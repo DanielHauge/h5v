@@ -1,0 +1,9 @@
+[package]
+name = "h5v"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
+hdf5-metno = "0.10.1"
+ratatui = { version = "0.29.0", features = ["all-widgets"] }
