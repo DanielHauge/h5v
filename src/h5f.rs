@@ -1,8 +1,8 @@
 use hdf5_metno::{Dataset, File, Group};
-use ratatui::widgets::canvas::Shape;
 
 use crate::sprint_typedesc::sprint_typedescriptor;
 
+#[derive(Debug)]
 pub struct DatasetMeta {
     shape: Vec<usize>,
     data_type: String,
@@ -13,26 +13,26 @@ pub struct DatasetMeta {
 }
 
 pub trait HasChildren {
-    fn Groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
-    fn Datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
+    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
 }
 
 impl HasChildren for Group {
-    fn Groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
+    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
         Ok(self.groups()?)
     }
 
-    fn Datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
+    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
         Ok(self.datasets()?)
     }
 }
 
 impl HasChildren for File {
-    fn Groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
+    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
         Ok(self.groups()?)
     }
 
-    fn Datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
+    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
         Ok(self.datasets()?)
     }
 }
@@ -44,9 +44,9 @@ pub trait HasName {
 impl HasName for Node {
     fn name(&self) -> String {
         match self {
-            Node::File(file) => file.name(),
-            Node::Group(group) => group.name(),
-            Node::Dataset(dataset, _) => dataset.name(),
+            Node::File(file) => file.name().split("/").last().unwrap().to_string(),
+            Node::Group(group) => group.name().split("/").last().unwrap().to_string(),
+            Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap().to_string(),
         }
     }
 }
@@ -95,12 +95,14 @@ impl DatasetMeta {
     }
 }
 
+#[derive(Debug)]
 pub enum Node {
     File(File),
     Group(Group),
     Dataset(Dataset, DatasetMeta),
 }
 
+#[derive(Debug)]
 pub struct H5FNode {
     pub expanded: bool,
     pub node: Node,
@@ -118,6 +120,10 @@ impl H5FNode {
         }
     }
 
+    pub fn is_group(&self) -> bool {
+        matches!(self.node, Node::Group(_))
+    }
+
     pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
         self.expanded = true;
         self.read_children()?;
@@ -132,7 +138,7 @@ impl H5FNode {
         }
     }
 
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         self.node.name()
     }
 
@@ -143,13 +149,14 @@ impl H5FNode {
         if matches!(self.node, Node::Dataset(_, _)) {
             return Ok(());
         }
+        self.read = true;
         let has_children = match &self.node {
             Node::File(file) => file,
             Node::Group(group) => group,
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous if"),
         };
-        let groups = has_children.Groups()?;
-        let datasets = has_children.Datasets()?;
+        let groups = has_children.get_groups()?;
+        let datasets = has_children.get_datasets()?;
         for g in groups {
             self.children.push(H5FNode::new(Node::Group(g)));
         }
@@ -188,9 +195,10 @@ pub struct H5F {
 impl H5F {
     pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
-        Ok(Self {
-            root: H5FNode::new(Node::File(file)),
-        })
+        let mut h5fnode = H5FNode::new(Node::File(file));
+        h5fnode.expand()?;
+        let s = Self { root: h5fnode };
+        Ok(s)
     }
 }
 
@@ -217,12 +225,13 @@ mod tests {
         let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
         let root_node = h5f.root.node;
         let root_group = root_node.name();
-        assert_eq!(root_group, "/");
+        assert_eq!(root_group, "");
     }
+
     #[test]
     fn test_h5f_expand() {
         let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        assert_eq!(h5f.root.children.len(), 0);
+        assert_eq!(h5f.root.children.len(), 1);
         h5f.root.expand().unwrap();
         assert_eq!(h5f.root.children.len(), 1);
     }
@@ -233,7 +242,7 @@ mod tests {
         h5f.root.expand().unwrap();
         let root_children = &h5f.root.children;
         let root_child = &root_children[0];
-        assert_eq!(root_child.name(), "/data");
+        assert_eq!(root_child.name(), "data");
     }
 
     #[test]
@@ -241,19 +250,19 @@ mod tests {
         let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
         h5f.root.expand().unwrap();
         let grp_data = &mut h5f.root.children[0];
-        assert_eq!(grp_data.name(), "/data");
+        assert_eq!(grp_data.name(), "data");
         grp_data.expand().unwrap();
         let grp_1 = &mut grp_data.children[0];
-        assert_eq!(grp_1.name(), "/data/1");
+        assert_eq!(grp_1.name(), "1");
         grp_1.expand().unwrap();
         let grp_meshes = &mut grp_1.children[0];
-        assert_eq!(grp_meshes.name(), "/data/1/meshes");
+        assert_eq!(grp_meshes.name(), "meshes");
         grp_meshes.expand().unwrap();
         let grp_b = &mut grp_meshes.children[0];
-        assert_eq!(grp_b.name(), "/data/1/meshes/B");
+        assert_eq!(grp_b.name(), "B");
         grp_b.expand().unwrap();
         let ds_b = &mut grp_b.children[0];
-        assert_eq!(ds_b.name(), "/data/1/meshes/B/x");
+        assert_eq!(ds_b.name(), "x");
         let ds_b_meta = match &ds_b.node {
             super::Node::Dataset(_, meta) => meta,
             _ => panic!("It should be a dataset"),

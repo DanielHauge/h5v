@@ -8,13 +8,16 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style, Styled, Stylize},
+    style::{Color, Style, Stylize},
     text::Text,
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 
-use crate::h5f::{H5FNode, HasName, H5F};
+use crate::{
+    h5f::H5F,
+    ui_tree_view::{compute_tree_view, TreeItem},
+};
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
@@ -30,11 +33,7 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
     terminal.clear()?;
 
     let mut help = false;
-    // TODO: Implement tree cursor
-    // let mut tree -> Vec<H5FNode, Indent, Icon, Name, Type, etc>
-    // let mut tree_cursor = 0;
-    // Recompute on action expand, collapse and cursoe move beyond bounds
-    // Action can be infered by indexing into the tree based on cursor
+    let mut treeview = compute_tree_view(&h5f.root);
 
     loop {
         terminal.draw(|frame| {
@@ -43,8 +42,8 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
                 let [tree, info] = areas.as_ref() else {
                     panic!("Could not get the areas for the panels");
                 };
-                render_tree(&mut h5f.root, frame, tree);
-                render_info(&mut h5f.root, frame, info);
+                render_tree(frame, tree, &mut treeview);
+                render_info(frame, info);
             } else {
                 let help_text = Text::from("Press 'q' to quit");
                 let help_paragraph = Paragraph::new(help_text)
@@ -80,7 +79,7 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
     Ok(())
 }
 
-fn render_tree(root_node: &mut H5FNode, f: &mut Frame, area: &Rect) {
+fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>) {
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
@@ -94,19 +93,26 @@ fn render_tree(root_node: &mut H5FNode, f: &mut Frame, area: &Rect) {
         horizontal: 2,
         vertical: 1,
     });
-    let file_icon = Text::from(" ");
-    let filenode = root_node.full_path();
-    let text = Text::styled(
-        format!("{} {}", file_icon, filenode),
-        Style::default().fg(Color::Rgb(156, 210, 250)),
-    );
-    let p = Paragraph::new(text)
-        .block(Block::default().borders(Borders::NONE))
-        .wrap(Wrap { trim: true });
-    f.render_widget(p, inner_area);
+
+    let mut area = inner_area;
+
+    for tree_item in treeview.iter() {
+        let area_one_down = area.inner(Margin {
+            horizontal: 0,
+            vertical: 1,
+        });
+        let text = tree_item.text.clone();
+        let p = Paragraph::new(text).wrap(Wrap { trim: true });
+        f.render_widget(p, area_one_down);
+        area = area_one_down;
+    }
+    // let p = Paragraph::new(texts)
+    //     .block(Block::default().borders(Borders::NONE))
+    //     .wrap(Wrap { trim: true });
+    // f.render_widget(p, inner_area);
 }
 
-fn render_info(root_node: &mut H5FNode, f: &mut Frame, area: &Rect) {
+fn render_info(f: &mut Frame, area: &Rect) {
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))

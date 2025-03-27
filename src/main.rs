@@ -1,16 +1,10 @@
-use std::{any::Any, io::Read, process::exit, u8};
-
 use clap::Parser;
-use hdf5_metno::{
-    types::{dyn_value::DynVarLenString, FixedAscii, VarLenAscii},
-    Error, H5Type,
-};
-use sprint_attributes::{sprint_attribute, Stringer};
 
 mod h5f;
 mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;
+mod ui_tree_view;
 
 #[derive(Parser, Debug)]
 struct Args {
