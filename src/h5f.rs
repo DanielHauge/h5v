@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use hdf5_metno::{Dataset, File, Group};
 
 use crate::sprint_typedesc::sprint_typedescriptor;
@@ -107,7 +109,7 @@ pub struct H5FNode {
     pub expanded: bool,
     pub node: Node,
     pub read: bool,
-    pub children: Vec<H5FNode>,
+    pub children: Vec<Rc<RefCell<H5FNode>>>,
 }
 
 impl H5FNode {
@@ -124,7 +126,11 @@ impl H5FNode {
         matches!(self.node, Node::Group(_))
     }
 
-    pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
+    pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
+        if self.expanded {
+            self.expanded = false;
+            return Ok(());
+        }
         self.expanded = true;
         self.read_children()?;
         Ok(())
@@ -158,7 +164,9 @@ impl H5FNode {
         let groups = has_children.get_groups()?;
         let datasets = has_children.get_datasets()?;
         for g in groups {
-            self.children.push(H5FNode::new(Node::Group(g)));
+            let node = H5FNode::new(Node::Group(g));
+            let node = Rc::new(RefCell::new(node));
+            self.children.push(node);
         }
         for d in datasets {
             let dtype = d.dtype()?;
@@ -182,6 +190,7 @@ impl H5FNode {
             };
             let node_ds = Node::Dataset(d, meta);
             let node = H5FNode::new(node_ds);
+            let node = Rc::new(RefCell::new(node));
             self.children.push(node);
         }
         Ok(())
@@ -196,7 +205,7 @@ impl H5F {
     pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
         let mut h5fnode = H5FNode::new(Node::File(file));
-        h5fnode.expand()?;
+        h5fnode.expand_toggle()?;
         let s = Self { root: h5fnode };
         Ok(s)
     }
@@ -232,38 +241,39 @@ mod tests {
     fn test_h5f_expand() {
         let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
         assert_eq!(h5f.root.children.len(), 1);
-        h5f.root.expand().unwrap();
+        h5f.root.expand_toggle().unwrap();
         assert_eq!(h5f.root.children.len(), 1);
     }
 
     #[test]
     fn test_h5f_read_children() {
         let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        h5f.root.expand().unwrap();
+        h5f.root.expand_toggle().unwrap();
         let root_children = &h5f.root.children;
         let root_child = &root_children[0];
-        assert_eq!(root_child.name(), "data");
+        assert_eq!(root_child.borrow().name(), "data");
     }
 
     #[test]
     fn test_h5f_read_ds() {
         let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        h5f.root.expand().unwrap();
+        h5f.root.expand_toggle().unwrap();
         let grp_data = &mut h5f.root.children[0];
-        assert_eq!(grp_data.name(), "data");
-        grp_data.expand().unwrap();
-        let grp_1 = &mut grp_data.children[0];
-        assert_eq!(grp_1.name(), "1");
-        grp_1.expand().unwrap();
-        let grp_meshes = &mut grp_1.children[0];
-        assert_eq!(grp_meshes.name(), "meshes");
-        grp_meshes.expand().unwrap();
-        let grp_b = &mut grp_meshes.children[0];
-        assert_eq!(grp_b.name(), "B");
-        grp_b.expand().unwrap();
-        let ds_b = &mut grp_b.children[0];
-        assert_eq!(ds_b.name(), "x");
-        let ds_b_meta = match &ds_b.node {
+        assert_eq!(grp_data.borrow().name(), "data");
+        grp_data.borrow_mut().expand_toggle().unwrap();
+        let grp_1 = &mut grp_data.borrow_mut().children[0];
+        assert_eq!(grp_1.borrow().name(), "1");
+        grp_1.borrow_mut().expand_toggle().unwrap();
+        let grp_meshes = &mut grp_1.borrow_mut().children[0];
+        assert_eq!(grp_meshes.borrow().name(), "meshes");
+        grp_meshes.borrow_mut().expand_toggle().unwrap();
+        let grp_b = &mut grp_meshes.borrow_mut().children[0];
+        assert_eq!(grp_b.borrow().name(), "B");
+        grp_b.borrow_mut().expand_toggle().unwrap();
+        let ds_b = &mut grp_b.borrow_mut().children[0];
+        assert_eq!(ds_b.borrow().name(), "x");
+        let ds_node = &ds_b.borrow().node;
+        let ds_b_meta = match ds_node {
             super::Node::Dataset(_, meta) => meta,
             _ => panic!("It should be a dataset"),
         };

@@ -1,4 +1,8 @@
-use std::{io::stdout, io::Result, rc::Rc};
+use std::{
+    cell::RefCell,
+    io::{stdout, Result},
+    rc::Rc,
+};
 
 use ratatui::{
     crossterm::{
@@ -15,8 +19,9 @@ use ratatui::{
 };
 
 use crate::{
+    color_consts,
     h5f::H5F,
-    ui_tree_view::{compute_tree_view, TreeItem},
+    ui_tree_view::{compute_tree_view, expand_full_tree, TreeItem},
 };
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -26,14 +31,16 @@ fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     chunks
 }
 
-pub fn init(h5f: &mut H5F) -> Result<()> {
+pub fn init(h5f: H5F) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
 
     let mut help = false;
-    let mut treeview = compute_tree_view(&h5f.root);
+    let h5frcrc = Rc::new(RefCell::new(h5f.root));
+    let mut treeview = compute_tree_view(&h5frcrc); // Vec<TreeItem>
+    let mut cursor = 0;
 
     loop {
         terminal.draw(|frame| {
@@ -42,7 +49,7 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
                 let [tree, info] = areas.as_ref() else {
                     panic!("Could not get the areas for the panels");
                 };
-                render_tree(frame, tree, &mut treeview);
+                render_tree(frame, tree, &mut treeview, Some(cursor));
                 render_info(frame, info);
             } else {
                 let help_text = Text::from("Press 'q' to quit");
@@ -70,6 +77,31 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
                 if let (KeyEventKind::Press, KeyCode::Char('?')) = (key.kind, key.code) {
                     help = !help;
                 }
+                if let (KeyEventKind::Press, KeyCode::Up) = (key.kind, key.code) {
+                    if cursor > 0 {
+                        cursor -= 1;
+                    }
+                }
+                if let (KeyEventKind::Press, KeyCode::Char('j')) = (key.kind, key.code) {
+                    if cursor < treeview.len() - 1 {
+                        cursor += 1;
+                    }
+                }
+                if let (KeyEventKind::Press, KeyCode::Down) = (key.kind, key.code) {
+                    if cursor < treeview.len() - 1 {
+                        cursor += 1;
+                    }
+                }
+                if let (KeyEventKind::Press, KeyCode::Char('k')) = (key.kind, key.code) {
+                    if cursor > 0 {
+                        cursor -= 1;
+                    }
+                }
+                if let (KeyEventKind::Press, KeyCode::Enter) = (key.kind, key.code) {
+                    let tree_item = &mut treeview[cursor];
+                    tree_item.node.borrow_mut().expand_toggle().unwrap();
+                    treeview = compute_tree_view(&h5frcrc);
+                }
             }
         }
     }
@@ -79,12 +111,13 @@ pub fn init(h5f: &mut H5F) -> Result<()> {
     Ok(())
 }
 
-fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>) {
+fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>, cursor: Option<usize>) {
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(format!("Tree"))
+        .bg(color_consts::BG_COLOR)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
     f.render_widget(header_block, *area);
@@ -96,15 +129,17 @@ fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>) {
 
     let mut area = inner_area;
 
-    for tree_item in treeview.iter() {
-        let area_one_down = area.inner(Margin {
+    for (i, tree_item) in treeview.iter().enumerate() {
+        let text = tree_item.line.clone();
+        if cursor == Some(i) {
+            f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
+        } else {
+            f.render_widget(text, area);
+        }
+        area = area.inner(Margin {
             horizontal: 0,
             vertical: 1,
         });
-        let text = tree_item.text.clone();
-        let p = Paragraph::new(text).wrap(Wrap { trim: true });
-        f.render_widget(p, area_one_down);
-        area = area_one_down;
     }
     // let p = Paragraph::new(texts)
     //     .block(Block::default().borders(Borders::NONE))
@@ -118,6 +153,7 @@ fn render_info(f: &mut Frame, area: &Rect) {
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(format!("Info"))
+        .bg(color_consts::BG2_COLOR)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
     f.render_widget(header_block, *area);

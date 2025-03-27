@@ -1,5 +1,6 @@
 use clap::Parser;
 
+mod color_consts;
 mod h5f;
 mod sprint_attributes;
 mod sprint_typedesc;
@@ -14,6 +15,6 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let file = args.file;
-    let mut h5f = h5f::H5F::open(file).unwrap();
-    ui::init(&mut h5f).unwrap();
+    let h5f = h5f::H5F::open(file).unwrap();
+    ui::init(h5f).unwrap();
 }

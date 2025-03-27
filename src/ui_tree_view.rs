@@ -1,63 +1,117 @@
+use std::{cell::RefCell, rc::Rc};
+
 use ratatui::{
-    style::{Color, Style},
-    text::Text,
+    style::{Color, Style, Styled},
+    text::{Line, Span, Text},
 };
 
-use crate::h5f::H5FNode;
+use crate::{color_consts, h5f::H5FNode};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {
-    pub node: &'a H5FNode,
-    pub text: Text<'a>,
+    pub node: Rc<RefCell<H5FNode>>,
+    pub line: Line<'a>,
+    indent: usize,
 }
 
-pub fn compute_tree_view(root: &H5FNode) -> Vec<TreeItem> {
+pub fn compute_tree_view(root: &Rc<RefCell<H5FNode>>) -> Vec<TreeItem> {
     let mut tree_view = Vec::new();
     let file_icon = Text::from("󰈚 ");
-    let filenode = root.full_path();
-    let text = Text::styled(
+    let filenode = root.borrow().full_path();
+    let text = Line::styled(
         format!("{} {}", file_icon, filenode),
         Style::default().fg(Color::Rgb(156, 210, 250)),
     );
-    let root_tree_item = TreeItem { node: root, text };
+    let root_tree_item = TreeItem {
+        node: Rc::clone(root),
+        line: text,
+        indent: 0,
+    };
     tree_view.push(root_tree_item);
-    let children = compute_tree_view_rec(root, "".to_string());
+    let children = compute_tree_view_rec(root, vec![Span::raw("".to_string())], 0);
     tree_view.extend(children);
     tree_view
 }
 
-pub fn compute_tree_view_rec(node: &H5FNode, prefix: String) -> Vec<TreeItem> {
+pub fn compute_tree_view_rec<'a>(
+    node: &Rc<RefCell<H5FNode>>,
+    prefix: Vec<Span<'a>>,
+    indent: u8,
+) -> Vec<TreeItem<'a>> {
     let mut tree_view = Vec::new();
-    if !node.expanded {
+    if !node.borrow().expanded {
         return tree_view;
     }
-    let dataset_icon = "󰈚";
-    let mut groups = node.children.iter().peekable();
+    let dataset_icon = "󰈚 ";
+    let node_binding = node.borrow_mut();
+    let mut groups = node_binding.children.iter().peekable();
     while let Some(child) = groups.next() {
         let is_last_child = groups.peek().is_none();
         let connector = if is_last_child { "└─" } else { "├─" };
-        let folder_icon = if child.expanded { " " } else { " " };
+        let connector_span =
+            Span::styled(connector, Style::default().fg(color_consts::LINES_COLOR));
+        let collapse_icon = if child.borrow().expanded {
+            " "
+        } else {
+            " "
+        };
 
-        let icon = match child.is_group() {
+        // let folder_icon = if child.expanded { " " } else { " " };
+        let folder_icon = match (child.borrow().expanded, child.borrow().children.len() > 0) {
+            (true, true) => " ",
+            (true, false) => " ",
+            (false, true) => " ",
+            (false, false) => " ",
+        };
+
+        let icon = match child.borrow().is_group() {
             true => folder_icon,
             false => dataset_icon,
         };
-        let text = Text::from(format!("{}{} {} {}", prefix, connector, icon, child.name()));
+        let icon_span = Span::styled(icon, Style::default().fg(color_consts::FILE_COLOR));
+        let collapse_icon_span = match child.borrow().expanded {
+            true => Span::styled(collapse_icon, Style::default().fg(color_consts::FILE_COLOR)),
+            false => Span::styled(
+                collapse_icon,
+                Style::default().fg(color_consts::LINES_COLOR),
+            ),
+        };
+
+        // let text = Text::from(format!("{}{} {} {}", prefix, connector, icon, child.name()));
+        let mut line_vec = prefix.iter().cloned().collect::<Vec<Span>>();
+        line_vec.push(connector_span);
+        line_vec.push(Span::raw(" "));
+        if child.borrow().is_group() {
+            line_vec.push(collapse_icon_span);
+        }
+        line_vec.push(icon_span);
+        line_vec.push(Span::raw(" "));
+        line_vec.push(Span::styled(
+            child.borrow().name(),
+            Style::default().fg(color_consts::FILE_COLOR),
+        ));
+
+        let line = Line::from(line_vec);
 
         let tree_item = TreeItem {
-            node: child,
-            text: Text::from(text),
+            node: child.clone(),
+            line,
+            indent: indent as usize,
         };
         tree_view.push(tree_item);
+        let mut prefix_clone = prefix.clone();
+        let mut indent = indent as u8;
 
-        let adjusted_prefix = if is_last_child {
-            format!("{}   ", prefix)
+        if is_last_child {
+            indent += 3;
+            prefix_clone.push(Span::raw("   "));
         } else {
-            format!("{}│  ", prefix)
+            prefix_clone
+                .push(Span::raw("│   ").style(Style::default().fg(color_consts::LINES_COLOR)));
         };
 
-        if child.is_group() {
-            let children = compute_tree_view_rec(child, adjusted_prefix);
+        if child.borrow().is_group() {
+            let children = compute_tree_view_rec(child, prefix_clone, indent);
             tree_view.extend(children);
         }
     }
@@ -65,14 +119,22 @@ pub fn compute_tree_view_rec(node: &H5FNode, prefix: String) -> Vec<TreeItem> {
     tree_view
 }
 
+pub fn expand_full_tree(node: &Rc<RefCell<H5FNode>>) {
+    node.borrow_mut().expand_toggle().unwrap();
+    for child in node.borrow_mut().children.clone() {
+        expand_full_tree(&child);
+    }
+}
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use crate::h5f::{H5FNode, H5F};
 
-    fn expand_full_tree(node: &mut H5FNode) {
-        node.expand().unwrap();
-        for child in &mut node.children {
-            expand_full_tree(child);
+    pub fn expand_full_tree(node: &Rc<RefCell<H5FNode>>) {
+        node.borrow_mut().expand_toggle().unwrap();
+        for child in node.borrow_mut().children.clone() {
+            expand_full_tree(&child);
         }
     }
 
@@ -84,12 +146,13 @@ mod tests {
 
     #[test]
     fn test_compute_tree_view() {
-        let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        expand_full_tree(&mut h5f.root);
-        let tree_view = super::compute_tree_view(&mut h5f.root);
+        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
+        let rc = Rc::new(RefCell::new(h5f.root));
+        expand_full_tree(&rc);
+        let tree_view = super::compute_tree_view(&rc);
         assert_eq!(tree_view.len(), 12);
         for item in tree_view {
-            println!("{}", item.text.to_string());
+            println!("{}", item.line.to_string());
         }
     }
 }
