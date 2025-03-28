@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Dataset, File, Group};
+use hdf5_metno::{Attribute, Dataset, File, Group};
 
 use crate::sprint_typedesc::sprint_typedescriptor;
 
@@ -12,6 +12,12 @@ pub struct DatasetMeta {
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
+}
+
+pub trait HasAttributes {
+    fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error>;
+    fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
+    fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
 }
 
 pub trait HasChildren {
@@ -49,6 +55,34 @@ impl HasName for Node {
             Node::File(file) => file.name().split("/").last().unwrap().to_string(),
             Node::Group(group) => group.name().split("/").last().unwrap().to_string(),
             Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap().to_string(),
+        }
+    }
+}
+
+impl HasAttributes for Node {
+    fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error> {
+        let attr_names = self.attribute_names()?;
+        let mut attrs = vec![];
+        for name in attr_names {
+            let attr = self.attribute(&name)?;
+            attrs.push((name, attr));
+        }
+        Ok(attrs)
+    }
+
+    fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error> {
+        match self {
+            Node::File(file) => Ok(file.attr_names()?),
+            Node::Group(group) => Ok(group.attr_names()?),
+            Node::Dataset(dataset, _) => Ok(dataset.attr_names()?),
+        }
+    }
+
+    fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error> {
+        match self {
+            Node::File(file) => file.attr(name),
+            Node::Group(group) => group.attr(name),
+            Node::Dataset(dataset, _) => dataset.attr(name),
         }
     }
 }

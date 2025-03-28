@@ -20,7 +20,8 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    h5f::H5F,
+    h5f::{H5FNode, H5F},
+    ui_info::render_info_content,
     ui_tree_view::{compute_tree_view, expand_full_tree, TreeItem},
 };
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
@@ -50,7 +51,8 @@ pub fn init(h5f: H5F) -> Result<()> {
                     panic!("Could not get the areas for the panels");
                 };
                 render_tree(frame, tree, &mut treeview, Some(cursor));
-                render_info(frame, info);
+                let selected_node = &treeview[cursor].node;
+                render_info(frame, info, selected_node);
             } else {
                 let help_text = Text::from("Press 'q' to quit");
                 let help_paragraph = Paragraph::new(help_text)
@@ -145,7 +147,11 @@ fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>, cursor:
     }
 }
 
-fn render_info(f: &mut Frame, area: &Rect) {
+fn render_info(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node: &Rc<RefCell<H5FNode>>,
+) -> std::result::Result<(), hdf5_metno::Error> {
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
@@ -155,4 +161,6 @@ fn render_info(f: &mut Frame, area: &Rect) {
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
     f.render_widget(header_block, *area);
+    render_info_content(f, area, selected_node)?;
+    Ok(())
 }

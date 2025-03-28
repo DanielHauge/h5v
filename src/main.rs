@@ -5,6 +5,7 @@ mod h5f;
 mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;
+mod ui_info;
 mod ui_tree_view;
 
 #[derive(Parser, Debug)]
