@@ -10,7 +10,7 @@ use ratatui::{
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
     prelude::CrosstermBackend,
     style::{Color, Style, Stylize},
     text::Text,
@@ -102,6 +102,11 @@ pub fn init(h5f: H5F) -> Result<()> {
                     tree_item.node.borrow_mut().expand_toggle().unwrap();
                     treeview = compute_tree_view(&h5frcrc);
                 }
+                if let (KeyEventKind::Press, KeyCode::Char(' ')) = (key.kind, key.code) {
+                    let tree_item = &mut treeview[cursor];
+                    tree_item.node.borrow_mut().expand_toggle().unwrap();
+                    treeview = compute_tree_view(&h5frcrc);
+                }
             }
         }
     }
@@ -136,15 +141,8 @@ fn render_tree(f: &mut Frame, area: &Rect, treeview: &mut Vec<TreeItem>, cursor:
         } else {
             f.render_widget(text, area);
         }
-        area = area.inner(Margin {
-            horizontal: 0,
-            vertical: 1,
-        });
+        area = area.offset(Offset { x: 0, y: 1 });
     }
-    // let p = Paragraph::new(texts)
-    //     .block(Block::default().borders(Borders::NONE))
-    //     .wrap(Wrap { trim: true });
-    // f.render_widget(p, inner_area);
 }
 
 fn render_info(f: &mut Frame, area: &Rect) {

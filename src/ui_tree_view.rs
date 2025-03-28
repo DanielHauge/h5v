@@ -20,7 +20,7 @@ pub fn compute_tree_view(root: &Rc<RefCell<H5FNode>>) -> Vec<TreeItem> {
     let filenode = root.borrow().full_path();
     let text = Line::styled(
         format!("{} {}", file_icon, filenode),
-        Style::default().fg(Color::Rgb(156, 210, 250)),
+        Style::default().fg(color_consts::ROOT_FILE_COLOR),
     );
     let root_tree_item = TreeItem {
         node: Rc::clone(root),
@@ -68,7 +68,11 @@ pub fn compute_tree_view_rec<'a>(
             true => folder_icon,
             false => dataset_icon,
         };
-        let icon_span = Span::styled(icon, Style::default().fg(color_consts::FILE_COLOR));
+        let file_color = match child.borrow().is_group() {
+            true => color_consts::GROUP_COLOR,
+            false => color_consts::DATASET_FILE_COLOR,
+        };
+        let icon_span = Span::styled(icon, Style::default().fg(file_color));
         let collapse_icon_span = match child.borrow().expanded {
             true => Span::styled(collapse_icon, Style::default().fg(color_consts::FILE_COLOR)),
             false => Span::styled(
@@ -86,9 +90,13 @@ pub fn compute_tree_view_rec<'a>(
         }
         line_vec.push(icon_span);
         line_vec.push(Span::raw(" "));
+        let name_color = match child.borrow().is_group() {
+            true => color_consts::VARIABLE_BLUE,
+            false => color_consts::DATASET_COLOR,
+        };
         line_vec.push(Span::styled(
             child.borrow().name(),
-            Style::default().fg(color_consts::FILE_COLOR),
+            Style::default().fg(name_color),
         ));
 
         let line = Line::from(line_vec);

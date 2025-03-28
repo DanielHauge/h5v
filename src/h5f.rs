@@ -132,7 +132,12 @@ impl H5FNode {
             return Ok(());
         }
         self.expanded = true;
-        self.read_children()?;
+        for child in &self.children {
+            let mut child_node = child.borrow_mut();
+            if child_node.is_group() {
+                child_node.read_children()?;
+            }
+        }
         Ok(())
     }
 
@@ -205,7 +210,9 @@ impl H5F {
     pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
         let mut h5fnode = H5FNode::new(Node::File(file));
+        h5fnode.read_children()?;
         h5fnode.expand_toggle()?;
+
         let s = Self { root: h5fnode };
         Ok(s)
     }
