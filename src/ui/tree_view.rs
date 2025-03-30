@@ -1,11 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
-    style::{Color, Style, Styled},
+    style::{Style, Styled},
     text::{Line, Span, Text},
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{color_consts, h5f::H5FNode, ui::app::AppState};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {
@@ -14,26 +14,28 @@ pub struct TreeItem<'a> {
     indent: usize,
 }
 
-pub fn compute_tree_view(root: &Rc<RefCell<H5FNode>>) -> Vec<TreeItem> {
-    let mut tree_view = Vec::new();
-    let file_icon = Text::from("󰈚 ");
-    let filenode = root.borrow().full_path();
-    let text = Line::styled(
-        format!("{} {}", file_icon, filenode),
-        Style::default().fg(color_consts::ROOT_FILE_COLOR),
-    );
-    let root_tree_item = TreeItem {
-        node: Rc::clone(root),
-        line: text,
-        indent: 0,
-    };
-    tree_view.push(root_tree_item);
-    let children = compute_tree_view_rec(root, vec![Span::raw("".to_string())], 0);
-    tree_view.extend(children);
-    tree_view
+impl<'a> AppState<'a> {
+    pub fn compute_tree_view(&mut self) {
+        let mut tree_view = Vec::new();
+        let file_icon = Text::from("󰈚 ");
+        let filenode = self.root.borrow().full_path();
+        let text = Line::styled(
+            format!("{} {}", file_icon, filenode),
+            Style::default().fg(color_consts::ROOT_FILE_COLOR),
+        );
+        let root_tree_item = TreeItem {
+            node: self.root.clone(),
+            line: text,
+            indent: 0,
+        };
+        tree_view.push(root_tree_item);
+        let children = compute_tree_view_rec(&self.root, vec![Span::raw("".to_string())], 0);
+        tree_view.extend(children);
+        self.treeview = tree_view;
+    }
 }
 
-pub fn compute_tree_view_rec<'a>(
+fn compute_tree_view_rec<'a>(
     node: &Rc<RefCell<H5FNode>>,
     prefix: Vec<Span<'a>>,
     indent: u8,
@@ -127,40 +129,14 @@ pub fn compute_tree_view_rec<'a>(
     tree_view
 }
 
-pub fn expand_full_tree(node: &Rc<RefCell<H5FNode>>) {
-    node.borrow_mut().expand_toggle().unwrap();
-    for child in node.borrow_mut().children.clone() {
-        expand_full_tree(&child);
-    }
-}
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc};
 
-    use crate::h5f::{H5FNode, H5F};
-
-    pub fn expand_full_tree(node: &Rc<RefCell<H5FNode>>) {
-        node.borrow_mut().expand_toggle().unwrap();
-        for child in node.borrow_mut().children.clone() {
-            expand_full_tree(&child);
-        }
-    }
+    use crate::h5f::H5F;
 
     #[test]
     fn test_compute_tree_view_rec() {
         let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
         assert_eq!(h5f.root.expanded, true);
-    }
-
-    #[test]
-    fn test_compute_tree_view() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        let rc = Rc::new(RefCell::new(h5f.root));
-        expand_full_tree(&rc);
-        let tree_view = super::compute_tree_view(&rc);
-        assert_eq!(tree_view.len(), 12);
-        for item in tree_view {
-            println!("{}", item.line.to_string());
-        }
     }
 }

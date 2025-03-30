@@ -14,7 +14,7 @@ use crate::{
     sprint_attributes::sprint_attribute,
 };
 
-pub fn render_info_content(
+pub fn render_info_attributes(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
@@ -23,10 +23,10 @@ pub fn render_info_content(
         horizontal: 2,
         vertical: 1,
     });
-    let node = selected_node.borrow();
-    let attributes = node.node.attributes()?;
-    for a in attributes {
-        let name = a.0;
+    let mut node = selected_node.borrow_mut();
+    let attributes = node.read_attributes()?;
+    for a in &attributes.attributes {
+        let name = a.0.to_string();
         let value = sprint_attribute(&a.1)?;
         let attr_text = format!("{}: {}", name, value);
         let text = Text::from(attr_text);

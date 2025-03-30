@@ -139,9 +139,31 @@ pub enum Node {
 }
 
 #[derive(Debug)]
+pub struct ComputedAttributes {
+    pub longest_name_length: usize,
+    pub attributes: Vec<(String, Attribute)>,
+}
+impl ComputedAttributes {
+    pub fn new(node: &Node) -> Result<Self, hdf5_metno::Error> {
+        let attributes = node.attributes()?;
+
+        Ok(Self {
+            longest_name_length: 0,
+            attributes,
+        })
+    }
+
+    pub fn add(&mut self, name: String, attr: Attribute) {
+        self.longest_name_length = self.longest_name_length.max(name.len());
+        self.attributes.push((name, attr));
+    }
+}
+
+#[derive(Debug)]
 pub struct H5FNode {
     pub expanded: bool,
     pub node: Node,
+    pub computed_attributes: Option<ComputedAttributes>,
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
 }
@@ -153,11 +175,25 @@ impl H5FNode {
             node: node_type,
             read: false,
             children: vec![],
+            computed_attributes: None,
         }
     }
 
     pub fn is_group(&self) -> bool {
         matches!(self.node, Node::Group(_))
+    }
+
+    pub fn read_attributes(&mut self) -> Result<&ComputedAttributes, hdf5_metno::Error> {
+        match self.computed_attributes {
+            Some(ref computed_attributes) => Ok(computed_attributes),
+            None => {
+                let computed_attributes = ComputedAttributes::new(&self.node)?;
+                self.computed_attributes = Some(computed_attributes);
+                self.computed_attributes
+                    .as_ref()
+                    .ok_or_else(|| hdf5_metno::Error::from("Failed to read attributes".to_string()))
+            }
+        }
     }
 
     pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
@@ -166,6 +202,7 @@ impl H5FNode {
             return Ok(());
         }
         self.expanded = true;
+
         for child in &self.children {
             let mut child_node = child.borrow_mut();
             if child_node.is_group() {
@@ -194,7 +231,6 @@ impl H5FNode {
         if matches!(self.node, Node::Dataset(_, _)) {
             return Ok(());
         }
-        self.read = true;
         let has_children = match &self.node {
             Node::File(file) => file,
             Node::Group(group) => group,
@@ -202,10 +238,11 @@ impl H5FNode {
         };
         let groups = has_children.get_groups()?;
         let datasets = has_children.get_datasets()?;
+        let mut children = Vec::new();
         for g in groups {
             let node = H5FNode::new(Node::Group(g));
             let node = Rc::new(RefCell::new(node));
-            self.children.push(node);
+            children.push(node);
         }
         for d in datasets {
             let dtype = d.dtype()?;
@@ -230,8 +267,9 @@ impl H5FNode {
             let node_ds = Node::Dataset(d, meta);
             let node = H5FNode::new(node_ds);
             let node = Rc::new(RefCell::new(node));
-            self.children.push(node);
+            children.push(node);
         }
+        self.children = children;
         Ok(())
     }
 }
