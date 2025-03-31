@@ -140,22 +140,22 @@ pub enum Node {
 
 #[derive(Debug)]
 pub struct ComputedAttributes {
-    pub longest_name_length: usize,
+    pub longest_name_length: u16,
     pub attributes: Vec<(String, Attribute)>,
 }
 impl ComputedAttributes {
     pub fn new(node: &Node) -> Result<Self, hdf5_metno::Error> {
         let attributes = node.attributes()?;
+        let longest_name_length = attributes
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0) as u16;
 
         Ok(Self {
-            longest_name_length: 0,
+            longest_name_length,
             attributes,
         })
-    }
-
-    pub fn add(&mut self, name: String, attr: Attribute) {
-        self.longest_name_length = self.longest_name_length.max(name.len());
-        self.attributes.push((name, attr));
     }
 }
 

@@ -25,6 +25,7 @@ use crate::{
     ui::input::{handle_event, EventResult},
     ui::tree_view::TreeItem,
 };
+
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
