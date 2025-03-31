@@ -15,42 +15,6 @@ pub fn handle_event<'a>(
 ) -> Result<EventResult, AppError> {
     let mut state = state.borrow_mut();
 
-    // if let (KeyEventKind::Press, KeyCode::Char('q')) = (key.kind, key.code) {
-    //     return Ok(EventResult::Quit);
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Char('?')) = (key.kind, key.code) {
-    //     state.help = !state.help;
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Up) = (key.kind, key.code) {
-    //     if state.tree_view_cursor > 0 {
-    //         state.tree_view_cursor -= 1;
-    //     }
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Char('j')) = (key.kind, key.code) {
-    //     if state.tree_view_cursor < state.treeview.len() - 1 {
-    //         state.tree_view_cursor += 1;
-    //     }
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Down) = (key.kind, key.code) {
-    //     if state.tree_view_cursor < state.treeview.len() - 1 {
-    //         state.tree_view_cursor += 1;
-    //     }
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Char('k')) = (key.kind, key.code) {
-    //     if state.tree_view_cursor > 0 {
-    //         state.tree_view_cursor -= 1;
-    //     }
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Enter) = (key.kind, key.code) {
-    //     let tree_item = &mut state.treeview[state.tree_view_cursor];
-    //     tree_item.node.borrow_mut().expand_toggle().unwrap();
-    //     state.compute_tree_view();
-    // }
-    // if let (KeyEventKind::Press, KeyCode::Char(' ')) = (key.kind, key.code) {
-    //     let tree_item = &mut state.treeview[state.tree_view_cursor];
-    //     tree_item.node.borrow_mut().expand_toggle().unwrap();
-    //     state.compute_tree_view();
-    // }
     match event {
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => match key_event.code {
