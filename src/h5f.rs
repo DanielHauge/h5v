@@ -247,12 +247,12 @@ impl ComputedAttributes {
             .max()
             .unwrap_or(0) as u16;
 
+        let name_area_width = longest_name_length + 3;
         let rendered_ds_attributes = match node {
-            Node::Dataset(_, ds) => ds.render(longest_name_length),
+            Node::Dataset(_, ds) => ds.render(name_area_width),
             _ => vec![],
         };
 
-        let name_area_width = longest_name_length + 3;
         let rendered_custom_attributes =
             Self::render_attributes(&attributes, name_area_width as usize);
         let rendered_attributes = rendered_ds_attributes
