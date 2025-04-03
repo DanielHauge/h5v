@@ -39,36 +39,18 @@ pub fn render_info_attributes(
     });
     let mut node = selected_node.borrow_mut();
     let attributes = node.read_attributes()?;
-    let area = make_panels_rect(area_inner, attributes.longest_name_length);
+    let min_first_panel = match attributes.longest_name_length {
+        0..5 => 5,
+        5..=u16::MAX => attributes.longest_name_length,
+    };
+    let area = make_panels_rect(area_inner, min_first_panel);
     let [name_area, value_area] = area.as_ref() else {
         panic!("Could not get the areas for the panels");
     };
     let mut offset = 0;
-    for a in &attributes.attributes {
-        let name = a.0.to_string();
-        let name_len = name.len();
-        let name_styled = Span::styled(
-            name,
-            Style::default().fg(color_consts::VARIABLE_BLUE).bold(),
-        );
-        let extra_name_space = name_area.width as usize - name_len;
-        let name_helper_line = Span::styled(
-            "─".repeat(extra_name_space - 1),
-            Style::default().fg(color_consts::LINES_COLOR),
-        );
-        let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
-        let name_paragraph = Paragraph::new(name_styled + name_helper_line + equals_sign)
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: true });
-        f.render_widget(name_paragraph, name_area.offset(Offset { x: 0, y: offset }));
 
-        let value_line = match sprint_attribute(&a.1) {
-            Ok(l) => l,
-            Err(e) => Line::styled(
-                format!("Error: {}", e),
-                Style::default().fg(color_consts::ERROR_COLOR),
-            ),
-        };
+    for (name_line, value_line) in &attributes.rendered_attributes {
+        f.render_widget(name_line, name_area.offset(Offset { x: 0, y: offset }));
         f.render_widget(value_line, value_area.offset(Offset { x: 1, y: offset }));
         offset += 1;
     }

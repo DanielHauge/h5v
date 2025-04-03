@@ -1,8 +1,16 @@
 use std::{cell::RefCell, rc::Rc};
 
 use hdf5_metno::{Attribute, Dataset, File, Group};
+use ratatui::{
+    layout::Alignment,
+    style::{Style, Stylize},
+    text::{Line, Span},
+    widgets::{Paragraph, Wrap},
+};
 
-use crate::sprint_typedesc::sprint_typedescriptor;
+use crate::{
+    color_consts, sprint_attributes::sprint_attribute, sprint_typedesc::sprint_typedescriptor,
+};
 
 #[derive(Debug)]
 pub struct DatasetMeta {
@@ -12,6 +20,92 @@ pub struct DatasetMeta {
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
+}
+
+impl DatasetMeta {
+    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
+        let min_first_panel = match longest_name {
+            0..5 => 5,
+            5..=u16::MAX => longest_name,
+        };
+        let mut data_set_attrs = vec![];
+        let type_name = Span::styled(
+            "type",
+            Style::default()
+                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                .bold(),
+        );
+        let type_value = Span::styled(
+            self.data_type_string(),
+            Style::default()
+                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .bold(),
+        );
+        data_set_attrs.push((type_name, type_value));
+
+        let size_name = Span::styled(
+            "size",
+            Style::default()
+                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                .bold(),
+        );
+        let size_value = Span::styled(
+            self.size_string(),
+            Style::default()
+                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .bold(),
+        );
+        data_set_attrs.push((size_name, size_value));
+        let shape_name = Span::styled(
+            "shape",
+            Style::default()
+                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                .bold(),
+        );
+        let shape_value = Span::styled(
+            self.shape_string(),
+            Style::default()
+                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .bold(),
+        );
+        data_set_attrs.push((shape_name, shape_value));
+        match &self.chunk_shape_string() {
+            Some(chunk_shape) => {
+                let chunk_name = Span::styled(
+                    "chunk",
+                    Style::default()
+                        .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                        .bold(),
+                );
+                let chunk_value = Span::styled(
+                    chunk_shape.to_string(),
+                    Style::default()
+                        .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                        .bold(),
+                );
+                data_set_attrs.push((chunk_name, chunk_value));
+            }
+            _ => {}
+        }
+
+        let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
+        for (name, value) in data_set_attrs {
+            let name_len = name.width() as usize;
+            let extra_name_space = min_first_panel as usize - name_len;
+            let name_helper_line = Span::styled(
+                "─".repeat(extra_name_space - 1),
+                Style::default().fg(color_consts::LINES_COLOR),
+            );
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
+
+            let value_line = Line::from(vec![value]);
+            lines.push((name_line, value_line));
+        }
+
+        lines
+    }
 }
 
 pub trait HasAttributes {
@@ -142,6 +236,7 @@ pub enum Node {
 pub struct ComputedAttributes {
     pub longest_name_length: u16,
     pub attributes: Vec<(String, Attribute)>,
+    pub rendered_attributes: Vec<(Line<'static>, Line<'static>)>,
 }
 impl ComputedAttributes {
     pub fn new(node: &Node) -> Result<Self, hdf5_metno::Error> {
@@ -152,10 +247,57 @@ impl ComputedAttributes {
             .max()
             .unwrap_or(0) as u16;
 
+        let rendered_ds_attributes = match node {
+            Node::Dataset(_, ds) => ds.render(longest_name_length),
+            _ => vec![],
+        };
+
+        let name_area_width = longest_name_length + 3;
+        let rendered_custom_attributes =
+            Self::render_attributes(&attributes, name_area_width as usize);
+        let rendered_attributes = rendered_ds_attributes
+            .into_iter()
+            .chain(rendered_custom_attributes.clone())
+            .collect::<Vec<(Line<'static>, Line<'static>)>>();
+
         Ok(Self {
             longest_name_length,
             attributes,
+            rendered_attributes,
         })
+    }
+
+    fn render_attributes(
+        attributes: &Vec<(String, Attribute)>,
+        name_area_width: usize,
+    ) -> Vec<(Line<'static>, Line<'static>)> {
+        let mut rendered_attributes = vec![];
+        for (name, attr) in attributes {
+            let name = name.to_string();
+            let name_len = name.len();
+            let name_styled = Span::styled(
+                name,
+                Style::default().fg(color_consts::VARIABLE_BLUE).bold(),
+            );
+            let extra_name_space = name_area_width - name_len;
+            let name_helper_line = Span::styled(
+                "─".repeat(extra_name_space - 1),
+                Style::default().fg(color_consts::LINES_COLOR),
+            );
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
+
+            let value_line = match sprint_attribute(&attr) {
+                Ok(l) => l,
+                Err(e) => Line::styled(
+                    format!("Error: {}", e),
+                    Style::default().fg(color_consts::ERROR_COLOR),
+                ),
+            };
+            rendered_attributes.push((name_line, value_line));
+        }
+        rendered_attributes
     }
 }
 

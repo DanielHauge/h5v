@@ -14,6 +14,8 @@ pub const LINES_COLOR: Color = Color::Rgb(83, 86, 89);
 pub const DS_COLOR: Color = Color::Rgb(62, 65, 70);
 pub const ROOT_FILE_COLOR: Color = Color::Rgb(186, 230, 250);
 pub const VARIABLE_BLUE: Color = Color::Rgb(136, 200, 230);
+pub const VARIABLE_BLUE_BUILTIN: Color = Color::Rgb(66, 165, 245);
+pub const BUILT_IN_VALUE_COLOR: Color = Color::Rgb(222, 222, 222);
 pub const HIGHLIGHT_BG_COLOR: Color = Color::Rgb(55, 62, 70);
 
 pub const BG_COLOR: Color = Color::Rgb(41, 42, 45);
