@@ -152,6 +152,20 @@ impl HasName for Node {
         }
     }
 }
+pub trait HasPath {
+    fn path(&self) -> String;
+}
+
+impl HasPath for Node {
+    fn path(&self) -> String {
+        match self {
+            Node::File(file) => file.name(),
+            Node::Group(group) => group.name(),
+            Node::Dataset(dataset, _) => dataset.name(),
+        }
+        .to_string()
+    }
+}
 
 impl HasAttributes for Node {
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error> {
@@ -232,6 +246,37 @@ pub enum Node {
     Dataset(Dataset, DatasetMeta),
 }
 
+impl Node {
+    pub fn render(&self, longest_name: u16) -> (Line<'static>, Line<'static>) {
+        let min_first_panel = match longest_name {
+            0..8 => 8,
+            5..=u16::MAX => longest_name,
+        };
+        let path = self.path();
+        let name_styled = Span::styled(
+            "path",
+            Style::default()
+                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                .bold(),
+        );
+        let extra_name_space = min_first_panel as usize - "path".len();
+        let name_helper_line = Span::styled(
+            "─".repeat(extra_name_space - 1),
+            Style::default().fg(color_consts::LINES_COLOR),
+        );
+        let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+        let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
+        let path_styled = Span::styled(
+            path,
+            Style::default()
+                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .bold(),
+        );
+        let path_line = Line::from(vec![path_styled]);
+        (name_line, path_line)
+    }
+}
+
 #[derive(Debug)]
 pub struct ComputedAttributes {
     pub longest_name_length: u16,
@@ -248,6 +293,8 @@ impl ComputedAttributes {
             .unwrap_or(0) as u16;
 
         let name_area_width = longest_name_length + 3;
+        let path_attr = node.render(name_area_width);
+
         let rendered_ds_attributes = match node {
             Node::Dataset(_, ds) => ds.render(name_area_width),
             _ => vec![],
@@ -255,9 +302,10 @@ impl ComputedAttributes {
 
         let rendered_custom_attributes =
             Self::render_attributes(&attributes, name_area_width as usize);
-        let rendered_attributes = rendered_ds_attributes
+        let rendered_attributes = vec![path_attr]
             .into_iter()
-            .chain(rendered_custom_attributes.clone())
+            .chain(rendered_ds_attributes.into_iter())
+            .chain(rendered_custom_attributes.into_iter())
             .collect::<Vec<(Line<'static>, Line<'static>)>>();
 
         Ok(Self {
@@ -336,6 +384,23 @@ impl H5FNode {
                     .ok_or_else(|| hdf5_metno::Error::from("Failed to read attributes".to_string()))
             }
         }
+    }
+
+    pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
+        if self.expanded {
+            return Ok(());
+        }
+        self.expanded = true;
+        self.read_children()?;
+        Ok(())
+    }
+
+    pub fn collapse(&mut self) -> Result<(), hdf5_metno::Error> {
+        if !self.expanded {
+            return Ok(());
+        }
+        self.expanded = false;
+        Ok(())
     }
 
     pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {

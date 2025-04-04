@@ -48,10 +48,15 @@ pub fn render_info_attributes(
         panic!("Could not get the areas for the panels");
     };
     let mut offset = 0;
+    let height = name_area.height as i32;
 
     for (name_line, value_line) in &attributes.rendered_attributes {
         f.render_widget(name_line, name_area.offset(Offset { x: 0, y: offset }));
         f.render_widget(value_line, value_area.offset(Offset { x: 1, y: offset }));
+
+        if offset >= height - 1 {
+            break;
+        }
         offset += 1;
     }
 
