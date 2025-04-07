@@ -2,14 +2,13 @@ use std::{cell::RefCell, rc::Rc};
 
 use hdf5_metno::{Attribute, Dataset, File, Group};
 use ratatui::{
-    layout::Alignment,
     style::{Style, Stylize},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
 };
 
 use crate::{
-    color_consts, sprint_attributes::sprint_attribute, sprint_typedesc::sprint_typedescriptor,
+    color_consts, search::Searcher, sprint_attributes::sprint_attribute,
+    sprint_typedesc::sprint_typedescriptor,
 };
 
 #[derive(Debug)]
@@ -283,6 +282,7 @@ pub struct ComputedAttributes {
     pub attributes: Vec<(String, Attribute)>,
     pub rendered_attributes: Vec<(Line<'static>, Line<'static>)>,
 }
+
 impl ComputedAttributes {
     pub fn new(node: &Node) -> Result<Self, hdf5_metno::Error> {
         let attributes = node.attributes()?;
@@ -356,16 +356,18 @@ pub struct H5FNode {
     pub computed_attributes: Option<ComputedAttributes>,
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
+    pub searcher: Rc<RefCell<Searcher>>,
 }
 
 impl H5FNode {
-    pub fn new(node_type: Node) -> Self {
+    pub fn new(node_type: Node, searcher: Rc<RefCell<Searcher>>) -> Self {
         Self {
             expanded: false,
             node: node_type,
             read: false,
             children: vec![],
             computed_attributes: None,
+            searcher,
         }
     }
 
@@ -431,6 +433,21 @@ impl H5FNode {
         self.node.name()
     }
 
+    fn index(&mut self, recursive: bool) -> Result<(), hdf5_metno::Error> {
+        self.read_children()?;
+        if recursive {
+            for child in &self.children {
+                self.searcher.borrow_mut().add(H5FNodeRef::from(child));
+                let mut child_node = child.borrow_mut();
+                if child_node.is_group() {
+                    child_node.index(recursive)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn read_children(&mut self) -> Result<(), hdf5_metno::Error> {
         if self.read {
             return Ok(());
@@ -447,8 +464,9 @@ impl H5FNode {
         let datasets = has_children.get_datasets()?;
         let mut children = Vec::new();
         for g in groups {
-            let node = H5FNode::new(Node::Group(g));
+            let node = H5FNode::new(Node::Group(g), self.searcher.clone());
             let node = Rc::new(RefCell::new(node));
+
             children.push(node);
         }
         for d in datasets {
@@ -472,7 +490,7 @@ impl H5FNode {
                 chunk_shape,
             };
             let node_ds = Node::Dataset(d, meta);
-            let node = H5FNode::new(node_ds);
+            let node = H5FNode::new(node_ds, self.searcher.clone());
             let node = Rc::new(RefCell::new(node));
             children.push(node);
         }
@@ -481,19 +499,49 @@ impl H5FNode {
     }
 }
 
+#[derive(Debug)]
+pub struct H5FNodeRef {
+    pub name: String,
+    pub node: Rc<RefCell<H5FNode>>,
+}
+
+impl From<&Rc<RefCell<H5FNode>>> for H5FNodeRef {
+    fn from(node: &Rc<RefCell<H5FNode>>) -> Self {
+        let name = node.borrow().name();
+        let node = Rc::clone(node);
+        Self { name, node }
+    }
+}
+
+impl AsRef<str> for H5FNodeRef {
+    fn as_ref(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
 pub struct H5F {
-    pub root: H5FNode,
+    pub root: Rc<RefCell<H5FNode>>,
 }
 
 impl H5F {
     pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
-        let mut h5fnode = H5FNode::new(Node::File(file));
-        h5fnode.read_children()?;
-        h5fnode.expand_toggle()?;
+        let searcher = Rc::new(RefCell::new(Searcher::new()));
 
-        let s = Self { root: h5fnode };
+        let h5fnode = H5FNode::new(Node::File(file), searcher);
+        let root = Rc::new(RefCell::new(h5fnode));
+
+        root.borrow_mut().read_children()?;
+        root.borrow_mut().expand_toggle()?;
+
+        let s = Self { root };
         Ok(s)
+    }
+
+    pub fn index_recursive(&self) -> Result<(), hdf5_metno::Error> {
+        let mut root = self.root.borrow_mut();
+        root.index(true)?;
+        Ok(())
     }
 }
 
@@ -518,33 +566,33 @@ mod tests {
     #[test]
     fn test_h5f_read_root_path() {
         let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        let root_node = h5f.root.node;
+        let root_node = &h5f.root.borrow().node;
         let root_group = root_node.name();
         assert_eq!(root_group, "");
     }
 
     #[test]
     fn test_h5f_expand() {
-        let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        assert_eq!(h5f.root.children.len(), 1);
-        h5f.root.expand_toggle().unwrap();
-        assert_eq!(h5f.root.children.len(), 1);
+        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
+        assert_eq!(h5f.root.borrow().children.len(), 1);
+        h5f.root.borrow_mut().expand_toggle().unwrap();
+        assert_eq!(h5f.root.borrow().children.len(), 1);
     }
 
     #[test]
     fn test_h5f_read_children() {
-        let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        h5f.root.expand_toggle().unwrap();
-        let root_children = &h5f.root.children;
+        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
+        h5f.root.borrow_mut().expand_toggle().unwrap();
+        let root_children = &h5f.root.borrow().children;
         let root_child = &root_children[0];
         assert_eq!(root_child.borrow().name(), "data");
     }
 
     #[test]
     fn test_h5f_read_ds() {
-        let mut h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        h5f.root.expand_toggle().unwrap();
-        let grp_data = &mut h5f.root.children[0];
+        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
+        h5f.root.borrow_mut().expand_toggle().unwrap();
+        let grp_data = &mut h5f.root.borrow_mut().children[0];
         assert_eq!(grp_data.borrow().name(), "data");
         grp_data.borrow_mut().expand_toggle().unwrap();
         let grp_1 = &mut grp_data.borrow_mut().children[0];

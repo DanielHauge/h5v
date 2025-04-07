@@ -6,7 +6,7 @@ use std::{
 
 use ratatui::{
     crossterm::{
-        event::{self, KeyCode, KeyEventKind},
+        event::{self},
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
@@ -22,9 +22,11 @@ use crate::{
     color_consts,
     h5f::{H5FNode, H5F},
     ui::attributes::render_info_attributes,
-    ui::input::{handle_event, EventResult},
+    ui::input::{tree::handle_normal_tree_event, EventResult},
     ui::tree_view::TreeItem,
 };
+
+use super::input::handle_input_event;
 
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -59,12 +61,19 @@ pub enum Focus {
     Attributes,
 }
 
+pub enum Mode {
+    Normal,
+    Search,
+    Help,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub tree_view_cursor: usize,
     pub help: bool,
     pub focus: Focus,
+    pub mode: Mode,
 }
 
 pub fn init(file: H5F) -> Result<()> {
@@ -74,11 +83,12 @@ pub fn init(file: H5F) -> Result<()> {
     terminal.clear()?;
 
     let state = Rc::new(RefCell::new(AppState {
-        root: Rc::new(RefCell::new(file.root)),
+        root: file.root.clone(),
         treeview: vec![],
         tree_view_cursor: 0,
         help: false,
         focus: Focus::Tree,
+        mode: Mode::Normal,
     }));
     state.borrow_mut().compute_tree_view();
 
@@ -132,7 +142,7 @@ pub fn init(file: H5F) -> Result<()> {
         // Interaction to modify state -> Move to eventual ux module
         if event::poll(std::time::Duration::from_millis(16))? {
             let event = event::read()?;
-            match handle_event(&state, event)? {
+            match handle_input_event(&state, event)? {
                 EventResult::Quit => break,
                 EventResult::Continue => {}
                 EventResult::Redraw => {
@@ -211,31 +221,37 @@ fn render_tree(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {
 
     let mut area = inner_area;
     let state = state.borrow_mut();
-    let mut tree_view_skip_offset = 0;
-    let mut highlight_index = state.tree_view_cursor;
-    if area.height <= state.tree_view_cursor as u16 {
-        let half = area.height / 2;
-        tree_view_skip_offset = state.tree_view_cursor as u16 - half;
-        highlight_index = half as usize;
-    }
+    match state.mode {
+        Mode::Normal => {
+            let mut tree_view_skip_offset = 0;
+            let mut highlight_index = state.tree_view_cursor;
+            if area.height <= state.tree_view_cursor as u16 {
+                let half = area.height / 2;
+                tree_view_skip_offset = state.tree_view_cursor as u16 - half;
+                highlight_index = half as usize;
+            }
 
-    let treeview = &state.treeview;
+            let treeview = &state.treeview;
 
-    for (i, tree_item) in treeview
-        .iter()
-        .skip(tree_view_skip_offset as usize)
-        .enumerate()
-    {
-        if i >= area.height as usize {
-            break;
+            for (i, tree_item) in treeview
+                .iter()
+                .skip(tree_view_skip_offset as usize)
+                .enumerate()
+            {
+                if i >= area.height as usize {
+                    break;
+                }
+                let text = tree_item.line.clone();
+                if highlight_index == i {
+                    f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
+                } else {
+                    f.render_widget(text, area);
+                }
+                area = area.offset(Offset { x: 0, y: 1 });
+            }
         }
-        let text = tree_item.line.clone();
-        if highlight_index == i {
-            f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
-        } else {
-            f.render_widget(text, area);
-        }
-        area = area.offset(Offset { x: 0, y: 1 });
+        Mode::Search => {}
+        Mode::Help => unreachable!(),
     }
 }
 

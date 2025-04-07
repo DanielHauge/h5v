@@ -1,7 +1,10 @@
+use std::cell::RefCell;
+
 use clap::Parser;
 
 mod color_consts;
 mod h5f;
+mod search;
 mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;

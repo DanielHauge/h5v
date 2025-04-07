@@ -137,6 +137,6 @@ mod tests {
     #[test]
     fn test_compute_tree_view_rec() {
         let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
-        assert_eq!(h5f.root.expanded, true);
+        assert_eq!(h5f.root.borrow().expanded, true);
     }
 }
