@@ -59,6 +59,7 @@ fn compute_tree_view_rec<'a>(
         };
 
         // let folder_icon = if child.expanded { " " } else { " " };
+
         let folder_icon = match (child.borrow().expanded, child.borrow().children.len() > 0) {
             (true, true) => " ",
             (true, false) => " ",
@@ -70,11 +71,11 @@ fn compute_tree_view_rec<'a>(
             true => folder_icon,
             false => dataset_icon,
         };
-        let file_color = match child.borrow().is_group() {
+        let icon_color = match child.borrow().is_group() {
             true => color_consts::GROUP_COLOR,
             false => color_consts::DATASET_FILE_COLOR,
         };
-        let icon_span = Span::styled(icon, Style::default().fg(file_color));
+        let icon_span = Span::styled(icon, Style::default().fg(icon_color));
         let collapse_icon_span = match child.borrow().expanded {
             true => Span::styled(collapse_icon, Style::default().fg(color_consts::FILE_COLOR)),
             false => Span::styled(

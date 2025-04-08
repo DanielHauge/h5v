@@ -28,4 +28,6 @@ pub const GROUP_COLOR: Color = Color::Rgb(255, 204, 0);
 // grp file color normal variable name blue
 pub const GROUP_FILE_COLOR: Color = Color::Rgb(66, 165, 245);
 pub const DATASET_COLOR: Color = Color::Rgb(222, 222, 222);
+pub const SEARCH_TEXT_COLOR: Color = Color::Rgb(222, 222, 222);
+pub const SEARCH_COUNT_COLOR: Color = Color::DarkGray;
 pub const DATASET_FILE_COLOR: Color = Color::Rgb(38, 166, 154);

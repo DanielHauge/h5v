@@ -371,6 +371,43 @@ impl H5FNode {
         }
     }
 
+    pub fn render(&self) -> Line<'static> {
+        // let folder_icon = match (child.borrow().expanded, child.borrow().children.len() > 0) {
+        //     (true, true) => " ",
+        //     (true, false) => " ",
+        //     (false, true) => " ",
+        //     (false, false) => " ",
+        // };
+        //
+        // let icon = match child.borrow().is_group() {
+        //     true => folder_icon,
+        //     false => dataset_icon,
+        // };
+        // let icon_color = match child.borrow().is_group() {
+        //     true => color_consts::GROUP_COLOR,
+        //     false => color_consts::DATASET_FILE_COLOR,
+        // };
+        let icon = match self.is_group() {
+            true => " ",
+            false => "󰈚 ",
+        };
+        let icon_color = match self.is_group() {
+            true => color_consts::GROUP_COLOR,
+            false => color_consts::DATASET_FILE_COLOR,
+        };
+
+        let icon_span = Span::styled(icon, Style::default().fg(icon_color));
+        let name_color = match self.is_group() {
+            true => color_consts::VARIABLE_BLUE,
+            false => color_consts::DATASET_COLOR,
+        };
+        Line::from(vec![
+            icon_span,
+            Span::styled(" ", Style::default().fg(color_consts::LINES_COLOR)),
+            Span::styled(self.name(), Style::default().fg(name_color).bold()),
+        ])
+    }
+
     pub fn is_group(&self) -> bool {
         matches!(self.node, Node::Group(_))
     }
@@ -433,7 +470,7 @@ impl H5FNode {
         self.node.name()
     }
 
-    fn index(&mut self, recursive: bool) -> Result<(), hdf5_metno::Error> {
+    pub fn index(&mut self, recursive: bool) -> Result<(), hdf5_metno::Error> {
         self.read_children()?;
         if recursive {
             for child in &self.children {
@@ -503,13 +540,19 @@ impl H5FNode {
 pub struct H5FNodeRef {
     pub name: String,
     pub node: Rc<RefCell<H5FNode>>,
+    pub rendered: Line<'static>,
 }
 
 impl From<&Rc<RefCell<H5FNode>>> for H5FNodeRef {
     fn from(node: &Rc<RefCell<H5FNode>>) -> Self {
         let name = node.borrow().name();
         let node = Rc::clone(node);
-        Self { name, node }
+        let rendered = node.borrow().render();
+        Self {
+            name,
+            node,
+            rendered,
+        }
     }
 }
 

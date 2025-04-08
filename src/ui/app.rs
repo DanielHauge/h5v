@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    i32::MAX,
     io::{stdout, Error},
     rc::Rc,
 };
@@ -12,8 +13,8 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style, Stylize},
-    text::Text,
+    style::{Color, Modifier, Style, Stylize},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
@@ -61,6 +62,7 @@ pub enum Focus {
     Attributes,
 }
 
+#[derive(Debug, Clone)]
 pub enum Mode {
     Normal,
     Search,
@@ -74,6 +76,16 @@ pub struct AppState<'a> {
     pub help: bool,
     pub focus: Focus,
     pub mode: Mode,
+    pub indexed: bool,
+}
+
+impl<'a> AppState<'a> {
+    pub fn index(&mut self) -> Result<()> {
+        let mut root = self.root.borrow_mut();
+        root.index(true)?;
+        self.indexed = true;
+        Ok(())
+    }
 }
 
 pub fn init(file: H5F) -> Result<()> {
@@ -89,6 +101,7 @@ pub fn init(file: H5F) -> Result<()> {
         help: false,
         focus: Focus::Tree,
         mode: Mode::Normal,
+        indexed: false,
     }));
     state.borrow_mut().compute_tree_view();
 
@@ -220,8 +233,9 @@ fn render_tree(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {
     });
 
     let mut area = inner_area;
-    let state = state.borrow_mut();
-    match state.mode {
+    let mut state = state.borrow_mut();
+    let mode = state.mode.clone();
+    match mode {
         Mode::Normal => {
             let mut tree_view_skip_offset = 0;
             let mut highlight_index = state.tree_view_cursor;
@@ -250,7 +264,92 @@ fn render_tree(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {
                 area = area.offset(Offset { x: 0, y: 1 });
             }
         }
-        Mode::Search => {}
+        Mode::Search => {
+            if !state.indexed {
+                match state.index() {
+                    Ok(_) => {
+                        state.indexed = true;
+                    }
+                    Err(_) => {
+                        let error_text = Text::from("Error: Failed to index the file");
+                        let error_paragraph = Paragraph::new(error_text)
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .border_style(Style::default().fg(Color::Red))
+                                    .border_type(ratatui::widgets::BorderType::Rounded)
+                                    .title("Error")
+                                    .title_style(Style::default().fg(Color::Yellow).bold())
+                                    .title_alignment(Alignment::Center),
+                            )
+                            .wrap(Wrap { trim: true });
+                        f.render_widget(error_paragraph, area);
+                        return;
+                    }
+                }
+            }
+            let root = state.root.borrow();
+            let searcher = root.searcher.borrow();
+            let search_line_cursor = searcher.line_cursor;
+            let search_query = searcher.query.clone();
+            let search_results = searcher.search(&search_query);
+
+            let search_select_cursor = if searcher.select_cursor > search_results.len() {
+                if search_results.len() == 0 {
+                    0
+                } else {
+                    search_results.len() - 1
+                }
+            } else {
+                searcher.select_cursor
+            };
+            let results_count = search_results.len();
+
+            // render search title with a search symbol:
+            let search_icon_span = Span::styled(" ", Style::default().fg(Color::LightYellow));
+            let search_text_span = Span::styled(
+                format!(" {}", search_query),
+                Style::default().fg(color_consts::SEARCH_TEXT_COLOR),
+            );
+            let results_str = match results_count {
+                0 => " (No results)".to_string(),
+                1 => format!(" ({} result)", results_count),
+                _ => format!(" ({} results)", results_count),
+            };
+            let search_count_span = Span::styled(
+                results_str,
+                Style::default().fg(color_consts::SEARCH_COUNT_COLOR),
+            );
+            let search_line =
+                Line::from(vec![search_icon_span, search_text_span, search_count_span]);
+            f.render_widget(search_line, area);
+            let mut area_pos = area.as_position();
+            area_pos.x = area_pos.x + 3 + search_line_cursor as u16;
+            f.set_cursor_position(area_pos);
+
+            let mut offset = 1 as i32;
+            for (i, result) in search_results.iter().enumerate() {
+                if i >= area.height as usize {
+                    break;
+                }
+                if i == search_select_cursor {
+                    f.render_widget(
+                        result
+                            .rendered
+                            .clone()
+                            .bg(color_consts::HIGHLIGHT_BG_COLOR)
+                            .bold(),
+                        area.offset(Offset { x: 3, y: offset }),
+                    );
+                } else {
+                    f.render_widget(
+                        result.rendered.clone(),
+                        area.offset(Offset { x: 3, y: offset }),
+                    );
+                }
+                offset += 1;
+            }
+        }
         Mode::Help => unreachable!(),
     }
 }

@@ -26,6 +26,9 @@ impl AsRef<str> for Entry {
 pub struct Searcher {
     tree: BkTree<Entry>,
     lookup: HashMap<H5Path, H5FNodeRef>,
+    pub query: String,
+    pub line_cursor: usize,
+    pub select_cursor: usize,
 }
 
 impl Debug for Searcher {
@@ -39,7 +42,15 @@ impl Searcher {
         Searcher {
             tree: BkTree::new(levenshtein_distance),
             lookup: HashMap::new(),
+            query: String::new(),
+            line_cursor: 0,
+            select_cursor: 0,
         }
+    }
+
+    pub fn count_results(&self) -> usize {
+        let results = self.search(&self.query);
+        results.len()
     }
 
     pub fn add(&mut self, noderef: H5FNodeRef) {

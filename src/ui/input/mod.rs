@@ -44,9 +44,13 @@ pub fn handle_input_event<'a>(
         }
         Mode::Search => {
             if let Event::Key(key_event) = event {
-                if key_event.code == KeyCode::Esc {
-                    state.mode = Mode::Normal;
-                    return Ok(EventResult::Redraw);
+                match key_event.code {
+                    KeyCode::Char('q') => return Ok(EventResult::Quit),
+                    KeyCode::Esc => {
+                        state.mode = Mode::Normal;
+                        return Ok(EventResult::Redraw);
+                    }
+                    _ => {}
                 }
             }
             search::handle_search_event(&mut state, event)
