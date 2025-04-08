@@ -21,10 +21,13 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    h5f::{H5FNode, H5F},
-    ui::attributes::render_info_attributes,
-    ui::input::{tree::handle_normal_tree_event, EventResult},
-    ui::tree_view::TreeItem,
+    h5f::{self, H5FNode, H5F},
+    search::Searcher,
+    ui::{
+        attributes::render_info_attributes,
+        input::{tree::handle_normal_tree_event, EventResult},
+        tree_view::TreeItem,
+    },
 };
 
 use super::input::handle_input_event;
@@ -77,6 +80,7 @@ pub struct AppState<'a> {
     pub focus: Focus,
     pub mode: Mode,
     pub indexed: bool,
+    pub searcher: Rc<RefCell<Searcher>>,
 }
 
 impl<'a> AppState<'a> {
@@ -88,21 +92,25 @@ impl<'a> AppState<'a> {
     }
 }
 
-pub fn init(file: H5F) -> Result<()> {
+pub fn init(filename: String) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
+    let searcher = Rc::new(RefCell::new(Searcher::new()));
 
+    let h5f = h5f::H5F::open(filename, searcher.clone()).unwrap();
     let state = Rc::new(RefCell::new(AppState {
-        root: file.root.clone(),
+        root: h5f.root.clone(),
         treeview: vec![],
         tree_view_cursor: 0,
         help: false,
         focus: Focus::Tree,
         mode: Mode::Normal,
         indexed: false,
+        searcher,
     }));
+
     state.borrow_mut().compute_tree_view();
 
     let draw_closure = |frame: &mut Frame| {
@@ -158,6 +166,9 @@ pub fn init(file: H5F) -> Result<()> {
             match handle_input_event(&state, event)? {
                 EventResult::Quit => break,
                 EventResult::Continue => {}
+                EventResult::RedrawTreeCompute => {
+                    terminal.draw(draw_closure)?;
+                }
                 EventResult::Redraw => {
                     terminal.draw(draw_closure)?;
                 }

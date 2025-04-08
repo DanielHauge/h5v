@@ -17,6 +17,5 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let file = args.file;
-    let h5f = h5f::H5F::open(file).unwrap();
-    ui::app::init(h5f).unwrap();
+    ui::app::init(file).unwrap();
 }

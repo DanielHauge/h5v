@@ -133,11 +133,18 @@ fn compute_tree_view_rec<'a>(
 #[cfg(test)]
 mod tests {
 
-    use crate::h5f::H5F;
+    use std::{cell::RefCell, rc::Rc};
+
+    use crate::{h5f::H5F, search::Searcher};
+
+    fn new_searcer() -> Rc<RefCell<Searcher>> {
+        let searcher = Searcher::new();
+        Rc::new(RefCell::new(searcher))
+    }
 
     #[test]
     fn test_compute_tree_view_rec() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string()).unwrap();
+        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcer()).unwrap();
         assert_eq!(h5f.root.borrow().expanded, true);
     }
 }

@@ -12,18 +12,25 @@ pub enum EventResult {
     Quit,
     Redraw,
     Continue,
+    RedrawTreeCompute,
 }
 
 pub fn handle_input_event<'a>(
     state: &Rc<RefCell<AppState<'a>>>,
     event: Event,
 ) -> Result<EventResult, AppError> {
+    if let Event::Resize(_, __) = event {
+        return Ok(EventResult::Redraw);
+    }
+
     let mut state = state.borrow_mut();
     match state.mode {
         Mode::Normal => {
             if let Event::Key(key_event) = event {
                 match key_event.code {
                     KeyCode::Char('/') => {
+                        state.searcher.borrow_mut().query.clear();
+                        state.searcher.borrow_mut().line_cursor = 0;
                         state.mode = Mode::Search;
                         return Ok(EventResult::Redraw);
                     }
