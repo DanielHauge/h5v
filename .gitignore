@@ -19,3 +19,5 @@ target/
 # Added by cargo
 
 /target
+
+test.h5
