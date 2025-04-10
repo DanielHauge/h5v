@@ -12,15 +12,30 @@ if os.path.exists(file_name):
 with h5py.File(file_name, "w") as f:
     # Create a dataset with random data
     data = np.random.random((100, 100))
-    f.create_dataset("dataset_1", data=data)
+    f.create_dataset("attributes_ds", data=data)
 
     # Create a group and add a dataset to it
     group = f.create_group("group_1")
     group.create_dataset("dataset_2", data=data)
 
     # Add attributes to the dataset
-    f["dataset_1"].attrs["description"] = "This is a random dataset"
-    f["dataset_1"].attrs["units"] = "arbitrary units"
+    f["attributes_ds"].attrs["description"] = "This is a random dataset"
+    f["attributes_ds"].attrs["units"] = "arbitrary units"
+    f["attributes_ds"].attrs["author"] = "Your Name"
+    # also some arrays
+    f["attributes_ds"].attrs["array"] = np.array([1, 2, 3, 4, 5])
+    f["attributes_ds"].attrs["array2"] = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    f["attributes_ds"].attrs["array3"] = np.array(
+        [True, False, True, False, True])
+    f["attributes_ds"].attrs["array4"] = np.array([b"hello", b"world"])
+    f["attributes_ds"].attrs["array5"] = np.array(
+        [b"hello", b"world"], dtype="S")
+    f["attributes_ds"].attrs["array6"] = np.array(
+        [b"hello", b"world"], dtype="|S5")
+    f["attributes_ds"].attrs["float"] = 3.14
+    f["attributes_ds"].attrs["float_array"] = np.array([3.14, 2.71, 1.41])
+    f["attributes_ds"].attrs["int"] = 42
+    f["attributes_ds"].attrs["bool"] = True
 
     # Make a bigger nested groups and random good things
     group_2 = f.create_group("group_1/group_2")

@@ -316,7 +316,12 @@ fn spring_attribute_array(
                 .collect::<Vec<FixedAscii<8192>>>()
                 .render(),
         },
-        _ => todo!(),
+        TypeDescriptor::Boolean => attr
+            .read_1d::<bool>()?
+            .into_iter()
+            .collect::<Vec<bool>>()
+            .render(),
+        x => panic!("Unsupported type descriptor: {:?}", x),
     };
     Ok(gg)
 }
