@@ -1,3 +1,4 @@
+pub const COLOR_WHITE: Color = Color::White;
 use ratatui::style::Color;
 
 pub const NUMBER_COLOR: Color = Color::Rgb(181, 206, 168);

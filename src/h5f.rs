@@ -16,6 +16,7 @@ pub struct DatasetMeta {
     shape: Vec<usize>,
     data_type: String,
     data_bytesize: usize,
+    storage_required: u64,
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
@@ -24,8 +25,8 @@ pub struct DatasetMeta {
 impl DatasetMeta {
     pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
         let min_first_panel = match longest_name {
-            0..5 => 5,
-            5..=u16::MAX => longest_name,
+            0..8 => 8,
+            8..=u16::MAX => longest_name,
         };
         let mut data_set_attrs = vec![];
         let type_name = Span::styled(
@@ -90,7 +91,10 @@ impl DatasetMeta {
         let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
             let name_len = name.width() as usize;
-            let extra_name_space = min_first_panel as usize - name_len;
+            let extra_name_space = match min_first_panel as usize - name_len {
+                0..=1 => 1,
+                _ => min_first_panel as usize - name_len,
+            };
             let name_helper_line = Span::styled(
                 "─".repeat(extra_name_space - 1),
                 Style::default().fg(color_consts::LINES_COLOR),
@@ -228,13 +232,20 @@ impl DatasetMeta {
 
     pub fn size_string(&self) -> String {
         let size = self.total_bytes;
+        let total_storage = self.storage_required;
         let size_str = match size {
             0..1024 => format!("{} B", size),
             1024..1048576 => format!("{:.2} KB", size as f64 / 1024.0),
             1048576..1073741824 => format!("{:.2} MB", size as f64 / 1024.0 / 1024.0),
             _ => format!("{:.2} GB", size as f64 / 1024.0 / 1024.0 / 1024.0),
         };
-        size_str
+        let total_storage_str = match total_storage {
+            0..1024 => format!("{} B", total_storage),
+            1024..1048576 => format!("{:.2} KB", total_storage as f64 / 1024.0),
+            1048576..1073741824 => format!("{:.2} MB", total_storage as f64 / 1024.0 / 1024.0),
+            _ => format!("{:.2} GB", total_storage as f64 / 1024.0 / 1024.0 / 1024.0),
+        };
+        format!("{} ({})", size_str, total_storage_str)
     }
 }
 
@@ -525,11 +536,15 @@ impl H5FNode {
             let data_bytesize = dtype.size();
             let dtype_desc = dtype.to_descriptor()?;
 
-            let shape = d.shape();
+            let mut shape = d.shape();
             let total_elems = d.size();
-            let total_bytes = total_elems * data_bytesize;
+            if shape.is_empty() {
+                shape.push(total_elems);
+                shape.push(1);
+            }
             let data_type = sprint_typedescriptor(dtype_desc);
-
+            let total_bytes = data_bytesize * total_elems;
+            let storage_required = d.storage_size();
             let chunk_shape = d.chunk();
 
             let meta = DatasetMeta {
@@ -537,6 +552,7 @@ impl H5FNode {
                 data_type,
                 data_bytesize,
                 total_bytes,
+                storage_required,
                 total_elems,
                 chunk_shape,
             };

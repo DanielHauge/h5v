@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use bktree::{levenshtein_distance, BkTree};
+use bktree::{hamming_distance, levenshtein_distance, BkTree};
 
 use crate::{
     h5f::{H5FNode, H5FNodeRef, HasPath},
@@ -72,7 +72,8 @@ impl Searcher {
             name: query.to_string(),
             value: EntryValue::Query,
         };
-        let matches = self.tree.find(query_entry, 3);
+        let mut matches = self.tree.find(query_entry, 8);
+        matches.sort_by_key(|m| m.1);
         let mut results = vec![];
         for m in matches {
             let entry_value = &m.0.value;

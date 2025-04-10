@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use clap::Parser;
 
 mod color_consts;
+mod data;
 mod h5f;
 mod search;
 mod sprint_attributes;

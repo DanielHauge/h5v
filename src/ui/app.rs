@@ -30,7 +30,7 @@ use crate::{
     },
 };
 
-use super::input::handle_input_event;
+use super::{attributes, input::handle_input_event, preview::render_preview};
 
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -365,20 +365,45 @@ fn render_tree(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {
     }
 }
 
+fn split_info(area: Rect, attributes_count: usize) -> (Rect, Rect) {
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Length(attributes_count as u16 + 2),
+                Constraint::Min(0),
+            ]
+            .as_ref(),
+        )
+        .split(area);
+    (chunks[0], chunks[1])
+}
+
 fn render_info(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
 ) -> std::result::Result<(), hdf5_metno::Error> {
-    let header_block = Block::default()
+    let attr_count = selected_node
+        .borrow_mut()
+        .read_attributes()?
+        .rendered_attributes
+        .len();
+
+    let (attr_area, content_area) = split_info(*area, attr_count);
+
+    let attr_header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(format!("Info"))
+        .title(format!("Attributes"))
         .bg(color_consts::BG2_COLOR)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
-    f.render_widget(header_block, *area);
-    render_info_attributes(f, area, selected_node)?;
+    f.render_widget(attr_header_block, *area);
+    render_info_attributes(f, &attr_area, selected_node)?;
+
+    render_preview(f, &content_area, selected_node)?;
+
     Ok(())
 }
