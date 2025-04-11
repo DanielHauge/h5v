@@ -14,7 +14,8 @@ use crate::{
 #[derive(Debug)]
 pub struct DatasetMeta {
     shape: Vec<usize>,
-    data_type: String,
+    pub data_type: String,
+    #[allow(dead_code)]
     data_bytesize: usize,
     storage_required: u64,
     total_bytes: usize,
@@ -290,6 +291,7 @@ impl Node {
 #[derive(Debug)]
 pub struct ComputedAttributes {
     pub longest_name_length: u16,
+    #[allow(dead_code)]
     pub attributes: Vec<(String, Attribute)>,
     pub rendered_attributes: Vec<(Line<'static>, Line<'static>)>,
 }
@@ -362,7 +364,6 @@ impl ComputedAttributes {
 
 #[derive(Debug)]
 pub struct H5FNode {
-    pub name: String,
     pub expanded: bool,
     pub node: Node,
     pub computed_attributes: Option<ComputedAttributes>,
@@ -374,7 +375,6 @@ pub struct H5FNode {
 impl H5FNode {
     pub fn new(node_type: Node, searcher: Rc<RefCell<Searcher>>) -> Self {
         Self {
-            name: node_type.name(),
             expanded: false,
             node: node_type,
             read: false,
@@ -610,12 +610,6 @@ impl H5F {
 
         let s = Self { root };
         Ok(s)
-    }
-
-    pub fn index_recursive(&self) -> Result<(), hdf5_metno::Error> {
-        let mut root = self.root.borrow_mut();
-        root.index(true)?;
-        Ok(())
     }
 }
 

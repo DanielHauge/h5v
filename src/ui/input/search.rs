@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use crate::{

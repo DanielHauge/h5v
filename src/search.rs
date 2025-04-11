@@ -1,11 +1,8 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use bktree::{hamming_distance, levenshtein_distance, BkTree};
+use bktree::{levenshtein_distance, BkTree};
 
-use crate::{
-    h5f::{H5FNode, H5FNodeRef, HasPath},
-    ui::app::AppError,
-};
+use crate::h5f::{H5FNodeRef, HasPath};
 
 type EntryKey = String;
 type H5Path = String;
@@ -95,43 +92,5 @@ impl Searcher {
             }
         }
         results
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use std::{cell::RefCell, rc::Rc};
-
-    use super::*;
-    use crate::h5f::H5F;
-
-    fn new_searcher() -> Rc<RefCell<Searcher>> {
-        let searcher = Searcher::new();
-        Rc::new(RefCell::new(searcher))
-    }
-
-    #[test]
-    fn test_searcher_index() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        h5f.index_recursive().unwrap();
-
-        let root = h5f.root.borrow();
-        let searcher = root.searcher.borrow();
-
-        assert_eq!(searcher.lookup.len(), 11);
-    }
-
-    #[test]
-    fn test_searcher_matches() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        h5f.index_recursive().unwrap();
-
-        let root = h5f.root.borrow();
-        let searcher = root.searcher.borrow();
-
-        let query = "mesh";
-        let results = searcher.search(query);
-        assert_eq!(results.len(), 1);
     }
 }

@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    cmp::{max, min},
-    rc::Rc,
-};
+use std::cmp::{max, min};
 
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 

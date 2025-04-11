@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    i32::MAX,
-    io::{stdout, Error},
-    rc::Rc,
-};
+use std::{cell::RefCell, io::stdout, rc::Rc};
 
 use ratatui::{
     crossterm::{
@@ -13,7 +8,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
@@ -21,16 +16,12 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    h5f::{self, H5FNode, H5F},
+    h5f::{self, H5FNode},
     search::Searcher,
-    ui::{
-        attributes::render_info_attributes,
-        input::{tree::handle_normal_tree_event, EventResult},
-        tree_view::TreeItem,
-    },
+    ui::{attributes::render_info_attributes, input::EventResult, tree_view::TreeItem},
 };
 
-use super::{attributes, input::handle_input_event, preview::render_preview};
+use super::{input::handle_input_event, preview::render_preview};
 
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -179,52 +170,6 @@ pub fn init(filename: String) -> Result<()> {
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())
-}
-
-fn render_app(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {
-    let header_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(format!("App"))
-        .bg(color_consts::BG_COLOR)
-        .title_style(Style::default().fg(Color::Yellow).bold())
-        .title_alignment(Alignment::Center);
-    f.render_widget(header_block, *area);
-
-    let inner_area = area.inner(Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-
-    let mut area = inner_area;
-    let state = state.borrow_mut();
-    let mut tree_view_skip_offset = 0;
-    let mut highlight_index = state.tree_view_cursor;
-    if area.height <= state.tree_view_cursor as u16 {
-        let half = area.height / 2;
-        tree_view_skip_offset = state.tree_view_cursor as u16 - half;
-        highlight_index = half as usize;
-    }
-
-    let treeview = &state.treeview;
-
-    for (i, tree_item) in treeview
-        .iter()
-        .skip(tree_view_skip_offset as usize)
-        .enumerate()
-    {
-        if i >= area.height as usize {
-            break;
-        }
-        let text = tree_item.line.clone();
-        if highlight_index == i {
-            f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
-        } else {
-            f.render_widget(text, area);
-        }
-        area = area.offset(Offset { x: 0, y: 1 });
-    }
 }
 
 fn render_tree(f: &mut Frame, area: &Rect, state: Rc<RefCell<AppState>>) {

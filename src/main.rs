@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use clap::Parser;
 
 mod color_consts;

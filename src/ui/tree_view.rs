@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
-    style::{Style, Styled},
+    style::Style,
     text::{Line, Span, Text},
 };
 
@@ -11,7 +11,6 @@ use crate::{color_consts, h5f::H5FNode, ui::app::AppState};
 pub struct TreeItem<'a> {
     pub node: Rc<RefCell<H5FNode>>,
     pub line: Line<'a>,
-    indent: usize,
 }
 
 impl<'a> AppState<'a> {
@@ -26,7 +25,6 @@ impl<'a> AppState<'a> {
         let root_tree_item = TreeItem {
             node: self.root.clone(),
             line: text,
-            indent: 0,
         };
         tree_view.push(root_tree_item);
         let children = compute_tree_view_rec(&self.root, vec![Span::raw("".to_string())], 0);
@@ -107,7 +105,6 @@ fn compute_tree_view_rec<'a>(
         let tree_item = TreeItem {
             node: child.clone(),
             line,
-            indent: indent as usize,
         };
         tree_view.push(tree_item);
         let mut prefix_clone = prefix.clone();

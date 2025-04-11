@@ -1,8 +1,8 @@
 use std::{cell::RefCell, f64, rc::Rc};
 
-use hdf5_metno::{Error, Selection};
+use hdf5_metno::Error;
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Offset, Rect},
     style::Style,
     symbols,
     text::Span,
@@ -12,7 +12,8 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    h5f::{H5FNode, HasName, Node},
+    data::Previewable,
+    h5f::{H5FNode, Node},
 };
 
 pub fn render_preview(
@@ -20,28 +21,60 @@ pub fn render_preview(
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
 ) -> Result<(), Error> {
+    // Make a break line with a heading to indicater we render a preview
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 1,
     });
+    let height = area_inner.height;
+    let width = area_inner.width;
+    let title = format!("Preview, {}x{}", width, height);
+    let break_line = Block::default()
+        .title(title)
+        .borders(ratatui::widgets::Borders::TOP)
+        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+        .title_alignment(Alignment::Center)
+        .title_style(Style::default().fg(color_consts::TITLE))
+        .style(Style::default().bg(color_consts::BG2_COLOR));
+    f.render_widget(break_line, area_inner.offset(Offset { x: 0, y: -2 }));
     let node = &selected_node.borrow().node;
-    match node {
+    let data_preview = match node {
         Node::Dataset(ds, attr) => {
-
-            // ds.read_slice()?;
+            if ds.shape().len() == 1 && attr.data_type == "f64" {
+                ds.preview()
+            } else {
+                return Ok(());
+            }
         }
         _ => return Ok(()),
-    }
-    // Generate a long list of sinus data points
-    let mut data: Vec<(f64, f64)> = Vec::new();
-    for i in 0..1000 {
-        let x = i as f64 / 10.0;
-        let y = (x * 2.0).sin();
-        data.push((x, y));
-    }
+    };
+
+    let x_label_count = match area_inner.width {
+        0 => 0,
+        _ => area_inner.width / 8,
+    };
+    let x_labels = (0..=x_label_count)
+        .map(|i| {
+            let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
+            Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
+        })
+        .collect::<Vec<_>>();
+
+    let y_label_count = match area_inner.height {
+        0 => 0,
+        _ => area_inner.height / 4,
+    };
+
+    let y_labels = (0..=y_label_count)
+        .map(|i| {
+            let y = data_preview.min
+                + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
+            Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
+        })
+        .collect::<Vec<_>>();
 
     // into a &'a [(f64, f64)]
-    let data: &[(f64, f64)] = data.as_slice();
+    let data: &[(f64, f64)] = &data_preview.data;
     let ds = Dataset::default()
         .marker(symbols::Marker::Braille)
         .graph_type(GraphType::Line)
@@ -52,22 +85,15 @@ pub fn render_preview(
             Axis::default()
                 .title("X axis")
                 .style(Style::default().fg(ratatui::style::Color::White))
-                .labels([
-                    Span::styled("0", color_consts::COLOR_WHITE),
-                    Span::styled("10", color_consts::COLOR_WHITE),
-                ])
-                .bounds((0.0, 500.0).into()),
+                .labels(x_labels)
+                .bounds((0.0, data_preview.length as f64).into()),
         )
         .y_axis(
             Axis::default()
                 .title("Y axis")
                 .style(Style::default().fg(ratatui::style::Color::White))
-                .labels([
-                    Span::styled("1", color_consts::COLOR_WHITE),
-                    Span::styled("0", color_consts::COLOR_WHITE),
-                    Span::styled("-1", color_consts::COLOR_WHITE),
-                ])
-                .bounds((-2.0, 2.0).into()),
+                .labels(y_labels)
+                .bounds((data_preview.min, data_preview.max).into()),
         );
     f.render_widget(chart, area_inner);
 

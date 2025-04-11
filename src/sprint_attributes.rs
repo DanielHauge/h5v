@@ -2,27 +2,27 @@ use std::f64;
 
 use hdf5_metno::{
     types::{self, FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
-    Attribute, Error,
+    Error,
 };
 use ratatui::{text::Line, text::Span};
 
 use crate::color_consts;
 
-pub trait LineRenderable {
-    fn render_line(&self) -> Line<'static>;
-}
-
-impl LineRenderable for Attribute {
-    fn render_line(&self) -> Line<'static> {
-        match sprint_attribute(self) {
-            Ok(s) => s,
-            Err(c) => {
-                let s = format!("{c}");
-                Line::from(s).style(color_consts::ERROR_COLOR)
-            }
-        }
-    }
-}
+// pub trait LineRenderable {
+//     fn render_line(&self) -> Line<'static>;
+// }
+//
+// impl LineRenderable for Attribute {
+//     fn render_line(&self) -> Line<'static> {
+//         match sprint_attribute(self) {
+//             Ok(s) => s,
+//             Err(c) => {
+//                 let s = format!("{c}");
+//                 Line::from(s).style(color_consts::ERROR_COLOR)
+//             }
+//         }
+//     }
+// }
 
 pub trait Renderable {
     fn render(self) -> Span<'static>;

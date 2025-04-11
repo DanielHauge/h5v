@@ -1,18 +1,11 @@
 use std::{cell::RefCell, rc::Rc, u16};
 
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
-    style::{Color, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    layout::{Constraint, Layout, Margin, Offset, Rect},
     Frame,
 };
 
-use crate::{
-    color_consts,
-    h5f::{H5FNode, HasAttributes},
-    sprint_attributes::sprint_attribute,
-};
+use crate::h5f::H5FNode;
 
 fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
     let chunks = Layout::default()
