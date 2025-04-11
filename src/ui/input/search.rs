@@ -33,6 +33,12 @@ pub fn handle_search_event<'a>(
                                 searcher.query.insert(current_cursor, c);
                                 searcher.line_cursor += 1;
                             }
+                            let count_results = searcher.count_results();
+                            if count_results == 0 {
+                                searcher.select_cursor = count_results;
+                            } else if searcher.select_cursor >= count_results {
+                                searcher.select_cursor = count_results - 1;
+                            }
                             Ok(EventResult::Redraw)
                         } else {
                             Ok(EventResult::Continue)
@@ -103,6 +109,11 @@ pub fn handle_search_event<'a>(
                         let results = searcher.search(&searcher.query);
 
                         let selected_node = searcher.select_cursor;
+                        if results.is_empty() {
+                            state.mode = Mode::Normal;
+                            return Ok(EventResult::Redraw);
+                        }
+
                         let selected_index_corrected = if selected_node >= results.len() {
                             results.len() - 1
                         } else {
