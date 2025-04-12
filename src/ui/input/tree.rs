@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::ui::app::{AppError, AppState};
+use crate::{error::AppError, ui::app::AppState};
 
 use super::EventResult;
 

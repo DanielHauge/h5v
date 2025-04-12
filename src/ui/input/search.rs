@@ -1,8 +1,9 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use crate::{
+    error::AppError,
     h5f::HasPath,
-    ui::app::{AppError, AppState, Focus, Mode},
+    ui::app::{AppState, Focus, Mode},
 };
 
 use super::EventResult;

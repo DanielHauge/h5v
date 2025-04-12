@@ -2,6 +2,7 @@ use clap::Parser;
 
 mod color_consts;
 mod data;
+mod error;
 mod h5f;
 mod search;
 mod sprint_attributes;

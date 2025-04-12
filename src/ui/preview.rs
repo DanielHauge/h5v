@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    data::Previewable,
+    data::{PreviewSelection, Previewable, Slice},
     h5f::{H5FNode, Node},
 };
 
@@ -41,7 +41,7 @@ pub fn render_preview(
     let data_preview = match node {
         Node::Dataset(ds, attr) => {
             if ds.shape().len() == 1 && attr.data_type == "f64" {
-                ds.preview()
+                ds.preview(PreviewSelection::OneDim(Slice::All))
             } else {
                 return Ok(());
             }

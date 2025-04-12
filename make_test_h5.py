@@ -58,6 +58,13 @@ with h5py.File(file_name, "w") as f:
     y = np.sin(x).astype(np.float32)
     f.create_dataset("big_dataset", data=y)
 
+    # BIG dataset, 10 gb
+    num_points = 2**30
+    # 5 full sine waves over the entire data
+    x = np.linspace(0, 10 * np.pi, num_points)
+    y = np.sin(x).astype(np.float32)
+    f.create_dataset("big_dataset_2", data=y)
+
     # Create some chunking dataset like 10x4096x150
     x = np.random.random((10, 4096, 150))
     f.create_dataset("chunked_dataset", data=x, chunks=(1, 1024, 150))

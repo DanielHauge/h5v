@@ -1,7 +1,7 @@
 use hdf5_metno::Dataset;
 
 pub trait Previewable {
-    fn preview(&self) -> DatasetPreview;
+    fn preview(&self, selection: PreviewSelection) -> DatasetPreview;
 }
 
 pub struct DatasetPreview {
@@ -16,14 +16,18 @@ pub enum Slice {
 }
 
 pub enum PreviewSelection {
-    SingleDim(Slice),
+    OneDim(Slice),
 }
 
 impl Previewable for Dataset {
-    fn preview(&self) -> DatasetPreview {
-        let gg = self.read_1d::<f64>().unwrap();
+    fn preview(&self, selection: PreviewSelection) -> DatasetPreview {
+        let data_to_show = match selection {
+            PreviewSelection::OneDim(slice) => match slice {
+                Slice::All => self.read_1d::<f64>().unwrap(),
+            },
+        };
 
-        let data = gg
+        let data = data_to_show
             .iter()
             .enumerate()
             .map(|(i, y)| (i as f64, *y))

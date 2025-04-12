@@ -1,9 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
-use ratatui::crossterm::event::{Event, KeyCode};
+use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
-use super::app::{AppError, AppState, Focus, Mode};
+use crate::error::AppError;
+
+use super::app::{AppState, Focus, Mode};
 
 pub mod search;
 pub mod tree;
@@ -27,22 +29,32 @@ pub fn handle_input_event<'a>(
     match state.mode {
         Mode::Normal => {
             if let Event::Key(key_event) = event {
-                match key_event.code {
-                    KeyCode::Char('/') => {
+                match (key_event.code, key_event.modifiers) {
+                    (KeyCode::Char('/'), _) => {
                         state.searcher.borrow_mut().query.clear();
                         state.searcher.borrow_mut().line_cursor = 0;
                         state.mode = Mode::Search;
                         return Ok(EventResult::Redraw);
                     }
-                    KeyCode::Char('q') => return Ok(EventResult::Quit),
-                    KeyCode::Char('?') => {
+                    (KeyCode::Char('q'), _) => return Ok(EventResult::Quit),
+                    (KeyCode::Char('?'), _) => {
                         state.mode = Mode::Help;
+                        return Ok(EventResult::Redraw);
+                    }
+                    (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
+                        if let Focus::Tree = state.focus {
+                            state.focus = Focus::Attributes;
+                        } else {
+                            state.focus = Focus::Tree;
+                        }
+                        state.show_tree_view = !state.show_tree_view;
+
                         return Ok(EventResult::Redraw);
                     }
 
                     _ => match state.focus {
                         Focus::Tree => handle_normal_tree_event(&mut state, event),
-                        Focus::Attributes => todo!(),
+                        Focus::Attributes => Ok(EventResult::Continue),
                     },
                 }
             } else {
