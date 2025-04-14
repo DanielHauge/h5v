@@ -7,9 +7,20 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, search::Searcher, sprint_attributes::sprint_attribute,
-    sprint_typedesc::sprint_typedescriptor,
+    color_consts,
+    search::Searcher,
+    sprint_attributes::sprint_attribute,
+    sprint_typedesc::{encoding_from_dtype, is_type_numerical, sprint_typedescriptor},
+    ui::app::ContentShowMode,
 };
+
+#[derive(Debug)]
+pub enum Encoding {
+    Unknown,
+    LittleEndian,
+    UTF8,
+    ASCII,
+}
 
 #[derive(Debug)]
 pub struct DatasetMeta {
@@ -21,6 +32,8 @@ pub struct DatasetMeta {
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
+    pub numerical: bool,
+    pub encoding: Encoding,
 }
 
 impl DatasetMeta {
@@ -406,6 +419,24 @@ impl H5FNode {
         ])
     }
 
+    pub fn content_show_modes(&self) -> Vec<ContentShowMode> {
+        let mut result = vec![];
+        match &self.node {
+            Node::File(_) => {}
+            Node::Group(_) => {}
+            Node::Dataset(_, dataset_meta) => {
+                result.push(ContentShowMode::Preview);
+                if dataset_meta.numerical {
+                    result.push(ContentShowMode::Matrix);
+                    if dataset_meta.shape.len() > 1 {
+                        result.push(ContentShowMode::Heatmap);
+                    }
+                }
+            }
+        }
+        result
+    }
+
     pub fn is_group(&self) -> bool {
         matches!(self.node, Node::Group(_))
     }
@@ -542,7 +573,9 @@ impl H5FNode {
                 shape.push(total_elems);
                 shape.push(1);
             }
-            let data_type = sprint_typedescriptor(dtype_desc);
+            let data_type = sprint_typedescriptor(&dtype_desc);
+            let numerical = is_type_numerical(&dtype_desc);
+            let encoding = encoding_from_dtype(&dtype_desc);
             let total_bytes = data_bytesize * total_elems;
             let storage_required = d.storage_size();
             let chunk_shape = d.chunk();
@@ -555,6 +588,8 @@ impl H5FNode {
                 storage_required,
                 total_elems,
                 chunk_shape,
+                numerical,
+                encoding,
             };
             let node_ds = Node::Dataset(d, meta);
             let node = Rc::new(RefCell::new(H5FNode::new(node_ds, self.searcher.clone())));

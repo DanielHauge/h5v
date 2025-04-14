@@ -15,14 +15,13 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
     error::AppError,
     h5f::{self, H5FNode},
     search::Searcher,
-    ui::{attributes::render_info_attributes, input::EventResult, tree_view::TreeItem},
+    ui::{input::EventResult, tree_view::TreeItem},
 };
 
-use super::{input::handle_input_event, preview::render_preview, tree_view::render_tree};
+use super::{input::handle_input_event, main_display::render_main_display, tree_view::render_tree};
 
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -46,6 +45,13 @@ pub enum Mode {
     Help,
 }
 
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum ContentShowMode {
+    Preview,
+    Matrix,
+    Heatmap,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
@@ -56,6 +62,7 @@ pub struct AppState<'a> {
     pub indexed: bool,
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
+    pub content_mode: ContentShowMode,
 }
 
 impl<'a> AppState<'a> {
@@ -129,6 +136,7 @@ fn main_recover_loop(
         indexed: false,
         searcher,
         show_tree_view: true,
+        content_mode: ContentShowMode::Preview,
     }));
 
     state.borrow_mut().compute_tree_view();
@@ -151,7 +159,7 @@ fn main_recover_loop(
         };
 
         let selected_node = &state.borrow().treeview[state.borrow().tree_view_cursor].node;
-        match render_main_display(frame, &main_display_area, selected_node) {
+        match render_main_display(frame, &main_display_area, selected_node, &state) {
             Ok(()) => {}
             Err(e) => render_error(frame, &format!("Error: {}", e)),
         }
@@ -209,47 +217,4 @@ fn render_help(frame: &mut Frame<'_>) {
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(help_paragraph, frame.area());
-}
-
-fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
-    let chunks = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(attributes_count as u16 + 2),
-                Constraint::Min(0),
-            ]
-            .as_ref(),
-        )
-        .split(area);
-    (chunks[0], chunks[1])
-}
-
-fn render_main_display(
-    f: &mut Frame,
-    area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
-) -> std::result::Result<(), hdf5_metno::Error> {
-    let attr_count = selected_node
-        .borrow_mut()
-        .read_attributes()?
-        .rendered_attributes
-        .len();
-
-    let (attr_area, content_area) = split_main_display(*area, attr_count);
-
-    let attr_header_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(format!("Attributes"))
-        .bg(color_consts::BG2_COLOR)
-        .title_style(Style::default().fg(Color::Yellow).bold())
-        .title_alignment(Alignment::Center);
-    f.render_widget(attr_header_block, *area);
-    render_info_attributes(f, &attr_area, selected_node)?;
-
-    render_preview(f, &content_area, selected_node)?;
-
-    Ok(())
 }

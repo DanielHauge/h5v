@@ -1,12 +1,15 @@
 use std::{cell::RefCell, f64, rc::Rc};
 
-use hdf5_metno::Error;
+use hdf5_metno::{
+    types::{VarLenAscii, VarLenUnicode},
+    Error,
+};
 use ratatui::{
-    layout::{Alignment, Offset, Rect},
+    layout::Rect,
     style::Style,
     symbols,
     text::Span,
-    widgets::{Axis, Block, Chart, Dataset, GraphType},
+    widgets::{Axis, Chart, Dataset, GraphType},
     Frame,
 };
 
@@ -16,29 +19,46 @@ use crate::{
     h5f::{H5FNode, Node},
 };
 
+use super::app::AppState;
+
 pub fn render_preview(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
+    state: &Rc<RefCell<AppState>>,
 ) -> Result<(), Error> {
     // Make a break line with a heading to indicater we render a preview
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
+        vertical: 0,
+    });
+    let node = &selected_node.borrow().node;
+
+    match node {
+        Node::Dataset(_, attr) => {
+            if !attr.numerical {
+                render_string_preview(f, &area_inner, node)
+            } else {
+                render_chart_preview(f, &area_inner, node, state)
+            }
+        }
+        _ => {
+            return Ok(());
+        }
+    }
+}
+
+fn render_chart_preview(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node: &Node,
+    _state: &Rc<RefCell<AppState>>,
+) -> Result<(), Error> {
+    let area_inner = area.inner(ratatui::layout::Margin {
+        horizontal: 0,
         vertical: 1,
     });
-    let height = area_inner.height;
-    let width = area_inner.width;
-    let title = format!("Preview, {}x{}", width, height);
-    let break_line = Block::default()
-        .title(title)
-        .borders(ratatui::widgets::Borders::TOP)
-        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-        .title_alignment(Alignment::Center)
-        .title_style(Style::default().fg(color_consts::TITLE))
-        .style(Style::default().bg(color_consts::BG2_COLOR));
-    f.render_widget(break_line, area_inner.offset(Offset { x: 0, y: -2 }));
-    let node = &selected_node.borrow().node;
-    let data_preview = match node {
+    let data_preview = match &selected_node {
         Node::Dataset(ds, attr) => {
             if ds.shape().len() == 1 && attr.data_type == "f64" {
                 ds.preview(PreviewSelection::OneDim(Slice::All))
@@ -97,5 +117,54 @@ pub fn render_preview(
         );
     f.render_widget(chart, area_inner);
 
+    Ok(())
+}
+
+fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), Error> {
+    let (dataset, meta) = match selected_node {
+        Node::Dataset(ds, attr) => (ds, attr),
+        _ => panic!("Expected a string dataset to preview string data"),
+    };
+
+    match meta.encoding {
+        crate::h5f::Encoding::Unknown => panic!("Unknown encoding not supported for string data"),
+        crate::h5f::Encoding::LittleEndian => panic!("LittleEndian not supported for string data"),
+        crate::h5f::Encoding::ASCII => match dataset.read_scalar::<VarLenAscii>() {
+            Ok(x) => {
+                let string = x.to_string();
+                let string = string.lines().collect::<Vec<_>>().join("\n");
+                let string = Span::styled(string, color_consts::COLOR_WHITE);
+                let string = ratatui::text::Text::from(string);
+                let string = ratatui::widgets::Paragraph::new(string)
+                    .wrap(ratatui::widgets::Wrap { trim: true });
+                f.render_widget(string, *area);
+            }
+            Err(e) => {
+                f.render_widget(
+                    ratatui::widgets::Paragraph::new(format!("Error: {}", e))
+                        .style(Style::default().fg(color_consts::ERROR_COLOR)),
+                    *area,
+                );
+            }
+        },
+        crate::h5f::Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
+            Ok(x) => {
+                let string = x.to_string();
+                let string = string.lines().collect::<Vec<_>>().join("\n");
+                let string = Span::styled(string, color_consts::COLOR_WHITE);
+                let string = ratatui::text::Text::from(string);
+                let string = ratatui::widgets::Paragraph::new(string)
+                    .wrap(ratatui::widgets::Wrap { trim: true });
+                f.render_widget(string, *area);
+            }
+            Err(e) => {
+                f.render_widget(
+                    ratatui::widgets::Paragraph::new(format!("Error: {}", e))
+                        .style(Style::default().fg(color_consts::ERROR_COLOR)),
+                    *area,
+                );
+            }
+        },
+    }
     Ok(())
 }

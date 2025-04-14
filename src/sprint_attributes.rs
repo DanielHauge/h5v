@@ -200,12 +200,18 @@ fn sprint_attribute_scalar<'a>(
         },
         types::TypeDescriptor::VarLenAscii => attr.read_scalar::<VarLenAscii>()?.render(),
         types::TypeDescriptor::VarLenUnicode => attr.read_scalar::<VarLenUnicode>()?.render(),
-        types::TypeDescriptor::Reference(_) => unreachable!(),
-        types::TypeDescriptor::VarLenArray(_) => unreachable!(),
-        types::TypeDescriptor::Compound(_) => unreachable!(),
-        types::TypeDescriptor::FixedArray(_, _) => unreachable!(),
+        types::TypeDescriptor::Reference(_) => render_unsupported_type("reference"),
+        types::TypeDescriptor::VarLenArray(_) => render_unsupported_type("custom varlen array"),
+        types::TypeDescriptor::Compound(_) => render_unsupported_type("compound"),
+        types::TypeDescriptor::FixedArray(_, _) => render_unsupported_type("custom fixed array"),
     };
     Ok(val)
+}
+
+fn render_unsupported_type(type_name: impl Into<String>) -> Span<'static> {
+    let type_name = type_name.into();
+    let s = format!("Unsupported type: {type_name}");
+    Span::from(s).style(color_consts::ERROR_COLOR)
 }
 
 fn spring_attribute_array(
@@ -321,7 +327,74 @@ fn spring_attribute_array(
             .into_iter()
             .collect::<Vec<bool>>()
             .render(),
-        x => panic!("Unsupported type descriptor: {:?}", x),
+        TypeDescriptor::Enum(_) => vec![render_unsupported_type("enum array")],
+        TypeDescriptor::Compound(_) => vec![render_unsupported_type("compound array")],
+        TypeDescriptor::FixedArray(type_descriptor, size) => {
+            vec![render_unsupported_type(format!(
+                "fixed array of {type_descriptor} with size {size}"
+            ))]
+        }
+        TypeDescriptor::FixedUnicode(size) => match size {
+            0..32 => attr
+                .read_1d::<FixedUnicode<32>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<32>>>()
+                .render(),
+            32..64 => attr
+                .read_1d::<FixedUnicode<64>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<64>>>()
+                .render(),
+            64..128 => attr
+                .read_1d::<FixedUnicode<128>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<128>>>()
+                .render(),
+            128..256 => attr
+                .read_1d::<FixedUnicode<256>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<256>>>()
+                .render(),
+            256..512 => attr
+                .read_1d::<FixedUnicode<512>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<512>>>()
+                .render(),
+            512..1024 => attr
+                .read_1d::<FixedUnicode<1024>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<1024>>>()
+                .render(),
+            1024..2048 => attr
+                .read_1d::<FixedUnicode<2048>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<2048>>>()
+                .render(),
+            2048..4096 => attr
+                .read_1d::<FixedUnicode<4096>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<4096>>>()
+                .render(),
+            _ => attr
+                .read_1d::<FixedUnicode<8192>>()?
+                .into_iter()
+                .collect::<Vec<FixedUnicode<8192>>>()
+                .render(),
+        },
+        TypeDescriptor::VarLenArray(type_descriptor) => vec![render_unsupported_type(format!(
+            "varlen array of {type_descriptor}"
+        ))],
+        TypeDescriptor::VarLenAscii => attr
+            .read_1d::<VarLenAscii>()?
+            .into_iter()
+            .collect::<Vec<VarLenAscii>>()
+            .render(),
+        TypeDescriptor::VarLenUnicode => attr
+            .read_1d::<VarLenUnicode>()?
+            .into_iter()
+            .collect::<Vec<VarLenUnicode>>()
+            .render(),
+        TypeDescriptor::Reference(_) => vec![render_unsupported_type("reference array")],
     };
     Ok(gg)
 }
@@ -331,7 +404,6 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
         if attr.is_scalar() {
             let attr_type = attr.dtype()?.to_descriptor()?;
             let span = sprint_attribute_scalar(attr, attr_type)?;
-            // join each span by using plux operator
             let line = Line::from(span);
             Ok(line)
         } else {

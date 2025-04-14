@@ -118,3 +118,14 @@ with h5py.File(file_name, "w") as f:
     steps = np.random.choice([-1, 1], size=1000)
     path = np.cumsum(steps)
     f.create_dataset("random_walk", data=path)
+
+    # simple string dataset
+    f.create_dataset("string_dataset", data="Hello string")
+
+    # also an ascii string dataset
+    f.create_dataset("ascii_string_dataset", data=b"Hello ascii")
+    # also a unicode string dataset
+    f.create_dataset("unicode_string_dataset",
+                     data="Hello utf8".encode("utf-8"))
+    # also a bytes dataset
+    f.create_dataset("bytes_dataset", data=b"Hello bytes")
