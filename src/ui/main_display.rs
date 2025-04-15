@@ -75,7 +75,7 @@ pub fn render_main_display(
     let mut tab_titles = vec![];
     for (i, x) in supported_display_modes.iter().enumerate() {
         let title = match x {
-            ContentShowMode::Preview => "Preview",
+            ContentShowMode::Preview => "Preview 🗠",
             ContentShowMode::Matrix => "Matrix",
             ContentShowMode::Heatmap => "Heatmap",
         };

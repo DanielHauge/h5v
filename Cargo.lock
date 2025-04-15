@@ -286,6 +286,7 @@ dependencies = [
  "clap",
  "hdf5-metno",
  "itertools 0.14.0",
+ "ndarray",
  "ratatui",
 ]
 

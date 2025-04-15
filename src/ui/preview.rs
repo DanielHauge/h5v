@@ -15,7 +15,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    data::{PreviewSelection, Previewable, Slice},
+    data::{PreviewSelection, Previewable, SliceSelection},
     h5f::{H5FNode, Node},
 };
 
@@ -59,9 +59,27 @@ fn render_chart_preview(
         vertical: 1,
     });
     let data_preview = match &selected_node {
-        Node::Dataset(ds, attr) => {
-            if ds.shape().len() == 1 && attr.data_type == "f64" {
-                ds.preview(PreviewSelection::OneDim(Slice::All))
+        Node::Dataset(ds, _) => {
+            if ds.shape().len() == 1 {
+                if ds.shape()[0] > 25000 {
+                    f.render_widget(
+                        ratatui::widgets::Paragraph::new("Too much data to preview")
+                            .style(Style::default().fg(color_consts::ERROR_COLOR)),
+                        *area,
+                    );
+                    return Ok(());
+                }
+                ds.preview(PreviewSelection {
+                    x: 0,
+                    index: vec![],
+                    slice: SliceSelection::All,
+                })?
+            } else if ds.shape().len() == 2 {
+                ds.preview(PreviewSelection {
+                    x: 1,
+                    index: vec![0],
+                    slice: SliceSelection::All,
+                })?
             } else {
                 return Ok(());
             }

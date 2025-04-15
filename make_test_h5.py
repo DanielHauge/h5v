@@ -58,12 +58,81 @@ with h5py.File(file_name, "w") as f:
     y = np.sin(x).astype(np.float32)
     f.create_dataset("big_dataset", data=y)
 
-    # BIG dataset, 10 gb
-    num_points = 2**30
-    # 5 full sine waves over the entire data
-    x = np.linspace(0, 10 * np.pi, num_points)
-    y = np.sin(x).astype(np.float32)
-    f.create_dataset("big_dataset_2", data=y)
+    # # BIG dataset, 10 gb
+    # num_points = 2**30
+    # # 5 full sine waves over the entire data
+    # x = np.linspace(0, 10 * np.pi, num_points)
+    # y = np.sin(x).astype(np.float32)
+    # f.create_dataset("big_dataset_2", data=y)
+
+    # make grp for all datasets of all types
+    group_all = f.create_group("all_datasets")
+    # u8
+    x = np.random.randint(0, 255, size=(1, 100), dtype=np.uint8)
+    group_all.create_dataset("uint8_dataset", data=x)
+    # u16
+    x = np.random.randint(0, 65535, size=(1, 100), dtype=np.uint16)
+    group_all.create_dataset("uint16_dataset", data=x)
+    # u32
+    x = np.random.randint(0, 4294967295, size=(1, 100), dtype=np.uint32)
+    group_all.create_dataset("uint32_dataset", data=x)
+    # u64
+    x = np.random.randint(0, 18446744073709551615,
+                          size=(1, 100), dtype=np.uint64)
+    group_all.create_dataset("uint64_dataset", data=x)
+    # i8
+    x = np.random.randint(-128, 127, size=(1, 100), dtype=np.int8)
+    group_all.create_dataset("int8_dataset", data=x)
+    # i16
+    x = np.random.randint(-32768, 32767, size=(1, 100), dtype=np.int16)
+    group_all.create_dataset("int16_dataset", data=x)
+    # i32
+    x = np.random.randint(-2147483648, 2147483647,
+                          size=(1, 100), dtype=np.int32)
+    group_all.create_dataset("int32_dataset", data=x)
+    # i64
+    x = np.random.randint(-9223372036854775808,
+                          9223372036854775807, size=(1, 100), dtype=np.int64)
+    group_all.create_dataset("int64_dataset", data=x)
+
+    # f32
+    x = np.random.random((1, 100)).astype(np.float32)
+    group_all.create_dataset("float32_dataset", data=x)
+    # f64
+    x = np.random.random((1, 100)).astype(np.float64)
+    group_all.create_dataset("float64_dataset", data=x)
+
+    # make 3d dataset
+    # Create a dataset with random data
+    data = np.random.random((100, 100, 100))
+    f.create_dataset("3d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((100, 100, 100, 100))
+    f.create_dataset("4d_dataset", data=data)
+
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2))
+    f.create_dataset("5d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2))
+    f.create_dataset("6d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2, 2))
+    f.create_dataset("7d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2))
+    f.create_dataset("8d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2, 2))
+    f.create_dataset("9d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2,
+                            2, 2))
+    f.create_dataset("10d_dataset", data=data)
+    # Create a dataset with random data
+    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2,
+                            2, 2, 2))
+    f.create_dataset("11d_dataset", data=data)
 
     # Create some chunking dataset like 10x4096x150
     x = np.random.random((10, 4096, 150))
