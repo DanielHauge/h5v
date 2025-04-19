@@ -63,6 +63,9 @@ pub struct AppState<'a> {
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
+    pub selected_x_dim: usize,
+    pub selected_y_dim: usize,
+    pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
 }
 
 impl<'a> AppState<'a> {
@@ -137,29 +140,33 @@ fn main_recover_loop(
         searcher,
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
+        selected_x_dim: 0,
+        selected_y_dim: 0,
+        selected_indexes: [0; 15],
     }));
 
     state.borrow_mut().compute_tree_view();
 
     let draw_closure = |frame: &mut Frame| {
-        if state.borrow().help {
+        let mut state = state.borrow_mut();
+        if state.help {
             return render_help(frame);
         }
 
-        let show_tree_view = state.borrow().show_tree_view;
+        let show_tree_view = state.show_tree_view;
 
         let main_display_area = match show_tree_view {
             true => {
                 let areas = make_panels_rect(frame.area());
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
-                render_tree(frame, tree_area, &state);
+                render_tree(frame, tree_area, &mut state);
                 main_display_area
             }
             false => frame.area(),
         };
 
-        let selected_node = &state.borrow().treeview[state.borrow().tree_view_cursor].node;
-        match render_main_display(frame, &main_display_area, selected_node, &state) {
+        let selected_node = state.treeview[state.tree_view_cursor].node.clone();
+        match render_main_display(frame, &main_display_area, &selected_node, &mut state) {
             Ok(()) => {}
             Err(e) => render_error(frame, &format!("Error: {}", e)),
         }

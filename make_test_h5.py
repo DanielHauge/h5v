@@ -102,37 +102,9 @@ with h5py.File(file_name, "w") as f:
     x = np.random.random((1, 100)).astype(np.float64)
     group_all.create_dataset("float64_dataset", data=x)
 
-    # make 3d dataset
-    # Create a dataset with random data
-    data = np.random.random((100, 100, 100))
-    f.create_dataset("3d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((100, 100, 100, 100))
-    f.create_dataset("4d_dataset", data=data)
-
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2))
-    f.create_dataset("5d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2))
-    f.create_dataset("6d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2, 2))
-    f.create_dataset("7d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2))
-    f.create_dataset("8d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2, 2))
-    f.create_dataset("9d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2,
-                            2, 2))
-    f.create_dataset("10d_dataset", data=data)
-    # Create a dataset with random data
-    data = np.random.random((2, 2, 2, 2, 2, 2, 2, 2,
-                            2, 2, 2))
-    f.create_dataset("11d_dataset", data=data)
+    # u32
+    x = np.random.randint(0, 255, size=(100, 1), dtype=np.uint8)
+    group_all.create_dataset("chunked_first_by_one", data=x)
 
     # Create some chunking dataset like 10x4096x150
     x = np.random.random((10, 4096, 150))

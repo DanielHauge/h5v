@@ -25,9 +25,8 @@ pub fn render_preview(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
-    state: &Rc<RefCell<AppState>>,
+    state: &mut AppState,
 ) -> Result<(), Error> {
-    // Make a break line with a heading to indicater we render a preview
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 0,
@@ -52,44 +51,65 @@ fn render_chart_preview(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Node,
-    _state: &Rc<RefCell<AppState>>,
+    state: &mut AppState,
 ) -> Result<(), Error> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
     });
-    let data_preview = match &selected_node {
-        Node::Dataset(ds, _) => {
-            if ds.shape().len() == 1 {
-                if ds.shape()[0] > 25000 {
-                    f.render_widget(
-                        ratatui::widgets::Paragraph::new("Too much data to preview")
-                            .style(Style::default().fg(color_consts::ERROR_COLOR)),
-                        *area,
-                    );
-                    return Ok(());
-                }
-                ds.preview(PreviewSelection {
-                    x: 0,
-                    index: vec![],
-                    slice: SliceSelection::All,
-                })?
-            } else if ds.shape().len() == 2 {
-                ds.preview(PreviewSelection {
-                    x: 1,
-                    index: vec![0],
-                    slice: SliceSelection::All,
-                })?
-            } else {
-                return Ok(());
-            }
-        }
+
+    let (ds, _) = match selected_node {
+        Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
     };
 
-    let x_label_count = match area_inner.width {
+    let shape = ds.shape();
+    let total_dims = shape.len();
+    let x_selectable_dims: Vec<usize> = shape
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| **v > 1)
+        .map(|(i, _)| i)
+        .collect();
+
+    let selected_indexe_length = state.selected_indexes.len();
+    for i in 0..selected_indexe_length {
+        if !x_selectable_dims.contains(&i) {
+            state.selected_indexes[i] = 0;
+        }
+    }
+
+    if !x_selectable_dims.contains(&state.selected_x_dim) {
+        state.selected_x_dim = x_selectable_dims[0];
+    }
+
+    let chart_area = if x_selectable_dims.len() > 1 {
+        let paragrapth =
+            ratatui::widgets::Paragraph::new("TODO: More than 1 dimension, select x axis")
+                .style(Style::default().fg(color_consts::COLOR_WHITE));
+        f.render_widget(paragrapth, *area);
+        return Ok(());
+    } else {
+        area_inner
+    };
+
+    if shape[state.selected_x_dim] > 250000 {
+        let paragrapth = ratatui::widgets::Paragraph::new("TODO: To many data points to show")
+            .style(Style::default().fg(color_consts::COLOR_WHITE));
+        f.render_widget(paragrapth, *area);
+        return Ok(());
+    }
+
+    // make slice of state.selected_indexes[0..total_dims]
+    let data_preview = ds.preview(PreviewSelection {
+        x: state.selected_x_dim,
+        index: state.selected_indexes[0..total_dims - 1].to_vec(),
+        slice: SliceSelection::All,
+    })?;
+
+    let x_label_count = match chart_area.width {
         0 => 0,
-        _ => area_inner.width / 8,
+        _ => chart_area.width / 8,
     };
     let x_labels = (0..=x_label_count)
         .map(|i| {
@@ -98,9 +118,9 @@ fn render_chart_preview(
         })
         .collect::<Vec<_>>();
 
-    let y_label_count = match area_inner.height {
+    let y_label_count = match chart_area.height {
         0 => 0,
-        _ => area_inner.height / 4,
+        _ => chart_area.height / 4,
     };
 
     let y_labels = (0..=y_label_count)
@@ -133,7 +153,7 @@ fn render_chart_preview(
                 .labels(y_labels)
                 .bounds((data_preview.min, data_preview.max).into()),
         );
-    f.render_widget(chart, area_inner);
+    f.render_widget(chart, chart_area);
 
     Ok(())
 }

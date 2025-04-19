@@ -33,7 +33,7 @@ pub fn render_main_display(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
-    state: &Rc<RefCell<AppState>>,
+    state: &mut AppState,
 ) -> std::result::Result<(), hdf5_metno::Error> {
     let attr_count = selected_node
         .borrow_mut()
@@ -53,7 +53,7 @@ pub fn render_main_display(
     f.render_widget(attr_header_block, *area);
     render_info_attributes(f, &attr_area, selected_node)?;
 
-    let current_display_mode = &state.borrow().content_mode;
+    let current_display_mode = &state.content_mode;
     let supported_display_modes = selected_node.borrow().content_show_modes();
     if supported_display_modes.is_empty() {
         return Ok(());
@@ -106,7 +106,7 @@ pub fn render_main_display(
         }),
     );
 
-    render_preview(f, &content_area, selected_node, &state)?;
+    render_preview(f, &content_area, selected_node, state)?;
 
     Ok(())
 }

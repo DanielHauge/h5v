@@ -132,7 +132,7 @@ fn compute_tree_view_rec<'a>(
     tree_view
 }
 
-pub fn render_tree(f: &mut Frame, area: Rect, state: &Rc<RefCell<AppState>>) {
+pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
@@ -149,7 +149,6 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &Rc<RefCell<AppState>>) {
     });
 
     let mut area = inner_area;
-    let mut state = state.borrow_mut();
     let mode = state.mode.clone();
     match mode {
         Mode::Normal => {
