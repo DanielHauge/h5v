@@ -1,6 +1,12 @@
-use hdf5_metno::types::TypeDescriptor;
+use hdf5_metno::{
+    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii},
+    Dataset,
+};
 
-use crate::h5f::Encoding;
+use crate::{
+    h5f::{Encoding, ImageType},
+    sprint_attributes::sprint_attribute,
+};
 
 pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
     match type_desc {
@@ -30,6 +36,44 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
         TypeDescriptor::VarLenAscii => "ascii".to_string(),
         TypeDescriptor::VarLenUnicode => "unicode".to_string(),
         TypeDescriptor::Reference(_) => "reference".to_string(),
+    }
+}
+
+// https://support.hdfgroup.org/documentation/hdf5/latest/_i_m_g.html
+pub fn is_image(d: &Dataset) -> Option<ImageType> {
+    let class = match d.attr("CLASS") {
+        Ok(class) => class,
+        Err(_) => return None,
+    };
+
+    match sprint_attribute(&class) {
+        Ok(class) => {
+            let class_string = class.to_string().replace("\"", "");
+            if class_string != "IMAGE" {
+                return None;
+            }
+        }
+        Err(_) => return None,
+    }
+
+    let image_subclass = match d.attr("IMAGE_SUBCLASS") {
+        Ok(image_subclass) => image_subclass,
+        Err(_) => return None,
+    };
+
+    let read_image_subclass = match sprint_attribute(&image_subclass) {
+        Ok(read_image_subclass) => read_image_subclass.to_string().replace("\"", ""),
+        Err(_) => return None,
+    };
+
+    match read_image_subclass.as_str() {
+        "IMAGE_GRAYSCALE" => Some(ImageType::GRAYSCALE),
+        "IMAGE_TRUECOLOR" => Some(ImageType::TRUECOLOR),
+        "IMAGE_BITMAP" => Some(ImageType::BITMAP),
+        "IMAGE_INDEXED" => Some(ImageType::INDEXED),
+        "IMAGE_JPEG" => Some(ImageType::JPEG),
+        "IMAGE_PNG" => Some(ImageType::PNG),
+        _ => None,
     }
 }
 

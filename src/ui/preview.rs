@@ -1,22 +1,27 @@
-use std::{cell::RefCell, f64, rc::Rc};
+use std::{cell::RefCell, f64, io::BufReader, rc::Rc};
 
 use hdf5_metno::{
     types::{VarLenAscii, VarLenUnicode},
     Error,
 };
+use image::{ImageFormat, ImageReader};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     symbols,
-    text::Span,
-    widgets::{Axis, Chart, Dataset, GraphType},
+    text::{Span, Text},
+    widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
     Frame,
+};
+use ratatui_image::{
+    picker::{self, Picker},
+    StatefulImage,
 };
 
 use crate::{
     color_consts,
     data::{PreviewSelection, Previewable, SliceSelection},
-    h5f::{H5FNode, Node},
+    h5f::{Encoding, H5FNode, ImageType, Node},
 };
 
 use super::app::AppState;
@@ -34,22 +39,60 @@ pub fn render_preview(
     let node = &selected_node.borrow().node;
 
     match node {
-        Node::Dataset(_, attr) => {
-            if !attr.numerical {
-                render_string_preview(f, &area_inner, node)
-            } else {
-                render_chart_preview(f, &area_inner, node, state)
+        Node::Dataset(_, attr) => match &attr.image {
+            Some(image_type) => match image_type {
+                ImageType::JPEG => render_jpeg(f, &area_inner, &node),
+                ImageType::PNG => todo!(),
+                ImageType::GRAYSCALE => todo!(),
+                ImageType::BITMAP => todo!(),
+                ImageType::TRUECOLOR => todo!(),
+                ImageType::INDEXED => todo!(),
+            },
+            None => {
+                if !attr.numerical {
+                    render_string_preview(f, &area_inner, node)
+                } else {
+                    render_chart_preview(f, &area_inner, node, state)
+                }
             }
-        }
+        },
         _ => {
             return Ok(());
         }
     }
 }
 
+fn render_jpeg(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), Error> {
+    let (ds, _) = match selected_node {
+        Node::Dataset(ds, attr) => (ds, attr),
+        _ => return Ok(()),
+    };
+
+    let now = std::time::Instant::now();
+    let ds_reader = ds.as_byte_reader().unwrap();
+    let ds_buffered = BufReader::new(ds_reader);
+    let dyn_img = image::load(ds_buffered, ImageFormat::Jpeg).unwrap();
+    let loaded_time = now.elapsed();
+    let picker = Picker::from_query_stdio().unwrap();
+    let picked_time = now.elapsed();
+    // let picker = Picker::from_fontsize((20, 9));
+    let mut image = picker.new_resize_protocol(dyn_img);
+    let resize_proto_time = now.elapsed();
+    let image_widget = StatefulImage::default();
+    f.render_stateful_widget(image_widget, *area, &mut image);
+    let render_time = now.elapsed();
+    panic!(
+        "{} {} {} {}",
+        loaded_time.as_millis(),
+        picked_time.as_millis(),
+        resize_proto_time.as_millis(),
+        render_time.as_millis()
+    );
+    Ok(())
+}
+
 fn render_dim_selector(f: &mut Frame, area: &Rect, state: &mut AppState) -> Result<(), Error> {
-    let p = ratatui::widgets::Paragraph::new("TODO: X axis")
-        .style(Style::default().fg(color_consts::COLOR_WHITE));
+    let p = Paragraph::new("TODO: X axis").style(Style::default().fg(color_consts::COLOR_WHITE));
     f.render_widget(p, *area);
     Ok(())
 }
@@ -101,7 +144,7 @@ fn render_chart_preview(
     };
 
     if shape[state.selected_x_dim] > 250000 {
-        let paragrapth = ratatui::widgets::Paragraph::new("TODO: To many data points to show")
+        let paragrapth = Paragraph::new("TODO: To many data points to show")
             .style(Style::default().fg(color_consts::COLOR_WHITE));
         f.render_widget(paragrapth, *area);
         return Ok(());
@@ -172,39 +215,37 @@ fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Re
     };
 
     match meta.encoding {
-        crate::h5f::Encoding::Unknown => panic!("Unknown encoding not supported for string data"),
-        crate::h5f::Encoding::LittleEndian => panic!("LittleEndian not supported for string data"),
-        crate::h5f::Encoding::ASCII => match dataset.read_scalar::<VarLenAscii>() {
+        Encoding::Unknown => panic!("Unknown encoding not supported for string data"),
+        Encoding::LittleEndian => panic!("LittleEndian not supported for string data"),
+        Encoding::ASCII => match dataset.read_scalar::<VarLenAscii>() {
             Ok(x) => {
                 let string = x.to_string();
                 let string = string.lines().collect::<Vec<_>>().join("\n");
                 let string = Span::styled(string, color_consts::COLOR_WHITE);
-                let string = ratatui::text::Text::from(string);
-                let string = ratatui::widgets::Paragraph::new(string)
-                    .wrap(ratatui::widgets::Wrap { trim: true });
+                let string = Text::from(string);
+                let string = Paragraph::new(string).wrap(Wrap { trim: true });
                 f.render_widget(string, *area);
             }
             Err(e) => {
                 f.render_widget(
-                    ratatui::widgets::Paragraph::new(format!("Error: {}", e))
+                    Paragraph::new(format!("Error: {}", e))
                         .style(Style::default().fg(color_consts::ERROR_COLOR)),
                     *area,
                 );
             }
         },
-        crate::h5f::Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
+        Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
             Ok(x) => {
                 let string = x.to_string();
                 let string = string.lines().collect::<Vec<_>>().join("\n");
                 let string = Span::styled(string, color_consts::COLOR_WHITE);
-                let string = ratatui::text::Text::from(string);
-                let string = ratatui::widgets::Paragraph::new(string)
-                    .wrap(ratatui::widgets::Wrap { trim: true });
+                let string = Text::from(string);
+                let string = Paragraph::new(string).wrap(Wrap { trim: true });
                 f.render_widget(string, *area);
             }
             Err(e) => {
                 f.render_widget(
-                    ratatui::widgets::Paragraph::new(format!("Error: {}", e))
+                    Paragraph::new(format!("Error: {}", e))
                         .style(Style::default().fg(color_consts::ERROR_COLOR)),
                     *area,
                 );

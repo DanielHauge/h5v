@@ -10,7 +10,7 @@ use crate::{
     color_consts,
     search::Searcher,
     sprint_attributes::sprint_attribute,
-    sprint_typedesc::{encoding_from_dtype, is_type_numerical, sprint_typedescriptor},
+    sprint_typedesc::{encoding_from_dtype, is_image, is_type_numerical, sprint_typedescriptor},
     ui::app::ContentShowMode,
 };
 
@@ -20,6 +20,16 @@ pub enum Encoding {
     LittleEndian,
     UTF8,
     ASCII,
+}
+
+#[derive(Debug)]
+pub enum ImageType {
+    JPEG,
+    PNG,
+    GRAYSCALE,
+    BITMAP,
+    TRUECOLOR,
+    INDEXED,
 }
 
 #[derive(Debug)]
@@ -34,6 +44,7 @@ pub struct DatasetMeta {
     chunk_shape: Option<Vec<usize>>,
     pub numerical: bool,
     pub encoding: Encoding,
+    pub image: Option<ImageType>,
 }
 
 impl DatasetMeta {
@@ -579,6 +590,7 @@ impl H5FNode {
             let total_bytes = data_bytesize * total_elems;
             let storage_required = d.storage_size();
             let chunk_shape = d.chunk();
+            let image = is_image(&d);
 
             let meta = DatasetMeta {
                 shape,
@@ -590,6 +602,7 @@ impl H5FNode {
                 chunk_shape,
                 numerical,
                 encoding,
+                image,
             };
             let node_ds = Node::Dataset(d, meta);
             let node = Rc::new(RefCell::new(H5FNode::new(node_ds, self.searcher.clone())));
