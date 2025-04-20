@@ -68,26 +68,19 @@ fn render_jpeg(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), E
         _ => return Ok(()),
     };
 
-    let now = std::time::Instant::now();
+    let inner_area = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+
     let ds_reader = ds.as_byte_reader().unwrap();
     let ds_buffered = BufReader::new(ds_reader);
     let dyn_img = image::load(ds_buffered, ImageFormat::Jpeg).unwrap();
-    let loaded_time = now.elapsed();
     let picker = Picker::from_query_stdio().unwrap();
-    let picked_time = now.elapsed();
     // let picker = Picker::from_fontsize((20, 9));
     let mut image = picker.new_resize_protocol(dyn_img);
-    let resize_proto_time = now.elapsed();
     let image_widget = StatefulImage::default();
-    f.render_stateful_widget(image_widget, *area, &mut image);
-    let render_time = now.elapsed();
-    panic!(
-        "{} {} {} {}",
-        loaded_time.as_millis(),
-        picked_time.as_millis(),
-        resize_proto_time.as_millis(),
-        render_time.as_millis()
-    );
+    f.render_stateful_widget(image_widget, inner_area, &mut image);
     Ok(())
 }
 
