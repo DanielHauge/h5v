@@ -5,7 +5,7 @@ use hdf5_metno::{
     Error,
 };
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::Style,
     symbols,
     text::Span,
@@ -47,17 +47,19 @@ pub fn render_preview(
     }
 }
 
+fn render_dim_selector(f: &mut Frame, area: &Rect, state: &mut AppState) -> Result<(), Error> {
+    let p = ratatui::widgets::Paragraph::new("TODO: X axis")
+        .style(Style::default().fg(color_consts::COLOR_WHITE));
+    f.render_widget(p, *area);
+    Ok(())
+}
+
 fn render_chart_preview(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Node,
     state: &mut AppState,
 ) -> Result<(), Error> {
-    let area_inner = area.inner(ratatui::layout::Margin {
-        horizontal: 0,
-        vertical: 1,
-    });
-
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -84,13 +86,18 @@ fn render_chart_preview(
     }
 
     let chart_area = if x_selectable_dims.len() > 1 {
-        let paragrapth =
-            ratatui::widgets::Paragraph::new("TODO: More than 1 dimension, select x axis")
-                .style(Style::default().fg(color_consts::COLOR_WHITE));
-        f.render_widget(paragrapth, *area);
-        return Ok(());
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(3), Constraint::Min(1)]).split(*area);
+        render_dim_selector(f, &areas_split[0], state)?;
+        areas_split[1].inner(ratatui::layout::Margin {
+            horizontal: 0,
+            vertical: 1,
+        })
     } else {
-        area_inner
+        area.inner(ratatui::layout::Margin {
+            horizontal: 0,
+            vertical: 1,
+        })
     };
 
     if shape[state.selected_x_dim] > 250000 {
