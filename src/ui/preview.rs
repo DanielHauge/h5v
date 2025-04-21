@@ -15,6 +15,7 @@ use ratatui::{
 };
 use ratatui_image::{
     picker::{self, Picker},
+    thread::ThreadImage,
     StatefulImage,
 };
 
@@ -41,7 +42,7 @@ pub fn render_preview(
     match node {
         Node::Dataset(_, attr) => match &attr.image {
             Some(image_type) => match image_type {
-                ImageType::JPEG => render_jpeg(f, &area_inner, &node),
+                ImageType::JPEG => render_jpeg(f, &area_inner, &node, state),
                 ImageType::PNG => todo!(),
                 ImageType::GRAYSCALE => todo!(),
                 ImageType::BITMAP => todo!(),
@@ -62,7 +63,12 @@ pub fn render_preview(
     }
 }
 
-fn render_jpeg(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), Error> {
+fn render_jpeg(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node: &Node,
+    state: &mut AppState,
+) -> Result<(), Error> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -73,14 +79,23 @@ fn render_jpeg(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), E
         vertical: 1,
     });
 
-    let ds_reader = ds.as_byte_reader().unwrap();
-    let ds_buffered = BufReader::new(ds_reader);
-    let dyn_img = image::load(ds_buffered, ImageFormat::Jpeg).unwrap();
-    let picker = Picker::from_query_stdio().unwrap();
-    // let picker = Picker::from_fontsize((20, 9));
-    let mut image = picker.new_resize_protocol(dyn_img);
-    let image_widget = StatefulImage::default();
-    f.render_stateful_widget(image_widget, inner_area, &mut image);
+    match state.img_state.is_from_ds(selected_node) {
+        true => match state.img_state.protocol {
+            Some(ref mut protocol) => {
+                let image_widget = ThreadImage::new();
+                f.render_stateful_widget(image_widget, inner_area, protocol);
+            }
+            None => {}
+        },
+        false => {
+            state.img_state.protocol = None;
+            state.img_state.ds = Some(ds.name());
+            let ds_reader = ds.as_byte_reader().unwrap();
+            let ds_buffered = BufReader::new(ds_reader);
+            state.img_state.tx_load_img.send(ds_buffered).unwrap();
+        }
+    }
+
     Ok(())
 }
 

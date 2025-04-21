@@ -138,7 +138,7 @@ pub fn handle_search_event<'a>(
                                 break;
                             }
                         }
-                        Ok(EventResult::RedrawTreeCompute)
+                        Ok(EventResult::Redraw)
                     }
 
                     _ => Ok(EventResult::Continue),

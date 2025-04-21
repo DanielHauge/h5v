@@ -14,18 +14,16 @@ pub enum EventResult {
     Quit,
     Redraw,
     Continue,
-    RedrawTreeCompute,
 }
 
 pub fn handle_input_event<'a>(
-    state: &Rc<RefCell<AppState<'a>>>,
+    state: &mut AppState<'a>,
     event: Event,
 ) -> Result<EventResult, AppError> {
     if let Event::Resize(_, __) = event {
         return Ok(EventResult::Redraw);
     }
 
-    let mut state = state.borrow_mut();
     match state.mode {
         Mode::Normal => {
             if let Event::Key(key_event) = event {
@@ -53,7 +51,7 @@ pub fn handle_input_event<'a>(
                     }
 
                     _ => match state.focus {
-                        Focus::Tree => handle_normal_tree_event(&mut state, event),
+                        Focus::Tree => handle_normal_tree_event(state, event),
                         Focus::Attributes => Ok(EventResult::Continue),
                     },
                 }
@@ -72,7 +70,7 @@ pub fn handle_input_event<'a>(
                     _ => {}
                 }
             }
-            search::handle_search_event(&mut state, event)
+            search::handle_search_event(state, event)
         }
         Mode::Help => todo!(),
     }

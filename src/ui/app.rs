@@ -1,5 +1,13 @@
-use std::{cell::RefCell, io::stdout, rc::Rc};
+use std::{
+    cell::RefCell,
+    io::{stdout, BufRead, BufReader},
+    rc::Rc,
+    sync::mpsc::{channel, Sender},
+    thread,
+};
 
+use hdf5_metno::ByteReader;
+use image::ImageFormat;
 use ratatui::{
     crossterm::{
         event::{self},
@@ -13,10 +21,14 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
+use ratatui_image::{
+    picker::Picker,
+    thread::{ResizeRequest, ResizeResponse, ThreadImage, ThreadProtocol},
+};
 
 use crate::{
     error::AppError,
-    h5f::{self, H5FNode},
+    h5f::{self, H5FNode, Node},
     search::Searcher,
     ui::{input::EventResult, tree_view::TreeItem},
 };
@@ -52,6 +64,37 @@ pub enum ContentShowMode {
     Heatmap,
 }
 
+pub struct ImgState {
+    pub protocol: Option<ThreadProtocol>,
+    pub picker: Picker,
+    pub tx_load_img: Sender<BufReader<ByteReader>>,
+    pub ds: Option<String>,
+}
+
+impl ImgState {
+    pub fn is_from_ds(&self, node: &Node) -> bool {
+        if let None = self.ds {
+            return false;
+        }
+        match node {
+            Node::Dataset(ds, _) => {
+                let name = &ds.name();
+                let ds_name_str = match &self.ds {
+                    Some(ds_name) => ds_name.as_str(),
+                    None => {
+                        return false;
+                    }
+                };
+                if *name == ds_name_str {
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
@@ -66,6 +109,7 @@ pub struct AppState<'a> {
     pub selected_x_dim: usize,
     pub selected_y_dim: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
+    pub img_state: ImgState,
 }
 
 impl<'a> AppState<'a> {
@@ -129,7 +173,20 @@ fn main_recover_loop(
             e
         )))
     })?;
-    let state = Rc::new(RefCell::new(AppState {
+
+    let (tx_events, rx_events) = channel();
+    let tx_events_2 = tx_events.clone();
+    let (tx_load_img, picker) = handle_image_resize(tx_events_2);
+    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img);
+
+    let img_state = ImgState {
+        protocol: None,
+        picker,
+        tx_load_img,
+        ds: None,
+    };
+
+    let mut state = AppState {
         root: h5f.root.clone(),
         treeview: vec![],
         tree_view_cursor: 0,
@@ -143,12 +200,12 @@ fn main_recover_loop(
         selected_x_dim: 0,
         selected_y_dim: 0,
         selected_indexes: [0; 15],
-    }));
+        img_state,
+    };
 
-    state.borrow_mut().compute_tree_view();
+    state.compute_tree_view();
 
-    let draw_closure = |frame: &mut Frame| {
-        let mut state = state.borrow_mut();
+    let draw_closure = |frame: &mut Frame, state: &mut AppState| {
         if state.help {
             return render_help(frame);
         }
@@ -159,39 +216,107 @@ fn main_recover_loop(
             true => {
                 let areas = make_panels_rect(frame.area());
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
-                render_tree(frame, tree_area, &mut state);
+                render_tree(frame, tree_area, state);
                 main_display_area
             }
             false => frame.area(),
         };
 
         let selected_node = state.treeview[state.tree_view_cursor].node.clone();
-        match render_main_display(frame, &main_display_area, &selected_node, &mut state) {
+        match render_main_display(frame, &main_display_area, &selected_node, state) {
             Ok(()) => {}
             Err(e) => render_error(frame, &format!("Error: {}", e)),
         }
     };
 
     // First time draw nice state
-    terminal.draw(draw_closure)?;
+    terminal.draw(|f| draw_closure(f, &mut state))?;
+
+    handle_term_events(tx_events);
 
     loop {
-        // Interaction to modify state -> Move to eventual ux module
-        if event::poll(std::time::Duration::from_millis(16))? {
-            let event = event::read()?;
-            match handle_input_event(&state, event)? {
+        let event = rx_events.recv().unwrap();
+        match event {
+            AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)? {
                 EventResult::Quit => break,
                 EventResult::Continue => {}
-                EventResult::RedrawTreeCompute => {
-                    terminal.draw(draw_closure)?;
-                }
                 EventResult::Redraw => {
-                    terminal.draw(draw_closure)?;
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
                 }
+            },
+            AppEvent::ImageResized(resize_response) => match state.img_state.protocol {
+                Some(ref mut img_thread_protocol) => {
+                    let _ = img_thread_protocol.update_resized_protocol(resize_response);
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                None => {}
+            },
+            AppEvent::ImageLoaded(thread_protocol) => {
+                state.img_state.protocol = Some(thread_protocol);
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
             }
         }
     }
     Ok(IntendedMainLoopBreak {})
+}
+
+pub enum AppEvent {
+    TermEvent(event::Event),
+    ImageResized(ResizeResponse),
+    ImageLoaded(ThreadProtocol),
+}
+
+fn handle_term_events(tx_events: Sender<AppEvent>) {
+    thread::spawn(move || loop {
+        if event::poll(std::time::Duration::from_millis(16)).is_ok() {
+            if let Ok(event) = event::read() {
+                tx_events.send(AppEvent::TermEvent(event)).unwrap();
+            }
+        }
+    });
+}
+
+fn handle_image_resize(tx_events: Sender<AppEvent>) -> (Sender<ResizeRequest>, Picker) {
+    let (tx_worker, rx_worker) = channel::<ResizeRequest>();
+    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
+
+    thread::spawn(move || loop {
+        if let Ok(request) = rx_worker.recv() {
+            if let Ok(resized) = request.resize_encode() {
+                tx_events
+                    .send(AppEvent::ImageResized(resized))
+                    .expect("Failed to send image redraw event");
+            } else {
+                panic!("Failed to resize image");
+            }
+        }
+    });
+    (tx_worker, picker)
+}
+
+fn handle_image_load(
+    tx_events: Sender<AppEvent>,
+    tx_worker: Sender<ResizeRequest>,
+) -> Sender<BufReader<ByteReader>> {
+    let (tx_load, rx_load) = channel::<BufReader<ByteReader>>();
+    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
+
+    thread::spawn(move || loop {
+        let ds_reader = rx_load.recv().unwrap();
+        let dyn_img = image::load(ds_reader, ImageFormat::Jpeg).unwrap();
+        let stateful_protocol = picker.new_resize_protocol(dyn_img);
+        let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+        tx_events
+            .send(AppEvent::ImageLoaded(thread_protocol))
+            .unwrap();
+    });
+    tx_load
 }
 
 fn render_error(frame: &mut Frame<'_>, error: &str) {
