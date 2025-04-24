@@ -16,12 +16,11 @@ pub enum SliceSelection {
     All,
     FromTo(usize, usize),
 }
-
 type XAxis = usize;
 
 pub struct PreviewSelection {
-    pub x: XAxis,
     pub index: Vec<usize>,
+    pub x: XAxis,
     pub slice: SliceSelection,
 }
 
@@ -31,7 +30,6 @@ impl Previewable for Dataset {
             SliceSelection::FromTo(start, end) => start..end,
             SliceSelection::All => 0..self.shape()[selection.x],
         };
-        // TODO: F this shit.
         let data_to_show = match selection.index.len() {
             0 => self.read_1d::<f64>()?,
             1 => match selection.x {

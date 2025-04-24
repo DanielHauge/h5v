@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use hdf5_metno::ByteReader;
+use hdf5_metno::{ByteReader, Dataset, Reader};
 use image::ImageFormat;
 use ratatui::{
     crossterm::{
@@ -28,12 +28,17 @@ use ratatui_image::{
 
 use crate::{
     error::AppError,
-    h5f::{self, H5FNode, Node},
+    h5f::{self, H5FNode, ImageType, Node},
     search::Searcher,
     ui::{input::EventResult, tree_view::TreeItem},
 };
 
-use super::{input::handle_input_event, main_display::render_main_display, tree_view::render_tree};
+use super::{
+    image_preview::{handle_image_load, handle_image_resize, handle_imagefs_load},
+    input::handle_input_event,
+    main_display::render_main_display,
+    tree_view::render_tree,
+};
 
 fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -67,13 +72,15 @@ pub enum ContentShowMode {
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
     pub picker: Picker,
-    pub tx_load_img: Sender<BufReader<ByteReader>>,
+    pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
+    pub tx_load_img: Sender<(Dataset, ImageType)>,
+
     pub ds: Option<String>,
 }
 
 impl ImgState {
     pub fn is_from_ds(&self, node: &Node) -> bool {
-        if let None = self.ds {
+        if self.ds.is_none() {
             return false;
         }
         match node {
@@ -132,16 +139,15 @@ pub fn init(filename: String) -> Result<()> {
     let mut last_message = None;
 
     loop {
-        match main_recover_loop(&mut terminal, filename) {
+        match main_recover_loop(&mut terminal, filename.clone()) {
             Ok(_) => break,
             Err(e) => match e {
                 AppError::Io(error) => {
                     last_message = Some(format!("IO Error: - {}", error));
-                    break;
                 }
                 AppError::Hdf5(error) => match error {
                     hdf5_metno::Error::HDF5(_) => {
-                        last_message = Some(format!("HDF5 Error"));
+                        last_message = Some("HDF5 Error".to_string());
                         break;
                     }
                     hdf5_metno::Error::Internal(e) => {
@@ -177,11 +183,13 @@ fn main_recover_loop(
     let (tx_events, rx_events) = channel();
     let tx_events_2 = tx_events.clone();
     let (tx_load_img, picker) = handle_image_resize(tx_events_2);
-    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img);
+    let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone());
+    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone());
 
     let img_state = ImgState {
         protocol: None,
         picker,
+        tx_load_imgfs,
         tx_load_img,
         ds: None,
     };
@@ -246,15 +254,14 @@ fn main_recover_loop(
                     })?;
                 }
             },
-            AppEvent::ImageResized(resize_response) => match state.img_state.protocol {
-                Some(ref mut img_thread_protocol) => {
+            AppEvent::ImageResized(resize_response) => {
+                if let Some(ref mut img_thread_protocol) = state.img_state.protocol {
                     let _ = img_thread_protocol.update_resized_protocol(resize_response);
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
                 }
-                None => {}
-            },
+            }
             AppEvent::ImageLoaded(thread_protocol) => {
                 state.img_state.protocol = Some(thread_protocol);
                 terminal.draw(|f| {
@@ -280,43 +287,6 @@ fn handle_term_events(tx_events: Sender<AppEvent>) {
             }
         }
     });
-}
-
-fn handle_image_resize(tx_events: Sender<AppEvent>) -> (Sender<ResizeRequest>, Picker) {
-    let (tx_worker, rx_worker) = channel::<ResizeRequest>();
-    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
-
-    thread::spawn(move || loop {
-        if let Ok(request) = rx_worker.recv() {
-            if let Ok(resized) = request.resize_encode() {
-                tx_events
-                    .send(AppEvent::ImageResized(resized))
-                    .expect("Failed to send image redraw event");
-            } else {
-                panic!("Failed to resize image");
-            }
-        }
-    });
-    (tx_worker, picker)
-}
-
-fn handle_image_load(
-    tx_events: Sender<AppEvent>,
-    tx_worker: Sender<ResizeRequest>,
-) -> Sender<BufReader<ByteReader>> {
-    let (tx_load, rx_load) = channel::<BufReader<ByteReader>>();
-    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
-
-    thread::spawn(move || loop {
-        let ds_reader = rx_load.recv().unwrap();
-        let dyn_img = image::load(ds_reader, ImageFormat::Jpeg).unwrap();
-        let stateful_protocol = picker.new_resize_protocol(dyn_img);
-        let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-        tx_events
-            .send(AppEvent::ImageLoaded(thread_protocol))
-            .unwrap();
-    });
-    tx_load
 }
 
 fn render_error(frame: &mut Frame<'_>, error: &str) {

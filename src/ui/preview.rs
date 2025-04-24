@@ -4,7 +4,7 @@ use hdf5_metno::{
     types::{VarLenAscii, VarLenUnicode},
     Error,
 };
-use image::{ImageFormat, ImageReader};
+use image::ImageFormat;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -13,11 +13,7 @@ use ratatui::{
     widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
     Frame,
 };
-use ratatui_image::{
-    picker::{self, Picker},
-    thread::ThreadImage,
-    StatefulImage,
-};
+use ratatui_image::thread::ThreadImage;
 
 use crate::{
     color_consts,
@@ -25,7 +21,7 @@ use crate::{
     h5f::{Encoding, H5FNode, ImageType, Node},
 };
 
-use super::app::AppState;
+use super::{app::AppState, image_preview::render_img};
 
 pub fn render_preview(
     f: &mut Frame,
@@ -41,14 +37,7 @@ pub fn render_preview(
 
     match node {
         Node::Dataset(_, attr) => match &attr.image {
-            Some(image_type) => match image_type {
-                ImageType::JPEG => render_jpeg(f, &area_inner, &node, state),
-                ImageType::PNG => todo!(),
-                ImageType::GRAYSCALE => todo!(),
-                ImageType::BITMAP => todo!(),
-                ImageType::TRUECOLOR => todo!(),
-                ImageType::INDEXED => todo!(),
-            },
+            Some(image_type) => render_img(image_type, f, &area_inner, node, state),
             None => {
                 if !attr.numerical {
                     render_string_preview(f, &area_inner, node)
@@ -57,46 +46,8 @@ pub fn render_preview(
                 }
             }
         },
-        _ => {
-            return Ok(());
-        }
+        _ => Ok(()),
     }
-}
-
-fn render_jpeg(
-    f: &mut Frame,
-    area: &Rect,
-    selected_node: &Node,
-    state: &mut AppState,
-) -> Result<(), Error> {
-    let (ds, _) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
-        _ => return Ok(()),
-    };
-
-    let inner_area = area.inner(ratatui::layout::Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-
-    match state.img_state.is_from_ds(selected_node) {
-        true => match state.img_state.protocol {
-            Some(ref mut protocol) => {
-                let image_widget = ThreadImage::new();
-                f.render_stateful_widget(image_widget, inner_area, protocol);
-            }
-            None => {}
-        },
-        false => {
-            state.img_state.protocol = None;
-            state.img_state.ds = Some(ds.name());
-            let ds_reader = ds.as_byte_reader().unwrap();
-            let ds_buffered = BufReader::new(ds_reader);
-            state.img_state.tx_load_img.send(ds_buffered).unwrap();
-        }
-    }
-
-    Ok(())
 }
 
 fn render_dim_selector(f: &mut Frame, area: &Rect, state: &mut AppState) -> Result<(), Error> {

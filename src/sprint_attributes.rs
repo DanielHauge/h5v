@@ -162,20 +162,15 @@ fn sprint_attribute_scalar<'a>(
             types::IntSize::U8 => attr.read_scalar::<u64>()?.render(),
         },
         types::TypeDescriptor::Float(float_size) => match float_size {
-            types::FloatSize::U4 => {
-                let gg = attr.read_scalar::<f32>()?.render();
-                gg
-            }
+            types::FloatSize::U4 => attr.read_scalar::<f32>()?.render(),
             types::FloatSize::U8 => attr.read_scalar::<f64>()?.render(),
         },
         types::TypeDescriptor::Boolean => attr.read_scalar::<bool>()?.render(),
-        types::TypeDescriptor::Enum(enum_type) => match enum_type {
-            a => {
-                let s = format!("{:?}", a);
-                let span = Span::from(s).style(color_consts::BOOL_COLOR);
-                span
-            }
-        },
+        types::TypeDescriptor::Enum(enum_type) => {
+            let s = format!("{:?}", enum_type);
+            let span = Span::from(s).style(color_consts::BOOL_COLOR);
+            span
+        }
         types::TypeDescriptor::FixedAscii(a) => match a {
             0..32 => attr.read_scalar::<FixedAscii<32>>()?.render(),
             32..64 => attr.read_scalar::<FixedAscii<64>>()?.render(),
@@ -415,8 +410,8 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
             let end = vec![start_end];
             let spans = start
                 .into_iter()
-                .chain(spans.into_iter())
-                .chain(end.into_iter())
+                .chain(spans)
+                .chain(end)
                 .collect::<Vec<Span<'static>>>();
             let line = Line::from(spans);
             Ok(line)

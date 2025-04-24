@@ -29,6 +29,7 @@ fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
         .split(area);
     (chunks[0], chunks[1])
 }
+
 pub fn render_main_display(
     f: &mut Frame,
     area: &Rect,

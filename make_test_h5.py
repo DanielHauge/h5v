@@ -4,6 +4,7 @@ import os
 
 import h5py
 import numpy as np
+from PIL import Image
 
 file_name = "test.h5"
 if os.path.exists(file_name):
@@ -91,8 +92,9 @@ with h5py.File(file_name, "w") as f:
                           size=(1, 100), dtype=np.int32)
     group_all.create_dataset("int32_dataset", data=x)
     # i64
-    x = np.random.randint(-9223372036854775808,
-                          9223372036854775807, size=(1, 100), dtype=np.int64)
+    x = np.random.randint(
+        -9223372036854775808, 9223372036854775807, size=(1, 100), dtype=np.int64
+    )
     group_all.create_dataset("int64_dataset", data=x)
 
     # f32
@@ -168,5 +170,82 @@ with h5py.File(file_name, "w") as f:
     # also a unicode string dataset
     f.create_dataset("unicode_string_dataset",
                      data="Hello utf8".encode("utf-8"))
-    # also a bytes dataset
+
     f.create_dataset("bytes_dataset", data=b"Hello bytes")
+
+    # open jpeg file and save it in the hdf5 file
+    with open("test.jpg", "rb") as f_jpg:
+        jpg_data = f_jpg.read()
+        # as u8 array
+        jpg_data = np.frombuffer(jpg_data, dtype=np.uint8)
+        f.create_dataset("jpg_dataset", data=jpg_data)
+        # set attributes: CLASS: IMAGE, VERSION: 1.2
+        # set attribute IMAGE: JPEG
+        f["jpg_dataset"].attrs["CLASS"] = "IMAGE"
+        f["jpg_dataset"].attrs["VERSION"] = "1.2"
+        f["jpg_dataset"].attrs["IMAGE_SUBCLASS"] = "IMAGE_JPEG"
+        # make official jpeg into true color color HDF5 stuff
+
+    img = Image.open("test.jpg").convert("RGB")
+    img_array = np.array(img)
+    # save the image as a dataset
+    image_ds = f.create_dataset("image_rgb", data=img_array)
+    image_ds.attrs["CLASS"] = "IMAGE"
+    image_ds.attrs["IMAGE_SUBCLASS"] = "IMAGE_TRUECOLOR"
+    image_ds.attrs["IMAGE_VERSION"] = "1.2"
+    # inteflace
+    image_ds.attrs["INTERLACE_MODE"] = "INTERLACE_PIXEL"
+    # aspect ratio
+    image_ds.attrs["IMAGE_ASPECTRATIO"] = 10
+
+    # grayscale image
+    img_gray = Image.open("test.jpg").convert("L")
+    img_gray_array = np.array(img_gray)
+    # save the image as a dataset
+    image_gray_ds = f.create_dataset("image_gray", data=img_gray_array)
+    image_gray_ds.attrs["CLASS"] = "IMAGE"
+    image_gray_ds.attrs["IMAGE_SUBCLASS"] = "IMAGE_GRAYSCALE"
+    image_gray_ds.attrs["IMAGE_VERSION"] = "1.2"
+    # image white is zero usigned interger importantt
+    image_gray_ds.attrs.create("IMAGE_WHITE_IS_ZERO", 0, dtype=np.uint8)
+
+    # bitmap
+    img_bitmap = Image.open("test.jpg").convert("1")
+    img_bitmap_array = np.array(img_bitmap)
+    # save the image as a dataset
+    image_bitmap_ds = f.create_dataset("image_bitmap", data=img_bitmap_array)
+    image_bitmap_ds.attrs["CLASS"] = "IMAGE"
+    image_bitmap_ds.attrs["IMAGE_SUBCLASS"] = "IMAGE_BITMAP"
+    image_bitmap_ds.attrs["IMAGE_VERSION"] = "1.2"
+    image_bitmap_ds.attrs.create("IMAGE_WHITE_IS_ZERO", 0, dtype=np.uint8)
+
+    # indexed pallet
+    img_indexed = Image.open("test.jpg").convert("P")
+    img_indexed_array = np.array(img_indexed)
+    # max 256 colors, so 256*3 = 768 entries
+    palette = img_indexed.getpalette()[:768]
+
+    palette_np = np.array(
+        palette, dtype=np.uint8).reshape(-1, 3)  # shape (N, 3)
+    # save the palette as a dataset
+    palette_ds = f.create_dataset("palette", data=palette_np, dtype=np.uint8)
+    # save the image as a dataset
+    image_indexed_ds = f.create_dataset(
+        "image_indexed", data=img_indexed_array)
+    image_indexed_ds.attrs["CLASS"] = "IMAGE"
+    image_indexed_ds.attrs["IMAGE_SUBCLASS"] = "IMAGE_INDEXED"
+    image_indexed_ds.attrs["IMAGE_VERSION"] = "1.2"
+    image_indexed_ds.attrs["PALETTE"] = palette_ds.ref
+    image_indexed_ds.attrs["INTERLACE_MODE"] = "INTERLACE_PIXEL"
+
+    # do png
+    with open("test.png", "rb") as f_png:
+        png_data = f_png.read()
+        # as u8 array
+        png_data = np.frombuffer(png_data, dtype=np.uint8)
+        f.create_dataset("png_dataset", data=png_data)
+        # set attributes: CLASS: IMAGE, VERSION: 1.2
+        # set attribute IMAGE: PNG
+        f["png_dataset"].attrs["CLASS"] = "IMAGE"
+        f["png_dataset"].attrs["VERSION"] = "1.2"
+        f["png_dataset"].attrs["IMAGE_SUBCLASS"] = "IMAGE_PNG"
