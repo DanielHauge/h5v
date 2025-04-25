@@ -176,7 +176,7 @@ pub fn handle_image_load(
     tx_worker: Sender<ResizeRequest>,
 ) -> Sender<(Dataset, ImageType)> {
     let (tx_load, rx_load) = channel::<(Dataset, ImageType)>();
-    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
+    let picker = Picker::from_query_stdio().unwrap_or_else(move |_| Picker::from_fontsize((7, 14)));
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {
             match img_format {
