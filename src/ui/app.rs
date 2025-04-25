@@ -1,12 +1,12 @@
 use std::{
     cell::RefCell,
-    io::{stdout, BufRead, BufReader},
+    io::{stdout, BufReader},
     rc::Rc,
     sync::mpsc::{channel, Sender},
     thread,
 };
 
-use hdf5_metno::{ByteReader, Dataset, Reader};
+use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
 use ratatui::{
     crossterm::{
@@ -21,10 +21,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
-use ratatui_image::{
-    picker::Picker,
-    thread::{ResizeRequest, ResizeResponse, ThreadImage, ThreadProtocol},
-};
+use ratatui_image::thread::{ResizeResponse, ThreadProtocol};
 
 use crate::{
     error::AppError,
@@ -71,10 +68,8 @@ pub enum ContentShowMode {
 
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
-    pub picker: Picker,
     pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
     pub tx_load_img: Sender<(Dataset, ImageType)>,
-
     pub ds: Option<String>,
 }
 
@@ -114,12 +109,12 @@ pub struct AppState<'a> {
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
     pub selected_x_dim: usize,
-    pub selected_y_dim: usize,
+    // pub selected_y_dim: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
     pub img_state: ImgState,
 }
 
-impl<'a> AppState<'a> {
+impl AppState<'_> {
     pub fn index(&mut self) -> Result<()> {
         let mut root = self.root.borrow_mut();
         root.index(true)?;
@@ -182,13 +177,12 @@ fn main_recover_loop(
 
     let (tx_events, rx_events) = channel();
     let tx_events_2 = tx_events.clone();
-    let (tx_load_img, picker) = handle_image_resize(tx_events_2);
+    let tx_load_img = handle_image_resize(tx_events_2);
     let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone());
     let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone());
 
     let img_state = ImgState {
         protocol: None,
-        picker,
         tx_load_imgfs,
         tx_load_img,
         ds: None,
@@ -206,7 +200,7 @@ fn main_recover_loop(
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
         selected_x_dim: 0,
-        selected_y_dim: 0,
+        // selected_y_dim: 0,
         selected_indexes: [0; 15],
         img_state,
     };

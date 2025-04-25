@@ -19,17 +19,23 @@ pub enum Encoding {
     Unknown,
     LittleEndian,
     UTF8,
-    ASCII,
+    Ascii,
+}
+
+#[derive(Debug, Clone)]
+pub enum InterlaceMode {
+    Pixel, // [height][width][pixel components] -> value
+    Plane, // [pixel components][height][width] -> value
 }
 
 #[derive(Debug)]
 pub enum ImageType {
-    JPEG,
-    PNG,
-    GRAYSCALE,
-    BITMAP,
-    TRUECOLOR,
-    INDEXED,
+    Jpeg,
+    Png,
+    Grayscale,
+    Bitmap,
+    Truecolor(InterlaceMode),
+    Indexed(InterlaceMode),
 }
 
 #[derive(Debug)]
@@ -94,28 +100,25 @@ impl DatasetMeta {
                 .bold(),
         );
         data_set_attrs.push((shape_name, shape_value));
-        match &self.chunk_shape_string() {
-            Some(chunk_shape) => {
-                let chunk_name = Span::styled(
-                    "chunk",
-                    Style::default()
-                        .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                        .bold(),
-                );
-                let chunk_value = Span::styled(
-                    chunk_shape.to_string(),
-                    Style::default()
-                        .fg(color_consts::BUILT_IN_VALUE_COLOR)
-                        .bold(),
-                );
-                data_set_attrs.push((chunk_name, chunk_value));
-            }
-            _ => {}
+        if let Some(chunk_shape) = &self.chunk_shape_string() {
+            let chunk_name = Span::styled(
+                "chunk",
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
+            let chunk_value = Span::styled(
+                chunk_shape.to_string(),
+                Style::default()
+                    .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                    .bold(),
+            );
+            data_set_attrs.push((chunk_name, chunk_value));
         }
 
         let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
-            let name_len = name.width() as usize;
+            let name_len = name.width();
             let extra_name_space = match min_first_panel as usize - name_len {
                 0..=1 => 1,
                 _ => min_first_panel as usize - name_len,
@@ -149,21 +152,21 @@ pub trait HasChildren {
 
 impl HasChildren for Group {
     fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        Ok(self.groups()?)
+        self.groups()
     }
 
     fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
-        Ok(self.datasets()?)
+        self.datasets()
     }
 }
 
 impl HasChildren for File {
     fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        Ok(self.groups()?)
+        self.groups()
     }
 
     fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
-        Ok(self.datasets()?)
+        self.datasets()
     }
 }
 
@@ -285,7 +288,7 @@ impl Node {
     pub fn render(&self, longest_name: u16) -> (Line<'static>, Line<'static>) {
         let min_first_panel = match longest_name {
             0..8 => 8,
-            5..=u16::MAX => longest_name,
+            8..=u16::MAX => longest_name,
         };
         let path = self.path();
         let name_styled = Span::styled(
@@ -341,8 +344,8 @@ impl ComputedAttributes {
             Self::render_attributes(&attributes, name_area_width as usize);
         let rendered_attributes = vec![path_attr]
             .into_iter()
-            .chain(rendered_ds_attributes.into_iter())
-            .chain(rendered_custom_attributes.into_iter())
+            .chain(rendered_ds_attributes)
+            .chain(rendered_custom_attributes)
             .collect::<Vec<(Line<'static>, Line<'static>)>>();
 
         Ok(Self {
@@ -373,7 +376,7 @@ impl ComputedAttributes {
                 Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
             let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
 
-            let value_line = match sprint_attribute(&attr) {
+            let value_line = match sprint_attribute(attr) {
                 Ok(l) => l,
                 Err(e) => Line::styled(
                     format!("Error: {}", e),

@@ -6,8 +6,8 @@ use crate::{error::AppError, ui::app::AppState};
 
 use super::EventResult;
 
-pub fn handle_normal_tree_event<'a>(
-    state: &mut AppState<'a>,
+pub fn handle_normal_tree_event(
+    state: &mut AppState<'_>,
     event: Event,
 ) -> Result<EventResult, AppError> {
     match event {

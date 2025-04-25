@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, u16};
+use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
     layout::{Constraint, Layout, Margin, Offset, Rect},
@@ -43,6 +43,7 @@ pub fn render_info_attributes(
     let mut offset = 0;
     let height = name_area.height as i32;
 
+    #[allow(clippy::explicit_counter_loop)]
     for (name_line, value_line) in &attributes.rendered_attributes {
         f.render_widget(name_line, name_area.offset(Offset { x: 0, y: offset }));
         f.render_widget(value_line, value_area.offset(Offset { x: 1, y: offset }));

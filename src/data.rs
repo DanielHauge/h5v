@@ -1,5 +1,5 @@
 use hdf5_metno::{Dataset, Error};
-use ndarray::{s, Array1, Array2, Slice};
+use ndarray::s;
 
 pub trait Previewable {
     fn preview(&self, selection: PreviewSelection) -> Result<DatasetPreview, Error>;
@@ -14,7 +14,7 @@ pub struct DatasetPreview {
 
 pub enum SliceSelection {
     All,
-    FromTo(usize, usize),
+    // FromTo(usize, usize),
 }
 type XAxis = usize;
 
@@ -27,7 +27,7 @@ pub struct PreviewSelection {
 impl Previewable for Dataset {
     fn preview(&self, selection: PreviewSelection) -> Result<DatasetPreview, Error> {
         let slice = match selection.slice {
-            SliceSelection::FromTo(start, end) => start..end,
+            // SliceSelection::FromTo(start, end) => start..end,
             SliceSelection::All => 0..self.shape()[selection.x],
         };
         let data_to_show = match selection.index.len() {

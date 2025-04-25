@@ -18,7 +18,7 @@ pub struct TreeItem<'a> {
     pub line: Line<'a>,
 }
 
-impl<'a> AppState<'a> {
+impl AppState<'_> {
     pub fn compute_tree_view(&mut self) {
         let mut tree_view = Vec::new();
         let file_icon = Text::from("󰈚 ");
@@ -63,7 +63,7 @@ fn compute_tree_view_rec<'a>(
 
         // let folder_icon = if child.expanded { " " } else { " " };
 
-        let folder_icon = match (child.borrow().expanded, child.borrow().children.len() > 0) {
+        let folder_icon = match (child.borrow().expanded, !child.borrow().children.is_empty()) {
             (true, true) => " ",
             (true, false) => " ",
             (false, true) => " ",
@@ -88,7 +88,7 @@ fn compute_tree_view_rec<'a>(
         };
 
         // let text = Text::from(format!("{}{} {} {}", prefix, connector, icon, child.name()));
-        let mut line_vec = prefix.iter().cloned().collect::<Vec<Span>>();
+        let mut line_vec = prefix.to_vec();
         line_vec.push(connector_span);
         line_vec.push(Span::raw(" "));
         if child.borrow().is_group() {
@@ -113,7 +113,7 @@ fn compute_tree_view_rec<'a>(
         };
         tree_view.push(tree_item);
         let mut prefix_clone = prefix.clone();
-        let mut indent = indent as u8;
+        let mut indent = indent;
 
         if is_last_child {
             indent += 3;
@@ -137,7 +137,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(format!("Tree"))
+        .title("Tree".to_string())
         .bg(color_consts::BG_COLOR)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
@@ -210,7 +210,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             let search_results = searcher.search(&search_query);
 
             let search_select_cursor = if searcher.select_cursor > search_results.len() {
-                if search_results.len() == 0 {
+                if search_results.is_empty() {
                     0
                 } else {
                     search_results.len() - 1
@@ -242,7 +242,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             area_pos.x = area_pos.x + 3 + search_line_cursor as u16;
             f.set_cursor_position(area_pos);
 
-            let mut offset = 1 as i32;
+            let mut offset = 1;
             for (i, result) in search_results.iter().enumerate() {
                 if i >= area.height as usize {
                     break;
@@ -284,6 +284,6 @@ mod tests {
     #[test]
     fn test_compute_tree_view_rec() {
         let h5f = H5F::open("test.h5".to_string(), new_searcer()).unwrap();
-        assert_eq!(h5f.root.borrow().expanded, true);
+        assert!(h5f.root.borrow().expanded);
     }
 }

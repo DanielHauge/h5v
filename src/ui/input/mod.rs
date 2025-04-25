@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
@@ -16,10 +14,7 @@ pub enum EventResult {
     Continue,
 }
 
-pub fn handle_input_event<'a>(
-    state: &mut AppState<'a>,
-    event: Event,
-) -> Result<EventResult, AppError> {
+pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {
     if let Event::Resize(_, __) = event {
         return Ok(EventResult::Redraw);
     }
@@ -32,12 +27,12 @@ pub fn handle_input_event<'a>(
                         state.searcher.borrow_mut().query.clear();
                         state.searcher.borrow_mut().line_cursor = 0;
                         state.mode = Mode::Search;
-                        return Ok(EventResult::Redraw);
+                        Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Char('q'), _) => return Ok(EventResult::Quit),
+                    (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
                     (KeyCode::Char('?'), _) => {
                         state.mode = Mode::Help;
-                        return Ok(EventResult::Redraw);
+                        Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
                         if let Focus::Tree = state.focus {
@@ -47,7 +42,7 @@ pub fn handle_input_event<'a>(
                         }
                         state.show_tree_view = !state.show_tree_view;
 
-                        return Ok(EventResult::Redraw);
+                        Ok(EventResult::Redraw)
                     }
 
                     _ => match state.focus {
@@ -56,7 +51,7 @@ pub fn handle_input_event<'a>(
                     },
                 }
             } else {
-                return Ok(EventResult::Continue);
+                Ok(EventResult::Continue)
             }
         }
         Mode::Search => {

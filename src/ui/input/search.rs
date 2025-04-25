@@ -8,8 +8,8 @@ use crate::{
 
 use super::EventResult;
 
-pub fn handle_search_event<'a>(
-    state: &mut AppState<'a>,
+pub fn handle_search_event(
+    state: &mut AppState<'_>,
     event: Event,
 ) -> Result<EventResult, AppError> {
     match event {

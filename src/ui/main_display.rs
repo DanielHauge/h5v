@@ -47,7 +47,7 @@ pub fn render_main_display(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(format!("Attributes"))
+        .title("Attributes".to_string())
         .bg(color_consts::BG2_COLOR)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);

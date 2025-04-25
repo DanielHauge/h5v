@@ -1,10 +1,7 @@
-use hdf5_metno::{
-    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii},
-    Dataset,
-};
+use hdf5_metno::{types::TypeDescriptor, Dataset};
 
 use crate::{
-    h5f::{Encoding, ImageType},
+    h5f::{Encoding, ImageType, InterlaceMode},
     sprint_attributes::sprint_attribute,
 };
 
@@ -66,13 +63,35 @@ pub fn is_image(d: &Dataset) -> Option<ImageType> {
         Err(_) => return None,
     };
 
+    let interlace_mode = match d.attr("INTERLACE_MODE") {
+        Ok(interlace_mode) => Some(interlace_mode),
+        Err(_) => None,
+    };
+
+    let interlace_mode_read = match interlace_mode {
+        Some(interlace_mode) => match sprint_attribute(&interlace_mode) {
+            Ok(interlace_mode_read) => Some(interlace_mode_read.to_string().replace("\"", "")),
+            Err(_) => None,
+        },
+        None => None,
+    };
+
+    let interlace_node_parsed = match interlace_mode_read {
+        Some(interlace) => match interlace.as_str() {
+            "INTERLACE_PIXEL" => Some(InterlaceMode::Pixel),
+            "INTERLACE_PLANE" => Some(InterlaceMode::Plane),
+            _ => None,
+        },
+        None => None,
+    };
+
     match read_image_subclass.as_str() {
-        "IMAGE_GRAYSCALE" => Some(ImageType::GRAYSCALE),
-        "IMAGE_TRUECOLOR" => Some(ImageType::TRUECOLOR),
-        "IMAGE_BITMAP" => Some(ImageType::BITMAP),
-        "IMAGE_INDEXED" => Some(ImageType::INDEXED),
-        "IMAGE_JPEG" => Some(ImageType::JPEG),
-        "IMAGE_PNG" => Some(ImageType::PNG),
+        "IMAGE_GRAYSCALE" => Some(ImageType::Grayscale),
+        "IMAGE_TRUECOLOR" => Some(ImageType::Truecolor(interlace_node_parsed?)),
+        "IMAGE_BITMAP" => Some(ImageType::Bitmap),
+        "IMAGE_INDEXED" => Some(ImageType::Indexed(interlace_node_parsed?)),
+        "IMAGE_JPEG" => Some(ImageType::Jpeg),
+        "IMAGE_PNG" => Some(ImageType::Png),
         _ => None,
     }
 }
@@ -103,10 +122,10 @@ pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
         TypeDescriptor::Enum(_) => Encoding::Unknown,
         TypeDescriptor::Compound(_) => Encoding::Unknown,
         TypeDescriptor::FixedArray(_, _) => Encoding::Unknown,
-        TypeDescriptor::FixedAscii(_) => Encoding::ASCII,
+        TypeDescriptor::FixedAscii(_) => Encoding::Ascii,
         TypeDescriptor::FixedUnicode(_) => Encoding::UTF8,
         TypeDescriptor::VarLenArray(_) => Encoding::Unknown,
-        TypeDescriptor::VarLenAscii => Encoding::ASCII,
+        TypeDescriptor::VarLenAscii => Encoding::Ascii,
         TypeDescriptor::VarLenUnicode => Encoding::UTF8,
         TypeDescriptor::Reference(_) => Encoding::Unknown,
     }

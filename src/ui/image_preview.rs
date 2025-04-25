@@ -1,20 +1,19 @@
 use std::{
-    cell::OnceCell,
     io::BufReader,
     sync::mpsc::{channel, Sender},
     thread,
 };
 
-use hdf5_metno::{ByteReader, Dataset, Error, Reader};
+use hdf5_metno::{ByteReader, Dataset, Error};
 use image::ImageFormat;
-use ndarray::{s, Array3};
+use ndarray::{s, Array2, Array3};
 use ratatui::{layout::Rect, Frame};
 use ratatui_image::{
     picker::Picker,
     thread::{ResizeRequest, ThreadImage, ThreadProtocol},
 };
 
-use crate::h5f::{ImageType, Node};
+use crate::h5f::{ImageType, InterlaceMode, Node};
 
 use super::app::{AppEvent, AppState};
 
@@ -26,20 +25,41 @@ pub fn render_img(
     state: &mut AppState,
 ) -> Result<(), Error> {
     match image_type {
-        ImageType::JPEG => render_raw_img(f, area, node, state, ImageFormat::Jpeg),
-        ImageType::PNG => render_raw_img(f, area, node, state, ImageFormat::Png),
-        ImageType::INDEXED => Ok(()),
-        ImageType::TRUECOLOR => render_truecolor(f, area, node, state),
-        ImageType::GRAYSCALE => Ok(()),
-        ImageType::BITMAP => Ok(()),
+        ImageType::Jpeg => render_raw_img(f, area, node, state, ImageFormat::Jpeg),
+        ImageType::Png => render_raw_img(f, area, node, state, ImageFormat::Png),
+        ImageType::Truecolor(m) => {
+            render_ds_img(f, area, node, state, ImageType::Truecolor(m.clone()))
+        }
+        ImageType::Grayscale => render_ds_img(f, area, node, state, ImageType::Grayscale),
+        _ => render_unsupported_image_format(f, area, node),
     }
 }
 
-fn render_truecolor(
+fn render_unsupported_image_format(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node: &Node,
+) -> Result<(), Error> {
+    let (ds, _) = match selected_node {
+        Node::Dataset(ds, attr) => (ds, attr),
+        _ => return Ok(()),
+    };
+
+    let inner_area = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let unsupported_msg = format!("Unsupported image format for dataset: {}", ds.name());
+    f.render_widget(unsupported_msg, inner_area);
+    Ok(())
+}
+
+fn render_ds_img(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Node,
     state: &mut AppState,
+    img_type: ImageType,
 ) -> Result<(), Error> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
@@ -64,7 +84,7 @@ fn render_truecolor(
             state
                 .img_state
                 .tx_load_img
-                .send((ds_clone, ImageType::TRUECOLOR))
+                .send((ds_clone, img_type))
                 .unwrap();
         }
     }
@@ -112,9 +132,8 @@ fn render_raw_img(
     Ok(())
 }
 
-pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> (Sender<ResizeRequest>, Picker) {
+pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
-    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
 
     thread::spawn(move || loop {
         if let Ok(request) = rx_worker.recv() {
@@ -127,7 +146,7 @@ pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> (Sender<ResizeRequest
             }
         }
     });
-    (tx_worker, picker)
+    tx_worker
 }
 
 pub fn handle_imagefs_load(
@@ -143,7 +162,9 @@ pub fn handle_imagefs_load(
                 let stateful_protocol = picker.new_resize_protocol(dyn_img);
                 let thread_protocol =
                     ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                tx_events.send(AppEvent::ImageLoaded(thread_protocol));
+                tx_events
+                    .send(AppEvent::ImageLoaded(thread_protocol))
+                    .expect("Failed to send image loaded event");
             }
         }
     });
@@ -159,23 +180,79 @@ pub fn handle_image_load(
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {
             match img_format {
-                ImageType::GRAYSCALE => todo!(),
-                ImageType::BITMAP => todo!(),
-                ImageType::TRUECOLOR => {
+                ImageType::Grayscale => {
+                    let shape = ds_reader.shape();
+                    let data: Array2<u8> = ds_reader.read_slice::<u8, _, _>(s![.., ..]).unwrap();
+                    let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
+                    for i in 0..shape[1] {
+                        for j in 0..shape[0] {
+                            let pixel = image::Luma([data[[j, i]]]);
+                            image_buffer.put_pixel(i as u32, j as u32, pixel);
+                        }
+                    }
+                    let dyn_img = image::DynamicImage::ImageLuma8(image_buffer);
+                    let stateful_protocol = picker.new_resize_protocol(dyn_img);
+                    let thread_protocol =
+                        ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                    tx_events
+                        .send(AppEvent::ImageLoaded(thread_protocol))
+                        .expect("Failed to send image loaded event");
+                }
+                ImageType::Bitmap => {
+                    let shape = ds_reader.shape();
+                    let data: Array2<bool> =
+                        ds_reader.read_slice::<bool, _, _>(s![.., ..]).unwrap();
+                    let mut image_buffer = image::GrayImage::new(shape[0] as u32, shape[1] as u32);
+                    for i in 0..shape[1] {
+                        for j in 0..shape[0] {
+                            let pixel = if data[[i, j]] {
+                                image::Luma([255])
+                            } else {
+                                image::Luma([0])
+                            };
+                            image_buffer.put_pixel(i as u32, j as u32, pixel);
+                        }
+                    }
+                    let dyn_img = image::DynamicImage::ImageLuma8(image_buffer);
+                    let stateful_protocol = picker.new_resize_protocol(dyn_img);
+                    let thread_protocol =
+                        ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                    tx_events
+                        .send(AppEvent::ImageLoaded(thread_protocol))
+                        .expect("Failed to send image loaded event");
+                }
+                ImageType::Truecolor(interlace) => {
                     let shape = ds_reader.shape();
                     let data: Array3<u8> =
                         ds_reader.read_slice::<u8, _, _>(s![.., .., ..]).unwrap();
 
-                    let mut image_buffer = image::RgbaImage::new(shape[0] as u32, shape[1] as u32);
-                    for i in 0..shape[0] {
-                        for j in 0..shape[1] {
-                            let pixel = image::Rgba([
-                                data[[i, j, 0]],
-                                data[[i, j, 1]],
-                                data[[i, j, 2]],
-                                255,
-                            ]);
-                            image_buffer.put_pixel(i as u32, j as u32, pixel);
+                    let mut image_buffer = image::RgbaImage::new(shape[1] as u32, shape[0] as u32);
+                    match interlace {
+                        InterlaceMode::Pixel => {
+                            for i in 0..shape[1] {
+                                for j in 0..shape[0] {
+                                    let pixel = image::Rgba([
+                                        data[[j, i, 0]],
+                                        data[[j, i, 1]],
+                                        data[[j, i, 2]],
+                                        255,
+                                    ]);
+                                    image_buffer.put_pixel(i as u32, j as u32, pixel);
+                                }
+                            }
+                        }
+                        InterlaceMode::Plane => {
+                            for i in 0..shape[2] {
+                                for j in 0..shape[1] {
+                                    let pixel = image::Rgba([
+                                        data[[0, j, i]],
+                                        data[[1, j, i]],
+                                        data[[2, j, i]],
+                                        255,
+                                    ]);
+                                    image_buffer.put_pixel(i as u32, j as u32, pixel);
+                                }
+                            }
                         }
                     }
                     let dyn_img = image::DynamicImage::ImageRgba8(image_buffer);
@@ -186,7 +263,7 @@ pub fn handle_image_load(
                         .send(AppEvent::ImageLoaded(thread_protocol))
                         .expect("Failed to send image loaded event");
                 }
-                ImageType::INDEXED => todo!(),
+                ImageType::Indexed(interlace) => todo!(),
                 _ => unreachable!("This should never happen"),
             }
         }

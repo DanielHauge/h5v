@@ -1,10 +1,9 @@
-use std::{cell::RefCell, f64, io::BufReader, rc::Rc};
+use std::{cell::RefCell, f64, rc::Rc};
 
 use hdf5_metno::{
     types::{VarLenAscii, VarLenUnicode},
     Error,
 };
-use image::ImageFormat;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -13,12 +12,11 @@ use ratatui::{
     widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
     Frame,
 };
-use ratatui_image::thread::ThreadImage;
 
 use crate::{
     color_consts,
     data::{PreviewSelection, Previewable, SliceSelection},
-    h5f::{Encoding, H5FNode, ImageType, Node},
+    h5f::{Encoding, H5FNode, Node},
 };
 
 use super::{app::AppState, image_preview::render_img};
@@ -50,7 +48,7 @@ pub fn render_preview(
     }
 }
 
-fn render_dim_selector(f: &mut Frame, area: &Rect, state: &mut AppState) -> Result<(), Error> {
+fn render_dim_selector(f: &mut Frame, area: &Rect, _state: &mut AppState) -> Result<(), Error> {
     let p = Paragraph::new("TODO: X axis").style(Style::default().fg(color_consts::COLOR_WHITE));
     f.render_widget(p, *area);
     Ok(())
@@ -167,6 +165,34 @@ fn render_chart_preview(
     Ok(())
 }
 
+fn render_unsupported_rendering(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node: &Node,
+    desc: &str,
+) -> Result<(), Error> {
+    let (ds, _) = match selected_node {
+        Node::Dataset(ds, attr) => (ds, attr),
+        _ => return Ok(()),
+    };
+
+    let inner_area = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let unsupported_msg = format!("Unsupported preview for dataset: {}", ds.name());
+    f.render_widget(unsupported_msg, inner_area);
+    let why = format!("Reason: {}", desc);
+    f.render_widget(
+        why,
+        inner_area.inner(ratatui::layout::Margin {
+            horizontal: 2,
+            vertical: 1,
+        }),
+    );
+    Ok(())
+}
+
 fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), Error> {
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
@@ -174,9 +200,25 @@ fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Re
     };
 
     match meta.encoding {
-        Encoding::Unknown => panic!("Unknown encoding not supported for string data"),
-        Encoding::LittleEndian => panic!("LittleEndian not supported for string data"),
-        Encoding::ASCII => match dataset.read_scalar::<VarLenAscii>() {
+        Encoding::LittleEndian => {
+            render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "LittleEndian not supported for string data",
+            )?;
+            return Ok(());
+        }
+        Encoding::Unknown => {
+            render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Unknown encoding not supported for string data",
+            )?;
+            return Ok(());
+        }
+        Encoding::Ascii => match dataset.read_scalar::<VarLenAscii>() {
             Ok(x) => {
                 let string = x.to_string();
                 let string = string.lines().collect::<Vec<_>>().join("\n");
