@@ -16,6 +16,7 @@ use ratatui::{
 use crate::{
     color_consts,
     data::{PreviewSelection, Previewable, SliceSelection},
+    error::AppError,
     h5f::{Encoding, H5FNode, Node},
 };
 
@@ -26,7 +27,7 @@ pub fn render_preview(
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
     state: &mut AppState,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 0,
@@ -53,7 +54,7 @@ fn render_chart_preview(
     area: &Rect,
     selected_node: &Node,
     state: &mut AppState,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -192,7 +193,7 @@ fn render_unsupported_rendering(
     Ok(())
 }
 
-fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), Error> {
+fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), AppError> {
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => panic!("Expected a string dataset to preview string data"),

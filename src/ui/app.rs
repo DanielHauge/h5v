@@ -70,6 +70,7 @@ pub fn init(filename: String) -> Result<()> {
                         break;
                     }
                 },
+                AppError::ChannelError(c) => last_message = Some(format!("Channel Error: - {}", c)),
             },
         }
     }
@@ -124,6 +125,7 @@ fn main_recover_loop(
         // selected_y_dim: 0,
         selected_indexes: [0; 15],
         img_state,
+        page: 0,
     };
 
     state.compute_tree_view();

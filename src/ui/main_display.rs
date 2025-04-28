@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{color_consts, error::AppError, h5f::H5FNode};
 
 use super::{
     attributes::render_info_attributes,
@@ -35,7 +35,7 @@ pub fn render_main_display(
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
     state: &mut AppState,
-) -> std::result::Result<(), hdf5_metno::Error> {
+) -> std::result::Result<(), AppError> {
     let attr_count = selected_node
         .borrow_mut()
         .read_attributes()?

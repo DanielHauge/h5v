@@ -13,7 +13,10 @@ use ratatui_image::{
     thread::{ResizeRequest, ResizeResponse, ThreadImage, ThreadProtocol},
 };
 
-use crate::h5f::{ImageType, InterlaceMode, Node};
+use crate::{
+    error::AppError,
+    h5f::{ImageType, InterlaceMode, Node},
+};
 
 use super::{app::AppEvent, state::AppState};
 
@@ -23,7 +26,7 @@ pub fn render_img(
     area: &Rect,
     node: &Node,
     state: &mut AppState,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     match image_type {
         ImageType::Jpeg => render_raw_img(f, area, node, state, ImageFormat::Jpeg),
         ImageType::Png => render_raw_img(f, area, node, state, ImageFormat::Png),
@@ -39,7 +42,7 @@ fn render_unsupported_image_format(
     f: &mut Frame,
     area: &Rect,
     selected_node: &Node,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -60,7 +63,7 @@ fn render_ds_img(
     selected_node: &Node,
     state: &mut AppState,
     img_type: ImageType,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -85,11 +88,7 @@ fn render_ds_img(
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
             let ds_clone = ds.clone();
-            state
-                .img_state
-                .tx_load_img
-                .send((ds_clone, img_type))
-                .expect("Failed to send image load request");
+            state.img_state.tx_load_img.send((ds_clone, img_type))?;
         }
     }
 
@@ -102,7 +101,7 @@ fn render_raw_img(
     selected_node: &Node,
     state: &mut AppState,
     img_format: ImageFormat,
-) -> Result<(), Error> {
+) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
@@ -210,11 +209,12 @@ pub fn handle_image_load(
                     let data: Array2<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
                         Ok(d) => d,
                         Err(e) => {
-                            return tx_events
+                            tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                     e.to_string(),
                                 )))
-                                .expect("Failed to send image loaded event")
+                                .expect("Failed to send image loaded event");
+                            continue;
                         }
                     };
                     let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
@@ -239,11 +239,12 @@ pub fn handle_image_load(
                     let data: Array2<bool> = match ds_reader.read_slice::<bool, _, _>(s![.., ..]) {
                         Ok(d) => d,
                         Err(e) => {
-                            return tx_events
+                            tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                     e.to_string(),
                                 )))
-                                .expect("Failed to send image loaded event")
+                                .expect("Failed to send image loaded event");
+                            continue;
                         }
                     };
                     let mut image_buffer = image::GrayImage::new(shape[0] as u32, shape[1] as u32);
@@ -272,11 +273,12 @@ pub fn handle_image_load(
                     let data: Array3<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
                         Ok(d) => d,
                         Err(e) => {
-                            return tx_events
+                            tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                     e.to_string(),
                                 )))
-                                .expect("Failed to send image loaded event")
+                                .expect("Failed to send image loaded event");
+                            continue;
                         }
                     };
 
@@ -320,18 +322,20 @@ pub fn handle_image_load(
                         .expect("Failed to send image loaded event");
                 }
                 ImageType::Indexed(_interlace) => {
-                    return tx_events
+                    tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                             "Unsupported image format".to_string(),
                         )))
-                        .expect("Failed to send image loaded event")
+                        .expect("Failed to send image loaded event");
+                    continue;
                 }
                 _ => {
-                    return tx_events
+                    tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                             "Unsupported image format".to_string(),
                         )))
-                        .expect("Failed to send image loaded event")
+                        .expect("Failed to send image loaded event");
+                    continue;
                 }
             }
         }
