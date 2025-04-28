@@ -10,7 +10,7 @@ use ndarray::{s, Array2, Array3};
 use ratatui::{layout::Rect, Frame};
 use ratatui_image::{
     picker::Picker,
-    thread::{ResizeRequest, ThreadImage, ThreadProtocol},
+    thread::{ResizeRequest, ResizeResponse, ThreadImage, ThreadProtocol},
 };
 
 use crate::h5f::{ImageType, InterlaceMode, Node};
@@ -72,20 +72,24 @@ fn render_ds_img(
     });
     match state.img_state.is_from_ds(selected_node) {
         true => {
-            if let Some(ref mut protocol) = state.img_state.protocol {
+            if let Some(e) = &state.img_state.error {
+                let error_msg = format!("Error loading image: {}", e);
+                f.render_widget(error_msg, inner_area);
+            } else if let Some(ref mut protocol) = state.img_state.protocol {
                 let image_widget = ThreadImage::new();
                 f.render_stateful_widget(image_widget, inner_area, protocol);
             }
         }
         false => {
             state.img_state.protocol = None;
+            state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
             let ds_clone = ds.clone();
             state
                 .img_state
                 .tx_load_img
                 .send((ds_clone, img_type))
-                .unwrap();
+                .expect("Failed to send image load request");
         }
     }
 
@@ -110,22 +114,28 @@ fn render_raw_img(
     });
 
     match state.img_state.is_from_ds(selected_node) {
-        true => {
-            if let Some(ref mut protocol) = state.img_state.protocol {
-                let image_widget = ThreadImage::new();
-                f.render_stateful_widget(image_widget, inner_area, protocol);
+        true => match state.img_state.error {
+            Some(ref e) => {
+                let error_msg = format!("Error loading image - {}", e);
+                f.render_widget(error_msg, inner_area);
             }
-        }
+            None => {
+                if let Some(ref mut protocol) = state.img_state.protocol {
+                    let image_widget = ThreadImage::new();
+                    f.render_stateful_widget(image_widget, inner_area, protocol);
+                }
+            }
+        },
         false => {
             state.img_state.protocol = None;
             state.img_state.ds = Some(ds.name());
-            let ds_reader = ds.as_byte_reader().unwrap();
+            let ds_reader = ds.as_byte_reader()?;
             let ds_buffered = BufReader::new(ds_reader);
             state
                 .img_state
                 .tx_load_imgfs
                 .send((ds_buffered, img_format))
-                .unwrap();
+                .expect("Failed to send image load request");
         }
     }
 
@@ -137,12 +147,15 @@ pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest>
 
     thread::spawn(move || loop {
         if let Ok(request) = rx_worker.recv() {
-            if let Ok(resized) = request.resize_encode() {
-                tx_events
-                    .send(AppEvent::ImageResized(resized))
-                    .expect("Failed to send image redraw event");
-            } else {
-                panic!("Failed to resize image");
+            match request.resize_encode() {
+                Ok(r) => tx_events
+                    .send(AppEvent::ImageResized(ImageResizeResult::Success(r)))
+                    .expect("Failed to send image redraw event"),
+                Err(e) => tx_events
+                    .send(AppEvent::ImageResized(ImageResizeResult::Error(
+                        e.to_string(),
+                    )))
+                    .expect("Failed to send image redraw event"),
             }
         }
     });
@@ -163,7 +176,9 @@ pub fn handle_imagefs_load(
                 let thread_protocol =
                     ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
                 tx_events
-                    .send(AppEvent::ImageLoaded(thread_protocol))
+                    .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
+                        thread_protocol,
+                    )))
                     .expect("Failed to send image loaded event");
             }
         }
@@ -171,18 +186,37 @@ pub fn handle_imagefs_load(
     tx_load
 }
 
+pub enum ImageResizeResult {
+    Success(ResizeResponse),
+    Error(String),
+}
+
+pub enum ImageLoadedResult {
+    Success(ThreadProtocol),
+    Failure(String),
+}
+
 pub fn handle_image_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
 ) -> Sender<(Dataset, ImageType)> {
     let (tx_load, rx_load) = channel::<(Dataset, ImageType)>();
-    let picker = Picker::from_query_stdio().unwrap_or_else(move |_| Picker::from_fontsize((7, 14)));
+    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {
             match img_format {
                 ImageType::Grayscale => {
                     let shape = ds_reader.shape();
-                    let data: Array2<u8> = ds_reader.read_slice::<u8, _, _>(s![.., ..]).unwrap();
+                    let data: Array2<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            return tx_events
+                                .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                    e.to_string(),
+                                )))
+                                .expect("Failed to send image loaded event")
+                        }
+                    };
                     let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
                     for i in 0..shape[1] {
                         for j in 0..shape[0] {
@@ -195,13 +229,23 @@ pub fn handle_image_load(
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
                     tx_events
-                        .send(AppEvent::ImageLoaded(thread_protocol))
+                        .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
+                            thread_protocol,
+                        )))
                         .expect("Failed to send image loaded event");
                 }
                 ImageType::Bitmap => {
                     let shape = ds_reader.shape();
-                    let data: Array2<bool> =
-                        ds_reader.read_slice::<bool, _, _>(s![.., ..]).unwrap();
+                    let data: Array2<bool> = match ds_reader.read_slice::<bool, _, _>(s![.., ..]) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            return tx_events
+                                .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                    e.to_string(),
+                                )))
+                                .expect("Failed to send image loaded event")
+                        }
+                    };
                     let mut image_buffer = image::GrayImage::new(shape[0] as u32, shape[1] as u32);
                     for i in 0..shape[1] {
                         for j in 0..shape[0] {
@@ -218,13 +262,23 @@ pub fn handle_image_load(
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
                     tx_events
-                        .send(AppEvent::ImageLoaded(thread_protocol))
+                        .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
+                            thread_protocol,
+                        )))
                         .expect("Failed to send image loaded event");
                 }
                 ImageType::Truecolor(interlace) => {
                     let shape = ds_reader.shape();
-                    let data: Array3<u8> =
-                        ds_reader.read_slice::<u8, _, _>(s![.., .., ..]).unwrap();
+                    let data: Array3<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            return tx_events
+                                .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                    e.to_string(),
+                                )))
+                                .expect("Failed to send image loaded event")
+                        }
+                    };
 
                     let mut image_buffer = image::RgbaImage::new(shape[1] as u32, shape[0] as u32);
                     match interlace {
@@ -260,11 +314,25 @@ pub fn handle_image_load(
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
                     tx_events
-                        .send(AppEvent::ImageLoaded(thread_protocol))
+                        .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
+                            thread_protocol,
+                        )))
                         .expect("Failed to send image loaded event");
                 }
-                ImageType::Indexed(_interlace) => todo!(),
-                _ => unreachable!("This should never happen"),
+                ImageType::Indexed(_interlace) => {
+                    return tx_events
+                        .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                            "Unsupported image format".to_string(),
+                        )))
+                        .expect("Failed to send image loaded event")
+                }
+                _ => {
+                    return tx_events
+                        .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                            "Unsupported image format".to_string(),
+                        )))
+                        .expect("Failed to send image loaded event")
+                }
             }
         }
     });

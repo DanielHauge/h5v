@@ -36,6 +36,7 @@ pub struct ImgState {
     pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
     pub tx_load_img: Sender<(Dataset, ImageType)>,
     pub ds: Option<String>,
+    pub error: Option<String>,
 }
 
 impl ImgState {

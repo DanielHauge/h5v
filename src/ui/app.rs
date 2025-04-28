@@ -19,12 +19,14 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
-use ratatui_image::thread::{ResizeResponse, ThreadProtocol};
 
 use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
 use super::{
-    image_preview::{handle_image_load, handle_image_resize, handle_imagefs_load},
+    image_preview::{
+        handle_image_load, handle_image_resize, handle_imagefs_load, ImageLoadedResult,
+        ImageResizeResult,
+    },
     input::handle_input_event,
     main_display::render_main_display,
     state::{AppState, ContentShowMode, Focus, ImgState, Mode},
@@ -104,6 +106,7 @@ fn main_recover_loop(
         tx_load_imgfs,
         tx_load_img,
         ds: None,
+        error: None,
     };
 
     let mut state = AppState {
@@ -155,7 +158,7 @@ fn main_recover_loop(
     handle_term_events(tx_events);
 
     loop {
-        let event = rx_events.recv().unwrap();
+        let event = rx_events.recv().expect("Oh no, something horrible went wrong. Could no longer receive events from events channel.");
         match event {
             AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)? {
                 EventResult::Quit => break,
@@ -166,20 +169,38 @@ fn main_recover_loop(
                     })?;
                 }
             },
-            AppEvent::ImageResized(resize_response) => {
-                if let Some(ref mut img_thread_protocol) = state.img_state.protocol {
-                    let _ = img_thread_protocol.update_resized_protocol(resize_response);
+            AppEvent::ImageResized(resize_response) => match resize_response {
+                ImageResizeResult::Success(resize_response) => {
+                    if let Some(ref mut img_thread_protocol) = state.img_state.protocol {
+                        let _ = img_thread_protocol.update_resized_protocol(resize_response);
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                }
+                ImageResizeResult::Error(e) => {
+                    state.img_state.error = Some(format!("Error resizing image: {}", e));
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
                 }
-            }
-            AppEvent::ImageLoaded(thread_protocol) => {
-                state.img_state.protocol = Some(thread_protocol);
-                terminal.draw(|f| {
-                    draw_closure(f, &mut state);
-                })?;
-            }
+            },
+            AppEvent::ImageLoad(img_load) => match img_load {
+                ImageLoadedResult::Success(thread_protocol) => {
+                    state.img_state.protocol = Some(thread_protocol);
+                    state.img_state.error = None;
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                ImageLoadedResult::Failure(f) => {
+                    state.img_state.protocol = None;
+                    state.img_state.error = Some(f);
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+            },
         }
     }
     Ok(IntendedMainLoopBreak {})
@@ -187,15 +208,18 @@ fn main_recover_loop(
 
 pub enum AppEvent {
     TermEvent(event::Event),
-    ImageResized(ResizeResponse),
-    ImageLoaded(ThreadProtocol),
+    ImageResized(ImageResizeResult),
+    ImageLoad(ImageLoadedResult),
 }
 
 fn handle_term_events(tx_events: Sender<AppEvent>) {
     thread::spawn(move || loop {
         if event::poll(std::time::Duration::from_millis(16)).is_ok() {
             if let Ok(event) = event::read() {
-                tx_events.send(AppEvent::TermEvent(event)).unwrap();
+                match tx_events.send(AppEvent::TermEvent(event)) {
+                    Ok(_) => {}
+                    Err(_e) => {} // TODO: log to a file maybe
+                }
             }
         }
     });

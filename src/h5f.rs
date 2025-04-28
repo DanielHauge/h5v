@@ -177,9 +177,9 @@ pub trait HasName {
 impl HasName for Node {
     fn name(&self) -> String {
         match self {
-            Node::File(file) => file.name().split("/").last().unwrap().to_string(),
-            Node::Group(group) => group.name().split("/").last().unwrap().to_string(),
-            Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap().to_string(),
+            Node::File(file) => file.name().split("/").last().unwrap_or("").to_string(),
+            Node::Group(group) => group.name().split("/").last().unwrap_or("").to_string(),
+            Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap_or("").to_string(),
         }
     }
 }
@@ -499,9 +499,9 @@ impl H5FNode {
 
     pub fn full_path(&self) -> String {
         match &self.node {
-            Node::File(f) => f.filename().split("/").last().unwrap().to_string(),
-            Node::Group(g) => g.filename().split("/").last().unwrap().to_string(),
-            Node::Dataset(ds, _) => ds.filename().split("/").last().unwrap().to_string(),
+            Node::File(f) => f.filename().split("/").last().unwrap_or("").to_string(),
+            Node::Group(g) => g.filename().split("/").last().unwrap_or("").to_string(),
+            Node::Dataset(ds, _) => ds.filename().split("/").last().unwrap_or("").to_string(),
         }
     }
 
@@ -543,7 +543,11 @@ impl H5FNode {
                         return Ok(());
                     }
                 }
-                panic!("Child not found {} {}", child_mame.unwrap(), relative_path);
+                panic!(
+                    "Child not found {} {}",
+                    child_mame.unwrap_or("N/A"),
+                    relative_path
+                );
             }
             None => Ok(()),
         }

@@ -50,7 +50,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Char('l'), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if !tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().expand().unwrap();
+                        tree_item.node.borrow_mut().expand()?;
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -70,7 +70,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Char('L'), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if !tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().expand().unwrap();
+                        tree_item.node.borrow_mut().expand()?;
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -130,7 +130,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Right, _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if !tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().expand().unwrap();
+                        tree_item.node.borrow_mut().expand()?;
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -155,13 +155,13 @@ pub fn handle_normal_tree_event(
                 }
                 (KeyCode::Enter, _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    tree_item.node.borrow_mut().expand_toggle().unwrap();
+                    tree_item.node.borrow_mut().expand_toggle()?;
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
                 (KeyCode::Char(' '), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    tree_item.node.borrow_mut().expand_toggle().unwrap();
+                    tree_item.node.borrow_mut().expand_toggle()?;
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
