@@ -12,3 +12,22 @@ itertools = "0.14.0"
 ndarray = "0.16.1"
 ratatui = { version = "0.29.0", features = ["all-widgets"] }
 ratatui-image = "5.0.0"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C",
+    "target-cpu=native", # Optimize for the host CPU
+    "-C",
+    "opt-level=3",       # Maximize optimization
+    "-C",
+    "lto=fat",           # Link-time optimization (LTO)
+    "-C",
+    "codegen-units=1",   # Reduce the number of codegen units (better optimization)
+    "-C",
+    "panic=abort",       # Abort on panic instead of unwinding (faster)
+]
+linker = "rust-lld.exe"
+
+[profile.release]
+lto = "fat"     # Enable link-time optimization
+panic = "abort"
