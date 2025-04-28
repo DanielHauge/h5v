@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::{error::AppError, ui::app::AppState};
+use crate::{error::AppError, ui::state::AppState};
 
 use super::EventResult;
 
@@ -40,7 +40,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Char('h'), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().collapse().unwrap();
+                        tree_item.node.borrow_mut().collapse();
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -60,7 +60,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Char('H'), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().collapse().unwrap();
+                        tree_item.node.borrow_mut().collapse();
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -120,7 +120,7 @@ pub fn handle_normal_tree_event(
                 (KeyCode::Left, _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().collapse().unwrap();
+                        tree_item.node.borrow_mut().collapse();
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {

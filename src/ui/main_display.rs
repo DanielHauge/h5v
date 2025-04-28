@@ -11,9 +11,9 @@ use ratatui::{
 use crate::{color_consts, h5f::H5FNode};
 
 use super::{
-    app::{AppState, ContentShowMode},
     attributes::render_info_attributes,
     preview::render_preview,
+    state::{AppState, ContentShowMode},
 };
 
 fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {

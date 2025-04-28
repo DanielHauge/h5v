@@ -3,7 +3,7 @@ use tree::handle_normal_tree_event;
 
 use crate::error::AppError;
 
-use super::app::{AppState, Focus, Mode};
+use super::state::{AppState, Focus, Mode};
 
 pub mod search;
 pub mod tree;

@@ -8,9 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode, ui::app::AppState};
+use crate::{color_consts, h5f::H5FNode};
 
-use super::app::Mode;
+use super::state::{AppState, Mode};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {

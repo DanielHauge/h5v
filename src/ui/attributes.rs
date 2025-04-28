@@ -38,7 +38,7 @@ pub fn render_info_attributes(
     };
     let area = make_panels_rect(area_inner, min_first_panel);
     let [name_area, value_area] = area.as_ref() else {
-        panic!("Could not get the areas for the panels");
+        panic!("Could not get the areas for the info attribute panels");
     };
     let mut offset = 0;
     let height = name_area.height as i32;

@@ -1,8 +1,10 @@
 pub mod app;
 pub mod attributes;
+pub mod dims;
 pub mod help;
 pub mod image_preview;
 pub mod input;
 pub mod main_display;
 pub mod preview;
+pub mod state;
 pub mod tree_view;

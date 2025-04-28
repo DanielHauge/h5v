@@ -15,7 +15,7 @@ use ratatui_image::{
 
 use crate::h5f::{ImageType, InterlaceMode, Node};
 
-use super::app::{AppEvent, AppState};
+use super::{app::AppEvent, state::AppState};
 
 pub fn render_img(
     image_type: &ImageType,
@@ -263,7 +263,7 @@ pub fn handle_image_load(
                         .send(AppEvent::ImageLoaded(thread_protocol))
                         .expect("Failed to send image loaded event");
                 }
-                ImageType::Indexed(interlace) => todo!(),
+                ImageType::Indexed(_interlace) => todo!(),
                 _ => unreachable!("This should never happen"),
             }
         }

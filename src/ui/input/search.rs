@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use crate::{
     error::AppError,
     h5f::HasPath,
-    ui::app::{AppState, Focus, Mode},
+    ui::state::{AppState, Focus, Mode},
 };
 
 use super::EventResult;

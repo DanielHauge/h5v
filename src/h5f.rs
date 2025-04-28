@@ -11,7 +11,7 @@ use crate::{
     search::Searcher,
     sprint_attributes::sprint_attribute,
     sprint_typedesc::{encoding_from_dtype, is_image, is_type_numerical, sprint_typedescriptor},
-    ui::app::ContentShowMode,
+    ui::state::ContentShowMode,
 };
 
 #[derive(Debug)]
@@ -435,6 +435,7 @@ impl H5FNode {
 
     pub fn content_show_modes(&self) -> Vec<ContentShowMode> {
         let mut result = vec![];
+
         match &self.node {
             Node::File(_) => {}
             Node::Group(_) => {}
@@ -469,20 +470,15 @@ impl H5FNode {
     }
 
     pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
-        self.expanded = true;
-        if self.expanded {
-            return Ok(());
-        }
         self.read_children()?;
+        if !self.expanded {
+            self.expand_toggle()?;
+        }
         Ok(())
     }
 
-    pub fn collapse(&mut self) -> Result<(), hdf5_metno::Error> {
-        if !self.expanded {
-            return Ok(());
-        }
+    pub fn collapse(&mut self) {
         self.expanded = false;
-        Ok(())
     }
 
     pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {

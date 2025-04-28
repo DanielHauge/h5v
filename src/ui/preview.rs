@@ -5,7 +5,7 @@ use hdf5_metno::{
     Error,
 };
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Offset, Rect},
     style::Style,
     symbols,
     text::{Span, Text},
@@ -19,7 +19,7 @@ use crate::{
     h5f::{Encoding, H5FNode, Node},
 };
 
-use super::{app::AppState, image_preview::render_img};
+use super::{dims::render_dim_selector, image_preview::render_img, state::AppState};
 
 pub fn render_preview(
     f: &mut Frame,
@@ -46,12 +46,6 @@ pub fn render_preview(
         },
         _ => Ok(()),
     }
-}
-
-fn render_dim_selector(f: &mut Frame, area: &Rect, _state: &mut AppState) -> Result<(), Error> {
-    let p = Paragraph::new("TODO: X axis").style(Style::default().fg(color_consts::COLOR_WHITE));
-    f.render_widget(p, *area);
-    Ok(())
 }
 
 fn render_chart_preview(
@@ -88,7 +82,7 @@ fn render_chart_preview(
     let chart_area = if x_selectable_dims.len() > 1 {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(3), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], state)?;
+        render_dim_selector(f, &areas_split[0], state, &shape)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -101,9 +95,14 @@ fn render_chart_preview(
     };
 
     if shape[state.selected_x_dim] > 250000 {
-        let paragrapth = Paragraph::new("TODO: To many data points to show")
-            .style(Style::default().fg(color_consts::COLOR_WHITE));
+        let paragrapth =
+            Paragraph::new("WARN: Display of datasets with more than 250000 points disabled. ")
+                .style(Style::default().fg(color_consts::COLOR_WHITE));
         f.render_widget(paragrapth, *area);
+        let paragrapth = Paragraph::new("TODO: Enumeration of slices not yet implemented. ")
+            .style(Style::default().fg(color_consts::COLOR_WHITE));
+        f.render_widget(paragrapth, area.offset(Offset { x: 0, y: 1 }));
+
         return Ok(());
     }
 
