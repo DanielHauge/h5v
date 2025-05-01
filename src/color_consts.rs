@@ -1,3 +1,4 @@
+pub const SELECTED_DIM: ratatui::prelude::Color = Color::Yellow;
 pub const TITLE: Color = Color::Yellow;
 pub const COLOR_WHITE: Color = Color::White;
 use ratatui::style::Color;

@@ -131,7 +131,7 @@ fn main_recover_loop(
     state.compute_tree_view();
 
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
-        if state.help {
+        if let Mode::Help = state.mode {
             return render_help(frame);
         }
 

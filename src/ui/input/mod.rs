@@ -30,6 +30,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(EventResult::Quit),
                     (KeyCode::Char('?'), _) => {
                         state.mode = Mode::Help;
                         Ok(EventResult::Redraw)
@@ -67,6 +68,14 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
             }
             search::handle_search_event(state, event)
         }
-        Mode::Help => todo!(),
+        Mode::Help => {
+            if let Event::Key(key_event) = event {
+                if key_event.code == KeyCode::Esc {
+                    state.mode = Mode::Normal;
+                    return Ok(EventResult::Redraw);
+                }
+            }
+            Ok(EventResult::Continue)
+        }
     }
 }

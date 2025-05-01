@@ -28,7 +28,6 @@ pub enum Mode {
 pub enum ContentShowMode {
     Preview,
     Matrix,
-    Heatmap,
 }
 
 pub struct ImgState {

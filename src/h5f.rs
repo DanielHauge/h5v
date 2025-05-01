@@ -443,9 +443,6 @@ impl H5FNode {
                 result.push(ContentShowMode::Preview);
                 if dataset_meta.numerical {
                     result.push(ContentShowMode::Matrix);
-                    if dataset_meta.shape.len() > 1 {
-                        result.push(ContentShowMode::Heatmap);
-                    }
                 }
             }
         }

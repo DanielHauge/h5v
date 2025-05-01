@@ -78,7 +78,6 @@ pub fn render_main_display(
         let title = match x {
             ContentShowMode::Preview => "Preview 🗠",
             ContentShowMode::Matrix => "Matrix",
-            ContentShowMode::Heatmap => "Heatmap",
         };
 
         if i == display_index {

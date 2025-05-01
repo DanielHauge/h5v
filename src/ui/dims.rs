@@ -1,5 +1,11 @@
 use hdf5_metno::{Error, Hyperslab, Selection, SliceOrIndex};
-use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
+use ratatui::{
+    layout::{Constraint, Margin, Offset, Rect},
+    style::{Style, Styled, Stylize},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
+    Frame,
+};
 
 use crate::color_consts;
 
@@ -8,11 +14,83 @@ use super::state::AppState;
 pub fn render_dim_selector(
     f: &mut Frame,
     area: &Rect,
-    _state: &mut AppState,
-    _shape: &[usize],
+    state: &mut AppState,
+    shape: &[usize],
 ) -> Result<(), Error> {
-    let p = Paragraph::new("TODO: X axis").style(Style::default().fg(color_consts::COLOR_WHITE));
-    f.render_widget(p, *area);
+    let x_selection = state.selected_x_dim;
+    let index_selection = state.selected_indexes;
+    let height = area.height;
+    let width = area.width;
+    let block = Block::default()
+        .title("Slice selection")
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN));
+    f.render_widget(block, *area);
+
+    let inner_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    let (labels_area, dims_area) = {
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Length(8), Constraint::Min(0)].as_ref())
+            .split(inner_area);
+        (chunks[0], chunks[1])
+    };
+    // Print Shape: and View: on each line
+    let shape_line = Line::from("Shape: ").alignment(ratatui::layout::Alignment::Right);
+    let view_line = Line::from("Slice: ").alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(shape_line, labels_area);
+    f.render_widget(view_line, labels_area.offset(Offset { x: 0, y: 1 }));
+
+    let shape_strings = shape.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let bounds: Vec<u16> = shape_strings.iter().map(|s| s.len() as u16).collect();
+    let (segments, spacers) = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .spacing(3)
+        .constraints(
+            bounds
+                .iter()
+                .map(|&s| Constraint::Length(s))
+                .collect::<Vec<_>>(),
+        )
+        .split_with_spacers(dims_area);
+    let spacers_len = spacers.len();
+
+    for (i, spacer_area) in spacers.iter().enumerate() {
+        if i == spacers_len - 1 {
+            break;
+        }
+        let spacer = Paragraph::new(" | ")
+            .style(Style::default().bg(color_consts::BG2_COLOR))
+            .block(Block::default().borders(Borders::NONE));
+        f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
+        f.render_widget(spacer, *spacer_area);
+    }
+
+    for (i, dim) in shape_strings.iter().enumerate() {
+        let dim_line = Line::from(dim.as_str()).alignment(ratatui::layout::Alignment::Left);
+        f.render_widget(dim_line, segments[i]);
+        if i == x_selection {
+            let x_span = Span::from("X").style(
+                Style::default()
+                    .bold()
+                    .underlined()
+                    .fg(color_consts::SELECTED_DIM),
+            );
+            let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
+        } else {
+            let selected_index = index_selection[i];
+            let selected_line = Line::from(format!("{}", selected_index))
+                .alignment(ratatui::layout::Alignment::Left);
+            f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
+        }
+    }
+
     Ok(())
 }
 
