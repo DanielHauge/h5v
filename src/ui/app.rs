@@ -29,7 +29,7 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{AppState, ContentShowMode, Focus, ImgState, Mode},
+    state::{AppState, AttributeCursor, ContentShowMode, Focus, ImgState, Mode},
     tree_view::render_tree,
 };
 
@@ -114,7 +114,10 @@ fn main_recover_loop(
         root: h5f.root.clone(),
         treeview: vec![],
         tree_view_cursor: 0,
-        help: false,
+        attributes_view_cursor: AttributeCursor {
+            attribute_index: 0,
+            attribute_view_selection: super::state::AttributeViewSelection::Name,
+        },
         focus: Focus::Tree,
         mode: Mode::Normal,
         indexed: false,

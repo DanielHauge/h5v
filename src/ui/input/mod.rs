@@ -1,3 +1,4 @@
+use attributes::handle_normal_attributes;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
@@ -5,6 +6,7 @@ use crate::error::AppError;
 
 use super::state::{AppState, Focus, Mode};
 
+pub mod attributes;
 pub mod search;
 pub mod tree;
 
@@ -35,6 +37,18 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         state.mode = Mode::Help;
                         Ok(EventResult::Redraw)
                     }
+                    (KeyCode::Right, KeyModifiers::SHIFT) => {
+                        if let Focus::Tree = state.focus {
+                            state.focus = Focus::Attributes;
+                        }
+                        Ok(EventResult::Redraw)
+                    }
+                    (KeyCode::Left, KeyModifiers::SHIFT) => {
+                        if let Focus::Attributes = state.focus {
+                            state.focus = Focus::Tree;
+                        }
+                        Ok(EventResult::Redraw)
+                    }
                     (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
                         if let Focus::Tree = state.focus {
                             state.focus = Focus::Attributes;
@@ -48,7 +62,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
 
                     _ => match state.focus {
                         Focus::Tree => handle_normal_tree_event(state, event),
-                        Focus::Attributes => Ok(EventResult::Continue),
+                        Focus::Attributes => handle_normal_attributes(state, event),
                     },
                 }
             } else {

@@ -30,7 +30,7 @@ pub fn render_preview(
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
-        vertical: 0,
+        vertical: 1,
     });
     let node = &selected_node.borrow().node;
 
@@ -145,7 +145,7 @@ fn render_chart_preview(
         .graph_type(GraphType::Line)
         .data(data);
     let chart = Chart::new(vec![ds])
-        .style(Style::default().bg(color_consts::BG2_COLOR))
+        .style(Style::default().bg(color_consts::BG_COLOR))
         .x_axis(
             Axis::default()
                 .title("X axis")

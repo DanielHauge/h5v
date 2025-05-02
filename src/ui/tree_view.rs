@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{color_consts, h5f::H5FNode};
 
-use super::state::{AppState, Mode};
+use super::state::{AppState, Focus, Mode};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {
@@ -133,12 +133,16 @@ fn compute_tree_view_rec<'a>(
 }
 
 pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
+    let bg = match state.focus {
+        Focus::Tree => color_consts::FOCUS_BG_COLOR,
+        _ => color_consts::BG_COLOR,
+    };
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title("Tree".to_string())
-        .bg(color_consts::BG_COLOR)
+        .bg(bg)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
     f.render_widget(header_block, area);
@@ -171,7 +175,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                     break;
                 }
                 let text = tree_item.line.clone();
-                if highlight_index == i {
+                if highlight_index == i && matches!(state.focus, Focus::Tree) {
                     f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
                 } else {
                     f.render_widget(text, area);

@@ -13,7 +13,7 @@ use crate::{color_consts, error::AppError, h5f::H5FNode};
 use super::{
     attributes::render_info_attributes,
     preview::render_preview,
-    state::{AppState, ContentShowMode},
+    state::{AppState, ContentShowMode, Focus},
 };
 
 fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
@@ -43,16 +43,7 @@ pub fn render_main_display(
         .len();
 
     let (attr_area, content_area) = split_main_display(*area, attr_count);
-    let attr_header_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title("Attributes".to_string())
-        .bg(color_consts::BG2_COLOR)
-        .title_style(Style::default().fg(Color::Yellow).bold())
-        .title_alignment(Alignment::Center);
-    f.render_widget(attr_header_block, *area);
-    render_info_attributes(f, &attr_area, selected_node)?;
+    render_info_attributes(f, &attr_area, selected_node, state)?;
 
     let current_display_mode = &state.content_mode;
     let supported_display_modes = selected_node.borrow().content_show_modes();
@@ -97,14 +88,8 @@ pub fn render_main_display(
         .border_style(Style::default().fg(color_consts::BREAK_COLOR))
         .title_alignment(Alignment::Center)
         .title_style(Style::default().fg(color_consts::TITLE))
-        .style(Style::default().bg(color_consts::BG2_COLOR));
-    f.render_widget(
-        break_line,
-        content_area.offset(Offset { x: 0, y: -1 }).inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        }),
-    );
+        .style(Style::default().bg(color_consts::BG_COLOR));
+    f.render_widget(break_line, content_area);
 
     render_preview(f, &content_area, selected_node, state)?;
 

@@ -62,11 +62,22 @@ impl ImgState {
     }
 }
 
+pub enum AttributeViewSelection {
+    Name,
+    NameAndValue,
+    Value,
+}
+
+pub struct AttributeCursor {
+    pub attribute_index: usize,
+    pub attribute_view_selection: AttributeViewSelection,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub tree_view_cursor: usize,
-    pub help: bool,
+    pub attributes_view_cursor: AttributeCursor,
     pub focus: Focus,
     pub mode: Mode,
     pub indexed: bool,

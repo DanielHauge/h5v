@@ -42,7 +42,7 @@ pub fn render_dim_selector(
     };
     // Print Shape: and View: on each line
     let shape_line = Line::from("Shape: ").alignment(ratatui::layout::Alignment::Right);
-    let view_line = Line::from("Slice: ").alignment(ratatui::layout::Alignment::Right);
+    let view_line = Line::from(" y = ").alignment(ratatui::layout::Alignment::Right);
     f.render_widget(shape_line, labels_area);
     f.render_widget(view_line, labels_area.offset(Offset { x: 0, y: 1 }));
 
@@ -65,7 +65,7 @@ pub fn render_dim_selector(
             break;
         }
         let spacer = Paragraph::new(" | ")
-            .style(Style::default().bg(color_consts::BG2_COLOR))
+            .style(Style::default().bg(color_consts::BG_COLOR))
             .block(Block::default().borders(Borders::NONE));
         f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
         f.render_widget(spacer, *spacer_area);

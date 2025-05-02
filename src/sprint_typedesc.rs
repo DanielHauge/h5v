@@ -32,7 +32,13 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
         TypeDescriptor::VarLenArray(_) => "array".to_string(),
         TypeDescriptor::VarLenAscii => "ascii".to_string(),
         TypeDescriptor::VarLenUnicode => "unicode".to_string(),
-        TypeDescriptor::Reference(_) => "reference".to_string(),
+        TypeDescriptor::Reference(hdf5_metno::types::Reference::Object) => {
+            "object-reference".to_string()
+        }
+        TypeDescriptor::Reference(hdf5_metno::types::Reference::Region) => {
+            "region-reference".to_string()
+        }
+        TypeDescriptor::Reference(hdf5_metno::types::Reference::Std) => "std-reference".to_string(),
     }
 }
 
