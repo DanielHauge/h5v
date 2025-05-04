@@ -30,6 +30,7 @@ impl Previewable for Dataset {
             // SliceSelection::FromTo(start, end) => start..end,
             SliceSelection::All => 0..self.shape()[selection.x],
         };
+        // TODO: Fix this, use the way to make slice from selections, like dims selector.
         let data_to_show = match selection.index.len() {
             0 => self.read_1d::<f64>()?,
             1 => match selection.x {
