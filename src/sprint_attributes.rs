@@ -197,7 +197,6 @@ fn sprint_attribute_scalar<'a>(
         },
         types::TypeDescriptor::VarLenAscii => attr.read_scalar::<VarLenAscii>()?.render(),
         types::TypeDescriptor::VarLenUnicode => attr.read_scalar::<VarLenUnicode>()?.render(),
-        types::TypeDescriptor::Reference(Reference::Std) => render_unsupported_type("ref std"),
         types::TypeDescriptor::Reference(Reference::Object) => render_unsupported_type("ref obj"),
         types::TypeDescriptor::Reference(Reference::Region) => render_unsupported_type("ref reg"),
         types::TypeDescriptor::VarLenArray(_) => render_unsupported_type("custom varlen array"),

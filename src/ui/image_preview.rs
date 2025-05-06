@@ -166,7 +166,7 @@ pub fn handle_imagefs_load(
     tx_worker: Sender<ResizeRequest>,
 ) -> Sender<(BufReader<ByteReader>, ImageFormat)> {
     let (tx_load, rx_load) = channel::<(BufReader<ByteReader>, ImageFormat)>();
-    let picker = Picker::from_query_stdio().expect("Failed to create Picker");
+    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
 
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {

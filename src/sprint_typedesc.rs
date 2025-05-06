@@ -38,7 +38,6 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
         TypeDescriptor::Reference(hdf5_metno::types::Reference::Region) => {
             "region-reference".to_string()
         }
-        TypeDescriptor::Reference(hdf5_metno::types::Reference::Std) => "std-reference".to_string(),
     }
 }
 
