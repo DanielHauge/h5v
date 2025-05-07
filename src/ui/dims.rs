@@ -92,38 +92,83 @@ pub fn render_dim_selector(
     Ok(())
 }
 
-const MAX_PAGE_SIZE: usize = 250000;
-
-pub trait HasSelection {
-    fn get_selection(&self) -> Selection;
+pub struct MatrixSelection {
+    pub cols: u16,
+    pub rows: u16,
 }
 
-impl HasSelection for AppState<'_> {
-    fn get_selection(&self) -> Selection {
-        let x = self.selected_x_dim;
-        let sels = self.selected_indexes;
-        let page = self.page;
-        generate_selector_slice(x, &sels, page)
-    }
+pub trait HasMatrixSelection {
+    fn get_matrix_selection(&self, select: MatrixSelection, total_dims: &[usize]) -> Selection;
 }
 
-fn generate_selector_slice(x: usize, selections: &[usize], page: usize) -> Selection {
-    let mut slice: Vec<SliceOrIndex> = Vec::new();
-    let total_dims = selections.len();
-    let start = page * MAX_PAGE_SIZE;
-    let end = start + MAX_PAGE_SIZE;
-    (0..total_dims).for_each(|dim| {
-        if x == dim {
+impl HasMatrixSelection for AppState<'_> {
+    fn get_matrix_selection(&self, matrix_view: MatrixSelection, shape: &[usize]) -> Selection {
+        let mut slice: Vec<SliceOrIndex> = Vec::new();
+        let total_dims = shape.len();
+        if total_dims == 1 {
             slice.push(SliceOrIndex::SliceTo {
-                start,
-                end,
+                start: self.matrix_view_state.row_offset.min(shape[0] - 1),
                 step: 1,
+                end: (self.matrix_view_state.row_offset + matrix_view.rows as usize).min(shape[0]),
                 block: 1,
             });
         } else {
-            slice.push(SliceOrIndex::Index(selections[dim]));
+            let selections = self.selected_indexes;
+            (0..total_dims).for_each(|dim| {
+                if self.selected_x_dim == dim {
+                    slice.push(SliceOrIndex::SliceTo {
+                        start: self.matrix_view_state.col_offset.min(shape[dim] - 1),
+                        step: 1,
+                        end: (self.matrix_view_state.col_offset + matrix_view.cols as usize)
+                            .min(shape[dim]),
+                        block: 1,
+                    });
+                } else if self.selected_y_dim == dim {
+                    slice.push(SliceOrIndex::SliceTo {
+                        start: self.matrix_view_state.row_offset.min(shape[dim] - 1),
+                        step: 1,
+                        end: (self.matrix_view_state.row_offset + matrix_view.rows as usize)
+                            .min(shape[dim]),
+                        block: 1,
+                    });
+                } else {
+                    slice.push(SliceOrIndex::Index(selections[dim]));
+                }
+            });
         }
-    });
-
-    Selection::Hyperslab(Hyperslab::from(slice))
+        Selection::Hyperslab(Hyperslab::from(slice))
+    }
 }
+// const MAX_PAGE_SIZE: usize = 250000;
+// pub trait HasSelection {
+//     fn get_selection(&self) -> Selection;
+// }
+//
+// impl HasSelection for AppState<'_> {
+//     fn get_selection(&self) -> Selection {
+//         let x = self.selected_x_dim;
+//         let sels = self.selected_indexes;
+//         let page = self.page;
+//         generate_selector_slice(x, &sels, page)
+//     }
+// }
+// fn generate_selector_slice(x: usize, selections: &[usize], page: usize) -> Selection {
+//     let mut slice: Vec<SliceOrIndex> = Vec::new();
+//     let total_dims = selections.len();
+//     let start = page * MAX_PAGE_SIZE;
+//     let end = start + MAX_PAGE_SIZE;
+//     (0..total_dims).for_each(|dim| {
+//         if x == dim {
+//             slice.push(SliceOrIndex::SliceTo {
+//                 start,
+//                 end,
+//                 step: 1,
+//                 block: 1,
+//             });
+//         } else {
+//             slice.push(SliceOrIndex::Index(selections[dim]));
+//         }
+//     });
+//
+//     Selection::Hyperslab(Hyperslab::from(slice))
+// }

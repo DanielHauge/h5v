@@ -15,7 +15,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    data::{PreviewSelection, Previewable, SliceSelection},
+    data::{Plotable, PreviewSelection, SliceSelection},
     error::AppError,
     h5f::{Encoding, H5FNode, Node},
 };
@@ -108,7 +108,7 @@ fn render_chart_preview(
     }
 
     // make slice of state.selected_indexes[0..total_dims]
-    let data_preview = ds.preview(PreviewSelection {
+    let data_preview = ds.plot(PreviewSelection {
         x: state.selected_x_dim,
         index: state.selected_indexes[0..total_dims - 1].to_vec(),
         slice: SliceSelection::All,

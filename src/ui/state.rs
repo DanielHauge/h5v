@@ -73,6 +73,11 @@ pub struct AttributeCursor {
     pub attribute_view_selection: AttributeViewSelection,
 }
 
+pub struct MatrixViewState {
+    pub col_offset: usize,
+    pub row_offset: usize,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
@@ -85,10 +90,11 @@ pub struct AppState<'a> {
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
     pub selected_x_dim: usize,
-    // pub selected_y_dim: usize,
+    pub selected_y_dim: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
-    pub page: usize,
+    // pub page: usize,
     pub img_state: ImgState,
+    pub matrix_view_state: MatrixViewState,
 }
 
 type Result<T> = std::result::Result<T, AppError>;

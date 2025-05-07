@@ -40,7 +40,7 @@ pub enum ImageType {
 
 #[derive(Debug)]
 pub struct DatasetMeta {
-    shape: Vec<usize>,
+    pub shape: Vec<usize>,
     pub data_type: String,
     #[allow(dead_code)]
     data_bytesize: usize,

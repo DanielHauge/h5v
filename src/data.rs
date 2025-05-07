@@ -1,15 +1,35 @@
-use hdf5_metno::{Dataset, Error};
-use ndarray::s;
+use hdf5_metno::{Dataset, Error, H5Type, Selection};
+use ndarray::{s, Array1, Array2};
 
-pub trait Previewable {
-    fn preview(&self, selection: PreviewSelection) -> Result<DatasetPreview, Error>;
+pub trait Plotable {
+    fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error>;
 }
 
-pub struct DatasetPreview {
+pub trait MatrixTable {
+    fn matrix_table<T>(&self, selection: Selection) -> Result<DatasetTableData<T>, Error>
+    where
+        T: H5Type;
+}
+
+pub trait MatrixValues {
+    fn matrix_values<T>(&self, selection: Selection) -> Result<DatasetValuesData<T>, Error>
+    where
+        T: H5Type;
+}
+
+pub struct DatasetPlotingData {
     pub data: Vec<(f64, f64)>,
     pub length: usize,
     pub max: f64,
     pub min: f64,
+}
+
+pub struct DatasetTableData<T> {
+    pub data: Array2<T>,
+}
+
+pub struct DatasetValuesData<T> {
+    pub data: Array1<T>,
 }
 
 pub enum SliceSelection {
@@ -24,8 +44,30 @@ pub struct PreviewSelection {
     pub slice: SliceSelection,
 }
 
-impl Previewable for Dataset {
-    fn preview(&self, selection: PreviewSelection) -> Result<DatasetPreview, Error> {
+impl MatrixTable for Dataset {
+    fn matrix_table<T>(&self, selection: Selection) -> Result<DatasetTableData<T>, Error>
+    where
+        T: H5Type,
+    {
+        let gg = self.read_slice_2d(selection)?;
+        let result = DatasetTableData { data: gg };
+        Ok(result)
+    }
+}
+
+impl MatrixValues for Dataset {
+    fn matrix_values<T>(&self, selection: Selection) -> Result<DatasetValuesData<T>, Error>
+    where
+        T: H5Type,
+    {
+        let data = self.read_slice_1d(selection)?;
+        let result = DatasetValuesData { data };
+        Ok(result)
+    }
+}
+
+impl Plotable for Dataset {
+    fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error> {
         let slice = match selection.slice {
             // SliceSelection::FromTo(start, end) => start..end,
             SliceSelection::All => 0..self.shape()[selection.x],
@@ -118,7 +160,7 @@ impl Previewable for Dataset {
         let length = data.len();
         let max = data.iter().map(|(_, y)| *y).fold(f64::MIN, f64::max);
         let min = data.iter().map(|(_, y)| *y).fold(f64::MAX, f64::min);
-        Ok(DatasetPreview {
+        Ok(DatasetPlotingData {
             data,
             length,
             max,

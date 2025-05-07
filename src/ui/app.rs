@@ -29,7 +29,7 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{AppState, AttributeCursor, ContentShowMode, Focus, ImgState, Mode},
+    state::{AppState, AttributeCursor, ContentShowMode, Focus, ImgState, MatrixViewState, Mode},
     tree_view::render_tree,
 };
 
@@ -110,6 +110,11 @@ fn main_recover_loop(
         error: None,
     };
 
+    let matrix_view_state = MatrixViewState {
+        col_offset: 0,
+        row_offset: 0,
+    };
+
     let mut state = AppState {
         root: h5f.root.clone(),
         treeview: vec![],
@@ -125,10 +130,11 @@ fn main_recover_loop(
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
         selected_x_dim: 0,
-        // selected_y_dim: 0,
+        selected_y_dim: 1,
         selected_indexes: [0; 15],
         img_state,
-        page: 0,
+        matrix_view_state,
+        // page: 0,
     };
 
     state.compute_tree_view();
