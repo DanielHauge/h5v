@@ -99,4 +99,36 @@ impl AppState<'_> {
         self.indexed = true;
         Ok(())
     }
+
+    pub fn available_content_show_modes(&self) -> Vec<ContentShowMode> {
+        let current_node = &self.treeview[self.tree_view_cursor].node;
+        let available_content_modes = current_node.borrow().content_show_modes();
+        available_content_modes
+    }
+
+    pub fn swap_content_show_mode(&mut self) {
+        let available_content_modes = self.available_content_show_modes();
+        if available_content_modes.is_empty() {
+            return;
+        }
+        match self.content_mode {
+            ContentShowMode::Preview
+                if available_content_modes.contains(&ContentShowMode::Matrix) =>
+            {
+                self.content_mode = ContentShowMode::Matrix;
+            }
+            _ => {
+                self.content_mode = ContentShowMode::Preview;
+            }
+        }
+    }
+
+    pub fn content_show_mode_eval(&self) -> ContentShowMode {
+        let available_content_modes = self.available_content_show_modes();
+        if available_content_modes.contains(&self.content_mode) {
+            self.content_mode
+        } else {
+            available_content_modes[0]
+        }
+    }
 }

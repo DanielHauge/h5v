@@ -33,6 +33,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     }
                     (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(EventResult::Quit),
+                    (KeyCode::Tab, _) => {
+                        state.swap_content_show_mode();
+                        Ok(EventResult::Redraw)
+                    }
                     (KeyCode::Char('?'), _) => {
                         state.mode = Mode::Help;
                         Ok(EventResult::Redraw)

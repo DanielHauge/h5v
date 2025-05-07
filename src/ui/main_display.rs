@@ -12,6 +12,7 @@ use crate::{color_consts, error::AppError, h5f::H5FNode};
 
 use super::{
     attributes::render_info_attributes,
+    matrix::render_matrix,
     preview::render_preview,
     state::{AppState, ContentShowMode, Focus},
 };
@@ -42,8 +43,13 @@ pub fn render_main_display(
         .rendered_attributes
         .len();
 
-    let (attr_area, content_area) = split_main_display(*area, attr_count);
-    render_info_attributes(f, &attr_area, selected_node, state)?;
+    let content_area = if state.show_tree_view {
+        let (attr_area, content_area) = split_main_display(*area, attr_count);
+        render_info_attributes(f, &attr_area, selected_node, state)?;
+        content_area
+    } else {
+        *area
+    };
 
     let current_display_mode = &state.content_mode;
     let supported_display_modes = selected_node.borrow().content_show_modes();
@@ -91,7 +97,10 @@ pub fn render_main_display(
         .style(Style::default().bg(color_consts::BG_COLOR));
     f.render_widget(break_line, content_area);
 
-    render_preview(f, &content_area, selected_node, state)?;
+    match state.content_show_mode_eval() {
+        ContentShowMode::Preview => render_preview(f, &content_area, selected_node, state)?,
+        ContentShowMode::Matrix => render_matrix(f, &content_area, selected_node, state)?,
+    }
 
     Ok(())
 }

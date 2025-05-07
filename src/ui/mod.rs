@@ -5,6 +5,7 @@ pub mod help;
 pub mod image_preview;
 pub mod input;
 pub mod main_display;
+pub mod matrix;
 pub mod preview;
 pub mod state;
 pub mod tree_view;
