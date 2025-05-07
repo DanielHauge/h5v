@@ -1,4 +1,7 @@
-use hdf5_metno::{types::TypeDescriptor, Dataset};
+use hdf5_metno::{
+    types::{Reference, TypeDescriptor},
+    Dataset,
+};
 
 use crate::{
     h5f::{Encoding, ImageType, InterlaceMode},
@@ -32,12 +35,9 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
         TypeDescriptor::VarLenArray(_) => "array".to_string(),
         TypeDescriptor::VarLenAscii => "ascii".to_string(),
         TypeDescriptor::VarLenUnicode => "unicode".to_string(),
-        TypeDescriptor::Reference(hdf5_metno::types::Reference::Object) => {
-            "object-reference".to_string()
-        }
-        TypeDescriptor::Reference(hdf5_metno::types::Reference::Region) => {
-            "region-reference".to_string()
-        }
+        TypeDescriptor::Reference(Reference::Object) => "object-reference".to_string(),
+        TypeDescriptor::Reference(Reference::Region) => "region-reference".to_string(),
+        TypeDescriptor::Reference(Reference::Std) => "std-reference".to_string(),
     }
 }
 
@@ -68,10 +68,7 @@ pub fn is_image(d: &Dataset) -> Option<ImageType> {
         Err(_) => return None,
     };
 
-    let interlace_mode = match d.attr("INTERLACE_MODE") {
-        Ok(interlace_mode) => Some(interlace_mode),
-        Err(_) => None,
-    };
+    let interlace_mode = d.attr("INTERLACE_MODE").ok();
 
     let interlace_mode_read = match interlace_mode {
         Some(interlace_mode) => match sprint_attribute(&interlace_mode) {

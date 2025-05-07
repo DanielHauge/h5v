@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use hdf5_metno::{ByteReader, Dataset, Error};
+use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
 use ndarray::{s, Array2, Array3};
 use ratatui::{layout::Rect, Frame};

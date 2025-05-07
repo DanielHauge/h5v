@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
     text::Span,
-    widgets::{block::Title, Block, Borders},
+    widgets::{block::Title, Block},
     Frame,
 };
 
@@ -14,7 +14,7 @@ use super::{
     attributes::render_info_attributes,
     matrix::render_matrix,
     preview::render_preview,
-    state::{AppState, ContentShowMode, Focus},
+    state::{AppState, ContentShowMode},
 };
 
 fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {

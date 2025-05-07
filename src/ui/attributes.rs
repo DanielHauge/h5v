@@ -1,6 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-use image::math;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
     style::{Color, Style, Stylize},

@@ -1,7 +1,7 @@
 use hdf5_metno::{Error, Hyperslab, Selection, SliceOrIndex};
 use ratatui::{
     layout::{Constraint, Margin, Offset, Rect},
-    style::{Style, Styled, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -19,8 +19,6 @@ pub fn render_dim_selector(
 ) -> Result<(), Error> {
     let x_selection = state.selected_x_dim;
     let index_selection = state.selected_indexes;
-    let height = area.height;
-    let width = area.width;
     let block = Block::default()
         .title("Slice selection")
         .borders(Borders::ALL)

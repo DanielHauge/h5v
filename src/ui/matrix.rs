@@ -1,32 +1,16 @@
-use std::{cell::RefCell, f64, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{
-    types::{VarLenAscii, VarLenUnicode},
-    Error,
-};
-use ratatui::{
-    layout::{Constraint, Layout, Offset, Rect},
-    style::Style,
-    symbols,
-    text::{Span, Text},
-    widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
-    Frame,
-};
+use ratatui::{layout::Rect, widgets::Paragraph, Frame};
 
-use crate::{
-    color_consts,
-    data::{PreviewSelection, Previewable, SliceSelection},
-    error::AppError,
-    h5f::{Encoding, H5FNode, Node},
-};
+use crate::{error::AppError, h5f::H5FNode};
 
-use super::{dims::render_dim_selector, image_preview::render_img, state::AppState};
+use super::state::AppState;
 
 pub fn render_matrix(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
-    state: &mut AppState,
+    _selected_node: &Rc<RefCell<H5FNode>>,
+    _state: &mut AppState,
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
