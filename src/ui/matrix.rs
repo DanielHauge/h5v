@@ -127,6 +127,14 @@ pub fn render_matrix(
     } else {
         let data = ds.matrix_table::<f64>(slice_selection)?;
 
+        let mut col_constraint = Vec::with_capacity((cols + 1) as usize);
+        col_constraint.push(Constraint::Length(15));
+        (0..cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
+        let col_header_areas = Layout::horizontal(col_constraint).split(rows_areas[0]);
+        for col in 1..cols {
+            let col_area = col_header_areas[col as usize];
+        }
+
         for i in 0..rows {
             let mut col_constraint = Vec::with_capacity((cols + 1) as usize);
             col_constraint.push(Constraint::Length(15));
