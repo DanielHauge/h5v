@@ -129,16 +129,14 @@ pub fn render_matrix(
 
         for i in 0..rows {
             let mut col_constraint = Vec::with_capacity((cols + 1) as usize);
-            (0..cols + 1).for_each(|_| col_constraint.push(Constraint::Min(26)));
+            col_constraint.push(Constraint::Length(15));
+            (0..cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
             let row_area = rows_areas[i as usize];
             let col_areas = Layout::horizontal(col_constraint).split(row_area);
             let idx_area = col_areas[0];
-            let idx_bg_color = if i % 2 == 0 {
-                color_consts::BG_VAL1_COLOR
-            } else {
-                color_consts::BG_VAL2_COLOR
-            };
-            let idx_line = Line::from(format!("{i}")).left_aligned();
+
+            let idx = state.matrix_view_state.row_offset + i as usize;
+            let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);
             for j in 0..cols {
                 let val_area = col_areas[(j + 1) as usize];
@@ -152,9 +150,10 @@ pub fn render_matrix(
                 let val = data.data.get(idx);
 
                 match val {
-                    Some(v) => {
-                        f.render_widget(Line::from(format!("{v}")).bg(val_bg_color), val_area)
-                    }
+                    Some(v) => f.render_widget(
+                        Line::from(format!("{v}")).bg(val_bg_color).centered(),
+                        val_area,
+                    ),
                     None => f.render_widget("None", val_area),
                 }
             }

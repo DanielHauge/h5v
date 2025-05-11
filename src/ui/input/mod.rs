@@ -1,8 +1,9 @@
 use attributes::handle_normal_attributes;
+use hdf5_metno::Dataset;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
-use crate::error::AppError;
+use crate::{error::AppError, h5f::Node};
 
 use super::state::{AppState, Focus, Mode};
 
@@ -62,6 +63,71 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         state.show_tree_view = !state.show_tree_view;
 
                         Ok(EventResult::Redraw)
+                    }
+                    (KeyCode::Up, KeyModifiers::CONTROL) => {
+                        // TODO: Clamp
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if state.matrix_view_state.row_offset == 0 {
+                            return Ok(EventResult::Continue);
+                        }
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                            state.matrix_view_state.row_offset =
+                                (state.matrix_view_state.row_offset - 1).min(row_selected_shape);
+                            Ok(EventResult::Redraw)
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
+                    }
+                    (KeyCode::Down, KeyModifiers::CONTROL) => {
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                            state.matrix_view_state.row_offset =
+                                (state.matrix_view_state.row_offset + 1).min(row_selected_shape);
+                            Ok(EventResult::Redraw)
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
+                    }
+                    (KeyCode::Right, KeyModifiers::CONTROL) => {
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            if dsattr.shape.len() > state.selected_y_dim {
+                                let col_selected_shape = dsattr.shape[state.selected_y_dim];
+                                state.matrix_view_state.col_offset =
+                                    (state.matrix_view_state.col_offset + 1)
+                                        .min(col_selected_shape);
+                                Ok(EventResult::Redraw)
+                            } else {
+                                Ok(EventResult::Continue)
+                            }
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
+                    }
+                    (KeyCode::Left, KeyModifiers::CONTROL) => {
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if state.matrix_view_state.col_offset == 0 {
+                            return Ok(EventResult::Continue);
+                        }
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            if dsattr.shape.len() > state.selected_y_dim {
+                                let col_selected_shape = dsattr.shape[state.selected_y_dim];
+                                state.matrix_view_state.col_offset =
+                                    (state.matrix_view_state.col_offset - 1)
+                                        .min(col_selected_shape);
+                                Ok(EventResult::Redraw)
+                            } else {
+                                Ok(EventResult::Continue)
+                            }
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
                     }
 
                     _ => match state.focus {
