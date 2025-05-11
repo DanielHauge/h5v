@@ -83,7 +83,7 @@ fn render_chart_preview(
     let chart_area = if x_selectable_dims.len() > 1 {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], state, &shape)?;
+        render_dim_selector(f, &areas_split[0], state, &shape, false)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,

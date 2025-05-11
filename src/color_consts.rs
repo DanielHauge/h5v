@@ -22,6 +22,10 @@ pub const HIGHLIGHT_BG_COLOR: Color = Color::Rgb(55, 62, 70);
 
 pub const FOCUS_BG_COLOR: Color = Color::Rgb(41, 42, 45);
 pub const BG_COLOR: Color = Color::Rgb(61, 62, 65);
+pub const BG_VAL1_COLOR: Color = Color::Rgb(41, 42, 45);
+pub const BG_VAL2_COLOR: Color = Color::Rgb(51, 52, 55);
+pub const BG_VAL3_COLOR: Color = Color::Rgb(45, 46, 50);
+pub const BG_VAL4_COLOR: Color = Color::Rgb(55, 56, 60);
 pub const BREAK_COLOR: Color = Color::Rgb(83, 86, 89);
 
 pub const EQUAL_SIGN_COLOR: Color = Color::Rgb(66, 165, 245);

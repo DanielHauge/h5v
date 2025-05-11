@@ -16,8 +16,10 @@ pub fn render_dim_selector(
     area: &Rect,
     state: &mut AppState,
     shape: &[usize],
+    row_columns: bool,
 ) -> Result<(), Error> {
     let x_selection = state.selected_x_dim;
+    let y_selection = state.selected_y_dim;
     let index_selection = state.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
@@ -40,7 +42,11 @@ pub fn render_dim_selector(
     };
     // Print Shape: and View: on each line
     let shape_line = Line::from("Shape: ").alignment(ratatui::layout::Alignment::Right);
-    let view_line = Line::from(" y = ").alignment(ratatui::layout::Alignment::Right);
+    let view_line = if !row_columns {
+        Line::from(" y = ").alignment(ratatui::layout::Alignment::Right)
+    } else {
+        Line::from(" view = ").alignment(ratatui::layout::Alignment::Right)
+    };
     f.render_widget(shape_line, labels_area);
     f.render_widget(view_line, labels_area.offset(Offset { x: 0, y: 1 }));
 
@@ -52,7 +58,7 @@ pub fn render_dim_selector(
         .constraints(
             bounds
                 .iter()
-                .map(|&s| Constraint::Length(s))
+                .map(|&s| Constraint::Length(s.max(3)))
                 .collect::<Vec<_>>(),
         )
         .split_with_spacers(dims_area);
@@ -72,8 +78,18 @@ pub fn render_dim_selector(
     for (i, dim) in shape_strings.iter().enumerate() {
         let dim_line = Line::from(dim.as_str()).alignment(ratatui::layout::Alignment::Left);
         f.render_widget(dim_line, segments[i]);
-        if i == x_selection {
-            let x_span = Span::from("X").style(
+        if i == y_selection && row_columns {
+            let y_span = Span::from("Col").style(
+                Style::default()
+                    .bold()
+                    .underlined()
+                    .fg(color_consts::SELECTED_DIM),
+            );
+            let y_line = Line::from(y_span).alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(y_line, segments[i].offset(Offset { x: 0, y: 1 }));
+        } else if i == x_selection {
+            let x_text = if !row_columns { "X" } else { "Row" };
+            let x_span = Span::from(x_text).style(
                 Style::default()
                     .bold()
                     .underlined()
@@ -115,7 +131,7 @@ impl HasMatrixSelection for AppState<'_> {
         } else {
             let selections = self.selected_indexes;
             (0..total_dims).for_each(|dim| {
-                if self.selected_x_dim == dim {
+                if self.selected_y_dim == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self.matrix_view_state.col_offset.min(shape[dim] - 1),
                         step: 1,
@@ -123,7 +139,7 @@ impl HasMatrixSelection for AppState<'_> {
                             .min(shape[dim]),
                         block: 1,
                     });
-                } else if self.selected_y_dim == dim {
+                } else if self.selected_x_dim == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self.matrix_view_state.row_offset.min(shape[dim] - 1),
                         step: 1,
