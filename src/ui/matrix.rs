@@ -1,15 +1,9 @@
-use core::slice;
 use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
-    layout::{
-        Alignment::{Center, Right},
-        Constraint, Layout, Rect,
-    },
+    layout::{Alignment::Center, Constraint, Layout, Rect},
     style::Stylize,
-    symbols::shade,
-    text::{Line, Span, Text},
-    widgets::Row,
+    text::Line,
     Frame,
 };
 
@@ -85,9 +79,13 @@ pub fn render_matrix(
         .get(state.selected_x_dim)
         .map(|x| *x as u16)
         .unwrap_or(0);
-    let cols = (width / 12).min(x_shape);
+    let max_cols = (width / 24).min(x_shape);
     let rows = heigh.min(y_scale);
-    let matrix_selection = MatrixSelection { cols, rows };
+    state.matrix_view_state.rows_currently_available = rows as usize;
+    let matrix_selection = MatrixSelection {
+        cols: max_cols,
+        rows,
+    };
     let slice_selection = state.get_matrix_selection(matrix_selection, &attr.shape);
 
     let mut rows_area_constraints = Vec::with_capacity(rows as usize);
@@ -99,7 +97,9 @@ pub fn render_matrix(
 
     if shape_len == 1 {
         let data = ds.matrix_values::<f64>(slice_selection)?;
-        let mut i = state.matrix_view_state.row_offset;
+        let mut i = state.matrix_view_state.row_offset.min(
+            attr.shape[state.selected_x_dim] - state.matrix_view_state.rows_currently_available,
+        );
         for (row_idx, d) in data.data.iter().enumerate() {
             let row_area = rows_areas[row_idx];
             let areas_split =
@@ -127,26 +127,29 @@ pub fn render_matrix(
     } else {
         let data = ds.matrix_table::<f64>(slice_selection)?;
 
-        let mut col_constraint = Vec::with_capacity((cols + 1) as usize);
+        let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
         col_constraint.push(Constraint::Length(15));
-        (0..cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
+        (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
         let col_header_areas = Layout::horizontal(col_constraint).split(rows_areas[0]);
-        for col in 1..cols {
+        for col in 1..max_cols {
             let col_area = col_header_areas[col as usize];
         }
 
         for i in 0..rows {
-            let mut col_constraint = Vec::with_capacity((cols + 1) as usize);
+            let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
             col_constraint.push(Constraint::Length(15));
-            (0..cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
+
+            (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
             let row_area = rows_areas[i as usize];
             let col_areas = Layout::horizontal(col_constraint).split(row_area);
             let idx_area = col_areas[0];
 
-            let idx = state.matrix_view_state.row_offset + i as usize;
+            let idx = state.matrix_view_state.row_offset.min(
+                attr.shape[state.selected_x_dim] - state.matrix_view_state.rows_currently_available,
+            ) + i as usize;
             let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);
-            for j in 0..cols {
+            for j in 0..max_cols {
                 let val_area = col_areas[(j + 1) as usize];
                 let val_bg_color = match (i % 2 == 0, j % 2 == 0) {
                     (true, true) => color_consts::BG_VAL3_COLOR,

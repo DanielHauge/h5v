@@ -17,6 +17,10 @@ pub trait MatrixValues {
         T: H5Type;
 }
 
+pub trait StringLengths {
+    fn string_lengths(&self) -> Vec<usize>;
+}
+
 pub struct DatasetPlotingData {
     pub data: Vec<(f64, f64)>,
     pub length: usize,
@@ -26,6 +30,29 @@ pub struct DatasetPlotingData {
 
 pub struct DatasetTableData<T> {
     pub data: Array2<T>,
+}
+
+impl StringLengths for DatasetTableData<String> {
+    fn string_lengths(&self) -> Vec<usize> {
+        let mut lengths = Vec::with_capacity(self.data.shape()[0]);
+        (0..self.data.shape()[0]).for_each(|i| {
+            lengths.push(0);
+            for j in 0..self.data.shape()[1] - 1 {
+                let len = self.data[[i, j]].len();
+                if lengths[i] + 2 < len {
+                    lengths[i] = len + 2;
+                }
+            }
+        });
+        lengths
+    }
+}
+
+impl From<DatasetTableData<f64>> for DatasetTableData<String> {
+    fn from(val: DatasetTableData<f64>) -> Self {
+        let data = val.data.mapv(|x| format!("{}", x));
+        DatasetTableData { data }
+    }
 }
 
 pub struct DatasetValuesData<T> {

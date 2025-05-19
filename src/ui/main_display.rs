@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
     text::Span,
-    widgets::{block::Title, Block},
+    widgets::{block::Title, Block, Paragraph, Wrap},
     Frame,
 };
 
@@ -54,6 +54,16 @@ pub fn render_main_display(
     let current_display_mode = &state.content_mode;
     let supported_display_modes = selected_node.borrow().content_show_modes();
     if supported_display_modes.is_empty() {
+        let no_data_message = "Group";
+        let paragraph = Paragraph::new(no_data_message)
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .bg(color_consts::BG_COLOR)
+                    .fg(color_consts::TITLE),
+            )
+            .wrap(Wrap { trim: true });
+        f.render_widget(paragraph, content_area);
         return Ok(());
     }
     let is_supported = supported_display_modes.contains(current_display_mode);

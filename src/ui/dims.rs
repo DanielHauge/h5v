@@ -123,7 +123,10 @@ impl HasMatrixSelection for AppState<'_> {
         let total_dims = shape.len();
         if total_dims == 1 {
             slice.push(SliceOrIndex::SliceTo {
-                start: self.matrix_view_state.row_offset.min(shape[0] - 1),
+                start: self
+                    .matrix_view_state
+                    .row_offset
+                    .min(shape[0] - self.matrix_view_state.rows_currently_available),
                 step: 1,
                 end: (self.matrix_view_state.row_offset + matrix_view.rows as usize).min(shape[0]),
                 block: 1,
@@ -141,7 +144,10 @@ impl HasMatrixSelection for AppState<'_> {
                     });
                 } else if self.selected_x_dim == dim {
                     slice.push(SliceOrIndex::SliceTo {
-                        start: self.matrix_view_state.row_offset.min(shape[dim] - 1),
+                        start: self
+                            .matrix_view_state
+                            .row_offset
+                            .min(shape[dim] - self.matrix_view_state.rows_currently_available),
                         step: 1,
                         end: (self.matrix_view_state.row_offset + matrix_view.rows as usize)
                             .min(shape[dim]),

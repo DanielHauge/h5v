@@ -21,10 +21,6 @@ pub fn handle_normal_tree_event(
                         Ok(EventResult::Continue)
                     }
                 }
-                (KeyCode::PageUp, _) => {
-                    state.tree_view_cursor = max(state.tree_view_cursor as isize - 10, 0) as usize;
-                    Ok(EventResult::Redraw)
-                }
                 (KeyCode::Char('u'), _) => {
                     state.tree_view_cursor = max(state.tree_view_cursor as isize - 10, 0) as usize;
                     Ok(EventResult::Redraw)
@@ -136,11 +132,6 @@ pub fn handle_normal_tree_event(
                     } else {
                         Ok(EventResult::Continue)
                     }
-                }
-                (KeyCode::PageDown, _) => {
-                    state.tree_view_cursor =
-                        min(state.tree_view_cursor + 10, state.treeview.len() - 1);
-                    Ok(EventResult::Redraw)
                 }
                 (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
                     state.tree_view_cursor =

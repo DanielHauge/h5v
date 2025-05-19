@@ -74,7 +74,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         if let Node::Dataset(_, dsattr) = current_node {
                             let row_selected_shape = dsattr.shape[state.selected_x_dim];
                             state.matrix_view_state.row_offset =
-                                (state.matrix_view_state.row_offset - 1).min(row_selected_shape);
+                                (state.matrix_view_state.row_offset - 1).min(
+                                    row_selected_shape
+                                        - state.matrix_view_state.rows_currently_available,
+                                );
                             Ok(EventResult::Redraw)
                         } else {
                             Ok(EventResult::Continue)
@@ -86,7 +89,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         if let Node::Dataset(_, dsattr) = current_node {
                             let row_selected_shape = dsattr.shape[state.selected_x_dim];
                             state.matrix_view_state.row_offset =
-                                (state.matrix_view_state.row_offset + 1).min(row_selected_shape);
+                                (state.matrix_view_state.row_offset + 1).min(
+                                    row_selected_shape
+                                        - state.matrix_view_state.rows_currently_available,
+                                );
                             Ok(EventResult::Redraw)
                         } else {
                             Ok(EventResult::Continue)
@@ -129,7 +135,43 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             Ok(EventResult::Continue)
                         }
                     }
-
+                    (KeyCode::PageDown, _) => {
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                            state.matrix_view_state.row_offset =
+                                (state.matrix_view_state.row_offset + 20).min(
+                                    row_selected_shape
+                                        - state.matrix_view_state.rows_currently_available,
+                                );
+                            Ok(EventResult::Redraw)
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
+                    }
+                    (KeyCode::PageUp, _) => {
+                        let current_node =
+                            &state.treeview[state.tree_view_cursor].node.borrow().node;
+                        if state.matrix_view_state.row_offset == 0 {
+                            return Ok(EventResult::Continue);
+                        }
+                        if let Node::Dataset(_, dsattr) = current_node {
+                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                            if state.matrix_view_state.row_offset < 20 {
+                                state.matrix_view_state.row_offset = 0;
+                            } else {
+                                state.matrix_view_state.row_offset =
+                                    (state.matrix_view_state.row_offset - 20).min(
+                                        row_selected_shape
+                                            - state.matrix_view_state.rows_currently_available,
+                                    );
+                            }
+                            Ok(EventResult::Redraw)
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
+                    }
                     _ => match state.focus {
                         Focus::Tree => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),
