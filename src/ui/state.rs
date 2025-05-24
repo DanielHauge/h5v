@@ -77,7 +77,7 @@ pub struct MatrixViewState {
     pub col_offset: usize,
     pub row_offset: usize,
     pub rows_currently_available: usize,
-    pub cols_shown: usize,
+    pub cols_currently_available: usize,
 }
 
 pub struct AppState<'a> {

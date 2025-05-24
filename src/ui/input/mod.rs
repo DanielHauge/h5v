@@ -105,8 +105,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             if dsattr.shape.len() > state.selected_y_dim {
                                 let col_selected_shape = dsattr.shape[state.selected_y_dim];
                                 state.matrix_view_state.col_offset =
-                                    (state.matrix_view_state.col_offset + 1)
-                                        .min(col_selected_shape);
+                                    (state.matrix_view_state.col_offset + 1).min(
+                                        col_selected_shape
+                                            - state.matrix_view_state.cols_currently_available,
+                                    );
                                 Ok(EventResult::Redraw)
                             } else {
                                 Ok(EventResult::Continue)
@@ -125,8 +127,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             if dsattr.shape.len() > state.selected_y_dim {
                                 let col_selected_shape = dsattr.shape[state.selected_y_dim];
                                 state.matrix_view_state.col_offset =
-                                    (state.matrix_view_state.col_offset - 1)
-                                        .min(col_selected_shape);
+                                    (state.matrix_view_state.col_offset - 1).min(
+                                        col_selected_shape
+                                            - state.matrix_view_state.cols_currently_available,
+                                    );
                                 Ok(EventResult::Redraw)
                             } else {
                                 Ok(EventResult::Continue)

@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
-    layout::{Alignment::Center, Constraint, Layout, Rect},
+    layout::{Alignment::Center, Constraint, Layout, Offset, Rect},
     style::Stylize,
     text::Line,
     Frame,
@@ -82,6 +82,7 @@ pub fn render_matrix(
     let max_cols = (width / 24).min(x_shape);
     let rows = heigh.min(y_scale);
     state.matrix_view_state.rows_currently_available = rows as usize;
+    state.matrix_view_state.cols_currently_available = max_cols as usize;
     let matrix_selection = MatrixSelection {
         cols: max_cols,
         rows,
@@ -106,11 +107,6 @@ pub fn render_matrix(
                 Layout::horizontal(vec![Constraint::Max(15), Constraint::Min(16)]).split(row_area);
             let idx_area = areas_split[0];
             let value_area = areas_split[1];
-            let idx_bg_color = if row_idx % 2 == 0 {
-                color_consts::BG_VAL1_COLOR
-            } else {
-                color_consts::BG_VAL2_COLOR
-            };
             let val_bg_color = if row_idx % 2 == 0 {
                 color_consts::BG_VAL3_COLOR
             } else {
@@ -131,8 +127,20 @@ pub fn render_matrix(
         col_constraint.push(Constraint::Length(15));
         (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
         let col_header_areas = Layout::horizontal(col_constraint).split(rows_areas[0]);
-        for col in 1..max_cols {
-            let col_area = col_header_areas[col as usize];
+
+        for col in 0..max_cols {
+            let col_area = col_header_areas[(col + 1) as usize];
+            let col_idx = state
+                .matrix_view_state
+                .col_offset
+                .min(attr.shape[state.selected_y_dim] - max_cols as usize)
+                + col as usize;
+            f.render_widget(
+                Line::from(format!("{col_idx}"))
+                    // .bg(color_consts::NUMBER_COLOR)
+                    .centered(),
+                col_area.offset(Offset { x: 0, y: -1 }),
+            );
         }
 
         for i in 0..rows {

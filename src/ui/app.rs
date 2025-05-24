@@ -114,7 +114,7 @@ fn main_recover_loop(
         col_offset: 0,
         row_offset: 0,
         rows_currently_available: 0,
-        cols_shown: 0,
+        cols_currently_available: 0,
     };
 
     let mut state = AppState {
