@@ -20,6 +20,8 @@ pub enum Encoding {
     LittleEndian,
     UTF8,
     Ascii,
+    UTF8Fixed(usize),  // Fixed length UTF-8 strings
+    AsciiFixed(usize), // Fixed length ASCII strings
 }
 
 #[derive(Debug, Clone)]

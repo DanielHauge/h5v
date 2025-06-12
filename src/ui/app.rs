@@ -6,6 +6,7 @@ use std::{
     thread,
 };
 
+use cli_clipboard::{ClipboardContext, ClipboardProvider};
 use ratatui::{
     crossterm::{
         event::{self},
@@ -71,6 +72,10 @@ pub fn init(filename: String) -> Result<()> {
                     }
                 },
                 AppError::ChannelError(c) => last_message = Some(format!("Channel Error: - {}", c)),
+                AppError::ClipboardError(msg) => {
+                    last_message = Some(format!("Clipboard Error: - {}", msg));
+                    break;
+                }
             },
         }
     }
@@ -116,6 +121,7 @@ fn main_recover_loop(
         rows_currently_available: 0,
         cols_currently_available: 0,
     };
+    let clipboard = ClipboardContext::new().expect("Failed to create clipboard context");
 
     let mut state = AppState {
         root: h5f.root.clone(),
@@ -126,7 +132,9 @@ fn main_recover_loop(
             attribute_view_selection: super::state::AttributeViewSelection::Name,
         },
         focus: Focus::Tree,
+        clipboard,
         mode: Mode::Normal,
+        copying: false,
         indexed: false,
         searcher,
         show_tree_view: true,
@@ -177,6 +185,18 @@ fn main_recover_loop(
                 EventResult::Quit => break,
                 EventResult::Continue => {}
                 EventResult::Redraw => {
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                EventResult::Copying => {
+                    state.copying = true;
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                    // sleep for 50 ms
+                    state.copying = false;
+                    thread::sleep(std::time::Duration::from_millis(100));
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;

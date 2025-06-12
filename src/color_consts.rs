@@ -19,6 +19,8 @@ pub const VARIABLE_BLUE: Color = Color::Rgb(136, 200, 230);
 pub const VARIABLE_BLUE_BUILTIN: Color = Color::Rgb(66, 165, 245);
 pub const BUILT_IN_VALUE_COLOR: Color = Color::Rgb(222, 222, 222);
 pub const HIGHLIGHT_BG_COLOR: Color = Color::Rgb(55, 62, 70);
+// Slightly orangy
+pub const HIGHLIGHT_BG_COLOR_COPY: Color = Color::Rgb(255, 153, 0);
 
 pub const FOCUS_BG_COLOR: Color = Color::Rgb(41, 42, 45);
 pub const BG_COLOR: Color = Color::Rgb(61, 62, 65);

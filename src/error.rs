@@ -5,6 +5,7 @@ pub enum AppError {
     Io(std::io::Error),
     Hdf5(hdf5_metno::Error),
     ChannelError(String),
+    ClipboardError(String),
 }
 
 impl Display for AppError {
@@ -13,6 +14,7 @@ impl Display for AppError {
             AppError::Io(err) => write!(f, "IO Error: {}", err),
             AppError::Hdf5(err) => write!(f, "HDF5 Error: {}", err),
             AppError::ChannelError(c) => write!(f, "Channel Error: {}", c),
+            AppError::ClipboardError(msg) => write!(f, "Clipboard Error: {}", msg),
         }
     }
 }

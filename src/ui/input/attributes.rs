@@ -1,3 +1,4 @@
+use cli_clipboard::ClipboardProvider;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
@@ -71,6 +72,31 @@ pub fn handle_normal_attributes(
                         Value => {}
                     }
                     Ok(EventResult::Redraw)
+                }
+                (KeyCode::Char('y'), _) => {
+                    let mut selected_node =
+                        state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let attributes = selected_node.read_attributes()?;
+                    let selected_attribute = attributes
+                        .rendered_attributes
+                        .get(state.attributes_view_cursor.attribute_index);
+
+                    if let Some(attribute) = selected_attribute {
+                        let value_string = attribute.1.to_string();
+                        match state.clipboard.set_contents(value_string) {
+                            Ok(()) => Ok(EventResult::Copying),
+                            Err(e) => {
+                                return Err(AppError::ClipboardError(format!(
+                                    "Failed to copy attribute value to clipboard: {}",
+                                    e
+                                )));
+                            }
+                        }
+                    } else {
+                        return Err(AppError::ClipboardError(
+                            "No attribute selected to copy".to_string(),
+                        ));
+                    }
                 }
 
                 _ => Ok(EventResult::Continue),

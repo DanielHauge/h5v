@@ -23,16 +23,19 @@ with h5py.File(file_name, "w") as f:
     f["attributes_ds"].attrs["description"] = "This is a random dataset"
     f["attributes_ds"].attrs["units"] = "arbitrary units"
     f["attributes_ds"].attrs["author"] = "Your Name"
+
+    # Create string dataset from unicode string, not attribute
+    my_unicode_string = "你好，世界! 🌍"
+    dt = h5py.string_dtype(encoding="utf-8")
+    f.create_dataset("unicode_string", data=my_unicode_string, dtype=dt)
+
     # also some arrays
     f["attributes_ds"].attrs["array"] = np.array([1, 2, 3, 4, 5])
     f["attributes_ds"].attrs["array2"] = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-    f["attributes_ds"].attrs["array3"] = np.array(
-        [True, False, True, False, True])
+    f["attributes_ds"].attrs["array3"] = np.array([True, False, True, False, True])
     f["attributes_ds"].attrs["array4"] = np.array([b"hello", b"world"])
-    f["attributes_ds"].attrs["array5"] = np.array(
-        [b"hello", b"world"], dtype="S")
-    f["attributes_ds"].attrs["array6"] = np.array(
-        [b"hello", b"world"], dtype="|S5")
+    f["attributes_ds"].attrs["array5"] = np.array([b"hello", b"world"], dtype="S")
+    f["attributes_ds"].attrs["array6"] = np.array([b"hello", b"world"], dtype="|S5")
     f["attributes_ds"].attrs["float"] = 3.14
     f["attributes_ds"].attrs["float_array"] = np.array([3.14, 2.71, 1.41])
     f["attributes_ds"].attrs["int"] = 42
@@ -78,8 +81,7 @@ with h5py.File(file_name, "w") as f:
     x = np.random.randint(0, 4294967295, size=(1, 100), dtype=np.uint32)
     group_all.create_dataset("uint32_dataset", data=x)
     # u64
-    x = np.random.randint(0, 18446744073709551615,
-                          size=(1, 100), dtype=np.uint64)
+    x = np.random.randint(0, 18446744073709551615, size=(1, 100), dtype=np.uint64)
     group_all.create_dataset("uint64_dataset", data=x)
     # i8
     x = np.random.randint(-128, 127, size=(1, 100), dtype=np.int8)
@@ -88,8 +90,7 @@ with h5py.File(file_name, "w") as f:
     x = np.random.randint(-32768, 32767, size=(1, 100), dtype=np.int16)
     group_all.create_dataset("int16_dataset", data=x)
     # i32
-    x = np.random.randint(-2147483648, 2147483647,
-                          size=(1, 100), dtype=np.int32)
+    x = np.random.randint(-2147483648, 2147483647, size=(1, 100), dtype=np.int32)
     group_all.create_dataset("int32_dataset", data=x)
     # i64
     x = np.random.randint(
@@ -168,8 +169,7 @@ with h5py.File(file_name, "w") as f:
     # also an ascii string dataset
     f.create_dataset("ascii_string_dataset", data=b"Hello ascii")
     # also a unicode string dataset
-    f.create_dataset("unicode_string_dataset",
-                     data="Hello utf8".encode("utf-8"))
+    f.create_dataset("unicode_string_dataset", data="Hello utf8".encode("utf-8"))
 
     f.create_dataset("bytes_dataset", data=b"Hello bytes")
 
@@ -225,13 +225,11 @@ with h5py.File(file_name, "w") as f:
     # max 256 colors, so 256*3 = 768 entries
     palette = img_indexed.getpalette()[:768]
 
-    palette_np = np.array(
-        palette, dtype=np.uint8).reshape(-1, 3)  # shape (N, 3)
+    palette_np = np.array(palette, dtype=np.uint8).reshape(-1, 3)  # shape (N, 3)
     # save the palette as a dataset
     palette_ds = f.create_dataset("palette", data=palette_np, dtype=np.uint8)
     # save the image as a dataset
-    image_indexed_ds = f.create_dataset(
-        "image_indexed", data=img_indexed_array)
+    image_indexed_ds = f.create_dataset("image_indexed", data=img_indexed_array)
     image_indexed_ds.attrs["CLASS"] = "IMAGE"
     image_indexed_ds.attrs["IMAGE_SUBCLASS"] = "IMAGE_INDEXED"
     image_indexed_ds.attrs["IMAGE_VERSION"] = "1.2"

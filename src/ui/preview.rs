@@ -1,7 +1,7 @@
 use std::{cell::RefCell, f64, rc::Rc};
 
 use hdf5_metno::{
-    types::{VarLenAscii, VarLenUnicode},
+    types::{FixedAscii, FixedUnicode, VarLenAscii, VarLenUnicode},
     Error,
 };
 use ratatui::{
@@ -13,14 +13,13 @@ use ratatui::{
     Frame,
 };
 
+use super::{dims::render_dim_selector, image_preview::render_img, state::AppState};
 use crate::{
     color_consts,
     data::{Plotable, PreviewSelection, SliceSelection},
     error::AppError,
     h5f::{Encoding, H5FNode, Node},
 };
-
-use super::{dims::render_dim_selector, image_preview::render_img, state::AppState};
 
 pub fn render_preview(
     f: &mut Frame,
@@ -193,6 +192,22 @@ fn render_unsupported_rendering(
     Ok(())
 }
 
+fn render_string<T: ToString>(f: &mut Frame, area: &Rect, string: T) {
+    let string = string.to_string();
+    let string = string.lines().collect::<Vec<_>>().join("\n");
+    let string = Span::styled(string, color_consts::COLOR_WHITE);
+    let string = Text::from(string);
+    let string = Paragraph::new(string).wrap(Wrap { trim: true });
+    f.render_widget(string, *area);
+}
+
+fn render_error<T: ToString>(f: &mut Frame, area: &Rect, error: T) {
+    f.render_widget(
+        Paragraph::new(error.to_string()).style(Style::default().fg(color_consts::ERROR_COLOR)),
+        *area,
+    );
+}
+
 fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), AppError> {
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
@@ -207,7 +222,6 @@ fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Re
                 selected_node,
                 "LittleEndian not supported for string data",
             )?;
-            return Ok(());
         }
         Encoding::Unknown => {
             render_unsupported_rendering(
@@ -216,41 +230,22 @@ fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Re
                 selected_node,
                 "Unknown encoding not supported for string data",
             )?;
-            return Ok(());
         }
         Encoding::Ascii => match dataset.read_scalar::<VarLenAscii>() {
-            Ok(x) => {
-                let string = x.to_string();
-                let string = string.lines().collect::<Vec<_>>().join("\n");
-                let string = Span::styled(string, color_consts::COLOR_WHITE);
-                let string = Text::from(string);
-                let string = Paragraph::new(string).wrap(Wrap { trim: true });
-                f.render_widget(string, *area);
-            }
-            Err(e) => {
-                f.render_widget(
-                    Paragraph::new(format!("Error: {}", e))
-                        .style(Style::default().fg(color_consts::ERROR_COLOR)),
-                    *area,
-                );
-            }
+            Ok(x) => render_string(f, area, x),
+            Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
         Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
-            Ok(x) => {
-                let string = x.to_string();
-                let string = string.lines().collect::<Vec<_>>().join("\n");
-                let string = Span::styled(string, color_consts::COLOR_WHITE);
-                let string = Text::from(string);
-                let string = Paragraph::new(string).wrap(Wrap { trim: true });
-                f.render_widget(string, *area);
-            }
-            Err(e) => {
-                f.render_widget(
-                    Paragraph::new(format!("Error: {}", e))
-                        .style(Style::default().fg(color_consts::ERROR_COLOR)),
-                    *area,
-                );
-            }
+            Ok(x) => render_string(f, area, x),
+            Err(e) => render_error(f, area, format!("Error: {}", e)),
+        },
+        Encoding::UTF8Fixed(_) => match dataset.read_scalar::<FixedUnicode<32768>>() {
+            Ok(x) => render_string(f, area, x.to_string()),
+            Err(e) => render_error(f, area, format!("Error: {}", e)),
+        },
+        Encoding::AsciiFixed(_) => match dataset.read_scalar::<FixedAscii<32768>>() {
+            Ok(x) => render_string(f, area, x.to_string()),
+            Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
     }
     Ok(())

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bktree = "1.0.1"
 clap = { version = "4.5.32", features = ["derive"] }
+cli-clipboard = "0.4.0"
 hdf5-metno = "0.10.1"
 image = "0.25.6"
 itertools = "0.14.0"

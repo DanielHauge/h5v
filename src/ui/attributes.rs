@@ -72,31 +72,36 @@ pub fn render_info_attributes(
         .attribute_index
         .clamp(0, (height - 1) as usize);
 
+    let highlighted_bg_color = if state.copying {
+        color_consts::HIGHLIGHT_BG_COLOR_COPY
+    } else {
+        color_consts::HIGHLIGHT_BG_COLOR
+    };
     #[allow(clippy::explicit_counter_loop)]
     for (name_line, value_line) in &attributes.rendered_attributes {
         if offset == *highlighted_index as i32 {
             match state.attributes_view_cursor.attribute_view_selection {
                 AttributeViewSelection::Name => {
                     f.render_widget(
-                        name_line.clone().bg(color_consts::HIGHLIGHT_BG_COLOR),
+                        name_line.clone().bg(highlighted_bg_color),
                         name_area.offset(Offset { x: 0, y: offset }),
                     );
                     f.render_widget(value_line, value_area.offset(Offset { x: 1, y: offset }));
                 }
                 AttributeViewSelection::NameAndValue => {
                     f.render_widget(
-                        name_line.clone().bg(color_consts::HIGHLIGHT_BG_COLOR),
+                        name_line.clone().bg(highlighted_bg_color),
                         name_area.offset(Offset { x: 0, y: offset }),
                     );
                     f.render_widget(
-                        value_line.clone().bg(color_consts::HIGHLIGHT_BG_COLOR),
+                        value_line.clone().bg(highlighted_bg_color),
                         value_area.offset(Offset { x: 1, y: offset }),
                     );
                 }
                 AttributeViewSelection::Value => {
                     f.render_widget(name_line, name_area.offset(Offset { x: 0, y: offset }));
                     f.render_widget(
-                        value_line.clone().bg(color_consts::HIGHLIGHT_BG_COLOR),
+                        value_line.clone().bg(highlighted_bg_color),
                         value_area.offset(Offset { x: 1, y: offset }),
                     );
                 }

@@ -14,6 +14,7 @@ pub mod tree;
 pub enum EventResult {
     Quit,
     Redraw,
+    Copying,
     Continue,
 }
 

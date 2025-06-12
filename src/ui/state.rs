@@ -1,5 +1,6 @@
 use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
 
+use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
 use ratatui_image::thread::ThreadProtocol;
@@ -84,6 +85,8 @@ pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub tree_view_cursor: usize,
+    pub clipboard: ClipboardContext,
+    pub copying: bool,
     pub attributes_view_cursor: AttributeCursor,
     pub focus: Focus,
     pub mode: Mode,
