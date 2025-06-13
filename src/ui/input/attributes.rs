@@ -5,7 +5,7 @@ use crate::{
     error::AppError,
     ui::state::{
         AppState,
-        AttributeViewSelection::{Name, NameAndValue, Value},
+        AttributeViewSelection::{Name, Value},
     },
 };
 
@@ -52,11 +52,8 @@ pub fn handle_normal_attributes(
                 (KeyCode::Left, _) => {
                     match state.attributes_view_cursor.attribute_view_selection {
                         Name => {}
-                        NameAndValue => {
-                            state.attributes_view_cursor.attribute_view_selection = Name;
-                        }
                         Value => {
-                            state.attributes_view_cursor.attribute_view_selection = NameAndValue;
+                            state.attributes_view_cursor.attribute_view_selection = Name;
                         }
                     }
                     Ok(EventResult::Redraw)
@@ -64,9 +61,6 @@ pub fn handle_normal_attributes(
                 (KeyCode::Right, _) => {
                     match state.attributes_view_cursor.attribute_view_selection {
                         Name => {
-                            state.attributes_view_cursor.attribute_view_selection = NameAndValue;
-                        }
-                        NameAndValue => {
                             state.attributes_view_cursor.attribute_view_selection = Value;
                         }
                         Value => {}
@@ -77,25 +71,49 @@ pub fn handle_normal_attributes(
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
                     let attributes = selected_node.read_attributes()?;
-                    let selected_attribute = attributes
+                    let selected_rendered_attribute = attributes
                         .rendered_attributes
                         .get(state.attributes_view_cursor.attribute_index);
 
-                    if let Some(attribute) = selected_attribute {
-                        let value_string = attribute.1.to_string();
-                        match state.clipboard.set_contents(value_string) {
-                            Ok(()) => Ok(EventResult::Copying),
-                            Err(e) => {
-                                return Err(AppError::ClipboardError(format!(
-                                    "Failed to copy attribute value to clipboard: {}",
-                                    e
-                                )));
+                    match state.attributes_view_cursor.attribute_view_selection {
+                        Name => {
+                            if let Some(attribute) = selected_rendered_attribute {
+                                let attr_name = attribute.0.to_string();
+                                let name = attr_name
+                                    .trim_end_matches('=')
+                                    .trim_end_matches('─')
+                                    .trim_end()
+                                    .to_string();
+
+                                match state.clipboard.set_contents(name.to_string()) {
+                                    Ok(()) => Ok(EventResult::Copying),
+                                    Err(e) => Err(AppError::ClipboardError(format!(
+                                        "Failed to copy attribute name to clipboard: {}",
+                                        e
+                                    ))),
+                                }
+                            } else {
+                                Err(AppError::ClipboardError(
+                                    "No attribute selected to copy".to_string(),
+                                ))
                             }
                         }
-                    } else {
-                        return Err(AppError::ClipboardError(
-                            "No attribute selected to copy".to_string(),
-                        ));
+                        Value => {
+                            if let Some(attribute) = selected_rendered_attribute {
+                                let value_string = attribute.1.to_string();
+                                match state.clipboard.set_contents(value_string) {
+                                    Ok(()) => Ok(EventResult::Copying),
+                                    Err(e) => Err(AppError::ClipboardError(format!(
+                                        "Failed to copy attribute value to clipboard: {}",
+                                        e
+                                    ))),
+                                }
+                            } else {
+                                Err(AppError::ClipboardError(
+                                    "No attribute selected to copy".to_string(),
+                                ))
+                            }
+                        }
                     }
                 }
 

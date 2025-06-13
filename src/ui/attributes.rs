@@ -88,16 +88,6 @@ pub fn render_info_attributes(
                     );
                     f.render_widget(value_line, value_area.offset(Offset { x: 1, y: offset }));
                 }
-                AttributeViewSelection::NameAndValue => {
-                    f.render_widget(
-                        name_line.clone().bg(highlighted_bg_color),
-                        name_area.offset(Offset { x: 0, y: offset }),
-                    );
-                    f.render_widget(
-                        value_line.clone().bg(highlighted_bg_color),
-                        value_area.offset(Offset { x: 1, y: offset }),
-                    );
-                }
                 AttributeViewSelection::Value => {
                     f.render_widget(name_line, name_area.offset(Offset { x: 0, y: offset }));
                     f.render_widget(

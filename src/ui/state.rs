@@ -65,7 +65,6 @@ impl ImgState {
 
 pub enum AttributeViewSelection {
     Name,
-    NameAndValue,
     Value,
 }
 
