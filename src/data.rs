@@ -18,6 +18,7 @@ pub trait MatrixValues {
 }
 
 pub trait StringLengths {
+    #[allow(dead_code)]
     fn string_lengths(&self) -> Vec<usize>;
 }
 

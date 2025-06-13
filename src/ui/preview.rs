@@ -239,11 +239,11 @@ fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Re
             Ok(x) => render_string(f, area, x),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
-        Encoding::UTF8Fixed(_) => match dataset.read_scalar::<FixedUnicode<32768>>() {
+        Encoding::UTF8Fixed => match dataset.read_scalar::<FixedUnicode<32768>>() {
             Ok(x) => render_string(f, area, x.to_string()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
-        Encoding::AsciiFixed(_) => match dataset.read_scalar::<FixedAscii<32768>>() {
+        Encoding::AsciiFixed => match dataset.read_scalar::<FixedAscii<32768>>() {
             Ok(x) => render_string(f, area, x.to_string()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },

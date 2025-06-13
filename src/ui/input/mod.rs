@@ -1,5 +1,4 @@
 use attributes::handle_normal_attributes;
-use hdf5_metno::Dataset;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 

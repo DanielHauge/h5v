@@ -10,7 +10,8 @@ use ndarray::{s, Array2, Array3};
 use ratatui::{layout::Rect, Frame};
 use ratatui_image::{
     picker::Picker,
-    thread::{ResizeRequest, ResizeResponse, ThreadImage, ThreadProtocol},
+    thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
+    StatefulImage,
 };
 
 use crate::{
@@ -79,7 +80,7 @@ fn render_ds_img(
                 let error_msg = format!("Error loading image: {}", e);
                 f.render_widget(error_msg, inner_area);
             } else if let Some(ref mut protocol) = state.img_state.protocol {
-                let image_widget = ThreadImage::new();
+                let image_widget = StatefulImage::default();
                 f.render_stateful_widget(image_widget, inner_area, protocol);
             }
         }
@@ -120,7 +121,7 @@ fn render_raw_img(
             }
             None => {
                 if let Some(ref mut protocol) = state.img_state.protocol {
-                    let image_widget = ThreadImage::new();
+                    let image_widget = StatefulImage::new();
                     f.render_stateful_widget(image_widget, inner_area, protocol);
                 }
             }
