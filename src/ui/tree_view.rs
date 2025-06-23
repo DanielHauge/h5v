@@ -8,10 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    color_consts,
-    h5f::{H5FNode, Node},
-};
+use crate::{color_consts, h5f::H5FNode};
 
 use super::state::{AppState, Focus, Mode};
 
