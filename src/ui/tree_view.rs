@@ -8,13 +8,17 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{
+    color_consts,
+    h5f::{H5FNode, Node},
+};
 
 use super::state::{AppState, Focus, Mode};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {
     pub node: Rc<RefCell<H5FNode>>,
+    pub load_more: bool,
     pub line: Line<'a>,
 }
 
@@ -29,6 +33,7 @@ impl AppState<'_> {
         );
         let root_tree_item = TreeItem {
             node: self.root.clone(),
+            load_more: false,
             line: text,
         };
         tree_view.push(root_tree_item);
@@ -50,9 +55,37 @@ fn compute_tree_view_rec<'a>(
     let dataset_icon = "󰈚 ";
     let node_binding = node.borrow_mut();
     let mut groups = node_binding.children.iter().peekable();
+    let mut loading = 0;
     while let Some(child) = groups.next() {
         let is_last_child = groups.peek().is_none();
         let connector = if is_last_child { "└─" } else { "├─" };
+        loading += 1;
+        if loading > node_binding.view_loaded {
+            // If we have more than 50 children, we stop rendering to avoid performance issues.
+            // This is a simple way to handle large datasets.
+            // TODO: Add load more
+            let adds = vec![
+                Span::styled(
+                    format!("{} ", "└─"),
+                    Style::default().fg(color_consts::LOAD_MORE_COLOR),
+                ),
+                Span::raw("... "),
+                Span::styled(
+                    "Load more",
+                    Style::default().fg(color_consts::LOAD_MORE_COLOR),
+                ),
+            ];
+            let mut spans = prefix.clone();
+            spans.extend(adds);
+            let line = Line::from(spans);
+            let tree_item = TreeItem {
+                node: node.clone(),
+                load_more: true,
+                line,
+            };
+            tree_view.push(tree_item);
+            break;
+        }
         let connector_span =
             Span::styled(connector, Style::default().fg(color_consts::LINES_COLOR));
         let collapse_icon = if child.borrow().expanded {
@@ -60,8 +93,6 @@ fn compute_tree_view_rec<'a>(
         } else {
             " "
         };
-
-        // let folder_icon = if child.expanded { " " } else { " " };
 
         let folder_icon = match (child.borrow().expanded, !child.borrow().children.is_empty()) {
             (true, true) => " ",
@@ -109,6 +140,7 @@ fn compute_tree_view_rec<'a>(
 
         let tree_item = TreeItem {
             node: child.clone(),
+            load_more: false,
             line,
         };
         tree_view.push(tree_item);

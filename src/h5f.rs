@@ -398,6 +398,7 @@ pub struct H5FNode {
     pub computed_attributes: Option<ComputedAttributes>,
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
+    pub view_loaded: u32,
     pub searcher: Rc<RefCell<Searcher>>,
 }
 
@@ -408,6 +409,7 @@ impl H5FNode {
             node: node_type,
             read: false,
             children: vec![],
+            view_loaded: 50,
             computed_attributes: None,
             searcher,
         }
@@ -483,6 +485,7 @@ impl H5FNode {
     pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
         if self.expanded {
             self.expanded = false;
+            self.view_loaded = 50;
             return Ok(());
         }
         self.expanded = true;
@@ -559,6 +562,7 @@ impl H5FNode {
         if matches!(self.node, Node::Dataset(_, _)) {
             return Ok(());
         }
+
         let has_children = match &self.node {
             Node::File(file) => file,
             Node::Group(group) => group,
@@ -576,6 +580,7 @@ impl H5FNode {
             children.push(node);
         }
         for d in datasets {
+            let d = d.to_owned();
             let dtype = d.dtype()?;
             let data_bytesize = dtype.size();
             let dtype_desc = dtype.to_descriptor()?;
