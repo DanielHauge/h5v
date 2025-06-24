@@ -26,25 +26,39 @@ pub fn render_preview(
     area: &Rect,
     selected_node: &Rc<RefCell<H5FNode>>,
     state: &mut AppState,
-) -> Result<(), AppError> {
+) {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 1,
     });
     let node = &selected_node.borrow().node;
 
-    match node {
-        Node::Dataset(_, attr) => match &attr.image {
-            Some(image_type) => render_img(image_type, f, &area_inner, node, state),
+    if let Node::Dataset(_, attr) = node {
+        match &attr.image {
+            Some(image_type) => match render_img(image_type, f, &area_inner, node, state) {
+                Ok(()) => {}
+                Err(e) => {
+                    render_error(f, &area_inner, format!("Render img error: {}", e));
+                }
+            },
             None => {
                 if !attr.numerical {
-                    render_string_preview(f, &area_inner, node)
+                    match render_string_preview(f, &area_inner, node) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            render_error(f, &area_inner, format!("Render string error: {}", e));
+                        }
+                    }
                 } else {
-                    render_chart_preview(f, &area_inner, node, state)
+                    match render_chart_preview(f, &area_inner, node, state) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            render_error(f, &area_inner, format!("Render chart error: {}", e));
+                        }
+                    }
                 }
             }
-        },
-        _ => Ok(()),
+        }
     }
 }
 

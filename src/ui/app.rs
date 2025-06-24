@@ -25,8 +25,8 @@ use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
 use super::{
     image_preview::{
-        handle_image_load, handle_image_resize, handle_imagefs_load, ImageLoadedResult,
-        ImageResizeResult,
+        handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
+        ImageLoadedResult, ImageResizeResult,
     },
     input::handle_input_event,
     main_display::render_main_display,
@@ -105,13 +105,17 @@ fn main_recover_loop(
     let tx_events_2 = tx_events.clone();
     let tx_load_img = handle_image_resize(tx_events_2);
     let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone());
+    let tx_load_imgfsvlen = handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone());
     let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone());
 
     let img_state = ImgState {
         protocol: None,
         tx_load_imgfs,
+        tx_load_imgfsvlen,
         tx_load_img,
         ds: None,
+        idx_to_load: 0,
+        idx_loaded: -1,
         error: None,
     };
 

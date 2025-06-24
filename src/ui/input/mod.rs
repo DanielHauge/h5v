@@ -64,40 +64,55 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
 
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Up, KeyModifiers::CONTROL) => {
-                        // TODO: Clamp
-                        let current_node =
-                            &state.treeview[state.tree_view_cursor].node.borrow().node;
-                        if state.matrix_view_state.row_offset == 0 {
-                            return Ok(EventResult::Continue);
+                    (KeyCode::Up, KeyModifiers::CONTROL) => match state.content_mode {
+                        super::state::ContentShowMode::Preview => {
+                            if state.img_state.idx_to_load > 0 {
+                                state.img_state.idx_to_load -= 1;
+                                Ok(EventResult::Redraw)
+                            } else {
+                                Ok(EventResult::Continue)
+                            }
                         }
-                        if let Node::Dataset(_, dsattr) = current_node {
-                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                            state.matrix_view_state.row_offset =
-                                (state.matrix_view_state.row_offset - 1).min(
-                                    row_selected_shape
-                                        - state.matrix_view_state.rows_currently_available,
-                                );
+                        super::state::ContentShowMode::Matrix => {
+                            let current_node =
+                                &state.treeview[state.tree_view_cursor].node.borrow().node;
+                            if state.matrix_view_state.row_offset == 0 {
+                                return Ok(EventResult::Continue);
+                            }
+                            if let Node::Dataset(_, dsattr) = current_node {
+                                let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                                state.matrix_view_state.row_offset =
+                                    (state.matrix_view_state.row_offset - 1).min(
+                                        row_selected_shape
+                                            - state.matrix_view_state.rows_currently_available,
+                                    );
+                                Ok(EventResult::Redraw)
+                            } else {
+                                Ok(EventResult::Continue)
+                            }
+                        }
+                    },
+                    (KeyCode::Down, KeyModifiers::CONTROL) => match state.content_mode {
+                        super::state::ContentShowMode::Preview => {
+                            state.img_state.idx_to_load += 1;
                             Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
                         }
-                    }
-                    (KeyCode::Down, KeyModifiers::CONTROL) => {
-                        let current_node =
-                            &state.treeview[state.tree_view_cursor].node.borrow().node;
-                        if let Node::Dataset(_, dsattr) = current_node {
-                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                            state.matrix_view_state.row_offset =
-                                (state.matrix_view_state.row_offset + 1).min(
-                                    row_selected_shape
-                                        - state.matrix_view_state.rows_currently_available,
-                                );
-                            Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
+                        super::state::ContentShowMode::Matrix => {
+                            let current_node =
+                                &state.treeview[state.tree_view_cursor].node.borrow().node;
+                            if let Node::Dataset(_, dsattr) = current_node {
+                                let row_selected_shape = dsattr.shape[state.selected_x_dim];
+                                state.matrix_view_state.row_offset =
+                                    (state.matrix_view_state.row_offset + 1).min(
+                                        row_selected_shape
+                                            - state.matrix_view_state.rows_currently_available,
+                                    );
+                                Ok(EventResult::Redraw)
+                            } else {
+                                Ok(EventResult::Continue)
+                            }
                         }
-                    }
+                    },
                     (KeyCode::Right, KeyModifiers::CONTROL) => {
                         let current_node =
                             &state.treeview[state.tree_view_cursor].node.borrow().node;

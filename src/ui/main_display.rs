@@ -108,7 +108,7 @@ pub fn render_main_display(
     f.render_widget(break_line, content_area);
 
     match state.content_show_mode_eval() {
-        ContentShowMode::Preview => render_preview(f, &content_area, selected_node, state)?,
+        ContentShowMode::Preview => render_preview(f, &content_area, selected_node, state),
         ContentShowMode::Matrix => render_matrix(f, &content_area, selected_node, state)?,
     }
 

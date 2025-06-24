@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use hdf5_metno::{ByteReader, Dataset};
+use hdf5_metno::{types::IntSize, ByteReader, Dataset, Selection};
 use image::ImageFormat;
 use ndarray::{s, Array2, Array3};
 use ratatui::{layout::Rect, Frame};
@@ -129,13 +129,42 @@ fn render_raw_img(
         false => {
             state.img_state.protocol = None;
             state.img_state.ds = Some(ds.name());
-            let ds_reader = ds.as_byte_reader()?;
-            let ds_buffered = BufReader::new(ds_reader);
-            state
-                .img_state
-                .tx_load_imgfs
-                .send((ds_buffered, img_format))
-                .expect("Failed to send image load request");
+            let gg = ds
+                .dtype()
+                .expect("Dataset dtype should be set")
+                .to_descriptor()
+                .unwrap();
+            match gg {
+                hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
+                    let ds_reader = ds.as_byte_reader()?;
+                    let ds_buffered = BufReader::new(ds_reader);
+                    state
+                        .img_state
+                        .tx_load_imgfs
+                        .send((ds_buffered, img_format))
+                        .expect("Failed to send image load request");
+                }
+                hdf5_metno::types::TypeDescriptor::VarLenArray(arr_type) => {
+                    if matches!(
+                        *arr_type,
+                        hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)
+                    ) {
+                        let i = state.img_state.idx_to_load;
+                        state.img_state.idx_loaded = i;
+                        state
+                            .img_state
+                            .tx_load_imgfsvlen
+                            .send((ds.clone(), i, img_format))
+                            .expect("Failed to send image load request");
+                    }
+                }
+                _ => {
+                    state.img_state.error = Some("Unsupported image format".to_string());
+                    let error_msg = format!("Unsupported image format for dataset: {}", ds.name());
+                    f.render_widget(error_msg, inner_area);
+                    return Ok(());
+                }
+            }
         }
     }
 
@@ -172,6 +201,45 @@ pub fn handle_imagefs_load(
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {
             if let Ok(dyn_img) = image::load(ds_reader, img_format) {
+                let stateful_protocol = picker.new_resize_protocol(dyn_img);
+                let thread_protocol =
+                    ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                tx_events
+                    .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
+                        thread_protocol,
+                    )))
+                    .expect("Failed to send image loaded event");
+            }
+        }
+    });
+    tx_load
+}
+
+pub fn handle_imagefsvlen_load(
+    tx_events: Sender<AppEvent>,
+    tx_worker: Sender<ResizeRequest>,
+) -> Sender<(Dataset, i32, ImageFormat)> {
+    let (tx_load, rx_load) = channel::<(Dataset, i32, ImageFormat)>();
+    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
+
+    thread::spawn(move || loop {
+        if let Ok((ds, idx, img_format)) = rx_load.recv() {
+            let data =
+                match ds.read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All) {
+                    Ok(d) => d[idx as usize].as_slice().to_vec(),
+                    Err(e) => {
+                        tx_events
+                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                e.to_string(),
+                            )))
+                            .expect("Failed to send image loaded event");
+                        continue;
+                    }
+                };
+
+            let cursor = std::io::Cursor::new(data);
+            let data = BufReader::new(cursor);
+            if let Ok(dyn_img) = image::load(data, img_format) {
                 let stateful_protocol = picker.new_resize_protocol(dyn_img);
                 let thread_protocol =
                     ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));

@@ -34,9 +34,12 @@ pub enum ContentShowMode {
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
     pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
+    pub tx_load_imgfsvlen: Sender<(Dataset, i32, ImageFormat)>,
     pub tx_load_img: Sender<(Dataset, ImageType)>,
     pub ds: Option<String>,
     pub error: Option<String>,
+    pub idx_to_load: i32,
+    pub idx_loaded: i32,
 }
 
 impl ImgState {
@@ -53,7 +56,7 @@ impl ImgState {
                         return false;
                     }
                 };
-                if *name == ds_name_str {
+                if *name == ds_name_str && self.idx_to_load == self.idx_loaded {
                     return true;
                 }
                 false
