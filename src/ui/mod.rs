@@ -7,5 +7,6 @@ pub mod input;
 pub mod main_display;
 pub mod matrix;
 pub mod preview;
+pub mod segment_scroll;
 pub mod state;
 pub mod tree_view;

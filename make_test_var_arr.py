@@ -37,6 +37,6 @@ with h5py.File(file_name, "w") as f:
     dset[3] = open_jpg_data("./testimages/630-600x600.jpg")
     dset[4] = open_jpg_data("./testimages/740-600x600.jpg")
     # resize to 10000 images to stress test
-    dset.resize((10000,))
-    for i in range(5, 10000):
+    dset.resize((50,))
+    for i in range(5, 50):
         dset[i] = open_jpg_data("./testimages/217-600x600.jpg")

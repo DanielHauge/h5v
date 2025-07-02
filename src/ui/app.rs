@@ -127,8 +127,15 @@ fn main_recover_loop(
     };
     let clipboard = ClipboardContext::new().expect("Failed to create clipboard context");
 
+    let segment_state = super::state::SegmentState {
+        idx: 0,
+        segment_count: 0,
+        segumented: false,
+    };
+
     let mut state = AppState {
         root: h5f.root.clone(),
+        segment_state,
         treeview: vec![],
         tree_view_cursor: 0,
         attributes_view_cursor: AttributeCursor {

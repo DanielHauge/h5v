@@ -83,6 +83,12 @@ pub struct MatrixViewState {
     pub cols_currently_available: usize,
 }
 
+pub struct SegmentState {
+    pub idx: i32,
+    pub segumented: bool,
+    pub segment_count: i32,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
@@ -101,6 +107,7 @@ pub struct AppState<'a> {
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
+    pub segment_state: SegmentState,
 }
 
 type Result<T> = std::result::Result<T, AppError>;

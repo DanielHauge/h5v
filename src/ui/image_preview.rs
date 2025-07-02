@@ -7,7 +7,10 @@ use std::{
 use hdf5_metno::{types::IntSize, ByteReader, Dataset, Selection};
 use image::ImageFormat;
 use ndarray::{s, Array2, Array3};
-use ratatui::{layout::Rect, Frame};
+use ratatui::{
+    layout::{Constraint, Layout, Rect},
+    Frame,
+};
 use ratatui_image::{
     picker::Picker,
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
@@ -19,7 +22,7 @@ use crate::{
     h5f::{ImageType, InterlaceMode, Node},
 };
 
-use super::{app::AppEvent, state::AppState};
+use super::{app::AppEvent, segment_scroll::render_segment_scroll, state::AppState};
 
 pub fn render_img(
     image_type: &ImageType,
@@ -28,14 +31,22 @@ pub fn render_img(
     node: &Node,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    let area = if state.segment_state.segumented {
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
+        render_segment_scroll(f, &areas_split[0], state)?;
+        areas_split[1]
+    } else {
+        *area
+    };
     match image_type {
-        ImageType::Jpeg => render_raw_img(f, area, node, state, ImageFormat::Jpeg),
-        ImageType::Png => render_raw_img(f, area, node, state, ImageFormat::Png),
+        ImageType::Jpeg => render_raw_img(f, &area, node, state, ImageFormat::Jpeg),
+        ImageType::Png => render_raw_img(f, &area, node, state, ImageFormat::Png),
         ImageType::Truecolor(m) => {
-            render_ds_img(f, area, node, state, ImageType::Truecolor(m.clone()))
+            render_ds_img(f, &area, node, state, ImageType::Truecolor(m.clone()))
         }
-        ImageType::Grayscale => render_ds_img(f, area, node, state, ImageType::Grayscale),
-        _ => render_unsupported_image_format(f, area, node),
+        ImageType::Grayscale => render_ds_img(f, &area, node, state, ImageType::Grayscale),
+        _ => render_unsupported_image_format(f, &area, node),
     }
 }
 
@@ -137,6 +148,7 @@ fn render_raw_img(
             match gg {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
+                    state.segment_state.segumented = false;
                     let ds_buffered = BufReader::new(ds_reader);
                     state
                         .img_state
@@ -151,6 +163,9 @@ fn render_raw_img(
                     ) {
                         let i = state.img_state.idx_to_load;
                         state.img_state.idx_loaded = i;
+                        state.segment_state.segumented = true;
+                        state.segment_state.segment_count = ds.shape()[0] as i32;
+                        state.segment_state.idx = i;
                         state
                             .img_state
                             .tx_load_imgfsvlen
