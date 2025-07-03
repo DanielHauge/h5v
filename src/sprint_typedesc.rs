@@ -29,12 +29,16 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
         TypeDescriptor::Boolean => "bool".to_string(),
         TypeDescriptor::Enum(_) => "enum".to_string(),
         TypeDescriptor::Compound(_) => "compound".to_string(),
-        TypeDescriptor::FixedArray(_, _) => "array".to_string(),
-        TypeDescriptor::FixedAscii(_) => "ascii".to_string(),
-        TypeDescriptor::FixedUnicode(_) => "unicode".to_string(),
-        TypeDescriptor::VarLenArray(_) => "array".to_string(),
-        TypeDescriptor::VarLenAscii => "ascii".to_string(),
-        TypeDescriptor::VarLenUnicode => "unicode".to_string(),
+        TypeDescriptor::FixedArray(inner, l) => {
+            format!("[{l}]{}", sprint_typedescriptor(inner))
+        }
+        TypeDescriptor::FixedAscii(l) => format!("[{l}]char (ascii)"),
+        TypeDescriptor::FixedUnicode(l) => format!("[{l}]char (utf)"),
+        TypeDescriptor::VarLenArray(inner) => {
+            format!("[]{}", sprint_typedescriptor(inner))
+        }
+        TypeDescriptor::VarLenAscii => "[]char (ascii)".to_string(),
+        TypeDescriptor::VarLenUnicode => "[]char (utf)".to_string(),
         TypeDescriptor::Reference(Reference::Object) => "object-reference".to_string(),
         TypeDescriptor::Reference(Reference::Region) => "region-reference".to_string(),
         TypeDescriptor::Reference(Reference::Std) => "std-reference".to_string(),
