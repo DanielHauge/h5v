@@ -99,8 +99,18 @@ fn render_ds_img(
             state.img_state.protocol = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
+            state.segment_state.segumented = ds.shape().len() == 4;
+            if state.segment_state.segumented {
+                state.segment_state.segment_count = ds.shape()[0] as i32
+            };
             let ds_clone = ds.clone();
-            state.img_state.tx_load_img.send((ds_clone, img_type))?;
+            let i = state.img_state.idx_to_load;
+            state.img_state.idx_loaded = i;
+            state.segment_state.idx = i;
+            state
+                .img_state
+                .tx_load_img
+                .send((ds_clone, state.segment_state.idx, img_type))?;
         }
     }
 
@@ -140,12 +150,12 @@ fn render_raw_img(
         false => {
             state.img_state.protocol = None;
             state.img_state.ds = Some(ds.name());
-            let gg = ds
+            let typedesc = ds
                 .dtype()
                 .expect("Dataset dtype should be set")
                 .to_descriptor()
                 .unwrap();
-            match gg {
+            match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
                     state.segment_state.segumented = false;
@@ -282,11 +292,11 @@ pub enum ImageLoadedResult {
 pub fn handle_image_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
-) -> Sender<(Dataset, ImageType)> {
-    let (tx_load, rx_load) = channel::<(Dataset, ImageType)>();
+) -> Sender<(Dataset, i32, ImageType)> {
+    let (tx_load, rx_load) = channel::<(Dataset, i32, ImageType)>();
     let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
     thread::spawn(move || loop {
-        if let Ok((ds_reader, img_format)) = rx_load.recv() {
+        if let Ok((ds_reader, idx, img_format)) = rx_load.recv() {
             match img_format {
                 ImageType::Grayscale => {
                     let shape = ds_reader.shape();
@@ -354,17 +364,49 @@ pub fn handle_image_load(
                 }
                 ImageType::Truecolor(interlace) => {
                     let shape = ds_reader.shape();
-                    let data: Array3<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
-                        Ok(d) => d,
-                        Err(e) => {
+                    let data = match shape.len() {
+                        3 => {
+                            let data: Array3<u8> =
+                                match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                };
+                            data
+                        }
+                        4 => {
+                            let data: Array3<u8> =
+                                match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                };
+                            data
+                        }
+                        _ => {
                             tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                    e.to_string(),
+                                    "Invalid shape for Truecolor image".to_string(),
                                 )))
                                 .expect("Failed to send image loaded event");
+
                             continue;
                         }
                     };
+
+                    let shape = data.shape();
 
                     let mut image_buffer = image::RgbaImage::new(shape[1] as u32, shape[0] as u32);
                     match interlace {

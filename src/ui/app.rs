@@ -240,6 +240,7 @@ fn main_recover_loop(
                 ImageLoadedResult::Failure(f) => {
                     state.img_state.protocol = None;
                     state.img_state.error = Some(f);
+
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;

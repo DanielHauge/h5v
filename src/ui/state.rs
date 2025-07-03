@@ -35,7 +35,7 @@ pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
     pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
     pub tx_load_imgfsvlen: Sender<(Dataset, i32, ImageFormat)>,
-    pub tx_load_img: Sender<(Dataset, ImageType)>,
+    pub tx_load_img: Sender<(Dataset, i32, ImageType)>,
     pub ds: Option<String>,
     pub error: Option<String>,
     pub idx_to_load: i32,
