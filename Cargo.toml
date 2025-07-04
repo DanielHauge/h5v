@@ -2,6 +2,11 @@
 name = "h5v"
 version = "0.1.0"
 edition = "2021"
+authors = ["Daniel <animcuil@gmail.com>"]
+description = "A terminal viewer for HDF5 files with chart, image, string, matrix, attributes support"
+readme = "README.md"
+repository = "https://github.com/DanielHauge/h5v"
+license = "Apache-2.0"
 
 [dependencies]
 bktree = "1.0.1"
