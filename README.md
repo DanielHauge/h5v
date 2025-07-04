@@ -19,9 +19,13 @@ h5v path/to/file.h5
 - `j`/`k`/`up`/`down`: Navigate through the items
 - `enter`/`space`/`l`/`h`: Open/close items
 - `shift` + navigate: shift focus
-- `q`: Quit
+- `q` / `ctrl`+`c`: Quit
 - `y`: Copy highlighted to clipboard
 - `ctrl` + navigate: Scroll through contents (image list or matrix)
+- `PgUp`/`PgDown`: Scroll through contents by half a page (image list or matrix)
+- `ctrl` + `d`/`u`: Navigate by half a page
+- `g`/`Home`: Go to the top
+- `G`/`End`: Go to the bottom
 
 ## Installation
 
