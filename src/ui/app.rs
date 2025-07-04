@@ -30,7 +30,10 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{AppState, AttributeCursor, ContentShowMode, Focus, ImgState, MatrixViewState, Mode},
+    state::{
+        AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState,
+        Mode,
+    },
     tree_view::render_tree,
 };
 
@@ -142,7 +145,7 @@ fn main_recover_loop(
             attribute_index: 0,
             attribute_view_selection: super::state::AttributeViewSelection::Name,
         },
-        focus: Focus::Tree,
+        focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
         mode: Mode::Normal,
         copying: false,

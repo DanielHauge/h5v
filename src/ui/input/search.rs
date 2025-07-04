@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use crate::{
     error::AppError,
     h5f::HasPath,
-    ui::state::{AppState, Focus, Mode},
+    ui::state::{AppState, Focus, LastFocused, Mode},
 };
 
 use super::EventResult;
@@ -130,7 +130,7 @@ pub fn handle_search_event(
                         state.root.borrow_mut().expand_path(&selected_path[1..])?;
 
                         state.mode = Mode::Normal;
-                        state.focus = Focus::Tree;
+                        state.focus = Focus::Tree(LastFocused::Attributes);
                         state.compute_tree_view();
                         for (i, tree_item) in state.treeview.iter().enumerate() {
                             if tree_item.node.borrow().node.path() == selected_path {

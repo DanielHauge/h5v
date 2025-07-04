@@ -13,9 +13,15 @@ use crate::{
 
 use super::tree_view::TreeItem;
 
-pub enum Focus {
-    Tree,
+pub enum LastFocused {
     Attributes,
+    Content,
+}
+
+pub enum Focus {
+    Tree(LastFocused),
+    Attributes,
+    Content,
 }
 
 #[derive(Debug, Clone)]

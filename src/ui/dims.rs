@@ -69,7 +69,7 @@ pub fn render_dim_selector(
             break;
         }
         let spacer = Paragraph::new(" | ")
-            .style(Style::default().bg(color_consts::BG_COLOR))
+            // .style(Style::default().bg(color_consts::BG_COLOR))
             .block(Block::default().borders(Borders::NONE));
         f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
         f.render_widget(spacer, *spacer_area);

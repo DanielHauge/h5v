@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, error::AppError, h5f::H5FNode};
+use crate::{color_consts, error::AppError, h5f::H5FNode, ui};
 
 use super::{
     attributes::render_info_attributes,
@@ -93,18 +93,23 @@ pub fn render_main_display(
             tab_titles.push(Span::styled(title, color_consts::TITLE));
         }
         if i != supported_modes_count - 1 {
-            tab_titles.push(Span::styled(" | ", crate::ui::main_display::Color::Green));
+            tab_titles.push(Span::styled(" | ", ui::main_display::Color::Green));
         }
     }
 
     let title = Title::from(tab_titles);
+    let bg_color = if matches!(state.focus, ui::state::Focus::Content) {
+        color_consts::FOCUS_BG_COLOR
+    } else {
+        color_consts::BG_COLOR
+    };
     let break_line = Block::default()
         .title(title)
         .borders(ratatui::widgets::Borders::TOP)
         .border_style(Style::default().fg(color_consts::BREAK_COLOR))
         .title_alignment(Alignment::Center)
         .title_style(Style::default().fg(color_consts::TITLE))
-        .style(Style::default().bg(color_consts::BG_COLOR));
+        .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
 
     match state.content_show_mode_eval() {

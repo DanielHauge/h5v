@@ -157,8 +157,13 @@ fn render_chart_preview(
         .marker(symbols::Marker::Braille)
         .graph_type(GraphType::Line)
         .data(data);
+    let bg = if matches!(state.focus, super::state::Focus::Content) {
+        color_consts::FOCUS_BG_COLOR
+    } else {
+        color_consts::BG_COLOR
+    };
     let chart = Chart::new(vec![ds])
-        .style(Style::default().bg(color_consts::BG_COLOR))
+        .style(Style::default().bg(bg))
         .x_axis(
             Axis::default()
                 .title("X axis")

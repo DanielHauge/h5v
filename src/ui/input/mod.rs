@@ -1,12 +1,17 @@
 use attributes::handle_normal_attributes;
-use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
+use content::handle_normal_content_event;
+use ratatui::crossterm::{
+    event::{Event, KeyCode, KeyModifiers},
+    style::Attributes,
+};
 use tree::handle_normal_tree_event;
 
 use crate::{error::AppError, h5f::Node};
 
-use super::state::{AppState, Focus, Mode};
+use super::state::{AppState, Focus, LastFocused, Mode};
 
 pub mod attributes;
+pub mod content;
 pub mod search;
 pub mod tree;
 
@@ -43,23 +48,38 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Right, KeyModifiers::SHIFT) => {
-                        if let Focus::Tree = state.focus {
+                        if let Focus::Tree(LastFocused::Attributes) = state.focus {
                             state.focus = Focus::Attributes;
+                        }
+                        if let Focus::Tree(LastFocused::Content) = state.focus {
+                            state.focus = Focus::Content;
                         }
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Left, KeyModifiers::SHIFT) => {
                         if let Focus::Attributes = state.focus {
-                            state.focus = Focus::Tree;
+                            state.focus = Focus::Tree(LastFocused::Attributes);
+                        }
+                        if let Focus::Content = state.focus {
+                            state.focus = Focus::Tree(LastFocused::Content);
+                        }
+                        Ok(EventResult::Redraw)
+                    }
+                    (KeyCode::Down, KeyModifiers::SHIFT) => {
+                        if let Focus::Attributes = state.focus {
+                            state.focus = Focus::Content;
+                        }
+                        Ok(EventResult::Redraw)
+                    }
+
+                    (KeyCode::Up, KeyModifiers::SHIFT) => {
+                        if let Focus::Content = state.focus {
+                            state.focus = Focus::Attributes;
                         }
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                        if let Focus::Tree = state.focus {
-                            state.focus = Focus::Attributes;
-                        } else {
-                            state.focus = Focus::Tree;
-                        }
+                        state.focus = Focus::Content;
                         state.show_tree_view = !state.show_tree_view;
 
                         Ok(EventResult::Redraw)
@@ -207,8 +227,9 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         }
                     }
                     _ => match state.focus {
-                        Focus::Tree => handle_normal_tree_event(state, event),
+                        Focus::Tree(_) => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),
+                        Focus::Content => handle_normal_content_event(state, event),
                     },
                 }
             } else {

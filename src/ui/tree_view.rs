@@ -163,7 +163,7 @@ fn compute_tree_view_rec<'a>(
 
 pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let bg = match state.focus {
-        Focus::Tree => color_consts::FOCUS_BG_COLOR,
+        Focus::Tree(_) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
     let header_block = Block::default()
@@ -204,7 +204,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                     break;
                 }
                 let text = tree_item.line.clone();
-                if highlight_index == i && matches!(state.focus, Focus::Tree) {
+                if highlight_index == i && matches!(state.focus, Focus::Tree(_)) {
                     f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
                 } else {
                     f.render_widget(text, area);
