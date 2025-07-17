@@ -133,8 +133,19 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     },
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
-                            state.img_state.idx_to_load += 1;
-                            Ok(EventResult::Redraw)
+                            if state.segment_state.segumented {
+                                if state.img_state.idx_to_load
+                                    < state.segment_state.segment_count - 1
+                                {
+                                    state.img_state.idx_to_load += 1;
+                                    Ok(EventResult::Redraw)
+                                } else {
+                                    Ok(EventResult::Continue)
+                                }
+                            } else {
+                                state.img_state.idx_to_load = state.segment_state.idx;
+                                Ok(EventResult::Redraw)
+                            }
                         }
                         super::state::ContentShowMode::Matrix => {
                             let current_node =
@@ -158,7 +169,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     },
                     (KeyCode::Left, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
-                            if state.img_state.idx_to_load > 0 {
+                            if state.img_state.idx_to_load > 0 && state.segment_state.segumented {
                                 state.img_state.idx_to_load -= 1;
                                 Ok(EventResult::Redraw)
                             } else {

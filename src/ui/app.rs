@@ -120,6 +120,7 @@ fn main_recover_loop(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
+        idx_max: 0,
     };
 
     let matrix_view_state = MatrixViewState {

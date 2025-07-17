@@ -45,6 +45,7 @@ pub struct ImgState {
     pub ds: Option<String>,
     pub error: Option<String>,
     pub idx_to_load: i32,
+    pub idx_max: i32,
     pub idx_loaded: i32,
 }
 
