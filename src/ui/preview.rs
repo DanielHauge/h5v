@@ -82,6 +82,16 @@ fn render_chart_preview(
         .map(|(i, _)| i)
         .collect();
 
+    if x_selectable_dims.is_empty() {
+        render_unsupported_rendering(
+            f,
+            area,
+            selected_node,
+            "Not enough data for selectable dimensions for x-axis",
+        )?;
+        return Ok(());
+    }
+
     let selected_indexe_length = state.selected_indexes.len();
     for i in 0..selected_indexe_length {
         if !x_selectable_dims.contains(&i) {

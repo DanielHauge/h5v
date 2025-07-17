@@ -19,6 +19,9 @@ with h5py.File(file_name, "w") as f:
     group = f.create_group("group_1")
     group.create_dataset("dataset_2", data=data)
 
+    # Make empty dataset with 0 elemtsn
+    f.create_dataset("empty_dataset", data=np.empty((0,)))
+
     # Add attributes to the dataset
     f["attributes_ds"].attrs["description"] = "This is a random dataset"
     f["attributes_ds"].attrs["units"] = "arbitrary units"

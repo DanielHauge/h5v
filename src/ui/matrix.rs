@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, os::unix::raw::uid_t, rc::Rc};
 
 use ratatui::{
     layout::{Alignment::Center, Constraint, Layout, Offset, Rect},
@@ -107,10 +107,15 @@ pub fn render_matrix(
                 Layout::horizontal(vec![Constraint::Max(15), Constraint::Min(16)]).split(row_area);
             let idx_area = areas_split[0];
             let value_area = areas_split[1];
-            let val_bg_color = if row_idx % 2 == 0 {
-                color_consts::BG_VAL3_COLOR
-            } else {
-                color_consts::BG_VAL4_COLOR
+            let val_bg_color = match (row_idx % 2) == 0 {
+                true => match (state.matrix_view_state.row_offset % 2) == 0 {
+                    true => color_consts::BG_VAL3_COLOR,
+                    false => color_consts::BG_VAL4_COLOR,
+                },
+                false => match (state.matrix_view_state.row_offset % 2) == 0 {
+                    true => color_consts::BG_VAL4_COLOR,
+                    false => color_consts::BG_VAL3_COLOR,
+                },
             };
             let idx_line = Line::from(format!("{i}")).left_aligned();
             let value_line = Line::from(format!("{d}"))
@@ -159,7 +164,11 @@ pub fn render_matrix(
             f.render_widget(idx_line, idx_area);
             for j in 0..max_cols {
                 let val_area = col_areas[(j + 1) as usize];
-                let val_bg_color = match (i % 2 == 0, j % 2 == 0) {
+
+                let val_bg_color = match (
+                    (i as usize + state.matrix_view_state.row_offset) % 2 == 0,
+                    (j as usize + state.matrix_view_state.col_offset) % 2 == 0,
+                ) {
                     (true, true) => color_consts::BG_VAL3_COLOR,
                     (true, false) => color_consts::BG_VAL4_COLOR,
                     (false, true) => color_consts::BG_VAL1_COLOR,
