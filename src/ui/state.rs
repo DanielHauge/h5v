@@ -16,12 +16,14 @@ use super::tree_view::TreeItem;
 pub enum LastFocused {
     Attributes,
     Content,
+    Tree,
 }
 
 pub enum Focus {
     Tree(LastFocused),
     Attributes,
     Content,
+    Command,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ pub enum Mode {
     Normal,
     Search,
     Help,
+    Command,
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -96,6 +99,11 @@ pub struct SegmentState {
     pub segment_count: i32,
 }
 
+pub struct CommandState {
+    pub command: String,
+    pub last_command: Option<String>,
+}
+
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
@@ -115,6 +123,7 @@ pub struct AppState<'a> {
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
     pub segment_state: SegmentState,
+    pub command_state: CommandState,
 }
 
 type Result<T> = std::result::Result<T, AppError>;

@@ -24,6 +24,7 @@ use ratatui::{
 use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
 use super::{
+    command::render_command_dialog,
     image_preview::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
         ImageLoadedResult, ImageResizeResult,
@@ -31,8 +32,8 @@ use super::{
     input::handle_input_event,
     main_display::render_main_display,
     state::{
-        AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState,
-        Mode,
+        self, AppState, AttributeCursor, CommandState, ContentShowMode, Focus, ImgState,
+        LastFocused, MatrixViewState, Mode,
     },
     tree_view::render_tree,
 };
@@ -131,20 +132,26 @@ fn main_recover_loop(
     };
     let clipboard = ClipboardContext::new().expect("Failed to create clipboard context");
 
-    let segment_state = super::state::SegmentState {
+    let segment_state = state::SegmentState {
         idx: 0,
         segment_count: 0,
         segumented: false,
     };
 
+    let command_state = CommandState {
+        command: String::new(),
+        last_command: None,
+    };
+
     let mut state = AppState {
         root: h5f.root.clone(),
         segment_state,
+        command_state,
         treeview: vec![],
         tree_view_cursor: 0,
         attributes_view_cursor: AttributeCursor {
             attribute_index: 0,
-            attribute_view_selection: super::state::AttributeViewSelection::Name,
+            attribute_view_selection: state::AttributeViewSelection::Name,
         },
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
@@ -185,6 +192,10 @@ fn main_recover_loop(
         match render_main_display(frame, &main_display_area, &selected_node, state) {
             Ok(()) => {}
             Err(e) => render_error(frame, &format!("Error: {}", e)),
+        }
+        if let Mode::Command = state.mode {
+            // Render command input area
+            render_command_dialog(frame, state);
         }
     };
 

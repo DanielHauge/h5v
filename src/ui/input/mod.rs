@@ -28,9 +28,20 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
     }
 
     match state.mode {
-        Mode::Normal => {
+        Mode::Normal | Mode::Command => {
             if let Event::Key(key_event) = event {
                 match (key_event.code, key_event.modifiers) {
+                    (KeyCode::Char(':'), _) => {
+                        state.mode = match state.mode {
+                            Mode::Command => Mode::Normal,
+                            _ => Mode::Command,
+                        };
+                        state.focus = match state.mode {
+                            Mode::Command => Focus::Content,
+                            _ => Focus::Tree(LastFocused::Content),
+                        };
+                        Ok(EventResult::Redraw)
+                    }
                     (KeyCode::Char('/'), _) => {
                         state.searcher.borrow_mut().query.clear();
                         state.searcher.borrow_mut().line_cursor = 0;
@@ -241,6 +252,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         Focus::Tree(_) => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),
                         Focus::Content => handle_normal_content_event(state, event),
+                        Focus::Command => handle_normal_content_event(state, event),
                     },
                 }
             } else {

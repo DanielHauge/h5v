@@ -184,7 +184,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let mut area = inner_area;
     let mode = state.mode.clone();
     match mode {
-        Mode::Normal => {
+        Mode::Normal | Mode::Command => {
             let mut tree_view_skip_offset = 0;
             let mut highlight_index = state.tree_view_cursor;
             if area.height <= state.tree_view_cursor as u16 {
