@@ -8,7 +8,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{
+    color_consts,
+    h5f::{H5FNode, Node},
+};
 
 use super::state::{AppState, Focus, Mode};
 
@@ -49,11 +52,13 @@ fn compute_tree_view_rec<'a>(
     if !node.borrow().expanded {
         return tree_view;
     }
-    let dataset_icon = "󰈚 ";
+
     let node_binding = node.borrow_mut();
+
     let mut groups = node_binding.children.iter().peekable();
     let mut loading = 0;
     while let Some(child) = groups.next() {
+        let c = child.borrow();
         let is_last_child = groups.peek().is_none();
         let connector = if is_last_child { "└─" } else { "├─" };
         loading += 1;
@@ -85,22 +90,18 @@ fn compute_tree_view_rec<'a>(
         }
         let connector_span =
             Span::styled(connector, Style::default().fg(color_consts::LINES_COLOR));
-        let collapse_icon = if child.borrow().expanded {
-            " "
-        } else {
-            " "
-        };
+        let collapse_icon = if c.expanded { " " } else { " " };
 
-        let folder_icon = match (child.borrow().expanded, !child.borrow().children.is_empty()) {
+        let folder_icon = match (c.expanded, !c.children.is_empty()) {
             (true, true) => " ",
             (true, false) => " ",
             (false, true) => " ",
             (false, false) => " ",
         };
 
-        let icon = match child.borrow().is_group() {
-            true => folder_icon,
-            false => dataset_icon,
+        let icon = match c.is_group() {
+            true => folder_icon.to_string(),
+            false => c.icon(),
         };
         let icon_color = match child.borrow().is_group() {
             true => color_consts::GROUP_COLOR,

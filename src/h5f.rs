@@ -1,6 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    mem,
+    ptr::{self, addr_of},
+    rc::Rc,
+};
 
-use hdf5_metno::{Attribute, Dataset, File, Group};
+use hdf5_metno::{Attribute, Dataset, File, Group, LinkType, Location, LocationType};
 use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
@@ -53,6 +58,8 @@ pub struct DatasetMeta {
     pub numerical: bool,
     pub encoding: Encoding,
     pub image: Option<ImageType>,
+    pub is_link: bool,
+    pub filename: String,
 }
 
 impl DatasetMeta {
@@ -150,6 +157,8 @@ pub trait HasAttributes {
 pub trait HasChildren {
     fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
     fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_external_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_external_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
 }
 
 impl HasChildren for Group {
@@ -160,15 +169,36 @@ impl HasChildren for Group {
     fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
         self.datasets()
     }
-}
 
-impl HasChildren for File {
-    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        self.groups()
+    fn get_external_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
+        let external_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::External == link.link_type {
+                match group.dataset(name) {
+                    Ok(ds) => objects.push(ds),
+                    Err(_) => {
+                        // Ignore it and move on
+                        return true;
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(external_datasets)
     }
 
-    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
-        self.datasets()
+    fn get_external_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
+        let external_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::External == link.link_type {
+                match group.group(name) {
+                    Ok(g) => objects.push(g),
+                    Err(_) => {
+                        return true; // we simply ignore it, and move on.
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(external_groups)
     }
 }
 
@@ -402,6 +432,11 @@ pub struct H5FNode {
     pub searcher: Rc<RefCell<Searcher>>,
 }
 
+pub enum DSType {
+    InternalDataset(Dataset),
+    ExternalDataset(Dataset),
+}
+
 impl H5FNode {
     pub fn new(node_type: Node, searcher: Rc<RefCell<Searcher>>) -> Self {
         Self {
@@ -415,10 +450,40 @@ impl H5FNode {
         }
     }
 
+    pub fn icon(&self) -> String {
+        match self.is_group() {
+            true => " ".to_string(),
+            false => {
+                let Node::Dataset(_, meta) = &self.node else {
+                    return "? ".to_string();
+                };
+                if meta.is_link {
+                    // Dont do a file icon, just a link icon
+                    "󰈚🔗".to_string()
+                } else {
+                    "󰈚 ".to_string()
+                }
+            }
+        }
+    }
+
     pub fn render(&self) -> Line<'static> {
         let icon = match self.is_group() {
             true => " ",
-            false => "󰈚 ",
+            false => {
+                let Node::Dataset(_, meta) = &self.node else {
+                    return Line::from(vec![Span::styled(
+                        "? ",
+                        Style::default().fg(color_consts::ERROR_COLOR),
+                    )]);
+                };
+                if meta.is_link {
+                    // Dont do a file icon, just a link icon
+                    "🔗 "
+                } else {
+                    "󰈚 "
+                }
+            }
         };
         let icon_color = match self.is_group() {
             true => color_consts::GROUP_COLOR,
@@ -569,7 +634,14 @@ impl H5FNode {
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous if"),
         };
         let groups = has_children.get_groups()?;
-        let datasets = has_children.get_datasets()?;
+        let mut datasets = vec![];
+        for d in has_children.get_datasets()? {
+            datasets.push(DSType::InternalDataset(d));
+        }
+        for d in has_children.get_external_datasets()? {
+            datasets.push(DSType::ExternalDataset(d));
+        }
+
         let mut children = Vec::new();
         for g in groups {
             let node = Rc::new(RefCell::new(H5FNode::new(
@@ -579,7 +651,11 @@ impl H5FNode {
 
             children.push(node);
         }
-        for d in datasets {
+        for wrapped_ds in datasets {
+            let (d, is_link) = match wrapped_ds {
+                DSType::InternalDataset(ds) => (ds, false),
+                DSType::ExternalDataset(ds) => (ds, true),
+            };
             let d = d.to_owned();
             let dtype = d.dtype()?;
             let data_bytesize = dtype.size();
@@ -598,6 +674,7 @@ impl H5FNode {
             let storage_required = d.storage_size();
             let chunk_shape = d.chunk();
             let image = is_image(&d);
+            let filename = d.filename().to_string();
 
             let meta = DatasetMeta {
                 shape,
@@ -610,6 +687,8 @@ impl H5FNode {
                 numerical,
                 encoding,
                 image,
+                is_link,
+                filename,
             };
             let node_ds = Node::Dataset(d, meta);
             let node = Rc::new(RefCell::new(H5FNode::new(node_ds, self.searcher.clone())));
