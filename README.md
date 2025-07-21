@@ -29,8 +29,6 @@ h5v path/to/file.h5
 
 ## Installation
 
-Must have rust and hdf5 lib installed, then run:
-
 ```bash
 cargo install h5v
 ```
