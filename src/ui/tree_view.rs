@@ -53,7 +53,7 @@ fn compute_tree_view_rec<'a>(
         return tree_view;
     }
 
-    let node_binding = node.borrow_mut();
+    let node_binding = node.borrow();
 
     let mut groups = node_binding.children.iter().peekable();
     let mut loading = 0;
@@ -92,21 +92,25 @@ fn compute_tree_view_rec<'a>(
             Span::styled(connector, Style::default().fg(color_consts::LINES_COLOR));
         let collapse_icon = if c.expanded { " " } else { " " };
 
-        let folder_icon = match (c.expanded, !c.children.is_empty()) {
-            (true, true) => " ",
-            (true, false) => " ",
-            (false, true) => " ",
-            (false, false) => " ",
+        let folder_icon_base = match (c.expanded, !c.children.is_empty()) {
+            (true, true) => "",
+            (true, false) => "",
+            (false, true) => "",
+            (false, false) => "",
         };
+        let folder_icon_link = c.icon();
+        let folder_icon = format!("{}{}", folder_icon_base, folder_icon_link);
 
         let icon = match c.is_group() {
             true => folder_icon.to_string(),
             false => c.icon(),
         };
+
         let icon_color = match child.borrow().is_group() {
             true => color_consts::GROUP_COLOR,
             false => color_consts::DATASET_FILE_COLOR,
         };
+
         let icon_span = Span::styled(icon, Style::default().fg(icon_color));
         let collapse_icon_span = match child.borrow().expanded {
             true => Span::styled(collapse_icon, Style::default().fg(color_consts::FILE_COLOR)),

@@ -44,6 +44,11 @@ pub enum ImageType {
     Truecolor(InterlaceMode),
     Indexed(InterlaceMode),
 }
+#[derive(Debug)]
+pub struct GroupMeta {
+    pub is_link: bool,
+    pub filename: String,
+}
 
 #[derive(Debug)]
 pub struct DatasetMeta {
@@ -60,6 +65,52 @@ pub struct DatasetMeta {
     pub image: Option<ImageType>,
     pub is_link: bool,
     pub filename: String,
+}
+impl GroupMeta {
+    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
+        let min_first_panel = match longest_name {
+            0..8 => 8,
+            8..=u16::MAX => longest_name,
+        };
+        let mut data_set_attrs = vec![];
+
+        if self.is_link {
+            let external_filename = Span::styled(
+                "link",
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
+            let external_value = Span::styled(
+                self.filename.clone(),
+                Style::default()
+                    .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                    .bold(),
+            );
+            data_set_attrs.push((external_filename, external_value));
+        }
+
+        let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
+        for (name, value) in data_set_attrs {
+            let name_len = name.width();
+            let extra_name_space = match min_first_panel as usize - name_len {
+                0..=1 => 1,
+                _ => min_first_panel as usize - name_len,
+            };
+            let name_helper_line = Span::styled(
+                "─".repeat(extra_name_space - 1),
+                Style::default().fg(color_consts::LINES_COLOR),
+            );
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
+
+            let value_line = Line::from(vec![value]);
+            lines.push((name_line, value_line));
+        }
+
+        lines
+    }
 }
 
 impl DatasetMeta {
@@ -123,6 +174,22 @@ impl DatasetMeta {
                     .bold(),
             );
             data_set_attrs.push((chunk_name, chunk_value));
+        }
+
+        if self.is_link {
+            let external_filename = Span::styled(
+                "link",
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
+            let external_value = Span::styled(
+                self.filename.clone(),
+                Style::default()
+                    .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                    .bold(),
+            );
+            data_set_attrs.push((external_filename, external_value));
         }
 
         let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
@@ -210,7 +277,7 @@ impl HasName for Node {
     fn name(&self) -> String {
         match self {
             Node::File(file) => file.name().split("/").last().unwrap_or("").to_string(),
-            Node::Group(group) => group.name().split("/").last().unwrap_or("").to_string(),
+            Node::Group(group, _) => group.name().split("/").last().unwrap_or("").to_string(),
             Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap_or("").to_string(),
         }
     }
@@ -223,7 +290,7 @@ impl HasPath for Node {
     fn path(&self) -> String {
         match self {
             Node::File(file) => file.name(),
-            Node::Group(group) => group.name(),
+            Node::Group(group, _) => group.name(),
             Node::Dataset(dataset, _) => dataset.name(),
         }
         .to_string()
@@ -244,7 +311,7 @@ impl HasAttributes for Node {
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error> {
         match self {
             Node::File(file) => Ok(file.attr_names()?),
-            Node::Group(group) => Ok(group.attr_names()?),
+            Node::Group(group, _) => Ok(group.attr_names()?),
             Node::Dataset(dataset, _) => Ok(dataset.attr_names()?),
         }
     }
@@ -252,7 +319,7 @@ impl HasAttributes for Node {
     fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error> {
         match self {
             Node::File(file) => file.attr(name),
-            Node::Group(group) => group.attr(name),
+            Node::Group(group, _) => group.attr(name),
             Node::Dataset(dataset, _) => dataset.attr(name),
         }
     }
@@ -312,7 +379,7 @@ impl DatasetMeta {
 #[derive(Debug)]
 pub enum Node {
     File(File),
-    Group(Group),
+    Group(Group, GroupMeta),
     Dataset(Dataset, DatasetMeta),
 }
 
@@ -369,6 +436,7 @@ impl ComputedAttributes {
 
         let rendered_ds_attributes = match node {
             Node::Dataset(_, ds) => ds.render(name_area_width),
+            Node::Group(_, grp_meta) => grp_meta.render(name_area_width),
             _ => vec![],
         };
 
@@ -437,6 +505,11 @@ pub enum DSType {
     ExternalDataset(Dataset),
 }
 
+pub enum GrpType {
+    InternalGroup(Group),
+    ExternalGroup(Group),
+}
+
 impl H5FNode {
     pub fn new(node_type: Node, searcher: Rc<RefCell<Searcher>>) -> Self {
         Self {
@@ -452,7 +525,17 @@ impl H5FNode {
 
     pub fn icon(&self) -> String {
         match self.is_group() {
-            true => " ".to_string(),
+            // true => " ".to_string(),
+            true => {
+                let Node::Group(_, meta) = &self.node else {
+                    return "?".to_string();
+                };
+                if meta.is_link {
+                    "🔗".to_string()
+                } else {
+                    " ".to_string()
+                }
+            }
             false => {
                 let Node::Dataset(_, meta) = &self.node else {
                     return "? ".to_string();
@@ -468,23 +551,7 @@ impl H5FNode {
     }
 
     pub fn render(&self) -> Line<'static> {
-        let icon = match self.is_group() {
-            true => " ",
-            false => {
-                let Node::Dataset(_, meta) = &self.node else {
-                    return Line::from(vec![Span::styled(
-                        "? ",
-                        Style::default().fg(color_consts::ERROR_COLOR),
-                    )]);
-                };
-                if meta.is_link {
-                    // Dont do a file icon, just a link icon
-                    "🔗 "
-                } else {
-                    "󰈚 "
-                }
-            }
-        };
+        let icon = self.icon();
         let icon_color = match self.is_group() {
             true => color_consts::GROUP_COLOR,
             false => color_consts::DATASET_FILE_COLOR,
@@ -507,7 +574,7 @@ impl H5FNode {
 
         match &self.node {
             Node::File(_) => {}
-            Node::Group(_) => {}
+            Node::Group(_, _) => {}
             Node::Dataset(_, dataset_meta) => {
                 result.push(ContentShowMode::Preview);
                 if dataset_meta.numerical {
@@ -519,7 +586,7 @@ impl H5FNode {
     }
 
     pub fn is_group(&self) -> bool {
-        matches!(self.node, Node::Group(_))
+        matches!(self.node, Node::Group(_, _))
     }
 
     pub fn read_attributes(&mut self) -> Result<&ComputedAttributes, hdf5_metno::Error> {
@@ -567,7 +634,7 @@ impl H5FNode {
     pub fn full_path(&self) -> String {
         match &self.node {
             Node::File(f) => f.filename().split("/").last().unwrap_or("").to_string(),
-            Node::Group(g) => g.filename().split("/").last().unwrap_or("").to_string(),
+            Node::Group(g, _) => g.filename().split("/").last().unwrap_or("").to_string(),
             Node::Dataset(ds, _) => ds.filename().split("/").last().unwrap_or("").to_string(),
         }
     }
@@ -630,10 +697,16 @@ impl H5FNode {
 
         let has_children = match &self.node {
             Node::File(file) => file,
-            Node::Group(group) => group,
+            Node::Group(group, _) => group,
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous if"),
         };
-        let groups = has_children.get_groups()?;
+        let mut groups = vec![];
+        for g in has_children.get_groups()? {
+            groups.push(GrpType::InternalGroup(g));
+        }
+        for g in has_children.get_external_groups()? {
+            groups.push(GrpType::ExternalGroup(g));
+        }
         let mut datasets = vec![];
         for d in has_children.get_datasets()? {
             datasets.push(DSType::InternalDataset(d));
@@ -643,9 +716,17 @@ impl H5FNode {
         }
 
         let mut children = Vec::new();
-        for g in groups {
+        for wrapped_g in groups {
+            let (g, is_link) = match wrapped_g {
+                GrpType::InternalGroup(g) => (g, false),
+                GrpType::ExternalGroup(g) => (g, true),
+            };
+            let meta = GroupMeta {
+                is_link,
+                filename: g.filename().to_string(),
+            };
             let node = Rc::new(RefCell::new(H5FNode::new(
-                Node::Group(g),
+                Node::Group(g, meta),
                 self.searcher.clone(),
             )));
 
