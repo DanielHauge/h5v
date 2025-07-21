@@ -300,17 +300,51 @@ pub fn handle_image_load(
             match img_format {
                 ImageType::Grayscale => {
                     let shape = ds_reader.shape();
-                    let data: Array2<u8> = match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
-                        Ok(d) => d,
-                        Err(e) => {
+                    // panic!("idx: {idx}, shape: {shape:?}");
+                    let data: Array2<u8> = match shape.len() {
+                        2 => match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                tx_events
+                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                        e.to_string(),
+                                    )))
+                                    .expect("Failed to send image loaded event");
+                                continue;
+                            }
+                        },
+                        3 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., ..]) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                tx_events
+                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                        e.to_string(),
+                                    )))
+                                    .expect("Failed to send image loaded event");
+                                continue;
+                            }
+                        },
+                        4 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., 0]) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                tx_events
+                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                        e.to_string(),
+                                    )))
+                                    .expect("Failed to send image loaded event");
+                                continue;
+                            }
+                        },
+                        _ => {
                             tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                    e.to_string(),
+                                    "Invalid shape for Grayscale image".to_string(),
                                 )))
                                 .expect("Failed to send image loaded event");
                             continue;
                         }
                     };
+                    let shape = data.shape();
                     let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
                     for i in 0..shape[1] {
                         for j in 0..shape[0] {
