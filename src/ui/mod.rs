@@ -1,6 +1,7 @@
 pub mod app;
 pub mod attributes;
 pub mod command;
+pub mod command_view;
 pub mod dims;
 pub mod help;
 pub mod image_preview;

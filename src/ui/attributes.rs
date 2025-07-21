@@ -12,7 +12,7 @@ use crate::{
     h5f::H5FNode,
 };
 
-use super::state::{AppState, AttributeViewSelection, Focus};
+use super::state::{AppState, AttributeViewSelection, Focus, Mode};
 
 fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
     let chunks = Layout::default()
@@ -34,8 +34,8 @@ pub fn render_info_attributes(
     selected_node: &Rc<RefCell<H5FNode>>,
     state: &mut AppState,
 ) -> Result<(), hdf5_metno::Error> {
-    let bg = match state.focus {
-        Focus::Attributes => FOCUS_BG_COLOR,
+    let bg = match (&state.focus, &state.mode) {
+        (Focus::Attributes, Mode::Normal) => FOCUS_BG_COLOR,
         _ => BG_COLOR,
     };
 

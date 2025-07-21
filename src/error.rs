@@ -6,6 +6,7 @@ pub enum AppError {
     Hdf5(hdf5_metno::Error),
     ChannelError(String),
     ClipboardError(String),
+    InvalidCommand(String),
 }
 
 impl Display for AppError {
@@ -15,6 +16,7 @@ impl Display for AppError {
             AppError::Hdf5(err) => write!(f, "HDF5 Error: {}", err),
             AppError::ChannelError(c) => write!(f, "Channel Error: {}", c),
             AppError::ClipboardError(msg) => write!(f, "Clipboard Error: {}", msg),
+            AppError::InvalidCommand(cmd) => write!(f, "Invalid Command: {}", cmd),
         }
     }
 }

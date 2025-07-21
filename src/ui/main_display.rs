@@ -98,10 +98,10 @@ pub fn render_main_display(
     }
 
     let title = Title::from(tab_titles);
-    let bg_color = if matches!(state.focus, ui::state::Focus::Content) {
-        color_consts::FOCUS_BG_COLOR
-    } else {
-        color_consts::BG_COLOR
+
+    let bg_color = match (&state.focus, &state.mode) {
+        (ui::state::Focus::Content, ui::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        _ => color_consts::BG_COLOR,
     };
     let break_line = Block::default()
         .title(title)

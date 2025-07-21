@@ -8,10 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    color_consts,
-    h5f::{H5FNode, Node},
-};
+use crate::{color_consts, h5f::H5FNode};
 
 use super::state::{AppState, Focus, Mode};
 
@@ -167,8 +164,8 @@ fn compute_tree_view_rec<'a>(
 }
 
 pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
-    let bg = match state.focus {
-        Focus::Tree(_) => color_consts::FOCUS_BG_COLOR,
+    let bg = match (&state.focus, &state.mode) {
+        (Focus::Tree(_), Mode::Normal) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
     let header_block = Block::default()

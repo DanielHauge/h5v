@@ -1,12 +1,10 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ratatui::{
     layout::Rect,
     widgets::{Paragraph, Scrollbar, ScrollbarState},
     Frame,
 };
 
-use crate::{error::AppError, h5f::H5FNode};
+use crate::error::AppError;
 
 use super::state::AppState;
 

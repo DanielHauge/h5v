@@ -167,10 +167,9 @@ fn render_chart_preview(
         .marker(symbols::Marker::Braille)
         .graph_type(GraphType::Line)
         .data(data);
-    let bg = if matches!(state.focus, super::state::Focus::Content) {
-        color_consts::FOCUS_BG_COLOR
-    } else {
-        color_consts::BG_COLOR
+    let bg = match (&state.focus, &state.mode) {
+        (super::state::Focus::Content, super::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        _ => color_consts::BG_COLOR,
     };
     let chart = Chart::new(vec![ds])
         .style(Style::default().bg(bg))

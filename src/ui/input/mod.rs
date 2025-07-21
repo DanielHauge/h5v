@@ -1,9 +1,6 @@
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
-use ratatui::crossterm::{
-    event::{Event, KeyCode, KeyModifiers},
-    style::Attributes,
-};
+use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
 use crate::{error::AppError, h5f::Node};
@@ -11,6 +8,7 @@ use crate::{error::AppError, h5f::Node};
 use super::state::{AppState, Focus, LastFocused, Mode};
 
 pub mod attributes;
+pub mod command;
 pub mod content;
 pub mod search;
 pub mod tree;
@@ -28,18 +26,14 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
     }
 
     match state.mode {
-        Mode::Normal | Mode::Command => {
+        Mode::Command => command::handle_command_event(state, event),
+        Mode::Normal => {
             if let Event::Key(key_event) = event {
                 match (key_event.code, key_event.modifiers) {
                     (KeyCode::Char(':'), _) => {
-                        state.mode = match state.mode {
-                            Mode::Command => Mode::Normal,
-                            _ => Mode::Command,
-                        };
-                        state.focus = match state.mode {
-                            Mode::Command => Focus::Content,
-                            _ => Focus::Tree(LastFocused::Content),
-                        };
+                        state.mode = Mode::Command;
+                        state.command_state.command_buffer.clear();
+                        state.command_state.cursor = 0;
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('/'), _) => {
@@ -252,7 +246,6 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         Focus::Tree(_) => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),
                         Focus::Content => handle_normal_content_event(state, event),
-                        Focus::Command => handle_normal_content_event(state, event),
                     },
                 }
             } else {

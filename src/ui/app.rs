@@ -24,7 +24,8 @@ use ratatui::{
 use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
 use super::{
-    command::render_command_dialog,
+    command::CommandState,
+    command_view::render_command_dialog,
     image_preview::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
         ImageLoadedResult, ImageResizeResult,
@@ -32,8 +33,8 @@ use super::{
     input::handle_input_event,
     main_display::render_main_display,
     state::{
-        self, AppState, AttributeCursor, CommandState, ContentShowMode, Focus, ImgState,
-        LastFocused, MatrixViewState, Mode,
+        self, AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused,
+        MatrixViewState, Mode,
     },
     tree_view::render_tree,
 };
@@ -63,7 +64,7 @@ pub fn init(filename: String) -> Result<()> {
             Ok(_) => break,
             Err(e) => match e {
                 AppError::Io(error) => {
-                    last_message = Some(format!("IO Error: - {}", error));
+                    last_message = Some(format!("IO Error: - {error}"));
                 }
                 AppError::Hdf5(error) => match error {
                     hdf5_metno::Error::HDF5(_) => {
@@ -71,14 +72,17 @@ pub fn init(filename: String) -> Result<()> {
                         break;
                     }
                     hdf5_metno::Error::Internal(e) => {
-                        last_message = Some(format!("HDF5 Internal: - {}", e));
+                        last_message = Some(format!("HDF5 Internal: - {e}"));
                         break;
                     }
                 },
-                AppError::ChannelError(c) => last_message = Some(format!("Channel Error: - {}", c)),
+                AppError::ChannelError(c) => last_message = Some(format!("Channel Error: - {c}")),
                 AppError::ClipboardError(msg) => {
-                    last_message = Some(format!("Clipboard Error: - {}", msg));
+                    last_message = Some(format!("Clipboard Error: - {msg}"));
                     break;
+                }
+                AppError::InvalidCommand(cmd) => {
+                    last_message = Some(format!("Invalid Command: - {cmd}"));
                 }
             },
         }
@@ -121,7 +125,6 @@ fn main_recover_loop(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
-        idx_max: 0,
     };
 
     let matrix_view_state = MatrixViewState {
@@ -139,8 +142,9 @@ fn main_recover_loop(
     };
 
     let command_state = CommandState {
-        command: String::new(),
+        command_buffer: String::new(),
         last_command: None,
+        cursor: 0,
     };
 
     let mut state = AppState {
@@ -194,7 +198,6 @@ fn main_recover_loop(
             Err(e) => render_error(frame, &format!("Error: {}", e)),
         }
         if let Mode::Command = state.mode {
-            // Render command input area
             render_command_dialog(frame, state);
         }
     };

@@ -1,4 +1,3 @@
-use cli_clipboard::ClipboardProvider;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{error::AppError, ui::state::AppState};
@@ -6,7 +5,7 @@ use crate::{error::AppError, ui::state::AppState};
 use super::EventResult;
 
 pub fn handle_normal_content_event(
-    state: &mut AppState<'_>,
+    _state: &mut AppState<'_>,
     event: Event,
 ) -> Result<EventResult, AppError> {
     match event {

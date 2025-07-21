@@ -11,19 +11,20 @@ use crate::{
     search::Searcher,
 };
 
-use super::tree_view::TreeItem;
+use super::{command::CommandState, tree_view::TreeItem};
 
+#[derive(Debug, Clone)]
 pub enum LastFocused {
     Attributes,
     Content,
     Tree,
 }
 
+#[derive(Debug, Clone)]
 pub enum Focus {
     Tree(LastFocused),
     Attributes,
     Content,
-    Command,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +49,6 @@ pub struct ImgState {
     pub ds: Option<String>,
     pub error: Option<String>,
     pub idx_to_load: i32,
-    pub idx_max: i32,
     pub idx_loaded: i32,
 }
 
@@ -97,11 +97,6 @@ pub struct SegmentState {
     pub idx: i32,
     pub segumented: bool,
     pub segment_count: i32,
-}
-
-pub struct CommandState {
-    pub command: String,
-    pub last_command: Option<String>,
 }
 
 pub struct AppState<'a> {
@@ -165,5 +160,21 @@ impl AppState<'_> {
         } else {
             available_content_modes[0]
         }
+    }
+
+    pub fn execute_command(&mut self) -> Result<()> {
+        let command = self.command_state.parse_command()?;
+        match command {
+            super::command::Command::Increment(increment) => {
+                self.img_state.idx_to_load += increment as i32;
+            }
+            super::command::Command::Decrement(decrement) => {
+                self.img_state.idx_to_load -= decrement as i32;
+            }
+            super::command::Command::Seek(seek) => {
+                self.img_state.idx_to_load = seek as i32;
+            }
+        }
+        Ok(())
     }
 }

@@ -1,11 +1,6 @@
-use std::{
-    cell::RefCell,
-    mem,
-    ptr::{self, addr_of},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Attribute, Dataset, File, Group, LinkType, Location, LocationType};
+use hdf5_metno::{Attribute, Dataset, File, Group, LinkType};
 use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
