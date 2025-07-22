@@ -9,8 +9,17 @@ mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;
 
+use git_version::git_version;
+const GIR_VERSION: &str = git_version!();
+
 #[derive(Parser, Debug)]
+#[clap(
+    version = GIR_VERSION,
+    author = "Your Name animcuil@gmail.com",
+    about = "HDF5 Terminal Viewer (h5v)"
+)]
 struct Args {
+    /// Path to the HDF5 file to open
     file: String,
 }
 
