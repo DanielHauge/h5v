@@ -10,7 +10,8 @@ mod sprint_typedesc;
 mod ui;
 
 use git_version::git_version;
-const GIR_VERSION: &str = git_version!();
+const GIR_VERSION: &str =
+    git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
 
 #[derive(Parser, Debug)]
 #[clap(
