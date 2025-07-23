@@ -138,7 +138,7 @@ fn main_recover_loop(
     let segment_state = state::SegmentState {
         idx: 0,
         segment_count: 0,
-        segumented: state::SegmentType::NotSegmented,
+        segumented: state::SegmentType::NoSegment,
     };
 
     let command_state = CommandState {

@@ -1,5 +1,3 @@
-use std::ops::Add;
-
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
@@ -110,7 +108,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             //     Ok(EventResult::Redraw)
                             // }
                             match state.segment_state.segumented {
-                                SegmentType::ImageSegmented => {
+                                SegmentType::Image => {
                                     if state.img_state.idx_to_load
                                         < state.segment_state.segment_count - 1
                                     {
@@ -120,7 +118,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                                         Ok(EventResult::Continue)
                                     }
                                 }
-                                SegmentType::ChartSegmented => {
+                                SegmentType::Chart => {
                                     state.segment_state.idx = state
                                         .segment_state
                                         .idx
@@ -128,7 +126,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                                         .clamp(1, state.segment_state.segment_count - 1);
                                     Ok(EventResult::Redraw)
                                 }
-                                SegmentType::NotSegmented => {
+                                SegmentType::NoSegment => {
                                     state.img_state.idx_to_load = state.segment_state.idx;
                                     Ok(EventResult::Redraw)
                                 }
@@ -157,7 +155,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Left, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
                             match state.segment_state.segumented {
-                                SegmentType::ImageSegmented => {
+                                SegmentType::Image => {
                                     if state.img_state.idx_to_load > 0 {
                                         state.img_state.idx_to_load -= 1;
                                         Ok(EventResult::Redraw)
@@ -165,7 +163,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                                         Ok(EventResult::Continue)
                                     }
                                 }
-                                SegmentType::ChartSegmented => {
+                                SegmentType::Chart => {
                                     state.segment_state.idx = state
                                         .segment_state
                                         .idx
@@ -173,7 +171,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                                         .clamp(0, state.segment_state.segment_count - 1);
                                     Ok(EventResult::Redraw)
                                 }
-                                SegmentType::NotSegmented => {
+                                SegmentType::NoSegment => {
                                     state.img_state.idx_to_load = state.segment_state.idx;
                                     Ok(EventResult::Redraw)
                                 }

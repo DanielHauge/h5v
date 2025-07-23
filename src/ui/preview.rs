@@ -124,7 +124,7 @@ fn render_chart_preview(
 
     const MAX_SEGMENT_SIZE: usize = 250000;
     let (chart_area, data_preview) = if shape[state.selected_x_dim] > MAX_SEGMENT_SIZE {
-        state.segment_state.segumented = SegmentType::ChartSegmented;
+        state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
             (shape[state.selected_x_dim] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
         let areas_split =

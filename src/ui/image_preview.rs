@@ -35,7 +35,7 @@ pub fn render_img(
     node: &Node,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    let area = if let SegmentType::ImageSegmented = state.segment_state.segumented {
+    let area = if let SegmentType::Image = state.segment_state.segumented {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
         render_segment_scroll(f, &areas_split[0], state)?;
@@ -104,9 +104,9 @@ fn render_ds_img(
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
             if ds.shape().len() == 4 {
-                state.segment_state.segumented = SegmentType::ImageSegmented;
+                state.segment_state.segumented = SegmentType::Image;
             }
-            if let SegmentType::ImageSegmented = state.segment_state.segumented {
+            if let SegmentType::Image = state.segment_state.segumented {
                 state.segment_state.segment_count = ds.shape()[0] as i32
             };
             let ds_clone = ds.clone();
@@ -164,7 +164,7 @@ fn render_raw_img(
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
-                    state.segment_state.segumented = SegmentType::NotSegmented;
+                    state.segment_state.segumented = SegmentType::NoSegment;
                     let ds_buffered = BufReader::new(ds_reader);
                     state
                         .img_state
@@ -179,7 +179,7 @@ fn render_raw_img(
                     ) {
                         let i = state.img_state.idx_to_load;
                         state.img_state.idx_loaded = i;
-                        state.segment_state.segumented = SegmentType::ImageSegmented;
+                        state.segment_state.segumented = SegmentType::Image;
                         state.segment_state.segment_count = ds.shape()[0] as i32;
                         state.segment_state.idx = i;
                         state

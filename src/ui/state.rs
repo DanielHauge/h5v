@@ -97,10 +97,11 @@ pub struct MatrixViewState {
 }
 
 pub enum SegmentType {
-    ImageSegmented,
-    ChartSegmented,
-    NotSegmented,
+    Image,
+    Chart,
+    NoSegment,
 }
+
 pub struct SegmentState {
     pub idx: i32,
     pub segumented: SegmentType,
