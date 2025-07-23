@@ -96,9 +96,14 @@ pub struct MatrixViewState {
     pub cols_currently_available: usize,
 }
 
+pub enum SegmentType {
+    ImageSegmented,
+    ChartSegmented,
+    NotSegmented,
+}
 pub struct SegmentState {
     pub idx: i32,
-    pub segumented: bool,
+    pub segumented: SegmentType,
     pub segment_count: i32,
 }
 

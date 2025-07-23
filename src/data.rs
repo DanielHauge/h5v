@@ -62,7 +62,7 @@ pub struct DatasetValuesData<T> {
 
 pub enum SliceSelection {
     All,
-    // FromTo(usize, usize),
+    FromTo(usize, usize),
 }
 type XAxis = usize;
 
@@ -97,12 +97,12 @@ impl MatrixValues for Dataset {
 impl Plotable for Dataset {
     fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error> {
         let slice = match selection.slice {
-            // SliceSelection::FromTo(start, end) => start..end,
             SliceSelection::All => 0..self.shape()[selection.x],
+            SliceSelection::FromTo(a, b) => a..b,
         };
         // TODO: Fix this, use the way to make slice from selections, like dims selector.
         let data_to_show = match selection.index.len() {
-            0 => self.read_1d::<f64>()?,
+            0 => self.read_slice_1d(slice)?,
             1 => match selection.x {
                 0 => self.read_slice(s![slice, selection.index[0]])?,
                 _ => self.read_slice(s![selection.index[0], slice])?,

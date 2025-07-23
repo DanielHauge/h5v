@@ -5,7 +5,7 @@ use hdf5_metno::{
     Error,
 };
 use ratatui::{
-    layout::{Constraint, Layout, Offset, Rect},
+    layout::{Constraint, Layout, Rect},
     style::Style,
     symbols,
     text::{Span, Text},
@@ -13,12 +13,16 @@ use ratatui::{
     Frame,
 };
 
-use super::{dims::render_dim_selector, image_preview::render_img, state::AppState};
+use super::{
+    dims::render_dim_selector, image_preview::render_img, segment_scroll::render_segment_scroll,
+    state::AppState,
+};
 use crate::{
     color_consts,
     data::{Plotable, PreviewSelection, SliceSelection},
     error::AppError,
     h5f::{Encoding, H5FNode, Node},
+    ui::state::SegmentType,
 };
 
 pub fn render_preview(
@@ -118,24 +122,32 @@ fn render_chart_preview(
         })
     };
 
-    if shape[state.selected_x_dim] > 250000 {
-        let paragrapth =
-            Paragraph::new("WARN: Display of datasets with more than 250000 points disabled. ")
-                .style(Style::default().fg(color_consts::COLOR_WHITE));
-        f.render_widget(paragrapth, *area);
-        let paragrapth = Paragraph::new("TODO: Enumeration of slices not yet implemented. ")
-            .style(Style::default().fg(color_consts::COLOR_WHITE));
-        f.render_widget(paragrapth, area.offset(Offset { x: 0, y: 1 }));
+    const MAX_SEGMENT_SIZE: usize = 250000;
+    let (chart_area, data_preview) = if shape[state.selected_x_dim] > MAX_SEGMENT_SIZE {
+        state.segment_state.segumented = SegmentType::ChartSegmented;
+        state.segment_state.segment_count =
+            (shape[state.selected_x_dim] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
+        render_segment_scroll(f, &areas_split[0], state)?;
 
-        return Ok(());
-    }
-
-    // make slice of state.selected_indexes[0..total_dims]
-    let data_preview = ds.plot(PreviewSelection {
-        x: state.selected_x_dim,
-        index: state.selected_indexes[0..total_dims - 1].to_vec(),
-        slice: SliceSelection::All,
-    })?;
+        let data_preview = ds.plot(PreviewSelection {
+            x: state.selected_x_dim,
+            index: state.selected_indexes[0..total_dims - 1].to_vec(),
+            slice: SliceSelection::FromTo(
+                MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
+                MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize,
+            ),
+        })?;
+        (areas_split[1], data_preview)
+    } else {
+        let data_preview = ds.plot(PreviewSelection {
+            x: state.selected_x_dim,
+            index: state.selected_indexes[0..total_dims - 1].to_vec(),
+            slice: SliceSelection::All,
+        })?;
+        (chart_area, data_preview)
+    };
 
     let x_label_count = match chart_area.width {
         0 => 0,

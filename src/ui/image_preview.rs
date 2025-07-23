@@ -22,7 +22,11 @@ use crate::{
     h5f::{ImageType, InterlaceMode, Node},
 };
 
-use super::{app::AppEvent, segment_scroll::render_segment_scroll, state::AppState};
+use super::{
+    app::AppEvent,
+    segment_scroll::render_segment_scroll,
+    state::{AppState, SegmentType},
+};
 
 pub fn render_img(
     image_type: &ImageType,
@@ -31,7 +35,7 @@ pub fn render_img(
     node: &Node,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    let area = if state.segment_state.segumented {
+    let area = if let SegmentType::ImageSegmented = state.segment_state.segumented {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
         render_segment_scroll(f, &areas_split[0], state)?;
@@ -99,8 +103,10 @@ fn render_ds_img(
             state.img_state.protocol = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
-            state.segment_state.segumented = ds.shape().len() == 4;
-            if state.segment_state.segumented {
+            if ds.shape().len() == 4 {
+                state.segment_state.segumented = SegmentType::ImageSegmented;
+            }
+            if let SegmentType::ImageSegmented = state.segment_state.segumented {
                 state.segment_state.segment_count = ds.shape()[0] as i32
             };
             let ds_clone = ds.clone();
@@ -158,7 +164,7 @@ fn render_raw_img(
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
-                    state.segment_state.segumented = false;
+                    state.segment_state.segumented = SegmentType::NotSegmented;
                     let ds_buffered = BufReader::new(ds_reader);
                     state
                         .img_state
@@ -173,7 +179,7 @@ fn render_raw_img(
                     ) {
                         let i = state.img_state.idx_to_load;
                         state.img_state.idx_loaded = i;
-                        state.segment_state.segumented = true;
+                        state.segment_state.segumented = SegmentType::ImageSegmented;
                         state.segment_state.segment_count = ds.shape()[0] as i32;
                         state.segment_state.idx = i;
                         state

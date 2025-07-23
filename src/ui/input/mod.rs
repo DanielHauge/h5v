@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
@@ -5,7 +7,7 @@ use tree::handle_normal_tree_event;
 
 use crate::{error::AppError, h5f::Node};
 
-use super::state::{AppState, Focus, LastFocused, Mode};
+use super::state::{AppState, Focus, LastFocused, Mode, SegmentType};
 
 pub mod attributes;
 pub mod command;
@@ -94,18 +96,42 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
-                            if state.segment_state.segumented {
-                                if state.img_state.idx_to_load
-                                    < state.segment_state.segment_count - 1
-                                {
-                                    state.img_state.idx_to_load += 1;
-                                    Ok(EventResult::Redraw)
-                                } else {
-                                    Ok(EventResult::Continue)
+                            // if let SegmentType::ImageSegmented = state.segment_state.segumented {
+                            //     if state.img_state.idx_to_load
+                            //         < state.segment_state.segment_count - 1
+                            //     {
+                            //         state.img_state.idx_to_load += 1;
+                            //         Ok(EventResult::Redraw)
+                            //     } else {
+                            //         Ok(EventResult::Continue)
+                            //     }
+                            // } else if let SegmentType::ChartSegmented = {
+                            //     state.img_state.idx_to_load = state.segment_state.idx;
+                            //     Ok(EventResult::Redraw)
+                            // }
+                            match state.segment_state.segumented {
+                                SegmentType::ImageSegmented => {
+                                    if state.img_state.idx_to_load
+                                        < state.segment_state.segment_count - 1
+                                    {
+                                        state.img_state.idx_to_load += 1;
+                                        Ok(EventResult::Redraw)
+                                    } else {
+                                        Ok(EventResult::Continue)
+                                    }
                                 }
-                            } else {
-                                state.img_state.idx_to_load = state.segment_state.idx;
-                                Ok(EventResult::Redraw)
+                                SegmentType::ChartSegmented => {
+                                    state.segment_state.idx = state
+                                        .segment_state
+                                        .idx
+                                        .saturating_add(1)
+                                        .clamp(1, state.segment_state.segment_count - 1);
+                                    Ok(EventResult::Redraw)
+                                }
+                                SegmentType::NotSegmented => {
+                                    state.img_state.idx_to_load = state.segment_state.idx;
+                                    Ok(EventResult::Redraw)
+                                }
                             }
                         }
                         super::state::ContentShowMode::Matrix => {
@@ -130,11 +156,27 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     },
                     (KeyCode::Left, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
-                            if state.img_state.idx_to_load > 0 && state.segment_state.segumented {
-                                state.img_state.idx_to_load -= 1;
-                                Ok(EventResult::Redraw)
-                            } else {
-                                Ok(EventResult::Continue)
+                            match state.segment_state.segumented {
+                                SegmentType::ImageSegmented => {
+                                    if state.img_state.idx_to_load > 0 {
+                                        state.img_state.idx_to_load -= 1;
+                                        Ok(EventResult::Redraw)
+                                    } else {
+                                        Ok(EventResult::Continue)
+                                    }
+                                }
+                                SegmentType::ChartSegmented => {
+                                    state.segment_state.idx = state
+                                        .segment_state
+                                        .idx
+                                        .saturating_sub(1)
+                                        .clamp(0, state.segment_state.segment_count - 1);
+                                    Ok(EventResult::Redraw)
+                                }
+                                SegmentType::NotSegmented => {
+                                    state.img_state.idx_to_load = state.segment_state.idx;
+                                    Ok(EventResult::Redraw)
+                                }
                             }
                         }
                         super::state::ContentShowMode::Matrix => {
