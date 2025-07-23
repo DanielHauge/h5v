@@ -93,45 +93,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
                     (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => {
-                            // if let SegmentType::ImageSegmented = state.segment_state.segumented {
-                            //     if state.img_state.idx_to_load
-                            //         < state.segment_state.segment_count - 1
-                            //     {
-                            //         state.img_state.idx_to_load += 1;
-                            //         Ok(EventResult::Redraw)
-                            //     } else {
-                            //         Ok(EventResult::Continue)
-                            //     }
-                            // } else if let SegmentType::ChartSegmented = {
-                            //     state.img_state.idx_to_load = state.segment_state.idx;
-                            //     Ok(EventResult::Redraw)
-                            // }
-                            match state.segment_state.segumented {
-                                SegmentType::Image => {
-                                    if state.img_state.idx_to_load
-                                        < state.segment_state.segment_count - 1
-                                    {
-                                        state.img_state.idx_to_load += 1;
-                                        Ok(EventResult::Redraw)
-                                    } else {
-                                        Ok(EventResult::Continue)
-                                    }
-                                }
-                                SegmentType::Chart => {
-                                    state.segment_state.idx = state
-                                        .segment_state
-                                        .idx
-                                        .saturating_add(1)
-                                        .clamp(1, state.segment_state.segment_count - 1);
-                                    Ok(EventResult::Redraw)
-                                }
-                                SegmentType::NoSegment => {
-                                    state.img_state.idx_to_load = state.segment_state.idx;
-                                    Ok(EventResult::Redraw)
-                                }
-                            }
-                        }
+                        super::state::ContentShowMode::Preview => state.inc(1),
                         super::state::ContentShowMode::Matrix => {
                             let current_node =
                                 &state.treeview[state.tree_view_cursor].node.borrow().node;
@@ -153,30 +115,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         }
                     },
                     (KeyCode::Left, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => {
-                            match state.segment_state.segumented {
-                                SegmentType::Image => {
-                                    if state.img_state.idx_to_load > 0 {
-                                        state.img_state.idx_to_load -= 1;
-                                        Ok(EventResult::Redraw)
-                                    } else {
-                                        Ok(EventResult::Continue)
-                                    }
-                                }
-                                SegmentType::Chart => {
-                                    state.segment_state.idx = state
-                                        .segment_state
-                                        .idx
-                                        .saturating_sub(1)
-                                        .clamp(0, state.segment_state.segment_count - 1);
-                                    Ok(EventResult::Redraw)
-                                }
-                                SegmentType::NoSegment => {
-                                    state.img_state.idx_to_load = state.segment_state.idx;
-                                    Ok(EventResult::Redraw)
-                                }
-                            }
-                        }
+                        super::state::ContentShowMode::Preview => state.dec(1),
                         super::state::ContentShowMode::Matrix => {
                             // If we are at the first column, do nothing
                             let current_node =

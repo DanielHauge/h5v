@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
+use std::{cell::RefCell, io::BufReader, ops::Sub, rc::Rc, sync::mpsc::Sender};
 
 use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};
@@ -173,7 +173,28 @@ impl AppState<'_> {
 
     pub fn dec(&mut self, dec: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+                SegmentType::Image => {
+                    if self.img_state.idx_to_load > 0 {
+                        self.img_state.idx_to_load -= 1;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
+                    }
+                }
+                SegmentType::Chart => {
+                    self.segment_state.idx = self
+                        .segment_state
+                        .idx
+                        .saturating_sub(dec as i32)
+                        .clamp(0, self.segment_state.segment_count - 1);
+                    Ok(EventResult::Redraw)
+                }
+                SegmentType::NoSegment => {
+                    self.img_state.idx_to_load = self.segment_state.idx;
+                    Ok(EventResult::Redraw)
+                }
+            },
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let current_node = &current_node.node.borrow().node;
@@ -194,7 +215,28 @@ impl AppState<'_> {
 
     pub fn inc(&mut self, inc: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+                SegmentType::Image => {
+                    if self.img_state.idx_to_load < self.segment_state.segment_count - 1 {
+                        self.img_state.idx_to_load += 1;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
+                    }
+                }
+                SegmentType::Chart => {
+                    self.segment_state.idx = self
+                        .segment_state
+                        .idx
+                        .saturating_add(inc as i32)
+                        .clamp(0, self.segment_state.segment_count - 1);
+                    Ok(EventResult::Redraw)
+                }
+                SegmentType::NoSegment => {
+                    self.img_state.idx_to_load = self.segment_state.idx;
+                    Ok(EventResult::Redraw)
+                }
+            },
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
                 if let Node::Dataset(_, dsattr) = current_node {
@@ -211,7 +253,30 @@ impl AppState<'_> {
 
     pub fn set(&mut self, idx: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+                SegmentType::Image => {
+                    if idx < self.segment_state.segment_count as usize {
+                        self.img_state.idx_to_load = idx as i32;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
+                    }
+                }
+                SegmentType::Chart => {
+                    if idx > 0 {
+                        self.segment_state.idx =
+                            ((idx - 1) as i32).clamp(0, self.segment_state.segment_count - 1);
+                        Ok(EventResult::Redraw)
+                    } else {
+                        self.segment_state.idx = 0;
+                        Ok(EventResult::Redraw)
+                    }
+                }
+                SegmentType::NoSegment => {
+                    self.img_state.idx_to_load = idx as i32;
+                    Ok(EventResult::Redraw)
+                }
+            },
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
                 if let Node::Dataset(_, dsattr) = current_node {
