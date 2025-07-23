@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io::BufReader, ops::Sub, rc::Rc, sync::mpsc::Sender};
+use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
 
 use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};

@@ -5,7 +5,7 @@ use tree::handle_normal_tree_event;
 
 use crate::{error::AppError, h5f::Node};
 
-use super::state::{AppState, Focus, LastFocused, Mode, SegmentType};
+use super::state::{AppState, Focus, LastFocused, Mode};
 
 pub mod attributes;
 pub mod command;
