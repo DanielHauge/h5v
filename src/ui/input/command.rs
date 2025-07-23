@@ -14,8 +14,10 @@ pub fn handle_command_event(
             KeyEventKind::Press => match (key_event.code, key_event.modifiers) {
                 (KeyCode::Enter, _) => {
                     state.mode = Mode::Normal;
-
-                    Ok(EventResult::Redraw)
+                    match state.command_state.parse_command() {
+                        Ok(cmd) => state.execute_command(&cmd),
+                        Err(_) => Ok(EventResult::Redraw),
+                    }
                 }
                 (KeyCode::Char('+'), _) => {
                     if state.command_state.cursor != 0 {

@@ -11,13 +11,16 @@ use crate::{
     search::Searcher,
 };
 
-use super::{command::CommandState, tree_view::TreeItem};
+use super::{
+    command::{Command, CommandState},
+    input::EventResult,
+    tree_view::TreeItem,
+};
 
 #[derive(Debug, Clone)]
 pub enum LastFocused {
     Attributes,
     Content,
-    Tree,
 }
 
 #[derive(Debug, Clone)]
@@ -162,19 +165,72 @@ impl AppState<'_> {
         }
     }
 
-    pub fn execute_command(&mut self) -> Result<()> {
-        let command = self.command_state.parse_command()?;
-        match command {
-            super::command::Command::Increment(increment) => {
-                self.img_state.idx_to_load += increment as i32;
-            }
-            super::command::Command::Decrement(decrement) => {
-                self.img_state.idx_to_load -= decrement as i32;
-            }
-            super::command::Command::Seek(seek) => {
-                self.img_state.idx_to_load = seek as i32;
+    pub fn dec(&mut self, dec: usize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let current_node = &current_node.node.borrow().node;
+                if self.matrix_view_state.row_offset == 0 {
+                    return Ok(EventResult::Redraw);
+                }
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset - dec)
+                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Redraw)
+                }
             }
         }
-        Ok(())
+    }
+
+    pub fn inc(&mut self, inc: usize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset + inc)
+                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Redraw)
+                }
+            }
+        }
+    }
+
+    pub fn set(&mut self, idx: usize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Preview => Ok(EventResult::Redraw),
+            super::state::ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    self.matrix_view_state.row_offset = idx
+                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Redraw)
+                }
+            }
+        }
+    }
+
+    pub fn execute_command(&mut self, command: &Command) -> Result<EventResult> {
+        match command {
+            super::command::Command::Increment(increment) => self.inc(*increment),
+            super::command::Command::Decrement(decrement) => self.dec(*decrement),
+            super::command::Command::Seek(seek) => self.set(*seek),
+            super::command::Command::Noop => Ok(EventResult::Redraw),
+        }
+    }
+
+    pub fn reexecute_command(&mut self) -> Result<EventResult> {
+        let last_command = &self.command_state.last_command.clone();
+        self.execute_command(last_command)
     }
 }

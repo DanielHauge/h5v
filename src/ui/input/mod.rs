@@ -36,6 +36,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         state.command_state.cursor = 0;
                         Ok(EventResult::Redraw)
                     }
+                    (KeyCode::Char('.'), _) => state.reexecute_command(),
                     (KeyCode::Char('/'), _) => {
                         state.searcher.borrow_mut().query.clear();
                         state.searcher.borrow_mut().line_cursor = 0;
@@ -89,53 +90,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
 
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Up, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => {
-                            // if state.img_state.idx_to_load > 0 {
-                            //     state.img_state.idx_to_load -= 1;
-                            //     Ok(EventResult::Redraw)
-                            // } else {
-                            //     Ok(EventResult::Continue)
-                            // }
-                            Ok(EventResult::Continue)
-                        }
-                        super::state::ContentShowMode::Matrix => {
-                            let current_node =
-                                &state.treeview[state.tree_view_cursor].node.borrow().node;
-                            if state.matrix_view_state.row_offset == 0 {
-                                return Ok(EventResult::Continue);
-                            }
-                            if let Node::Dataset(_, dsattr) = current_node {
-                                let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                                state.matrix_view_state.row_offset =
-                                    (state.matrix_view_state.row_offset - 1).min(
-                                        row_selected_shape
-                                            - state.matrix_view_state.rows_currently_available,
-                                    );
-                                Ok(EventResult::Redraw)
-                            } else {
-                                Ok(EventResult::Continue)
-                            }
-                        }
-                    },
-                    (KeyCode::Down, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => Ok(EventResult::Continue),
-                        super::state::ContentShowMode::Matrix => {
-                            let current_node =
-                                &state.treeview[state.tree_view_cursor].node.borrow().node;
-                            if let Node::Dataset(_, dsattr) = current_node {
-                                let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                                state.matrix_view_state.row_offset =
-                                    (state.matrix_view_state.row_offset + 1).min(
-                                        row_selected_shape
-                                            - state.matrix_view_state.rows_currently_available,
-                                    );
-                                Ok(EventResult::Redraw)
-                            } else {
-                                Ok(EventResult::Continue)
-                            }
-                        }
-                    },
+                    (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
+                    (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => {
                             if state.segment_state.segumented {
@@ -205,43 +161,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             }
                         }
                     },
-                    (KeyCode::PageDown, _) => {
-                        let current_node =
-                            &state.treeview[state.tree_view_cursor].node.borrow().node;
-                        if let Node::Dataset(_, dsattr) = current_node {
-                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                            state.matrix_view_state.row_offset =
-                                (state.matrix_view_state.row_offset + 20).min(
-                                    row_selected_shape
-                                        - state.matrix_view_state.rows_currently_available,
-                                );
-                            Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
-                        }
-                    }
-                    (KeyCode::PageUp, _) => {
-                        let current_node =
-                            &state.treeview[state.tree_view_cursor].node.borrow().node;
-                        if state.matrix_view_state.row_offset == 0 {
-                            return Ok(EventResult::Continue);
-                        }
-                        if let Node::Dataset(_, dsattr) = current_node {
-                            let row_selected_shape = dsattr.shape[state.selected_x_dim];
-                            if state.matrix_view_state.row_offset < 20 {
-                                state.matrix_view_state.row_offset = 0;
-                            } else {
-                                state.matrix_view_state.row_offset =
-                                    (state.matrix_view_state.row_offset - 20).min(
-                                        row_selected_shape
-                                            - state.matrix_view_state.rows_currently_available,
-                                    );
-                            }
-                            Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
-                        }
-                    }
+                    (KeyCode::PageDown, _) => state.inc(20),
+                    (KeyCode::PageUp, _) => state.dec(20),
                     _ => match state.focus {
                         Focus::Tree(_) => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),

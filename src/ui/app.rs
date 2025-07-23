@@ -24,7 +24,7 @@ use ratatui::{
 use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
 use super::{
-    command::CommandState,
+    command::{Command, CommandState},
     command_view::render_command_dialog,
     image_preview::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
@@ -143,7 +143,7 @@ fn main_recover_loop(
 
     let command_state = CommandState {
         command_buffer: String::new(),
-        last_command: None,
+        last_command: Command::Noop,
         cursor: 0,
     };
 
