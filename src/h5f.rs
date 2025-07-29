@@ -7,10 +7,12 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, data,
     search::Searcher,
     sprint_attributes::sprint_attribute,
-    sprint_typedesc::{encoding_from_dtype, is_image, is_type_numerical, sprint_typedescriptor},
+    sprint_typedesc::{
+        encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
+    },
     ui::state::ContentShowMode,
 };
 
@@ -55,7 +57,7 @@ pub struct DatasetMeta {
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
-    pub numerical: bool,
+    pub matrixable: Option<MatrixRenderType>,
     pub encoding: Encoding,
     pub image: Option<ImageType>,
     pub is_link: bool,
@@ -570,12 +572,29 @@ impl H5FNode {
         match &self.node {
             Node::File(_) => {}
             Node::Group(_, _) => {}
-            Node::Dataset(_, dataset_meta) => {
-                result.push(ContentShowMode::Preview);
-                if dataset_meta.numerical {
-                    result.push(ContentShowMode::Matrix);
-                }
-            }
+            Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
+                Some(matrix_renderable) => match matrix_renderable {
+                    MatrixRenderType::Float64 => {
+                        result.push(ContentShowMode::Matrix);
+                        result.push(ContentShowMode::Preview);
+                    }
+                    MatrixRenderType::Uint64 => {
+                        result.push(ContentShowMode::Matrix);
+                        result.push(ContentShowMode::Preview);
+                    }
+                    MatrixRenderType::Int64 => {
+                        result.push(ContentShowMode::Matrix);
+                        result.push(ContentShowMode::Preview);
+                    }
+                    MatrixRenderType::Compound => {
+                        result.push(ContentShowMode::Matrix);
+                    }
+                    MatrixRenderType::Strings => {
+                        result.push(ContentShowMode::Matrix);
+                    }
+                },
+                None => result.push(ContentShowMode::Preview),
+            },
         }
         result
     }
@@ -744,7 +763,7 @@ impl H5FNode {
                 shape.push(1);
             }
             let data_type = sprint_typedescriptor(&dtype_desc);
-            let numerical = is_type_numerical(&dtype_desc);
+            let numerical = is_type_matrixable(&dtype_desc);
             let encoding = encoding_from_dtype(&dtype_desc);
             let total_bytes = data_bytesize * total_elems;
             let storage_required = d.storage_size();
@@ -760,7 +779,7 @@ impl H5FNode {
                 storage_required,
                 total_elems,
                 chunk_shape,
-                numerical,
+                matrixable: numerical,
                 encoding,
                 image,
                 is_link,

@@ -102,21 +102,21 @@ pub fn is_image(d: &Dataset) -> Option<ImageType> {
     }
 }
 
-pub fn is_type_numerical(type_desc: &TypeDescriptor) -> bool {
+pub fn is_type_matrixable(type_desc: &TypeDescriptor) -> Option<MatrixRenderType> {
     match type_desc {
-        TypeDescriptor::Integer(_) => true,
-        TypeDescriptor::Unsigned(_) => true,
-        TypeDescriptor::Float(_) => true,
-        TypeDescriptor::Boolean => false,
-        TypeDescriptor::Enum(_) => false,
-        TypeDescriptor::Compound(_) => false,
-        TypeDescriptor::FixedArray(_, _) => false,
-        TypeDescriptor::FixedAscii(_) => false,
-        TypeDescriptor::FixedUnicode(_) => false,
-        TypeDescriptor::VarLenArray(_) => false,
-        TypeDescriptor::VarLenAscii => false,
-        TypeDescriptor::VarLenUnicode => false,
-        TypeDescriptor::Reference(_) => false,
+        TypeDescriptor::Integer(_) => Some(MatrixRenderType::Int64),
+        TypeDescriptor::Unsigned(_) => Some(MatrixRenderType::Uint64),
+        TypeDescriptor::Float(_) => Some(MatrixRenderType::Float64),
+        TypeDescriptor::Boolean => Some(MatrixRenderType::Uint64),
+        TypeDescriptor::Enum(_) => None,
+        TypeDescriptor::Compound(_) => Some(MatrixRenderType::Compound),
+        TypeDescriptor::FixedArray(_, _) => None,
+        TypeDescriptor::FixedAscii(_) => Some(MatrixRenderType::Strings),
+        TypeDescriptor::FixedUnicode(_) => Some(MatrixRenderType::Strings),
+        TypeDescriptor::VarLenArray(_) => None,
+        TypeDescriptor::VarLenAscii => Some(MatrixRenderType::Strings),
+        TypeDescriptor::VarLenUnicode => Some(MatrixRenderType::Strings),
+        TypeDescriptor::Reference(_) => None,
     }
 }
 pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
@@ -134,5 +134,31 @@ pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
         TypeDescriptor::VarLenAscii => Encoding::Ascii,
         TypeDescriptor::VarLenUnicode => Encoding::UTF8,
         TypeDescriptor::Reference(_) => Encoding::Unknown,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum MatrixRenderType {
+    Float64,
+    Uint64,
+    Int64,
+    Compound,
+    Strings,
+}
+pub fn numerical_render_type(type_desc: &TypeDescriptor) -> bool {
+    match type_desc {
+        TypeDescriptor::Integer(_) => true,
+        TypeDescriptor::Unsigned(_) => true,
+        TypeDescriptor::Float(_) => true,
+        TypeDescriptor::Boolean => false,
+        TypeDescriptor::Enum(_) => false,
+        TypeDescriptor::Compound(_) => false,
+        TypeDescriptor::FixedArray(_, _) => false,
+        TypeDescriptor::FixedAscii(_) => false,
+        TypeDescriptor::FixedUnicode(_) => false,
+        TypeDescriptor::VarLenArray(_) => false,
+        TypeDescriptor::VarLenAscii => false,
+        TypeDescriptor::VarLenUnicode => false,
+        TypeDescriptor::Reference(_) => false,
     }
 }

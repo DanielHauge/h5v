@@ -83,6 +83,11 @@ pub fn init(filename: String) -> Result<()> {
                 }
                 AppError::InvalidCommand(cmd) => {
                     last_message = Some(format!("Invalid Command: - {cmd}"));
+                    break;
+                }
+                AppError::InternalError(e) => {
+                    last_message = Some(format!("Internal Error: - {e}"));
+                    break;
                 }
             },
         }

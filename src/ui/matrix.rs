@@ -1,5 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 
+use hdf5_metno::H5Type;
 use ratatui::{
     layout::{Alignment::Center, Constraint, Layout, Offset, Rect},
     style::Stylize,
@@ -11,31 +12,41 @@ use crate::{
     color_consts,
     data::{MatrixTable, MatrixValues},
     error::AppError,
-    h5f::{H5FNode, Node::Dataset},
+    h5f::DatasetMeta,
 };
 
 use super::{
     dims::{render_dim_selector, HasMatrixSelection, MatrixSelection},
     state::AppState,
 };
+pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
+    let inner_area = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let unsupported_msg = format!("Not yet implemented:");
+    f.render_widget(unsupported_msg, inner_area);
+    let why = format!("{}", desc);
+    f.render_widget(
+        why,
+        inner_area.inner(ratatui::layout::Margin {
+            horizontal: 2,
+            vertical: 1,
+        }),
+    );
+}
 
-pub fn render_matrix(
+pub fn render_matrix<T: H5Type + Display>(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 1,
     });
-    let node = &selected_node.borrow().node;
-    let (ds, attr) = match node {
-        Dataset(ds, attr) => (ds, attr),
-        _ => {
-            unreachable!("Should not render matrix for anything other than dataset")
-        }
-    };
     let shape_len = attr.shape.len();
 
     let matrix_area = if shape_len > 1 {
@@ -97,7 +108,7 @@ pub fn render_matrix(
     let rows_areas = Layout::vertical(rows_area_constraints).split(matrix_area);
 
     if shape_len == 1 {
-        let data = ds.matrix_values::<f64>(slice_selection)?;
+        let data = ds.matrix_values::<T>(slice_selection)?;
         let mut i = state.matrix_view_state.row_offset.min(
             attr.shape[state.selected_x_dim] - state.matrix_view_state.rows_currently_available,
         );
@@ -126,7 +137,7 @@ pub fn render_matrix(
             i += 1;
         }
     } else {
-        let data = ds.matrix_table::<f64>(slice_selection)?;
+        let data = ds.matrix_table::<T>(slice_selection)?;
 
         let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
         col_constraint.push(Constraint::Length(15));

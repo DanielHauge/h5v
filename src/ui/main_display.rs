@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
+use hdf5_metno::types::{VarLenAscii, VarLenUnicode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
@@ -8,11 +9,17 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, error::AppError, h5f::H5FNode, ui};
+use crate::{
+    color_consts,
+    error::AppError,
+    h5f::{H5FNode, Node},
+    sprint_typedesc::MatrixRenderType,
+    ui,
+};
 
 use super::{
     attributes::render_info_attributes,
-    matrix::render_matrix,
+    matrix::{render_matrix, render_not_yet_implemented},
     preview::render_preview,
     state::{AppState, ContentShowMode},
 };
@@ -114,7 +121,38 @@ pub fn render_main_display(
 
     match state.content_show_mode_eval() {
         ContentShowMode::Preview => render_preview(f, &content_area, selected_node, state),
-        ContentShowMode::Matrix => render_matrix(f, &content_area, selected_node, state)?,
+        ContentShowMode::Matrix => {
+            //
+            let selected_node = &selected_node.borrow().node;
+            let (ds, attr) = match selected_node {
+                Node::Dataset(ds, attr) => (ds, attr),
+                _ => {
+                    unreachable!("Should not render matrix for anything other than dataset")
+                }
+            };
+            match attr.matrixable {
+                None => {
+                    return Ok(());
+                }
+                Some(x) => match x {
+                    MatrixRenderType::Float64 => {
+                        render_matrix::<f64>(f, &content_area, ds, attr, state)?
+                    }
+                    MatrixRenderType::Uint64 => {
+                        render_matrix::<u64>(f, &content_area, ds, attr, state)?
+                    }
+                    MatrixRenderType::Int64 => {
+                        render_matrix::<i64>(f, &content_area, ds, attr, state)?
+                    }
+                    MatrixRenderType::Compound => {
+                        render_not_yet_implemented(f, &content_area, "Compound matrix")
+                    }
+                    MatrixRenderType::Strings => {
+                        render_matrix::<VarLenUnicode>(f, &content_area, ds, attr, state)?
+                    }
+                },
+            }
+        }
     }
 
     Ok(())
