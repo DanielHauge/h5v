@@ -26,6 +26,19 @@ h5v path/to/file.h5
 - `ctrl` + `d`/`u`: Navigate by half a page
 - `g`/`Home`: Go to the top
 - `G`/`End`: Go to the bottom
+- `:` Enter command mode
+- `.` repeat last command
+- `?`: Show help
+
+## Commands
+
+- `:n` Go the nth item
+- `:+n` Go down n items
+- `:-n`  Go up n items
+
+For example, `:5` will go to the 5th item, `:+3` will go down 3 items, and `:-2` will go up 2 items.
+Use `:` to enter command mode, type the command, and press `enter` to execute it.
+Use `.` to repeat the last command.
 
 ## Installation
 
