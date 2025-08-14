@@ -19,7 +19,7 @@ use super::{
 };
 use crate::{
     color_consts,
-    data::{Plotable, PreviewSelection, SliceSelection},
+    data::{PreviewSelection, Previewable, SliceSelection},
     error::AppError,
     h5f::{Encoding, H5FNode, Node},
     ui::state::SegmentType,
@@ -73,7 +73,7 @@ fn render_chart_preview(
     selected_node: &Node,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    let (ds, _) = match selected_node {
+    let (ds, ds_meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
     };
@@ -88,12 +88,59 @@ fn render_chart_preview(
         .collect();
 
     if x_selectable_dims.is_empty() {
-        render_unsupported_rendering(
-            f,
-            area,
-            selected_node,
-            "Not enough data for selectable dimensions for x-axis",
-        )?;
+        // TODO: Read scalar
+        match ds_meta.matrixable {
+            Some(t) => match t {
+                crate::sprint_typedesc::MatrixRenderType::Float64 => {
+                    let ds = ds.read_scalar::<f64>();
+                    if let Err(e) = ds {
+                        render_error(f, area, format!("Error reading scalar: {}", e));
+                        return Ok(());
+                    }
+                    let ds = ds.unwrap();
+                    render_string(f, area, ds);
+                }
+                crate::sprint_typedesc::MatrixRenderType::Uint64 => {
+                    let ds = ds.read_scalar::<u64>();
+                    if let Err(e) = ds {
+                        render_error(f, area, format!("Error reading scalar: {}", e));
+                        return Ok(());
+                    }
+                    let ds = ds.unwrap();
+                    render_string(f, area, ds);
+                }
+                crate::sprint_typedesc::MatrixRenderType::Int64 => {
+                    let ds = ds.read_scalar::<i64>();
+                    if let Err(e) = ds {
+                        render_error(f, area, format!("Error reading scalar: {}", e));
+                        return Ok(());
+                    }
+                    let ds = ds.unwrap();
+                    render_string(f, area, ds);
+                }
+                crate::sprint_typedesc::MatrixRenderType::Compound => {
+                    render_unsupported_rendering(
+                        f,
+                        area,
+                        selected_node,
+                        "Compound types are not supported for chart preview",
+                    )?;
+                    return Ok(());
+                }
+                crate::sprint_typedesc::MatrixRenderType::Strings => {
+                    render_string_preview(f, area, selected_node)?;
+                    return Ok(());
+                }
+            },
+            None => {
+                render_unsupported_rendering(
+                    f,
+                    area,
+                    selected_node,
+                    "Not enough data for selectable dimensions for x-axis",
+                )?;
+            }
+        }
         return Ok(());
     }
 

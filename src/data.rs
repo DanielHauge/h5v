@@ -1,7 +1,7 @@
 use hdf5_metno::{Dataset, Error, H5Type, Selection};
 use ndarray::{s, Array1, Array2};
 
-pub trait Plotable {
+pub trait Previewable {
     fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error>;
 }
 
@@ -94,7 +94,7 @@ impl MatrixValues for Dataset {
     }
 }
 
-impl Plotable for Dataset {
+impl Previewable for Dataset {
     fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error> {
         let slice = match selection.slice {
             SliceSelection::All => 0..self.shape()[selection.x],

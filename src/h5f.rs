@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, data,
+    color_consts,
     search::Searcher,
     sprint_attributes::sprint_attribute,
     sprint_typedesc::{
@@ -575,22 +575,32 @@ impl H5FNode {
             Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
                 Some(matrix_renderable) => match matrix_renderable {
                     MatrixRenderType::Float64 => {
-                        result.push(ContentShowMode::Matrix);
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
                         result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Uint64 => {
-                        result.push(ContentShowMode::Matrix);
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
                         result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Int64 => {
-                        result.push(ContentShowMode::Matrix);
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
                         result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Compound => {
-                        result.push(ContentShowMode::Matrix);
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
                     }
                     MatrixRenderType::Strings => {
-                        result.push(ContentShowMode::Matrix);
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
                     }
                 },
                 None => result.push(ContentShowMode::Preview),

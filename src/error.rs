@@ -7,7 +7,6 @@ pub enum AppError {
     ChannelError(String),
     ClipboardError(String),
     InvalidCommand(String),
-    InternalError(String),
 }
 
 impl Display for AppError {
@@ -18,7 +17,6 @@ impl Display for AppError {
             AppError::ChannelError(c) => write!(f, "Channel Error: {}", c),
             AppError::ClipboardError(msg) => write!(f, "Clipboard Error: {}", msg),
             AppError::InvalidCommand(cmd) => write!(f, "Invalid Command: {}", cmd),
-            AppError::InternalError(msg) => write!(f, "Internal Error: {}", msg),
         }
     }
 }

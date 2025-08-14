@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::types::{VarLenAscii, VarLenUnicode};
+use hdf5_metno::types::VarLenUnicode;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},

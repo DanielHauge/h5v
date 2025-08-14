@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Display, rc::Rc};
+use std::fmt::Display;
 
 use hdf5_metno::H5Type;
 use ratatui::{
@@ -24,9 +24,9 @@ pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
         horizontal: 2,
         vertical: 1,
     });
-    let unsupported_msg = format!("Not yet implemented:");
+    let unsupported_msg = "Not yet implemented:".to_string();
     f.render_widget(unsupported_msg, inner_area);
-    let why = format!("{}", desc);
+    let why = desc.to_string();
     f.render_widget(
         why,
         inner_area.inner(ratatui::layout::Margin {

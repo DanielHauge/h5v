@@ -145,20 +145,3 @@ pub enum MatrixRenderType {
     Compound,
     Strings,
 }
-pub fn numerical_render_type(type_desc: &TypeDescriptor) -> bool {
-    match type_desc {
-        TypeDescriptor::Integer(_) => true,
-        TypeDescriptor::Unsigned(_) => true,
-        TypeDescriptor::Float(_) => true,
-        TypeDescriptor::Boolean => false,
-        TypeDescriptor::Enum(_) => false,
-        TypeDescriptor::Compound(_) => false,
-        TypeDescriptor::FixedArray(_, _) => false,
-        TypeDescriptor::FixedAscii(_) => false,
-        TypeDescriptor::FixedUnicode(_) => false,
-        TypeDescriptor::VarLenArray(_) => false,
-        TypeDescriptor::VarLenAscii => false,
-        TypeDescriptor::VarLenUnicode => false,
-        TypeDescriptor::Reference(_) => false,
-    }
-}
