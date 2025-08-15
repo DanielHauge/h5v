@@ -45,3 +45,13 @@ Use `.` to repeat the last command.
 ```bash
 cargo install h5v
 ```
+
+## Roadmap
+
+- [ ] Add support for changing row and column pivot in matrix mode.
+- [ ] Add support for Incrementing and decrementing the current selected dimension in matrix and preview modes.
+- [ ] Add command support for incrementing and decrementing the current selected dimension in matrix and preview modes.
+- [ ] Add preview for groups. ie. multi-chart preview, via attributes.
+- [ ] Add chart image version support when terminal supports it (xterm-kitty).
+- [ ] Add matrix support for compounds
+- [ ] Add preview support for compounds (select fields to preview)
