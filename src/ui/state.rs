@@ -203,8 +203,11 @@ impl AppState<'_> {
                 }
                 if let Node::Dataset(_, dsattr) = current_node {
                     let row_selected_shape = dsattr.shape[self.selected_x_dim];
-                    self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset - dec)
-                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                    self.matrix_view_state.row_offset =
+                        (self.matrix_view_state.row_offset.saturating_sub(dec)).min(
+                            row_selected_shape
+                                .saturating_sub(self.matrix_view_state.rows_currently_available),
+                        );
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Redraw)
@@ -281,8 +284,10 @@ impl AppState<'_> {
                 let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
                 if let Node::Dataset(_, dsattr) = current_node {
                     let row_selected_shape = dsattr.shape[self.selected_x_dim];
-                    self.matrix_view_state.row_offset = idx
-                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                    self.matrix_view_state.row_offset = idx.min(
+                        row_selected_shape
+                            .saturating_sub(self.matrix_view_state.rows_currently_available),
+                    );
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Redraw)
