@@ -68,6 +68,14 @@ pub fn render_matrix<T: H5Type + Display>(
         if !x_selectable_dims.contains(&state.selected_row) {
             state.selected_row = x_selectable_dims[0];
         }
+        if state.selected_dim == state.selected_row || state.selected_dim == state.selected_col {
+            state.selected_dim = x_selectable_dims
+                .iter()
+                .find(|&&x| x != state.selected_row && x != state.selected_col)
+                .cloned()
+                .unwrap_or(0); // doing 16, cause there can only be 15 dimensions, so this is just a
+                               // stupid way to represent NONE (lol, fuck it)
+        }
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
         render_dim_selector(f, &areas_split[0], state, &attr.shape, true)?;

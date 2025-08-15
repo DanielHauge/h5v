@@ -121,6 +121,7 @@ pub struct AppState<'a> {
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
+    pub selected_dim: usize,
     pub selected_x: usize,
     pub selected_row: usize,
     pub selected_col: usize,

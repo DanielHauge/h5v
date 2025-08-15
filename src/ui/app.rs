@@ -169,10 +169,10 @@ fn main_recover_loop(
         selected_row: 0,
         selected_col: 1,
         selected_x: 0,
+        selected_dim: 0,
         selected_indexes: [0; 15],
         img_state,
         matrix_view_state,
-        // page: 0,
     };
 
     state.compute_tree_view();

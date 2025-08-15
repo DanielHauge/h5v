@@ -80,33 +80,31 @@ pub fn render_dim_selector(
         let dim_line = Line::from(dim.as_str()).alignment(ratatui::layout::Alignment::Left);
         f.render_widget(dim_line, segments[i]);
         if i == col_selection && row_columns {
-            let y_span = Span::from("Col").style(
-                Style::default()
-                    .bold()
-                    .underlined()
-                    .fg(color_consts::SELECTED_DIM),
-            );
+            let y_span =
+                Span::from("Col").style(Style::default().bold().fg(color_consts::SELECTED_DIM));
             let y_line = Line::from(y_span).alignment(ratatui::layout::Alignment::Center);
             f.render_widget(y_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == row_selection && row_columns {
             let x_text = "Row";
-            let x_span = Span::from(x_text).style(
-                Style::default()
-                    .bold()
-                    .underlined()
-                    .fg(color_consts::SELECTED_DIM),
-            );
+            let x_span =
+                Span::from(x_text).style(Style::default().bold().fg(color_consts::SELECTED_DIM));
             let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == x_selection && !row_columns {
-            let x_span = Span::from("X").style(
+            let x_span =
+                Span::from("X").style(Style::default().bold().fg(color_consts::SELECTED_DIM));
+            let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
+        } else if i == state.selected_dim {
+            let selected_index = index_selection[i];
+            let span = Span::from(format!("{}", selected_index)).style(
                 Style::default()
                     .bold()
                     .underlined()
-                    .fg(color_consts::SELECTED_DIM),
+                    .underline_color(color_consts::SELECTED_INDEX),
             );
-            let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
-            f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
+            let selected_line = Line::from(span).alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else {
             let selected_index = index_selection[i];
             let selected_line = Line::from(format!("{}", selected_index))

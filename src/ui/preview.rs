@@ -153,6 +153,14 @@ fn render_chart_preview(
     if !x_selectable_dims.contains(&state.selected_x) {
         state.selected_x = x_selectable_dims[0];
     }
+    if state.selected_dim == state.selected_x {
+        state.selected_dim = x_selectable_dims
+            .iter()
+            .find(|&&x| x != state.selected_x)
+            .cloned()
+            .unwrap_or(0); // doing 16, cause there can only be 15 dimensions, so this is just a
+                           // stupid way to represent NONE (lol, fuck it)
+    }
 
     let chart_area = if x_selectable_dims.len() > 1 {
         let areas_split =
