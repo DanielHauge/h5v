@@ -601,6 +601,7 @@ impl H5FNode {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
                         }
+                        result.push(ContentShowMode::Preview);
                     }
                 },
                 None => result.push(ContentShowMode::Preview),

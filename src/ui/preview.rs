@@ -46,7 +46,6 @@ pub fn render_preview(
                 }
             },
             None => {
-                // TODO: Previwe render chart, string, matrix? strings? etc
                 if attr.matrixable.is_none() {
                     match render_string_preview(f, &area_inner, node) {
                         Ok(()) => {}
