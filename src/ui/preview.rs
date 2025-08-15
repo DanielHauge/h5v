@@ -150,8 +150,8 @@ fn render_chart_preview(
         }
     }
 
-    if !x_selectable_dims.contains(&state.selected_x_dim) {
-        state.selected_x_dim = x_selectable_dims[0];
+    if !x_selectable_dims.contains(&state.selected_x) {
+        state.selected_x = x_selectable_dims[0];
     }
 
     let chart_area = if x_selectable_dims.len() > 1 {
@@ -170,16 +170,16 @@ fn render_chart_preview(
     };
 
     const MAX_SEGMENT_SIZE: usize = 250000;
-    let (chart_area, data_preview) = if shape[state.selected_x_dim] > MAX_SEGMENT_SIZE {
+    let (chart_area, data_preview) = if shape[state.selected_x] > MAX_SEGMENT_SIZE {
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
-            (shape[state.selected_x_dim] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+            (shape[state.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
         let areas_split =
             Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
         render_segment_scroll(f, &areas_split[0], state)?;
 
         let data_preview = ds.plot(PreviewSelection {
-            x: state.selected_x_dim,
+            x: state.selected_x,
             index: state.selected_indexes[0..total_dims - 1].to_vec(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
@@ -189,7 +189,7 @@ fn render_chart_preview(
         (areas_split[1], data_preview)
     } else {
         let data_preview = ds.plot(PreviewSelection {
-            x: state.selected_x_dim,
+            x: state.selected_x,
             index: state.selected_indexes[0..total_dims - 1].to_vec(),
             slice: SliceSelection::All,
         })?;

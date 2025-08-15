@@ -121,8 +121,9 @@ pub struct AppState<'a> {
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
-    pub selected_x_dim: usize,
-    pub selected_y_dim: usize,
+    pub selected_x: usize,
+    pub selected_row: usize,
+    pub selected_col: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
@@ -171,6 +172,25 @@ impl AppState<'_> {
         }
     }
 
+    pub fn change_x(&mut self, delta: isize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Preview => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let current_node = &current_node.node.borrow().node;
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let shape = dsattr.shape.clone();
+                    self.selected_x = ((self.selected_x as isize + delta) % shape.len() as isize)
+                        as usize
+                        % shape.len();
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            _ => Ok(EventResult::Continue),
+        }
+    }
+
     pub fn dec(&mut self, dec: usize) -> Result<EventResult> {
         match self.content_mode {
             super::state::ContentShowMode::Preview => match self.segment_state.segumented {
@@ -202,7 +222,7 @@ impl AppState<'_> {
                     return Ok(EventResult::Redraw);
                 }
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    let row_selected_shape = dsattr.shape[self.selected_row];
                     self.matrix_view_state.row_offset =
                         (self.matrix_view_state.row_offset.saturating_sub(dec)).min(
                             row_selected_shape
@@ -243,7 +263,7 @@ impl AppState<'_> {
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    let row_selected_shape = dsattr.shape[self.selected_row];
                     self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset + inc)
                         .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
                     Ok(EventResult::Redraw)
@@ -283,7 +303,7 @@ impl AppState<'_> {
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_x_dim];
+                    let row_selected_shape = dsattr.shape[self.selected_row];
                     self.matrix_view_state.row_offset = idx.min(
                         row_selected_shape
                             .saturating_sub(self.matrix_view_state.rows_currently_available),

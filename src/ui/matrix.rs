@@ -65,8 +65,8 @@ pub fn render_matrix<T: H5Type + Display>(
             }
         }
 
-        if !x_selectable_dims.contains(&state.selected_x_dim) {
-            state.selected_x_dim = x_selectable_dims[0];
+        if !x_selectable_dims.contains(&state.selected_row) {
+            state.selected_row = x_selectable_dims[0];
         }
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
@@ -82,12 +82,12 @@ pub fn render_matrix<T: H5Type + Display>(
     let heigh = matrix_area.height;
     let x_shape = attr
         .shape
-        .get(state.selected_y_dim)
+        .get(state.selected_col)
         .map(|x| *x as u16)
         .unwrap_or(0);
     let y_scale = attr
         .shape
-        .get(state.selected_x_dim)
+        .get(state.selected_row)
         .map(|x| *x as u16)
         .unwrap_or(0);
     let max_cols = (width / 24).min(x_shape);
@@ -109,9 +109,10 @@ pub fn render_matrix<T: H5Type + Display>(
 
     if shape_len == 1 {
         let data = ds.matrix_values::<T>(slice_selection)?;
-        let mut i = state.matrix_view_state.row_offset.min(
-            attr.shape[state.selected_x_dim] - state.matrix_view_state.rows_currently_available,
-        );
+        let mut i = state
+            .matrix_view_state
+            .row_offset
+            .min(attr.shape[state.selected_row] - state.matrix_view_state.rows_currently_available);
         for (row_idx, d) in data.data.iter().enumerate() {
             let row_area = rows_areas[row_idx];
             let areas_split =
@@ -149,7 +150,7 @@ pub fn render_matrix<T: H5Type + Display>(
             let col_idx = state
                 .matrix_view_state
                 .col_offset
-                .min(attr.shape[state.selected_y_dim] - max_cols as usize)
+                .min(attr.shape[state.selected_col] - max_cols as usize)
                 + col as usize;
             f.render_widget(
                 Line::from(format!("{col_idx}"))
@@ -169,7 +170,7 @@ pub fn render_matrix<T: H5Type + Display>(
             let idx_area = col_areas[0];
 
             let idx = state.matrix_view_state.row_offset.min(
-                attr.shape[state.selected_x_dim] - state.matrix_view_state.rows_currently_available,
+                attr.shape[state.selected_row] - state.matrix_view_state.rows_currently_available,
             ) + i as usize;
             let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);

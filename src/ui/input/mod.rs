@@ -90,6 +90,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
 
                         Ok(EventResult::Redraw)
                     }
+                    (KeyCode::Char('x'), _) => state.change_x(1),
+                    (KeyCode::Char('X'), _) => state.change_x(-1),
                     (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
                     (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
@@ -98,8 +100,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             let current_node =
                                 &state.treeview[state.tree_view_cursor].node.borrow().node;
                             if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > state.selected_y_dim {
-                                    let col_selected_shape = dsattr.shape[state.selected_y_dim];
+                                if dsattr.shape.len() > state.selected_col {
+                                    let col_selected_shape = dsattr.shape[state.selected_col];
                                     state.matrix_view_state.col_offset =
                                         (state.matrix_view_state.col_offset + 1).min(
                                             col_selected_shape
@@ -124,8 +126,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                                 return Ok(EventResult::Continue);
                             }
                             if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > state.selected_y_dim {
-                                    let col_selected_shape = dsattr.shape[state.selected_y_dim];
+                                if dsattr.shape.len() > state.selected_col {
+                                    let col_selected_shape = dsattr.shape[state.selected_col];
                                     state.matrix_view_state.col_offset =
                                         (state.matrix_view_state.col_offset - 1).min(
                                             col_selected_shape

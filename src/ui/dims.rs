@@ -18,8 +18,9 @@ pub fn render_dim_selector(
     shape: &[usize],
     row_columns: bool,
 ) -> Result<(), Error> {
-    let x_selection = state.selected_x_dim;
-    let y_selection = state.selected_y_dim;
+    let x_selection = state.selected_x;
+    let row_selection = state.selected_row;
+    let col_selection = state.selected_col;
     let index_selection = state.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
@@ -78,7 +79,7 @@ pub fn render_dim_selector(
     for (i, dim) in shape_strings.iter().enumerate() {
         let dim_line = Line::from(dim.as_str()).alignment(ratatui::layout::Alignment::Left);
         f.render_widget(dim_line, segments[i]);
-        if i == y_selection && row_columns {
+        if i == col_selection && row_columns {
             let y_span = Span::from("Col").style(
                 Style::default()
                     .bold()
@@ -87,9 +88,18 @@ pub fn render_dim_selector(
             );
             let y_line = Line::from(y_span).alignment(ratatui::layout::Alignment::Center);
             f.render_widget(y_line, segments[i].offset(Offset { x: 0, y: 1 }));
-        } else if i == x_selection {
-            let x_text = if !row_columns { "X" } else { "Row" };
+        } else if i == row_selection && row_columns {
+            let x_text = "Row";
             let x_span = Span::from(x_text).style(
+                Style::default()
+                    .bold()
+                    .underlined()
+                    .fg(color_consts::SELECTED_DIM),
+            );
+            let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
+        } else if i == x_selection && !row_columns {
+            let x_span = Span::from("X").style(
                 Style::default()
                     .bold()
                     .underlined()
@@ -100,7 +110,7 @@ pub fn render_dim_selector(
         } else {
             let selected_index = index_selection[i];
             let selected_line = Line::from(format!("{}", selected_index))
-                .alignment(ratatui::layout::Alignment::Left);
+                .alignment(ratatui::layout::Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
         }
     }
@@ -134,7 +144,7 @@ impl HasMatrixSelection for AppState<'_> {
         } else {
             let selections = self.selected_indexes;
             (0..total_dims).for_each(|dim| {
-                if self.selected_y_dim == dim {
+                if self.selected_col == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self.matrix_view_state.col_offset.min(shape[dim] - 1),
                         step: 1,
@@ -142,7 +152,7 @@ impl HasMatrixSelection for AppState<'_> {
                             .min(shape[dim]),
                         block: 1,
                     });
-                } else if self.selected_x_dim == dim {
+                } else if self.selected_row == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self
                             .matrix_view_state
