@@ -41,6 +41,10 @@ pub fn handle_command_event(
                     state.mode = Mode::Normal;
                     Ok(EventResult::Redraw)
                 }
+                (KeyCode::Esc, _) => {
+                    state.mode = Mode::Normal;
+                    Ok(EventResult::Redraw)
+                }
                 (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
                     state.command_state.command_buffer.clear();
                     state.command_state.cursor = 0;
