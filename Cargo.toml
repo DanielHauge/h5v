@@ -13,7 +13,12 @@ bktree = "1.0.1"
 clap = { version = "4.5.32", features = ["derive"] }
 cli-clipboard = "0.4.0"
 git-version = "0.3.9"
-hdf5-metno = { version = "0.10.1", features = ["static"] }
+hdf5-metno = { version = "0.10.1", features = [
+    "blosc-all",
+    "lzf",
+    "static",
+    "zlib",
+] }
 image = "0.25.6"
 itertools = "0.14.0"
 ndarray = "0.16.1"
