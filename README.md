@@ -48,7 +48,7 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Add support for changing row and column pivot in matrix mode.
+- [ ] Fix issue about matrix 2d display. (Display of values not correct)
 - [ ] Add support for Incrementing and decrementing the current selected dimension in matrix and preview modes.
 - [ ] Add command support for incrementing and decrementing the current selected dimension in matrix and preview modes.
 - [ ] Add preview for groups. ie. multi-chart preview, via attributes.
