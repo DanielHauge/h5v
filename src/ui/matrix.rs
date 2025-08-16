@@ -12,7 +12,7 @@ use crate::{
     color_consts,
     data::{MatrixTable, MatrixValues},
     error::AppError,
-    h5f::DatasetMeta,
+    h5f::{DatasetMeta, H5FNode},
 };
 
 use super::{
@@ -41,6 +41,7 @@ pub fn render_matrix<T: H5Type + Display>(
     area: &Rect,
     ds: &hdf5_metno::Dataset,
     attr: &DatasetMeta,
+    node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
@@ -65,20 +66,19 @@ pub fn render_matrix<T: H5Type + Display>(
             }
         }
 
-        if !x_selectable_dims.contains(&state.selected_row) {
-            state.selected_row = x_selectable_dims[0];
+        if !x_selectable_dims.contains(&node.selected_row) {
+            node.selected_row = x_selectable_dims[0];
         }
-        if state.selected_dim == state.selected_row || state.selected_dim == state.selected_col {
-            state.selected_dim = x_selectable_dims
+        if node.selected_dim == node.selected_row || node.selected_dim == node.selected_col {
+            node.selected_dim = x_selectable_dims
                 .iter()
-                .find(|&&x| x != state.selected_row && x != state.selected_col)
+                .find(|&&x| x != node.selected_row && x != node.selected_col)
                 .cloned()
-                .unwrap_or(0); // doing 16, cause there can only be 15 dimensions, so this is just a
-                               // stupid way to represent NONE (lol, fuck it)
+                .unwrap_or(0);
         }
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
-        render_dim_selector(f, &areas_split[0], state, &attr.shape, true)?;
+        render_dim_selector(f, &areas_split[0], node, state, &attr.shape, true)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -90,12 +90,12 @@ pub fn render_matrix<T: H5Type + Display>(
     let heigh = matrix_area.height;
     let x_shape = attr
         .shape
-        .get(state.selected_col)
+        .get(node.selected_col)
         .map(|x| *x as u16)
         .unwrap_or(0);
     let y_scale = attr
         .shape
-        .get(state.selected_row)
+        .get(node.selected_row)
         .map(|x| *x as u16)
         .unwrap_or(0);
     let max_cols = (width / 24).min(x_shape);
@@ -106,7 +106,7 @@ pub fn render_matrix<T: H5Type + Display>(
         cols: max_cols,
         rows,
     };
-    let slice_selection = state.get_matrix_selection(matrix_selection, &attr.shape);
+    let slice_selection = state.get_matrix_selection(node, matrix_selection, &attr.shape);
 
     let mut rows_area_constraints = Vec::with_capacity(rows as usize);
     (0..rows).for_each(|_| {
@@ -120,7 +120,7 @@ pub fn render_matrix<T: H5Type + Display>(
         let mut i = state
             .matrix_view_state
             .row_offset
-            .min(attr.shape[state.selected_row] - state.matrix_view_state.rows_currently_available);
+            .min(attr.shape[node.selected_row] - state.matrix_view_state.rows_currently_available);
         for (row_idx, d) in data.data.iter().enumerate() {
             let row_area = rows_areas[row_idx];
             let areas_split =
@@ -158,7 +158,7 @@ pub fn render_matrix<T: H5Type + Display>(
             let col_idx = state
                 .matrix_view_state
                 .col_offset
-                .min(attr.shape[state.selected_col] - max_cols as usize)
+                .min(attr.shape[node.selected_col] - max_cols as usize)
                 + col as usize;
             f.render_widget(
                 Line::from(format!("{col_idx}"))
@@ -178,7 +178,7 @@ pub fn render_matrix<T: H5Type + Display>(
             let idx_area = col_areas[0];
 
             let idx = state.matrix_view_state.row_offset.min(
-                attr.shape[state.selected_row] - state.matrix_view_state.rows_currently_available,
+                attr.shape[node.selected_row] - state.matrix_view_state.rows_currently_available,
             ) + i as usize;
             let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);

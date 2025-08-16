@@ -41,25 +41,22 @@ fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
 pub fn render_main_display(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
+    selected_node_no: &Rc<RefCell<H5FNode>>,
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
-    let attr_count = selected_node
-        .borrow_mut()
-        .read_attributes()?
-        .rendered_attributes
-        .len();
+    let mut node = selected_node_no.borrow_mut();
+    let attr_count = node.read_attributes()?.rendered_attributes.len();
 
     let content_area = if state.show_tree_view {
         let (attr_area, content_area) = split_main_display(*area, attr_count);
-        render_info_attributes(f, &attr_area, selected_node, state)?;
+        render_info_attributes(f, &attr_area, &mut node, state)?;
         content_area
     } else {
         *area
     };
 
     let current_display_mode = &state.content_mode;
-    let supported_display_modes = selected_node.borrow().content_show_modes();
+    let supported_display_modes = node.content_show_modes();
     if supported_display_modes.is_empty() {
         let no_data_message = "Group";
         let paragraph = Paragraph::new(no_data_message)
@@ -118,13 +115,13 @@ pub fn render_main_display(
         .title_style(Style::default().fg(color_consts::TITLE))
         .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
+    let available = node.content_show_modes();
 
-    match state.content_show_mode_eval() {
-        ContentShowMode::Preview => render_preview(f, &content_area, selected_node, state),
+    match state.content_show_mode_eval(available) {
+        ContentShowMode::Preview => render_preview(f, &content_area, &mut node, state),
         ContentShowMode::Matrix => {
             //
-            let selected_node = &selected_node.borrow().node;
-            let (ds, attr) = match selected_node {
+            let (ds, attr) = match node.node.clone() {
                 Node::Dataset(ds, attr) => (ds, attr),
                 _ => {
                     unreachable!("Should not render matrix for anything other than dataset")
@@ -136,20 +133,25 @@ pub fn render_main_display(
                 }
                 Some(x) => match x {
                     MatrixRenderType::Float64 => {
-                        render_matrix::<f64>(f, &content_area, ds, attr, state)?
+                        render_matrix::<f64>(f, &content_area, &ds, &attr, &mut node, state)?
                     }
                     MatrixRenderType::Uint64 => {
-                        render_matrix::<u64>(f, &content_area, ds, attr, state)?
+                        render_matrix::<u64>(f, &content_area, &ds, &attr, &mut node, state)?
                     }
                     MatrixRenderType::Int64 => {
-                        render_matrix::<i64>(f, &content_area, ds, attr, state)?
+                        render_matrix::<i64>(f, &content_area, &ds, &attr, &mut node, state)?
                     }
                     MatrixRenderType::Compound => {
                         render_not_yet_implemented(f, &content_area, "Compound matrix")
                     }
-                    MatrixRenderType::Strings => {
-                        render_matrix::<VarLenUnicode>(f, &content_area, ds, attr, state)?
-                    }
+                    MatrixRenderType::Strings => render_matrix::<VarLenUnicode>(
+                        f,
+                        &content_area,
+                        &ds,
+                        &attr,
+                        &mut node,
+                        state,
+                    )?,
                 },
             }
         }

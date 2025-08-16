@@ -16,7 +16,7 @@ use crate::{
     ui::state::ContentShowMode,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Encoding {
     Unknown,
     LittleEndian,
@@ -32,7 +32,7 @@ pub enum InterlaceMode {
     Plane, // [pixel components][height][width] -> value
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ImageType {
     Jpeg,
     Png,
@@ -41,13 +41,13 @@ pub enum ImageType {
     Truecolor(InterlaceMode),
     Indexed(InterlaceMode),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroupMeta {
     pub is_link: bool,
     pub filename: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatasetMeta {
     pub shape: Vec<usize>,
     pub data_type: String,
@@ -373,7 +373,7 @@ impl DatasetMeta {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Node {
     File(File),
     Group(Group, GroupMeta),
@@ -495,6 +495,10 @@ pub struct H5FNode {
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
     pub searcher: Rc<RefCell<Searcher>>,
+    pub selected_dim: usize,
+    pub selected_x: usize,
+    pub selected_row: usize,
+    pub selected_col: usize,
 }
 
 pub enum DSType {
@@ -517,6 +521,10 @@ impl H5FNode {
             view_loaded: 50,
             computed_attributes: None,
             searcher,
+            selected_dim: 0,
+            selected_x: 0,
+            selected_row: 0,
+            selected_col: 1,
         }
     }
 

@@ -28,33 +28,35 @@ use crate::{
 pub fn render_preview(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
+    selected_node: &mut H5FNode,
     state: &mut AppState,
 ) {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 1,
     });
-    let node = &selected_node.borrow().node;
+    let node = selected_node.node.clone();
 
     if let Node::Dataset(_, attr) = node {
         match &attr.image {
-            Some(image_type) => match render_img(image_type, f, &area_inner, node, state) {
-                Ok(()) => {}
-                Err(e) => {
-                    render_error(f, &area_inner, format!("Render img error: {}", e));
+            Some(image_type) => {
+                match render_img(image_type, f, &area_inner, selected_node, state) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        render_error(f, &area_inner, format!("Render img error: {}", e));
+                    }
                 }
-            },
+            }
             None => {
                 if attr.matrixable.is_none() {
-                    match render_string_preview(f, &area_inner, node) {
+                    match render_string_preview(f, &area_inner, selected_node) {
                         Ok(()) => {}
                         Err(e) => {
                             render_error(f, &area_inner, format!("Render string error: {}", e));
                         }
                     }
                 } else {
-                    match render_chart_preview(f, &area_inner, node, state) {
+                    match render_chart_preview(f, &area_inner, selected_node, state) {
                         Ok(()) => {}
                         Err(e) => {
                             render_error(f, &area_inner, format!("Render chart error: {}", e));
@@ -69,13 +71,15 @@ pub fn render_preview(
 fn render_chart_preview(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Node,
+    node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    let selected_node = &node.node;
     let (ds, ds_meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
     };
+    let ds = ds.clone();
 
     let shape = ds.shape();
     let total_dims = shape.len();
@@ -127,7 +131,7 @@ fn render_chart_preview(
                     return Ok(());
                 }
                 crate::sprint_typedesc::MatrixRenderType::Strings => {
-                    render_string_preview(f, area, selected_node)?;
+                    render_string_preview(f, area, node)?;
                     return Ok(());
                 }
             },
@@ -150,22 +154,21 @@ fn render_chart_preview(
         }
     }
 
-    if !x_selectable_dims.contains(&state.selected_x) {
-        state.selected_x = x_selectable_dims[0];
+    if !x_selectable_dims.contains(&node.selected_x) {
+        node.selected_x = x_selectable_dims[0];
     }
-    if state.selected_dim == state.selected_x {
-        state.selected_dim = x_selectable_dims
+    if node.selected_dim == node.selected_x {
+        node.selected_dim = x_selectable_dims
             .iter()
-            .find(|&&x| x != state.selected_x)
+            .find(|&&x| x != node.selected_x)
             .cloned()
-            .unwrap_or(0); // doing 16, cause there can only be 15 dimensions, so this is just a
-                           // stupid way to represent NONE (lol, fuck it)
+            .unwrap_or(0);
     }
 
     let chart_area = if x_selectable_dims.len() > 1 {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], state, &shape, false)?;
+        render_dim_selector(f, &areas_split[0], node, state, &shape, false)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -178,16 +181,16 @@ fn render_chart_preview(
     };
 
     const MAX_SEGMENT_SIZE: usize = 250000;
-    let (chart_area, data_preview) = if shape[state.selected_x] > MAX_SEGMENT_SIZE {
+    let (chart_area, data_preview) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
-            (shape[state.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
         let areas_split =
             Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
         render_segment_scroll(f, &areas_split[0], state)?;
 
         let data_preview = ds.plot(PreviewSelection {
-            x: state.selected_x,
+            x: node.selected_x,
             index: state.selected_indexes[0..total_dims - 1].to_vec(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
@@ -197,7 +200,7 @@ fn render_chart_preview(
         (areas_split[1], data_preview)
     } else {
         let data_preview = ds.plot(PreviewSelection {
-            x: state.selected_x,
+            x: node.selected_x,
             index: state.selected_indexes[0..total_dims - 1].to_vec(),
             slice: SliceSelection::All,
         })?;
@@ -303,7 +306,12 @@ fn render_error<T: ToString>(f: &mut Frame, area: &Rect, error: T) {
     );
 }
 
-fn render_string_preview(f: &mut Frame, area: &Rect, selected_node: &Node) -> Result<(), AppError> {
+fn render_string_preview(
+    f: &mut Frame,
+    area: &Rect,
+    selected_node_refc: &mut H5FNode,
+) -> Result<(), AppError> {
+    let selected_node = &selected_node_refc.node;
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => panic!("Expected a string dataset to preview string data"),

@@ -19,7 +19,7 @@ use ratatui_image::{
 
 use crate::{
     error::AppError,
-    h5f::{ImageType, InterlaceMode, Node},
+    h5f::{H5FNode, ImageType, InterlaceMode, Node},
 };
 
 use super::{
@@ -32,9 +32,11 @@ pub fn render_img(
     image_type: &ImageType,
     f: &mut Frame,
     area: &Rect,
-    node: &Node,
+    // node: &Node,
+    selected_node_refc: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    let node = &selected_node_refc.node;
     let area = if let SegmentType::Image = state.segment_state.segumented {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);

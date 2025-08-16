@@ -7,20 +7,22 @@ use ratatui::{
     Frame,
 };
 
-use crate::color_consts;
+use crate::{color_consts, h5f::H5FNode};
 
 use super::state::AppState;
 
 pub fn render_dim_selector(
     f: &mut Frame,
     area: &Rect,
+    node: &mut H5FNode,
     state: &mut AppState,
     shape: &[usize],
     row_columns: bool,
 ) -> Result<(), Error> {
-    let x_selection = state.selected_x;
-    let row_selection = state.selected_row;
-    let col_selection = state.selected_col;
+    let x_selection = node.selected_x;
+    let row_selection = node.selected_row;
+    let col_selection = node.selected_col;
+    let selected_dim = node.selected_dim;
     let index_selection = state.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
@@ -95,7 +97,7 @@ pub fn render_dim_selector(
                 Span::from("X").style(Style::default().bold().fg(color_consts::SELECTED_DIM));
             let x_line = Line::from(x_span).alignment(ratatui::layout::Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
-        } else if i == state.selected_dim {
+        } else if i == selected_dim {
             let selected_index = index_selection[i];
             let span = Span::from(format!("{}", selected_index)).style(
                 Style::default()
@@ -122,11 +124,21 @@ pub struct MatrixSelection {
 }
 
 pub trait HasMatrixSelection {
-    fn get_matrix_selection(&self, select: MatrixSelection, total_dims: &[usize]) -> Selection;
+    fn get_matrix_selection(
+        &self,
+        node: &mut H5FNode,
+        select: MatrixSelection,
+        total_dims: &[usize],
+    ) -> Selection;
 }
 
 impl HasMatrixSelection for AppState<'_> {
-    fn get_matrix_selection(&self, matrix_view: MatrixSelection, shape: &[usize]) -> Selection {
+    fn get_matrix_selection(
+        &self,
+        node: &mut H5FNode,
+        matrix_view: MatrixSelection,
+        shape: &[usize],
+    ) -> Selection {
         let mut slice: Vec<SliceOrIndex> = Vec::new();
         let total_dims = shape.len();
         if total_dims == 1 {
@@ -142,7 +154,7 @@ impl HasMatrixSelection for AppState<'_> {
         } else {
             let selections = self.selected_indexes;
             (0..total_dims).for_each(|dim| {
-                if self.selected_col == dim {
+                if node.selected_col == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self.matrix_view_state.col_offset.min(shape[dim] - 1),
                         step: 1,
@@ -150,7 +162,7 @@ impl HasMatrixSelection for AppState<'_> {
                             .min(shape[dim]),
                         block: 1,
                     });
-                } else if self.selected_row == dim {
+                } else if node.selected_row == dim {
                     slice.push(SliceOrIndex::SliceTo {
                         start: self
                             .matrix_view_state

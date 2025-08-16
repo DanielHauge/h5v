@@ -46,7 +46,11 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(EventResult::Quit),
                     (KeyCode::Tab, _) => {
-                        state.swap_content_show_mode();
+                        let available = state.treeview[state.tree_view_cursor]
+                            .node
+                            .borrow_mut()
+                            .content_show_modes();
+                        state.swap_content_show_mode(available);
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('?'), _) => {
@@ -92,16 +96,21 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     }
                     (KeyCode::Char('x'), _) => state.change_x(1),
                     (KeyCode::Char('X'), _) => state.change_x(-1),
+                    (KeyCode::Char('r'), _) => state.change_row(1),
+                    (KeyCode::Char('R'), _) => state.change_row(-1),
+                    (KeyCode::Char('c'), _) => state.change_col(1),
+                    (KeyCode::Char('C'), _) => state.change_col(-1),
                     (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
                     (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => state.inc(1),
                         super::state::ContentShowMode::Matrix => {
-                            let current_node =
-                                &state.treeview[state.tree_view_cursor].node.borrow().node;
+                            let mut node =
+                                &state.treeview[state.tree_view_cursor].node.borrow_mut();
+                            let current_node = &node.node;
                             if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > state.selected_col {
-                                    let col_selected_shape = dsattr.shape[state.selected_col];
+                                if dsattr.shape.len() > node.selected_col {
+                                    let col_selected_shape = dsattr.shape[node.selected_col];
                                     state.matrix_view_state.col_offset =
                                         (state.matrix_view_state.col_offset + 1).min(
                                             col_selected_shape
@@ -120,14 +129,14 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         super::state::ContentShowMode::Preview => state.dec(1),
                         super::state::ContentShowMode::Matrix => {
                             // If we are at the first column, do nothing
-                            let current_node =
-                                &state.treeview[state.tree_view_cursor].node.borrow().node;
+                            let node = &state.treeview[state.tree_view_cursor].node.borrow_mut();
+                            let current_node = &node.node;
                             if state.matrix_view_state.col_offset == 0 {
                                 return Ok(EventResult::Continue);
                             }
                             if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > state.selected_col {
-                                    let col_selected_shape = dsattr.shape[state.selected_col];
+                                if dsattr.shape.len() > node.selected_col {
+                                    let col_selected_shape = dsattr.shape[node.selected_col];
                                     state.matrix_view_state.col_offset =
                                         (state.matrix_view_state.col_offset - 1).min(
                                             col_selected_shape

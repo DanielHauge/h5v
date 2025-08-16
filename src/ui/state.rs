@@ -121,10 +121,6 @@ pub struct AppState<'a> {
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
-    pub selected_dim: usize,
-    pub selected_x: usize,
-    pub selected_row: usize,
-    pub selected_col: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
@@ -141,21 +137,12 @@ impl AppState<'_> {
         Ok(())
     }
 
-    pub fn available_content_show_modes(&self) -> Vec<ContentShowMode> {
-        let current_node = &self.treeview[self.tree_view_cursor].node;
-        let available_content_modes = current_node.borrow().content_show_modes();
-        available_content_modes
-    }
-
-    pub fn swap_content_show_mode(&mut self) {
-        let available_content_modes = self.available_content_show_modes();
-        if available_content_modes.is_empty() {
+    pub fn swap_content_show_mode(&mut self, available: Vec<ContentShowMode>) {
+        if available.is_empty() {
             return;
         }
         match self.content_mode {
-            ContentShowMode::Preview
-                if available_content_modes.contains(&ContentShowMode::Matrix) =>
-            {
+            ContentShowMode::Preview if available.contains(&ContentShowMode::Matrix) => {
                 self.content_mode = ContentShowMode::Matrix;
             }
             _ => {
@@ -164,12 +151,67 @@ impl AppState<'_> {
         }
     }
 
-    pub fn content_show_mode_eval(&self) -> ContentShowMode {
-        let available_content_modes = self.available_content_show_modes();
-        if available_content_modes.contains(&self.content_mode) {
+    pub fn content_show_mode_eval(&self, available: Vec<ContentShowMode>) -> ContentShowMode {
+        if available.contains(&self.content_mode) {
             self.content_mode
         } else {
-            available_content_modes[0]
+            available[0]
+        }
+    }
+
+    pub fn change_row(&mut self, delta: isize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let mut current_node = current_node.node.borrow_mut();
+                if let Node::Dataset(_, dsattr) = &current_node.node {
+                    let shape = dsattr.shape.clone();
+                    let new_selected_row = ((current_node.selected_row as isize + delta)
+                        % shape.len() as isize) as usize
+                        % shape.len();
+                    if new_selected_row != current_node.selected_col {
+                        current_node.selected_row = new_selected_row;
+                        return Ok(EventResult::Redraw);
+                    }
+                    current_node.selected_row = ((current_node.selected_row as isize + delta + 1)
+                        % shape.len() as isize)
+                        as usize
+                        % shape.len();
+
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            _ => Ok(EventResult::Continue),
+        }
+    }
+
+    pub fn change_col(&mut self, delta: isize) -> Result<EventResult> {
+        match self.content_mode {
+            super::state::ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let mut current_node = current_node.node.borrow_mut();
+                if let Node::Dataset(_, dsattr) = &current_node.node {
+                    let shape = dsattr.shape.clone();
+                    let new_selected_col = ((current_node.selected_col as isize + delta)
+                        % shape.len() as isize) as usize
+                        % shape.len();
+                    if new_selected_col != current_node.selected_row {
+                        current_node.selected_col = new_selected_col;
+                        return Ok(EventResult::Redraw);
+                    }
+                    current_node.selected_col = ((current_node.selected_col as isize + delta + 1)
+                        % shape.len() as isize)
+                        as usize
+                        % shape.len();
+
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            _ => Ok(EventResult::Continue),
         }
     }
 
@@ -177,10 +219,11 @@ impl AppState<'_> {
         match self.content_mode {
             super::state::ContentShowMode::Preview => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let current_node = &current_node.node.borrow().node;
-                if let Node::Dataset(_, dsattr) = current_node {
+                let mut current_node = current_node.node.borrow_mut();
+                if let Node::Dataset(_, dsattr) = &current_node.node {
                     let shape = dsattr.shape.clone();
-                    self.selected_x = ((self.selected_x as isize + delta) % shape.len() as isize)
+                    current_node.selected_x = ((current_node.selected_x as isize + delta)
+                        % shape.len() as isize)
                         as usize
                         % shape.len();
                     Ok(EventResult::Redraw)
@@ -218,12 +261,13 @@ impl AppState<'_> {
             },
             super::state::ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let current_node = &current_node.node.borrow().node;
+                let node = &current_node.node.borrow_mut();
+                let current_node = &node.node;
                 if self.matrix_view_state.row_offset == 0 {
                     return Ok(EventResult::Redraw);
                 }
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_row];
+                    let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset =
                         (self.matrix_view_state.row_offset.saturating_sub(dec)).min(
                             row_selected_shape
@@ -262,9 +306,10 @@ impl AppState<'_> {
                 }
             },
             super::state::ContentShowMode::Matrix => {
-                let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
+                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_row];
+                    let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset + inc)
                         .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
                     Ok(EventResult::Redraw)
@@ -302,9 +347,10 @@ impl AppState<'_> {
                 }
             },
             super::state::ContentShowMode::Matrix => {
-                let current_node = &self.treeview[self.tree_view_cursor].node.borrow().node;
+                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let row_selected_shape = dsattr.shape[self.selected_row];
+                    let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset = idx.min(
                         row_selected_shape
                             .saturating_sub(self.matrix_view_state.rows_currently_available),

@@ -31,7 +31,7 @@ fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
 pub fn render_info_attributes(
     f: &mut Frame,
     area: &Rect,
-    selected_node: &Rc<RefCell<H5FNode>>,
+    node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), hdf5_metno::Error> {
     let bg = match (&state.focus, &state.mode) {
@@ -54,7 +54,6 @@ pub fn render_info_attributes(
         vertical: 1,
     });
 
-    let mut node = selected_node.borrow_mut();
     let attributes = node.read_attributes()?;
     let min_first_panel = match attributes.longest_name_length {
         0..5 => 5,
