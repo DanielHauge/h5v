@@ -227,9 +227,9 @@ pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest>
 pub fn handle_imagefs_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
+    picker: Picker,
 ) -> Sender<(BufReader<ByteReader>, ImageFormat)> {
     let (tx_load, rx_load) = channel::<(BufReader<ByteReader>, ImageFormat)>();
-    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
 
     thread::spawn(move || loop {
         if let Ok((ds_reader, img_format)) = rx_load.recv() {
@@ -251,9 +251,9 @@ pub fn handle_imagefs_load(
 pub fn handle_imagefsvlen_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
+    picker: Picker,
 ) -> Sender<(Dataset, i32, ImageFormat)> {
     let (tx_load, rx_load) = channel::<(Dataset, i32, ImageFormat)>();
-    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
 
     thread::spawn(move || loop {
         if let Ok((ds, idx, img_format)) = rx_load.recv() {
@@ -300,9 +300,9 @@ pub enum ImageLoadedResult {
 pub fn handle_image_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
+    picker: Picker,
 ) -> Sender<(Dataset, i32, ImageType)> {
     let (tx_load, rx_load) = channel::<(Dataset, i32, ImageType)>();
-    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
     thread::spawn(move || loop {
         if let Ok((ds_reader, idx, img_format)) = rx_load.recv() {
             match img_format {

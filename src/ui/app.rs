@@ -20,6 +20,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
+use ratatui_image::picker::Picker;
 
 use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
 
@@ -111,11 +112,13 @@ fn main_recover_loop(
     })?;
 
     let (tx_events, rx_events) = channel();
+    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
     let tx_events_2 = tx_events.clone();
     let tx_load_img = handle_image_resize(tx_events_2);
-    let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone());
-    let tx_load_imgfsvlen = handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone());
-    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone());
+    let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
+    let tx_load_imgfsvlen =
+        handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
+    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -126,6 +129,7 @@ fn main_recover_loop(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
+        picker,
     };
 
     let matrix_view_state = MatrixViewState {

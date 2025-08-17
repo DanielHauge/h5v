@@ -3,7 +3,7 @@ use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
 use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
-use ratatui_image::thread::ThreadProtocol;
+use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
 use crate::{
     error::AppError,
@@ -53,6 +53,7 @@ pub struct ImgState {
     pub error: Option<String>,
     pub idx_to_load: i32,
     pub idx_loaded: i32,
+    pub picker: Picker,
 }
 
 impl ImgState {

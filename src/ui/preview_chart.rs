@@ -1,3 +1,12 @@
+use std::fmt::Pointer;
+
+use image::{DynamicImage, ImageBuffer, Rgb};
+use plotters::{
+    chart::ChartBuilder,
+    prelude::{BitMapBackend, IntoDrawingArea},
+    style::{Color, IntoFont},
+};
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -6,10 +15,11 @@ use ratatui::{
     widgets::{Axis, Chart, Dataset, GraphType},
     Frame,
 };
+use ratatui_image::StatefulImage;
 
 use crate::{
     color_consts,
-    data::{PreviewSelection, Previewable, SliceSelection},
+    data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::AppError,
     h5f::{H5FNode, Node},
     ui::{
@@ -19,6 +29,7 @@ use crate::{
         state::SegmentType,
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
+    utils::image_capable_terminal,
 };
 
 use super::state::AppState;
@@ -162,59 +173,115 @@ pub fn render_chart_preview(
         (chart_area, data_preview)
     };
 
-    // RENDER THE CHART.
-    // TODO: Maybe make some nice render as image if possible
-    let x_label_count = match chart_area.width {
-        0 => 0,
-        _ => chart_area.width / 8,
-    };
-    let x_labels = (0..=x_label_count)
-        .map(|i| {
-            let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
-            Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
-        })
-        .collect::<Vec<_>>();
+    if image_capable_terminal() {
+        // TODO: Optimize this, store the image buffer in the node, and just reuse it.
+        // TODO: Optimize this, store the image buffer in the node .
+        let (x, y) = state.img_state.picker.font_size();
+        let height = chart_area.height as u32 * y as u32;
+        let width = chart_area.width as u32 * x as u32;
+        let mut buffer = vec![0; (height * width * 3) as usize];
+        render_image_chart(&mut buffer, width, height, data_preview)?;
+        let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer)
+            .expect("buffer size mismatch");
+        let image_widget = StatefulImage::default();
+        let dyn_img = DynamicImage::ImageRgb8(image);
+        let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
+        f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
+    } else {
+        let x_label_count = match chart_area.width {
+            0 => 0,
+            _ => chart_area.width / 8,
+        };
+        let x_labels = (0..=x_label_count)
+            .map(|i| {
+                let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
+                Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
+            })
+            .collect::<Vec<_>>();
 
-    let y_label_count = match chart_area.height {
-        0 => 0,
-        _ => chart_area.height / 4,
-    };
+        let y_label_count = match chart_area.height {
+            0 => 0,
+            _ => chart_area.height / 4,
+        };
 
-    let y_labels = (0..=y_label_count)
-        .map(|i| {
-            let y = data_preview.min
-                + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
-            Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
-        })
-        .collect::<Vec<_>>();
+        let y_labels = (0..=y_label_count)
+            .map(|i| {
+                let y = data_preview.min
+                    + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
+                Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
+            })
+            .collect::<Vec<_>>();
 
-    // into a &'a [(f64, f64)]
-    let data: &[(f64, f64)] = &data_preview.data;
-    let ds = Dataset::default()
-        .marker(Marker::Braille)
-        .graph_type(GraphType::Line)
-        .data(data);
-    let bg = match (&state.focus, &state.mode) {
-        (super::state::Focus::Content, super::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
-        _ => color_consts::BG_COLOR,
-    };
-    let chart = Chart::new(vec![ds])
-        .style(Style::default().bg(bg))
-        .x_axis(
-            Axis::default()
-                .title("X axis")
-                .style(Style::default().fg(ratatui::style::Color::White))
-                .labels(x_labels)
-                .bounds((0.0, data_preview.length as f64).into()),
+        // into a &'a [(f64, f64)]
+        let data: &[(f64, f64)] = &data_preview.data;
+        let ds = Dataset::default()
+            .marker(Marker::Braille)
+            .graph_type(GraphType::Line)
+            .data(data);
+        let bg = match (&state.focus, &state.mode) {
+            (super::state::Focus::Content, super::state::Mode::Normal) => {
+                color_consts::FOCUS_BG_COLOR
+            }
+            _ => color_consts::BG_COLOR,
+        };
+        let chart = Chart::new(vec![ds])
+            .style(Style::default().bg(bg))
+            .x_axis(
+                Axis::default()
+                    .title("X axis")
+                    .style(Style::default().fg(ratatui::style::Color::White))
+                    .labels(x_labels)
+                    .bounds((0.0, data_preview.length as f64).into()),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Y axis")
+                    .style(Style::default().fg(ratatui::style::Color::White))
+                    .labels(y_labels)
+                    .bounds((data_preview.min, data_preview.max).into()),
+            );
+        f.render_widget(chart, chart_area);
+    }
+
+    Ok(())
+}
+
+fn render_image_chart(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    data_preview: DatasetPlotingData,
+) -> Result<(), AppError> {
+    let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
+    root.margin(10, 10, 10, 10);
+    root.fill(&plotters::prelude::WHITE).unwrap();
+    let mut chart = ChartBuilder::on(&root)
+        .margin(10)
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(
+            0.0..data_preview.length as f64,
+            data_preview.min..data_preview.max,
         )
-        .y_axis(
-            Axis::default()
-                .title("Y axis")
-                .style(Style::default().fg(ratatui::style::Color::White))
-                .labels(y_labels)
-                .bounds((data_preview.min, data_preview.max).into()),
-        );
-    f.render_widget(chart, chart_area);
+        .unwrap();
 
+    // Draw the mesh (grid lines)
+    chart
+        .configure_mesh()
+        .x_label_style(("sans-serif", 18).into_font())
+        .y_label_style(("sans-serif", 18).into_font())
+        .draw()
+        .unwrap();
+
+    let data = data_preview.data.iter().map(|(x, y)| (*x, *y));
+    let line_series = plotters::prelude::LineSeries::new(data, plotters::prelude::BLUE);
+    chart.draw_series(line_series).unwrap();
+    // chart
+    //     .configure_series_labels()
+    //     .label_font(("sans-serif", 15).into_font())
+    //     .background_style(plotters::prelude::WHITE.mix(0.8))
+    //     .draw()
+    //     .unwrap();
+    root.present().unwrap();
     Ok(())
 }
