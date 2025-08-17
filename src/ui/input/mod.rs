@@ -105,8 +105,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
                         super::state::ContentShowMode::Preview => state.inc(1),
                         super::state::ContentShowMode::Matrix => {
-                            let mut node =
-                                &state.treeview[state.tree_view_cursor].node.borrow_mut();
+                            let node = &state.treeview[state.tree_view_cursor].node.borrow_mut();
                             let current_node = &node.node;
                             if let Node::Dataset(_, dsattr) = current_node {
                                 if dsattr.shape.len() > node.selected_col {

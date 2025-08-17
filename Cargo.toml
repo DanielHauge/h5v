@@ -22,6 +22,7 @@ hdf5-metno = { version = "0.10.1", features = [
 image = "0.25.6"
 itertools = "0.14.0"
 ndarray = "0.16.1"
+plotters = "0.3.7"
 ratatui = { version = "0.29.0", features = ["all-widgets"] }
 ratatui-image = "8.0.1"
 

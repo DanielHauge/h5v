@@ -9,6 +9,8 @@ pub mod input;
 pub mod main_display;
 pub mod matrix;
 pub mod preview;
+pub mod preview_chart;
 pub mod segment_scroll;
 pub mod state;
+pub mod std_comp_render;
 pub mod tree_view;

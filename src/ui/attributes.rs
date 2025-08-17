@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
