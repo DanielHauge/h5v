@@ -1,10 +1,8 @@
-use std::fmt::Pointer;
-
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     chart::ChartBuilder,
     prelude::{BitMapBackend, IntoDrawingArea},
-    style::{Color, IntoFont},
+    style::IntoFont,
 };
 
 use ratatui::{
@@ -113,10 +111,10 @@ pub fn render_chart_preview(
         return Ok(());
     }
 
-    let selected_indexe_length = state.selected_indexes.len();
+    let selected_indexe_length = node.selected_indexes.len();
     for i in 0..selected_indexe_length {
         if !x_selectable_dims.contains(&i) {
-            state.selected_indexes[i] = 0;
+            node.selected_indexes[i] = 0;
         }
     }
 
@@ -134,7 +132,7 @@ pub fn render_chart_preview(
     let chart_area = if x_selectable_dims.len() > 1 {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], node, state, &shape, false)?;
+        render_dim_selector(f, &areas_split[0], node, &shape, false)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -157,7 +155,7 @@ pub fn render_chart_preview(
 
         let data_preview = ds.plot(PreviewSelection {
             x: node.selected_x,
-            index: state.selected_indexes[0..total_dims - 1].to_vec(),
+            index: node.selected_indexes[0..total_dims].to_vec(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
                 MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize,
@@ -167,7 +165,7 @@ pub fn render_chart_preview(
     } else {
         let data_preview = ds.plot(PreviewSelection {
             x: node.selected_x,
-            index: state.selected_indexes[0..total_dims - 1].to_vec(),
+            index: node.selected_indexes[0..total_dims].to_vec(),
             slice: SliceSelection::All,
         })?;
         (chart_area, data_preview)
@@ -276,12 +274,6 @@ fn render_image_chart(
     let data = data_preview.data.iter().map(|(x, y)| (*x, *y));
     let line_series = plotters::prelude::LineSeries::new(data, plotters::prelude::BLUE);
     chart.draw_series(line_series).unwrap();
-    // chart
-    //     .configure_series_labels()
-    //     .label_font(("sans-serif", 15).into_font())
-    //     .background_style(plotters::prelude::WHITE.mix(0.8))
-    //     .draw()
-    //     .unwrap();
     root.present().unwrap();
     Ok(())
 }

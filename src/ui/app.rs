@@ -170,7 +170,6 @@ fn main_recover_loop(
         searcher,
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
-        selected_indexes: [0; 15],
         img_state,
         matrix_view_state,
     };

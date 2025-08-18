@@ -1,4 +1,4 @@
-use hdf5_metno::{Dataset, Error, H5Type, Selection};
+use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{s, Array1, Array2};
 
 pub trait Previewable {
@@ -100,85 +100,23 @@ impl Previewable for Dataset {
             SliceSelection::All => 0..self.shape()[selection.x],
             SliceSelection::FromTo(a, b) => a..b,
         };
-        // TODO: Fix this, use the way to make slice from selections, like dims selector.
-        let data_to_show = match selection.index.len() {
-            0 => self.read_slice_1d(slice)?,
-            1 => match selection.x {
-                0 => self.read_slice(s![slice, selection.index[0]])?,
-                _ => self.read_slice(s![selection.index[0], slice])?,
-            },
-            2 => match selection.x {
-                0 => self.read_slice(s![slice, selection.index[0], selection.index[1]])?,
-                1 => self.read_slice(s![selection.index[0], slice, selection.index[1]])?,
-                _ => self.read_slice(s![selection.index[0], selection.index[1], slice])?,
-            },
-            3 => match selection.x {
-                0 => self.read_slice(s![
-                    slice,
-                    selection.index[0],
-                    selection.index[1],
-                    selection.index[2]
-                ])?,
-                1 => self.read_slice(s![
-                    selection.index[0],
-                    slice,
-                    selection.index[1],
-                    selection.index[2]
-                ])?,
-                2 => self.read_slice(s![
-                    selection.index[0],
-                    selection.index[1],
-                    slice,
-                    selection.index[2]
-                ])?,
-                _ => self.read_slice(s![
-                    selection.index[0],
-                    selection.index[1],
-                    selection.index[2],
-                    slice
-                ])?,
-            },
-            4 => match selection.x {
-                0 => self.read_slice(s![
-                    slice,
-                    selection.index[0],
-                    selection.index[1],
-                    selection.index[2],
-                    selection.index[3]
-                ])?,
-                1 => self.read_slice(s![
-                    selection.index[0],
-                    slice,
-                    selection.index[1],
-                    selection.index[2],
-                    selection.index[3]
-                ])?,
-                2 => self.read_slice(s![
-                    selection.index[0],
-                    selection.index[1],
-                    slice,
-                    selection.index[2],
-                    selection.index[3]
-                ])?,
-                3 => self.read_slice(s![
-                    selection.index[0],
-                    selection.index[1],
-                    selection.index[2],
-                    slice,
-                    selection.index[3]
-                ])?,
-                _ => self.read_slice(s![
-                    selection.index[0],
-                    selection.index[1],
-                    selection.index[2],
-                    selection.index[3],
-                    slice
-                ])?,
-            },
-            _ => {
-                return Err(Error::from("Cmon man, who can think in +5D? xD"));
+
+        let mut slice_selections: Vec<SliceOrIndex> = Vec::new();
+        for idx in 0..self.shape().len() {
+            if idx == selection.x {
+                slice_selections.push(SliceOrIndex::SliceTo {
+                    start: slice.start,
+                    step: 1,
+                    end: slice.end,
+                    block: 1,
+                });
+            } else {
+                slice_selections.push(SliceOrIndex::Index(selection.index[idx]));
             }
-        };
+        }
+
+        let selection = Selection::Hyperslab(Hyperslab::from(slice_selections));
+        let data_to_show = self.read_slice_1d(selection)?;
 
         let data = data_to_show
             .iter()

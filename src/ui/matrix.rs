@@ -59,10 +59,10 @@ pub fn render_matrix<T: H5Type + Display>(
             .map(|(i, _)| i)
             .collect();
 
-        let selected_indexe_length = state.selected_indexes.len();
+        let selected_indexe_length = node.selected_indexes.len();
         for i in 0..selected_indexe_length {
             if !x_selectable_dims.contains(&i) {
-                state.selected_indexes[i] = 0;
+                node.selected_indexes[i] = 0;
             }
         }
 
@@ -78,7 +78,7 @@ pub fn render_matrix<T: H5Type + Display>(
         }
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
-        render_dim_selector(f, &areas_split[0], node, state, &attr.shape, true)?;
+        render_dim_selector(f, &areas_split[0], node, &attr.shape, true)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,

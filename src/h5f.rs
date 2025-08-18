@@ -499,6 +499,7 @@ pub struct H5FNode {
     pub selected_x: usize,
     pub selected_row: usize,
     pub selected_col: usize,
+    pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
 }
 
 pub enum DSType {
@@ -525,6 +526,7 @@ impl H5FNode {
             selected_x: 0,
             selected_row: 0,
             selected_col: 1,
+            selected_indexes: [0; 15], // WARN: Will we ever need more than 15 dimensions?
         }
     }
 

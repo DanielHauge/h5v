@@ -122,7 +122,6 @@ pub struct AppState<'a> {
     pub searcher: Rc<RefCell<Searcher>>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
-    pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
     pub segment_state: SegmentState,
@@ -186,6 +185,22 @@ impl AppState<'_> {
             }
             _ => Ok(EventResult::Continue),
         }
+    }
+
+    pub fn change_selected_index(&mut self, delta: isize) -> Result<EventResult> {
+        let current_node = &self.treeview[self.tree_view_cursor];
+        let mut node = current_node.node.borrow_mut();
+        let Node::Dataset(_, dsattr) = &node.node else {
+            return Ok(EventResult::Continue);
+        };
+        let x_shape = dsattr.shape[node.selected_dim];
+        let current_selected_dim = node.selected_indexes[node.selected_dim] as isize;
+        let new_current_x_index =
+            (current_selected_dim + delta).clamp(0, x_shape as isize - 1) as usize;
+        let selected_x = node.selected_dim;
+        node.selected_indexes[selected_x] = new_current_x_index;
+
+        Ok(EventResult::Redraw)
     }
 
     pub fn change_col(&mut self, delta: isize) -> Result<EventResult> {

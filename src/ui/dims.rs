@@ -15,7 +15,6 @@ pub fn render_dim_selector(
     f: &mut Frame,
     area: &Rect,
     node: &mut H5FNode,
-    state: &mut AppState,
     shape: &[usize],
     row_columns: bool,
 ) -> Result<(), Error> {
@@ -23,7 +22,7 @@ pub fn render_dim_selector(
     let row_selection = node.selected_row;
     let col_selection = node.selected_col;
     let selected_dim = node.selected_dim;
-    let index_selection = state.selected_indexes;
+    let index_selection = node.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
         .borders(Borders::ALL)
@@ -152,7 +151,7 @@ impl HasMatrixSelection for AppState<'_> {
                 block: 1,
             });
         } else {
-            let selections = self.selected_indexes;
+            let selections = node.selected_indexes;
             (0..total_dims).for_each(|dim| {
                 if node.selected_col == dim {
                     slice.push(SliceOrIndex::SliceTo {
