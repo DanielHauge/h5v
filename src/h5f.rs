@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Attribute, Dataset, File, Group, LinkType};
+use hdf5_metno::{Attribute, Dataset, File, Group, LinkType, LocationType};
 use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
@@ -45,10 +45,14 @@ pub enum ImageType {
 pub struct GroupMeta {
     pub is_link: bool,
     pub filename: String,
+    pub link_name: Option<String>,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct DatasetMeta {
+    pub link_name: Option<String>,
+    pub display_name: String,
     pub shape: Vec<usize>,
     pub data_type: String,
     #[allow(dead_code)]
@@ -188,6 +192,21 @@ impl DatasetMeta {
             );
             data_set_attrs.push((external_filename, external_value));
         }
+        if let Some(l_name) = &self.link_name {
+            let link_name_span = Span::styled(
+                "origin",
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
+            let link_value_span = Span::styled(
+                l_name.clone(),
+                Style::default()
+                    .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                    .bold(),
+            );
+            data_set_attrs.push((link_name_span, link_value_span));
+        }
 
         let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
@@ -219,19 +238,77 @@ pub trait HasAttributes {
 }
 
 pub trait HasChildren {
-    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
-    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
+    fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
+    fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
     fn get_external_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_soft_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
     fn get_external_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
 }
 
 impl HasChildren for Group {
-    fn get_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        self.groups()
+    fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
+        let soft_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::Soft == link.link_type {
+                match group.group(name) {
+                    Ok(g) => objects.push(g),
+                    Err(_) => {
+                        // Ignore it and move on
+                        return true;
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(soft_groups)
     }
 
-    fn get_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
-        self.datasets()
+    fn get_soft_datasets(&self) -> Result<Vec<(Dataset)>, hdf5_metno::Error> {
+        let soft_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::Soft == link.link_type {
+                match group.dataset(name) {
+                    Ok(ds) => objects.push(ds),
+                    Err(_) => {
+                        // Ignore it and move on
+                        return true;
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(soft_datasets)
+    }
+
+    fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
+        let hard_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::Hard == link.link_type {
+                match group.group(name) {
+                    Ok(g) => objects.push(g),
+                    Err(_) => {
+                        // Ignore it and move on
+                        return true;
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(hard_groups)
+    }
+
+    fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
+        let datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
+            if LinkType::Hard == link.link_type {
+                match group.dataset(name) {
+                    Ok(ds) => objects.push(ds),
+                    Err(_) => {
+                        // Ignore it and move on
+                        return true;
+                    }
+                }
+            }
+            true
+        })?;
+        Ok(datasets)
     }
 
     fn get_external_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
@@ -241,6 +318,7 @@ impl HasChildren for Group {
                     Ok(ds) => objects.push(ds),
                     Err(_) => {
                         // Ignore it and move on
+                        // TODO: Push a link broken thingie
                         return true;
                     }
                 }
@@ -273,9 +351,9 @@ pub trait HasName {
 impl HasName for Node {
     fn name(&self) -> String {
         match self {
-            Node::File(file) => file.name().split("/").last().unwrap_or("").to_string(),
-            Node::Group(group, _) => group.name().split("/").last().unwrap_or("").to_string(),
-            Node::Dataset(dataset, _) => dataset.name().split("/").last().unwrap_or("").to_string(),
+            Node::File(file) => file.name().split('/').last().unwrap_or("").to_string(),
+            Node::Group(_, meta) => meta.display_name.clone(),
+            Node::Dataset(_, meta) => meta.display_name.clone(),
         }
     }
 }
@@ -503,13 +581,15 @@ pub struct H5FNode {
 }
 
 pub enum DSType {
-    InternalDataset(Dataset),
-    ExternalDataset(Dataset),
+    Soft(Dataset),
+    Hard(Dataset),
+    External(Dataset),
 }
 
 pub enum GrpType {
-    InternalGroup(Group),
-    ExternalGroup(Group),
+    Soft(Group),
+    Hard(Group),
+    External(Group),
 }
 
 impl H5FNode {
@@ -735,29 +815,42 @@ impl H5FNode {
             Node::Group(group, _) => group,
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous if"),
         };
+
         let mut groups = vec![];
-        for g in has_children.get_groups()? {
-            groups.push(GrpType::InternalGroup(g));
+        for g in has_children.get_hard_groups()? {
+            groups.push(GrpType::Hard(g));
         }
         for g in has_children.get_external_groups()? {
-            groups.push(GrpType::ExternalGroup(g));
+            groups.push(GrpType::External(g));
+        }
+        for g in has_children.get_soft_groups()? {
+            groups.push(GrpType::Soft(g));
         }
         let mut datasets = vec![];
-        for d in has_children.get_datasets()? {
-            datasets.push(DSType::InternalDataset(d));
+        for d in has_children.get_hard_datasets()? {
+            datasets.push(DSType::Hard(d));
         }
         for d in has_children.get_external_datasets()? {
-            datasets.push(DSType::ExternalDataset(d));
+            datasets.push(DSType::External(d));
+        }
+        for d in has_children.get_soft_datasets()? {
+            datasets.push(DSType::Soft(d));
         }
 
         let mut children = Vec::new();
         for wrapped_g in groups {
             let (g, is_link) = match wrapped_g {
-                GrpType::InternalGroup(g) => (g, false),
-                GrpType::ExternalGroup(g) => (g, true),
+                GrpType::Hard(g) => (g, false),
+                GrpType::External(g) => (g, true),
+                GrpType::Soft(g) => (g, true),
             };
+            let display_name = g.name().split('/').next_back().unwrap_or("").to_string();
+            let link_name = None;
+
             let meta = GroupMeta {
                 is_link,
+                display_name,
+                link_name,
                 filename: g.filename().to_string(),
             };
             let node = Rc::new(RefCell::new(H5FNode::new(
@@ -769,9 +862,14 @@ impl H5FNode {
         }
         for wrapped_ds in datasets {
             let (d, is_link) = match wrapped_ds {
-                DSType::InternalDataset(ds) => (ds, false),
-                DSType::ExternalDataset(ds) => (ds, true),
+                DSType::Hard(ds) => (ds, false),
+                DSType::External(ds) => (ds, true),
+                DSType::Soft(ds) => (ds, true),
             };
+            let display_name = d.name().split('/').next_back().unwrap_or("").to_string();
+            // let member_names = d.as_group()?.member_names()?;
+
+            let link_name = None; // TODO: Handle link names for datasets
             let d = d.to_owned();
             let dtype = d.dtype()?;
             let data_bytesize = dtype.size();
@@ -795,10 +893,12 @@ impl H5FNode {
             let meta = DatasetMeta {
                 shape,
                 data_type,
+                display_name,
                 data_bytesize,
                 total_bytes,
                 storage_required,
                 total_elems,
+                link_name,
                 chunk_shape,
                 matrixable: numerical,
                 encoding,
