@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Attribute, Dataset, File, Group, LinkType, LocationType};
+use hdf5_metno::{Attribute, Dataset, File, Group, LinkType};
 use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
@@ -45,7 +45,6 @@ pub enum ImageType {
 pub struct GroupMeta {
     pub is_link: bool,
     pub filename: String,
-    pub link_name: Option<String>,
     pub display_name: String,
 }
 
@@ -263,7 +262,7 @@ impl HasChildren for Group {
         Ok(soft_groups)
     }
 
-    fn get_soft_datasets(&self) -> Result<Vec<(Dataset)>, hdf5_metno::Error> {
+    fn get_soft_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
         let soft_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
             if LinkType::Soft == link.link_type {
                 match group.dataset(name) {
@@ -351,7 +350,7 @@ pub trait HasName {
 impl HasName for Node {
     fn name(&self) -> String {
         match self {
-            Node::File(file) => file.name().split('/').last().unwrap_or("").to_string(),
+            Node::File(file) => file.name().split('/').next_back().unwrap_or("").to_string(),
             Node::Group(_, meta) => meta.display_name.clone(),
             Node::Dataset(_, meta) => meta.display_name.clone(),
         }
@@ -845,12 +844,10 @@ impl H5FNode {
                 GrpType::Soft(g) => (g, true),
             };
             let display_name = g.name().split('/').next_back().unwrap_or("").to_string();
-            let link_name = None;
 
             let meta = GroupMeta {
                 is_link,
                 display_name,
-                link_name,
                 filename: g.filename().to_string(),
             };
             let node = Rc::new(RefCell::new(H5FNode::new(

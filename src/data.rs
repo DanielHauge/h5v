@@ -1,5 +1,5 @@
 use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
-use ndarray::{s, Array1, Array2};
+use ndarray::{Array1, Array2};
 
 pub trait Previewable {
     fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error>;
