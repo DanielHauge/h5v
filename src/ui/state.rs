@@ -1,4 +1,6 @@
-use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
+use std::{
+    arch::x86_64::_MM_FROUND_NO_EXC, cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender,
+};
 
 use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};
@@ -193,18 +195,29 @@ impl AppState<'_> {
         let Node::Dataset(_, dsattr) = &node.node else {
             return Ok(EventResult::Continue);
         };
-        let current_selected_dim = node.selected_dim as isize;
-        let new_selected_dim =
-            (current_selected_dim + delta).clamp(0, dsattr.shape.len() as isize - 1) as usize;
+        let current_shape_len = dsattr.shape.len() as isize;
+        let next = node.selected_dim as isize + delta;
+        let new_selected_dim = if next < 0 {
+            (current_shape_len - 1) as usize
+        } else if next >= current_shape_len {
+            0_usize
+        } else {
+            next as usize
+        };
         match self.content_mode {
             ContentShowMode::Preview => {
                 if new_selected_dim != node.selected_x {
                     node.selected_dim = new_selected_dim;
                 } else {
-                    node.selected_dim = ((node.selected_dim as isize + delta + 1)
-                        % dsattr.shape.len() as isize)
-                        as usize
-                        % dsattr.shape.len();
+                    let next_next = new_selected_dim as isize + delta;
+                    let next_next = if next_next < 0 {
+                        (current_shape_len - 1) as usize
+                    } else if next_next >= current_shape_len {
+                        0_usize
+                    } else {
+                        next_next as usize
+                    };
+                    node.selected_dim = next_next.clamp(0, current_shape_len as usize);
                 }
                 Ok(EventResult::Redraw)
             }
@@ -212,10 +225,27 @@ impl AppState<'_> {
                 if new_selected_dim != node.selected_col && new_selected_dim != node.selected_row {
                     node.selected_dim = new_selected_dim;
                 } else {
-                    node.selected_dim = ((node.selected_dim as isize + delta + 1)
-                        % dsattr.shape.len() as isize)
-                        as usize
-                        % dsattr.shape.len();
+                    let next_next = new_selected_dim as isize + delta;
+                    let next_next = if next_next < 0 {
+                        (current_shape_len - 1) as usize
+                    } else if next_next >= current_shape_len {
+                        0_usize
+                    } else {
+                        next_next as usize
+                    };
+                    if next_next != node.selected_col && next_next != node.selected_row {
+                        node.selected_dim = next_next.clamp(0, current_shape_len as usize);
+                    } else {
+                        let next_next_next = next_next as isize + delta;
+                        let next_next_next = if next_next_next < 0 {
+                            (current_shape_len - 1) as usize
+                        } else if next_next_next >= current_shape_len {
+                            0_usize
+                        } else {
+                            next_next_next as usize
+                        };
+                        node.selected_dim = next_next_next.clamp(0, current_shape_len as usize);
+                    }
                 }
                 Ok(EventResult::Redraw)
             }
