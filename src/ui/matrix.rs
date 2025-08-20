@@ -88,28 +88,30 @@ pub fn render_matrix<T: H5Type + Display>(
     };
     let width = matrix_area.width;
     let heigh = matrix_area.height;
-    let x_shape = attr
+
+    let col_ds_len = attr
         .shape
         .get(node.selected_col)
         .map(|x| *x as u16)
         .unwrap_or(0);
-    let y_scale = attr
+    let row_ds_len = attr
         .shape
         .get(node.selected_row)
         .map(|x| *x as u16)
         .unwrap_or(0);
-    let max_cols = (width / 24).min(x_shape);
-    let rows = heigh.min(y_scale);
-    state.matrix_view_state.rows_currently_available = rows as usize;
+
+    let max_cols = (width / 24).min(col_ds_len);
+    let max_rows = heigh.min(row_ds_len);
+    state.matrix_view_state.rows_currently_available = max_rows as usize;
     state.matrix_view_state.cols_currently_available = max_cols as usize;
     let matrix_selection = MatrixSelection {
         cols: max_cols,
-        rows,
+        rows: max_rows,
     };
     let slice_selection = state.get_matrix_selection(node, matrix_selection, &attr.shape);
 
-    let mut rows_area_constraints = Vec::with_capacity(rows as usize);
-    (0..rows).for_each(|_| {
+    let mut rows_area_constraints = Vec::with_capacity(max_rows as usize);
+    (0..max_rows).for_each(|_| {
         rows_area_constraints.push(Constraint::Length(1));
     });
 
@@ -168,7 +170,7 @@ pub fn render_matrix<T: H5Type + Display>(
             );
         }
 
-        for i in 0..rows {
+        for i in 0..max_rows {
             let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
             col_constraint.push(Constraint::Length(15));
 
@@ -194,7 +196,11 @@ pub fn render_matrix<T: H5Type + Display>(
                     (false, true) => color_consts::BG_VAL1_COLOR,
                     (false, false) => color_consts::BG_VAL2_COLOR,
                 };
-                let idx = (i as usize, j as usize);
+                let idx = if node.selected_row > node.selected_col {
+                    (j as usize, i as usize)
+                } else {
+                    (i as usize, j as usize)
+                };
                 let val = data.data.get(idx);
 
                 match val {

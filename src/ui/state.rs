@@ -1,6 +1,4 @@
-use std::{
-    arch::x86_64::_MM_FROUND_NO_EXC, cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender,
-};
+use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
 
 use cli_clipboard::ClipboardContext;
 use hdf5_metno::{ByteReader, Dataset};
