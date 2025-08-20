@@ -104,6 +104,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Down, KeyModifiers::ALT) => state.change_selected_index(1),
                     (KeyCode::PageUp, KeyModifiers::ALT) => state.change_selected_index(-10),
                     (KeyCode::PageDown, KeyModifiers::ALT) => state.change_selected_index(10),
+                    (KeyCode::Left, KeyModifiers::ALT) => state.change_selected_dimension(-1),
+                    (KeyCode::Right, KeyModifiers::ALT) => state.change_selected_dimension(1),
                     (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
                     (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
                     (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {

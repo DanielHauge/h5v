@@ -161,7 +161,7 @@ impl AppState<'_> {
 
     pub fn change_row(&mut self, delta: isize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Matrix => {
+            ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
@@ -187,6 +187,41 @@ impl AppState<'_> {
         }
     }
 
+    pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {
+        let current_node = &self.treeview[self.tree_view_cursor];
+        let mut node = current_node.node.borrow_mut();
+        let Node::Dataset(_, dsattr) = &node.node else {
+            return Ok(EventResult::Continue);
+        };
+        let current_selected_dim = node.selected_dim as isize;
+        let new_selected_dim =
+            (current_selected_dim + delta).clamp(0, dsattr.shape.len() as isize - 1) as usize;
+        match self.content_mode {
+            ContentShowMode::Preview => {
+                if new_selected_dim != node.selected_x {
+                    node.selected_dim = new_selected_dim;
+                } else {
+                    node.selected_dim = ((node.selected_dim as isize + delta + 1)
+                        % dsattr.shape.len() as isize)
+                        as usize
+                        % dsattr.shape.len();
+                }
+                Ok(EventResult::Redraw)
+            }
+            ContentShowMode::Matrix => {
+                if new_selected_dim != node.selected_col && new_selected_dim != node.selected_row {
+                    node.selected_dim = new_selected_dim;
+                } else {
+                    node.selected_dim = ((node.selected_dim as isize + delta + 1)
+                        % dsattr.shape.len() as isize)
+                        as usize
+                        % dsattr.shape.len();
+                }
+                Ok(EventResult::Redraw)
+            }
+        }
+    }
+
     pub fn change_selected_index(&mut self, delta: isize) -> Result<EventResult> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
@@ -205,7 +240,7 @@ impl AppState<'_> {
 
     pub fn change_col(&mut self, delta: isize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Matrix => {
+            ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
@@ -233,7 +268,7 @@ impl AppState<'_> {
 
     pub fn change_x(&mut self, delta: isize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => {
+            ContentShowMode::Preview => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
@@ -253,7 +288,7 @@ impl AppState<'_> {
 
     pub fn dec(&mut self, dec: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+            ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if self.img_state.idx_to_load > 0 {
                         self.img_state.idx_to_load -= 1;
@@ -275,7 +310,7 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
             },
-            super::state::ContentShowMode::Matrix => {
+            ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let node = &current_node.node.borrow_mut();
                 let current_node = &node.node;
@@ -299,7 +334,7 @@ impl AppState<'_> {
 
     pub fn inc(&mut self, inc: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+            ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if self.img_state.idx_to_load < self.segment_state.segment_count - 1 {
                         self.img_state.idx_to_load += 1;
@@ -321,7 +356,7 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
             },
-            super::state::ContentShowMode::Matrix => {
+            ContentShowMode::Matrix => {
                 let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
                 let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
@@ -338,7 +373,7 @@ impl AppState<'_> {
 
     pub fn set(&mut self, idx: usize) -> Result<EventResult> {
         match self.content_mode {
-            super::state::ContentShowMode::Preview => match self.segment_state.segumented {
+            ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if idx < self.segment_state.segment_count as usize {
                         self.img_state.idx_to_load = idx as i32;
@@ -362,7 +397,7 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
             },
-            super::state::ContentShowMode::Matrix => {
+            ContentShowMode::Matrix => {
                 let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
                 let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
