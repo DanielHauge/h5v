@@ -24,6 +24,11 @@ h5v path/to/file.h5
 - `ctrl` + navigate: Scroll through contents (image list or matrix)
 - `PgUp`/`PgDown`: Scroll through contents by half a page (image list or matrix)
 - `ctrl` + `d`/`u`: Navigate by half a page
+- `alt` + `left`/`right`: Change the pivot for incrementing constant indexes in matrix and preview modes.
+- `alt` + `up`/`down`: Increment or decrement index at highlighted index in matrix and preview modes.
+- `c`/`C`: Shift column axis in matrix mode.
+- `r`/`R`: Shift row axis in matrix mode.
+- `x`/`X`: Shift x-axis selector in preview mode.
 - `g`/`Home`: Go to the top
 - `G`/`End`: Go to the bottom
 - `:` Enter command mode
@@ -34,7 +39,7 @@ h5v path/to/file.h5
 
 - `:n` Go the nth item
 - `:+n` Go down n items
-- `:-n`  Go up n items
+- `:-n` Go up n items
 
 For example, `:5` will go to the 5th item, `:+3` will go down 3 items, and `:-2` will go up 2 items.
 Use `:` to enter command mode, type the command, and press `enter` to execute it.
