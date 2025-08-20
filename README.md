@@ -54,7 +54,6 @@ cargo install h5v
 ## Roadmap
 
 - [ ] Fix issue about matrix 2d display. (Display of values not correct)
-- [ ] Add command support for incrementing and decrementing the current selected dimension in matrix and preview modes.
 - [ ] Add preview for groups. ie. multi-chart preview, via attributes.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
