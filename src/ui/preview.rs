@@ -1,8 +1,5 @@
 use hdf5_metno::types::{FixedAscii, FixedUnicode, VarLenAscii, VarLenUnicode};
-use ratatui::{
-    layout::Rect,
-    Frame,
-};
+use ratatui::{layout::Rect, Frame};
 
 use super::{
     image_preview::render_img,
@@ -61,9 +58,9 @@ pub fn render_preview(
 pub fn render_string_preview(
     f: &mut Frame,
     area: &Rect,
-    selected_node_refc: &mut H5FNode,
+    node: &mut H5FNode,
 ) -> Result<(), AppError> {
-    let selected_node = &selected_node_refc.node;
+    let selected_node = &node.node;
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
         _ => panic!("Expected a string dataset to preview string data"),
@@ -87,19 +84,19 @@ pub fn render_string_preview(
             );
         }
         Encoding::Ascii => match dataset.read_scalar::<VarLenAscii>() {
-            Ok(x) => render_string(f, area, x),
+            Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
         Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
-            Ok(x) => render_string(f, area, x),
+            Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
         Encoding::UTF8Fixed => match dataset.read_scalar::<FixedUnicode<32768>>() {
-            Ok(x) => render_string(f, area, x.to_string()),
+            Ok(x) => render_string(f, area, node, x.to_string(), meta.hl.clone()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
         Encoding::AsciiFixed => match dataset.read_scalar::<FixedAscii<32768>>() {
-            Ok(x) => render_string(f, area, x.to_string()),
+            Ok(x) => render_string(f, area, node, x.to_string(), meta.hl.clone()),
             Err(e) => render_error(f, area, format!("Error: {}", e)),
         },
     }

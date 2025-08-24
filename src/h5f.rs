@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Attribute, Dataset, File, Group, LinkType};
+use hdf5_metno::{types::VarLenUnicode, Attribute, Dataset, File, Group, LinkType};
 use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
@@ -60,6 +60,7 @@ pub struct DatasetMeta {
     total_bytes: usize,
     total_elems: usize,
     chunk_shape: Option<Vec<usize>>,
+    pub hl: Option<String>,
     pub matrixable: Option<MatrixRenderType>,
     pub encoding: Encoding,
     pub image: Option<ImageType>,
@@ -576,6 +577,7 @@ pub struct H5FNode {
     pub selected_x: usize,
     pub selected_row: usize,
     pub selected_col: usize,
+    pub line_offset: usize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
 }
 
@@ -605,6 +607,7 @@ impl H5FNode {
             selected_x: 0,
             selected_row: 0,
             selected_col: 1,
+            line_offset: 0,
             selected_indexes: [0; 15], // WARN: Will we ever need more than 15 dimensions?
         }
     }
@@ -886,8 +889,14 @@ impl H5FNode {
             let chunk_shape = d.chunk();
             let image = is_image(&d);
             let filename = d.filename().to_string();
+            let hl = d.attr("HIGHLIGHT").ok().map(|a| {
+                a.read_scalar::<VarLenUnicode>()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default()
+            });
 
             let meta = DatasetMeta {
+                hl,
                 shape,
                 data_type,
                 display_name,

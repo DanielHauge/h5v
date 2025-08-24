@@ -53,7 +53,13 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Fix issue about matrix 2d display. (Display of values not correct)
+- [ ] Add support for controlling sections to see of string + line number
 - [ ] Add preview for groups. ie. multi-chart preview, via attributes.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
+
+## Script ideas
+
+- Previewing (Like preview multiple datasets for a group for example)
+- Send data to External App or store or something else.
+- Scaling/Formatting data. (Add script to datasets, so data could be transformed before viewing Matrix + Preview.)

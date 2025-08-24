@@ -65,7 +65,7 @@ pub fn render_chart_preview(
                         return Ok(());
                     }
                     let ds = ds.unwrap();
-                    render_string(f, area, ds);
+                    render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Uint64 => {
                     let ds = ds.read_scalar::<u64>();
@@ -74,7 +74,7 @@ pub fn render_chart_preview(
                         return Ok(());
                     }
                     let ds = ds.unwrap();
-                    render_string(f, area, ds);
+                    render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Int64 => {
                     let ds = ds.read_scalar::<i64>();
@@ -83,7 +83,7 @@ pub fn render_chart_preview(
                         return Ok(());
                     }
                     let ds = ds.unwrap();
-                    render_string(f, area, ds);
+                    render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Compound => {
                     render_unsupported_rendering(

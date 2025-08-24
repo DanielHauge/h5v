@@ -42,3 +42,5 @@ pub const SEARCH_COUNT_COLOR: Color = Color::DarkGray;
 pub const DATASET_FILE_COLOR: Color = Color::Rgb(38, 166, 154);
 
 pub const LOAD_MORE_COLOR: ratatui::prelude::Color = Color::Yellow;
+
+pub const LINE_NUM_COLOR: ratatui::prelude::Color = Color::DarkGray;
