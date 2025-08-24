@@ -1,8 +1,8 @@
-pub const SELECTED_INDEX: ratatui::prelude::Color = Color::Cyan;
-pub const SELECTED_DIM: ratatui::prelude::Color = Color::Yellow;
+use ratatui::prelude::Color;
+pub const SELECTED_INDEX: Color = Color::Cyan;
+pub const SELECTED_DIM: Color = Color::Yellow;
 pub const TITLE: Color = Color::Yellow;
 pub const COLOR_WHITE: Color = Color::White;
-use ratatui::style::Color;
 
 pub const NUMBER_COLOR: Color = Color::Rgb(181, 206, 168);
 pub const UINT_COLOR: Color = NUMBER_COLOR;
@@ -41,6 +41,6 @@ pub const SEARCH_TEXT_COLOR: Color = Color::Rgb(222, 222, 222);
 pub const SEARCH_COUNT_COLOR: Color = Color::DarkGray;
 pub const DATASET_FILE_COLOR: Color = Color::Rgb(38, 166, 154);
 
-pub const LOAD_MORE_COLOR: ratatui::prelude::Color = Color::Yellow;
+pub const LOAD_MORE_COLOR: Color = Color::Yellow;
 
-pub const LINE_NUM_COLOR: ratatui::prelude::Color = Color::DarkGray;
+pub const LINE_NUM_COLOR: Color = Color::DarkGray;
