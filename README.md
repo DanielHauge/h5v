@@ -53,7 +53,6 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Add support for controlling sections to see of string + line number
 - [ ] Add preview for groups. ie. multi-chart preview, via attributes.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
