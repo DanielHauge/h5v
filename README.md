@@ -53,7 +53,6 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Add support for navigating strings that are larger than the screen. Basically, row offset + column offset for strings.
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
 - [ ] Add preview for groups. ie. multi-chart preview, via attributes.
 - [ ] Add matrix support for compounds
