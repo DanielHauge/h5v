@@ -117,7 +117,7 @@ pub fn render_hl_string<T: ToString>(
             escaped_lines.push(Line::from(spans));
         }
     }
-    let line_num = node.line_offset.to_string().len() as u16 + 1;
+    let line_num = (node.line_offset + area.height as usize).to_string().len() as u16;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
     render_linenums(f, &line_num_area, node);
     let string = Text::from(escaped_lines);
@@ -149,7 +149,7 @@ fn render_linenums(f: &mut Frame, area: &Rect, node: &mut H5FNode) {
 }
 
 fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode, string: T) {
-    let line_num = node.line_offset.to_string().len() as u16 + 1;
+    let line_num = (node.line_offset + area.height as usize).to_string().len() as u16;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
     render_linenums(f, &line_num_area, node);
     let string = string.to_string().lines().skip(node.line_offset).join("");
