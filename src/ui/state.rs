@@ -335,6 +335,16 @@ impl AppState<'_> {
                 }
                 SegmentType::NoSegment => {
                     self.img_state.idx_to_load = self.segment_state.idx;
+                    let current_node = &self.treeview[self.tree_view_cursor];
+                    let mut node = current_node.node.borrow_mut();
+                    let new_offset = node.line_offset as isize - dec as isize;
+                    let new_offset = if new_offset < 0 {
+                        0
+                    } else {
+                        new_offset as usize
+                    };
+                    node.line_offset = new_offset;
+
                     Ok(EventResult::Redraw)
                 }
             },
@@ -381,6 +391,12 @@ impl AppState<'_> {
                 }
                 SegmentType::NoSegment => {
                     self.img_state.idx_to_load = self.segment_state.idx;
+
+                    self.img_state.idx_to_load = self.segment_state.idx;
+                    let current_node = &self.treeview[self.tree_view_cursor];
+                    let mut node = current_node.node.borrow_mut();
+                    let new_offset = node.line_offset + inc;
+                    node.line_offset = new_offset;
                     Ok(EventResult::Redraw)
                 }
             },

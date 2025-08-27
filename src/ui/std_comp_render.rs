@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     text::{Line, Span, Text},
@@ -98,6 +99,8 @@ pub fn render_hl_string<T: ToString>(
         string
     };
     let mut escaped_lines = Vec::new();
+
+    let mut skips = node.line_offset;
     for line in LinesWithEndings::from(&string) {
         let ranges: Vec<(syntect::highlighting::Style, &str)> =
             h.highlight_line(line, &ps).unwrap();
@@ -108,7 +111,11 @@ pub fn render_hl_string<T: ToString>(
             span.style = style;
             spans.push(span);
         }
-        escaped_lines.push(Line::from(spans));
+        if skips > 0 {
+            skips -= 1;
+        } else {
+            escaped_lines.push(Line::from(spans));
+        }
     }
     let line_num = node.line_offset.to_string().len() as u16 + 1;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
@@ -145,7 +152,7 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
     let line_num = node.line_offset.to_string().len() as u16 + 1;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
     render_linenums(f, &line_num_area, node);
-    let string = string.to_string();
+    let string = string.to_string().lines().skip(node.line_offset).join("");
     let string = Text::from(string);
     f.render_widget(string, text_area);
 }
