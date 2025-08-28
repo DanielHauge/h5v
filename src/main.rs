@@ -4,6 +4,7 @@ mod color_consts;
 mod data;
 mod error;
 mod h5f;
+mod scripting;
 mod search;
 mod sprint_attributes;
 mod sprint_typedesc;
