@@ -27,7 +27,7 @@ impl AttributeLoad {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContextLoad {
-    selection: Vec<SliceOrIndex>,
+    pub selection: Vec<SliceOrIndex>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

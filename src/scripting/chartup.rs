@@ -1,4 +1,4 @@
-use hdf5_metno::Group;
+use hdf5_metno::{Group, Hyperslab, Selection};
 use ndarray::ArrayD;
 
 use crate::scripting::types::{Chart, Operation};
@@ -51,9 +51,8 @@ pub fn eval_operation(file: &Group, context: &Group, op: Operation) -> Result<Ar
         Operation::Value(entity_load) => match entity_load {
             super::types::EntityLoad::Context(context_load) => {
                 let ds = context.as_dataset().map_err(|e| e.to_string())?;
-                // TODO: use slice from context_load
-                let data: ArrayD<f64> = ds.read().map_err(|e| e.to_string())?;
-                Ok(data)
+                let selection = Selection::Hyperslab(Hyperslab::from(context_load.selection));
+                Ok(ds.read_slice(selection).map_err(|e| e.to_string())?)
             }
             super::types::EntityLoad::Dataset(dataset_load) => {
                 let ds = match file.dataset(&dataset_load.path) {
@@ -62,12 +61,26 @@ pub fn eval_operation(file: &Group, context: &Group, op: Operation) -> Result<Ar
                         .dataset(&dataset_load.path)
                         .map_err(|e| e.to_string())?,
                 };
-                // TODO: use slice from dataset_load
-                let data: ArrayD<f64> = ds.read().map_err(|e| e.to_string())?;
-                Ok(data)
+                let selection = Selection::Hyperslab(Hyperslab::from(dataset_load.selection));
+                Ok(ds.read_slice(selection).map_err(|e| e.to_string())?)
             }
             super::types::EntityLoad::Attribute(attribute_load) => {
-                todo!("attribute load not implemented")
+                let g = match file.group(&attribute_load.path) {
+                    Ok(g) => g,
+                    Err(_) => context
+                        .group(&attribute_load.path)
+                        .map_err(|e| e.to_string())?,
+                };
+                let attr = g.attr(&attribute_load.name).map_err(|e| e.to_string())?;
+                Ok(match attr.read_scalar::<f64>() {
+                    Ok(v) => ArrayD::from_shape_vec(ndarray::IxDyn(&[1]), vec![v]).unwrap(),
+                    Err(_) => match attr.read_raw::<f64>() {
+                        Ok(v) => {
+                            ArrayD::from_shape_vec(ndarray::IxDyn(&[v.len()]), v.to_vec()).unwrap()
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    },
+                })
             }
         },
     }
