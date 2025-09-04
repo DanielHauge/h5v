@@ -1,13 +1,15 @@
-use rhai::{CustomType, TypeBuilder};
+use hdf5_metno::SliceOrIndex;
+use rhai::{Array, CustomType, TypeBuilder};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DatasetLoad {
     pub path: String,
+    pub selection: Vec<SliceOrIndex>,
 }
 
 impl DatasetLoad {
-    pub fn dataset(path: String) -> Self {
-        Self { path }
+    pub fn dataset(path: String, selection: Vec<SliceOrIndex>) -> Self {
+        Self { path, selection }
     }
 }
 
@@ -24,8 +26,13 @@ impl AttributeLoad {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ContextLoad {
+    selection: Vec<SliceOrIndex>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum EntityLoad {
-    CurrentDataset,
+    Context(ContextLoad),
     Dataset(DatasetLoad),
     Attribute(AttributeLoad),
 }
@@ -52,8 +59,8 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn dataset(path: String) -> Self {
-        Operation::Value(EntityLoad::Dataset(DatasetLoad::dataset(path)))
+    pub fn dataset(path: String, selection: Vec<SliceOrIndex>) -> Self {
+        Operation::Value(EntityLoad::Dataset(DatasetLoad::dataset(path, selection)))
     }
 
     pub fn attr(path: String, name: String) -> Self {
@@ -61,32 +68,16 @@ impl Operation {
     }
 }
 
-#[derive(Clone, Debug, CustomType, PartialEq)]
-pub struct Plot {
+#[derive(Clone, Debug, CustomType, PartialEq, Default)]
+pub struct LineSeries {
     pub title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
-    pub dpi: Option<i64>,
     pub x_data: Option<Operation>,
-    pub y_data: Vec<Operation>,
-    pub allow_zip: bool,
+    pub y_data: Option<Operation>,
 }
 
-impl Default for Plot {
-    fn default() -> Self {
-        Self {
-            title: None,
-            x_label: None,
-            y_label: None,
-            dpi: Some(600),
-            x_data: None,
-            y_data: vec![],
-            allow_zip: false,
-        }
-    }
-}
-
-impl Plot {
+impl LineSeries {
     pub fn set_title(&mut self, title: String) {
         self.title = Some(title);
     }
@@ -99,20 +90,38 @@ impl Plot {
         self.y_label = Some(y_label);
     }
 
-    pub fn set_dpi(&mut self, dpi: i64) {
-        self.dpi = Some(dpi);
-    }
-
     pub fn set_x_data(&mut self, x_data: Operation) {
         self.x_data = Some(x_data);
     }
 
     pub fn set_y_data(&mut self, y_data: Operation) {
-        self.y_data.push(y_data);
+        self.y_data = Some(y_data);
+    }
+}
+
+#[derive(Clone, Debug, CustomType, PartialEq, Default)]
+pub struct Chart {
+    pub title: Option<String>,
+    pub dpi: Option<i64>,
+    pub series: Vec<LineSeries>,
+    pub colors: Option<Vec<String>>,
+}
+
+impl Chart {
+    pub fn set_title(&mut self, title: String) {
+        self.title = Some(title);
     }
 
-    pub fn set_allow_zip(&mut self, allow_zip: bool) {
-        self.allow_zip = allow_zip;
+    pub fn set_dpi(&mut self, dpi: i64) {
+        self.dpi = Some(dpi);
+    }
+
+    pub fn add_series(&mut self, series: LineSeries) {
+        self.series.push(series);
+    }
+
+    pub fn set_colors(&mut self, colors: Vec<String>) {
+        self.colors = Some(colors);
     }
 }
 
@@ -120,10 +129,34 @@ pub fn register_load_types(engine: &mut rhai::Engine) {
     engine
         .register_type_with_name::<EntityLoad>("EntityLoad")
         .register_fn("attr", Operation::attr)
-        .register_fn("dataset", Operation::dataset)
+        .register_fn("dataset", |path: String, arr: Array| {
+            let arr: Vec<SliceOrIndex> = arr
+                .into_iter()
+                .map(|x| {
+                    x.try_cast::<SliceOrIndex>()
+                        .unwrap_or(SliceOrIndex::Index(0))
+                })
+                .collect();
+            Operation::dataset(path, arr.to_vec())
+        })
         .register_type_with_name::<Operation>("Operation");
 
-    engine.register_fn("ctx", || Operation::Value(EntityLoad::CurrentDataset));
+    engine.register_fn("ctx", |selection: Array| {
+        let arr: Vec<SliceOrIndex> = selection
+            .into_iter()
+            .map(|x| {
+                x.try_cast::<SliceOrIndex>()
+                    .unwrap_or(SliceOrIndex::Unlimited {
+                        start: 0,
+                        step: 1,
+                        block: 1,
+                    })
+            })
+            .collect();
+        Operation::Value(EntityLoad::Context(ContextLoad {
+            selection: arr.to_vec(),
+        }))
+    });
 
     engine.register_fn("+", |left: Operation, right: Operation| {
         Operation::Addition {
@@ -151,16 +184,47 @@ pub fn register_load_types(engine: &mut rhai::Engine) {
         right: Box::new(right),
     });
 
+    engine.register_fn("index", |x: i64| SliceOrIndex::Index(x as usize));
+
+    engine.register_fn(
+        "slice_adv",
+        |start: i64, step: i64, end: i64, block: i64| SliceOrIndex::SliceTo {
+            start: if start < 0 { 0 } else { start as usize },
+            step: if step < 1 { 1 } else { step as usize },
+            end: if end < 0 { 0 } else { end as usize },
+            block: if block < 1 { 1 } else { block as usize },
+        },
+    );
+
+    engine.register_fn("slice", |start: i64, end: i64| SliceOrIndex::SliceTo {
+        start: if start < 0 { 0 } else { start as usize },
+        step: 1,
+        end: if end < 0 { 0 } else { end as usize },
+        block: 1,
+    });
+
+    engine.register_fn("all", || SliceOrIndex::Unlimited {
+        start: 0,
+        step: 1,
+        block: 1,
+    });
+
     engine
-        .register_type_with_name::<Plot>("Plot")
-        .register_fn("plot", Plot::default)
-        .register_fn("set_title", Plot::set_title)
-        .register_fn("set_x_label", Plot::set_x_label)
-        .register_fn("set_y_label", Plot::set_y_label)
-        .register_fn("set_dpi", Plot::set_dpi)
-        .register_fn("set_x_data", Plot::set_x_data)
-        .register_fn("set_allow_zip", Plot::set_allow_zip)
-        .register_fn("set_y_data", Plot::set_y_data);
+        .register_type_with_name::<LineSeries>("line")
+        .register_fn("line", LineSeries::default)
+        .register_fn("set_title", LineSeries::set_title)
+        .register_fn("set_x_label", LineSeries::set_x_label)
+        .register_fn("set_y_label", LineSeries::set_y_label)
+        .register_fn("set_x_data", LineSeries::set_x_data)
+        .register_fn("set_y_data", LineSeries::set_y_data);
+
+    engine
+        .register_type_with_name::<Chart>("Chart")
+        .register_fn("chart", Chart::default)
+        .register_fn("set_colors", Chart::set_colors)
+        .register_fn("set_title", Chart::set_title)
+        .register_fn("set_dpi", Chart::set_dpi)
+        .register_fn("add_series", Chart::add_series);
 }
 
 #[cfg(test)]
@@ -168,37 +232,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_script_engine_plot() {
+    fn test_script_engine_selection() {
+        let mut engine = rhai::Engine::new();
+        register_load_types(&mut engine);
+        let script = r#"
+        let sel = slice(0, 10);
+        sel
+    "#;
+        let selection = engine.eval::<SliceOrIndex>(script).unwrap();
+        assert_eq!(
+            selection,
+            SliceOrIndex::SliceTo {
+                start: 0,
+                step: 1,
+                end: 10,
+                block: 1
+            }
+        );
+    }
+
+    #[test]
+    fn test_script_engine_line() {
         let mut engine = rhai::Engine::new();
 
         // Register external function as 'compute'
         register_load_types(&mut engine);
 
         let script = r#"
-        let plot = plot();
-        plot.set_title("My Plot");
-        plot.set_x_label("X Axis");
-        plot.set_y_label("Y Axis");
-        plot.set_dpi(300);
-        plot.set_x_data(ctx());
-        plot.set_y_data(ctx());
-        plot.set_allow_zip(true);
-        plot
+        let line = line();
+        line.set_title("My line");
+        line.set_x_label("X Axis");
+        line.set_y_label("Y Axis");
+        line.set_x_data(ctx([all()]);
+        line.set_y_data(ctx([all()]);
+        line.set_allow_zip(true);
+        line
     "#;
-        let plot_opts = engine.eval::<Plot>(script).unwrap();
-        assert_eq!(plot_opts.title, Some("My Plot".to_string()));
+        let plot_opts = engine.eval::<LineSeries>(script).unwrap();
+        assert_eq!(plot_opts.title, Some("My line".to_string()));
         assert_eq!(plot_opts.x_label, Some("X Axis".to_string()));
         assert_eq!(plot_opts.y_label, Some("Y Axis".to_string()));
-        assert!(plot_opts.allow_zip);
-        assert_eq!(plot_opts.dpi, Some(300));
         assert_eq!(
             plot_opts.x_data,
-            Some(Operation::Value(EntityLoad::CurrentDataset))
+            Some(Operation::Value(EntityLoad::Context(ContextLoad {
+                selection: vec![SliceOrIndex::Unlimited {
+                    start: 0,
+                    step: 1,
+                    block: 1
+                }]
+            })))
         );
-        assert_eq!(plot_opts.y_data.len(), 1);
         assert_eq!(
-            plot_opts.y_data[0],
-            Operation::Value(EntityLoad::CurrentDataset)
+            plot_opts.y_data,
+            Some(Operation::Value(EntityLoad::Context(ContextLoad {
+                selection: vec![SliceOrIndex::Unlimited {
+                    start: 0,
+                    step: 1,
+                    block: 1
+                }]
+            })))
         );
     }
 
@@ -211,15 +303,25 @@ mod tests {
 
         let script = r#"
         let a = attr("path1", "name1");
-        let b = dataset("path2");
+        let selection = all();
+        let b = dataset("path2", [selection]);
         let c = a + b;     // uses our registered "+"
-        let d = ctx() - c; // uses our registered "ctx" and "-"
+        let d = ctx([all()]) - c; // uses our registered "ctx" and "-"
         d
     "#;
         let operation = engine.eval::<Operation>(script).unwrap();
         match operation {
             Operation::Subtract { left, right } => {
-                assert_eq!(*left, Operation::Value(EntityLoad::CurrentDataset));
+                assert_eq!(
+                    *left,
+                    Operation::Value(EntityLoad::Context(ContextLoad {
+                        selection: vec![SliceOrIndex::Unlimited {
+                            start: 0,
+                            step: 1,
+                            block: 1
+                        }]
+                    }))
+                );
                 match *right {
                     Operation::Addition { left, right } => {
                         assert_eq!(
@@ -232,7 +334,12 @@ mod tests {
                         assert_eq!(
                             *right,
                             Operation::Value(EntityLoad::Dataset(DatasetLoad {
-                                path: "path2".to_string()
+                                path: "path2".to_string(),
+                                selection: vec![SliceOrIndex::Unlimited {
+                                    start: 0,
+                                    step: 1,
+                                    block: 1
+                                }]
                             }))
                         );
                     }
