@@ -253,10 +253,12 @@ fn render_image_chart(
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     root.margin(10, 10, 10, 10);
     root.fill(&plotters::prelude::WHITE).unwrap();
+    let max = data_preview.max;
+    let y_label_area_size = format!("{max:.4}").len() as u32 * 3 + 30;
     let mut chart = ChartBuilder::on(&root)
         .margin(10)
         .x_label_area_size(30)
-        .y_label_area_size(30)
+        .y_label_area_size(y_label_area_size)
         .build_cartesian_2d(
             0.0..data_preview.length as f64,
             data_preview.min..data_preview.max,
