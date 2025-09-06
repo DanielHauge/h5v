@@ -1,7 +1,7 @@
 use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
 
 use cli_clipboard::ClipboardContext;
-use hdf5_metno::{ByteReader, Dataset};
+use hdf5_metno::{ByteReader, Dataset, Hyperslab, Selection, SliceOrIndex};
 use image::ImageFormat;
 use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
@@ -9,6 +9,7 @@ use crate::{
     error::AppError,
     h5f::{H5FNode, ImageType, Node},
     search::Searcher,
+    ui::mchart::MultiChartState,
 };
 
 use super::{
@@ -36,6 +37,7 @@ pub enum Mode {
     Search,
     Help,
     Command,
+    MultiChart,
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -117,6 +119,7 @@ pub struct AppState<'a> {
     pub copying: bool,
     pub attributes_view_cursor: AttributeCursor,
     pub focus: Focus,
+    pub multi_chart: MultiChartState,
     pub mode: Mode,
     pub indexed: bool,
     pub searcher: Rc<RefCell<Searcher>>,
@@ -185,6 +188,35 @@ impl AppState<'_> {
             }
             _ => Ok(EventResult::Continue),
         }
+    }
+
+    pub fn read_1d(&self) -> Option<Vec<f64>> {
+        let (ds, selection) = self.get_1d_selection()?;
+        let data = ds.read_slice_1d::<f64, _>(selection).ok()?.to_vec();
+        Some(data)
+    }
+
+    pub fn get_1d_selection(&self) -> Option<(Dataset, Selection)> {
+        let current_node = &self.treeview[self.tree_view_cursor];
+        let node = current_node.node.borrow();
+        let Node::Dataset(ds, dsattr) = &node.node else {
+            return None;
+        };
+        let selected_dim = node.selected_x;
+        let mut slice: Vec<SliceOrIndex> = Vec::new();
+        for (dim, _) in dsattr.shape.iter().enumerate() {
+            if dim == selected_dim {
+                slice.push(SliceOrIndex::Unlimited {
+                    start: 0,
+                    step: 1,
+                    block: 1,
+                });
+            } else {
+                slice.push(SliceOrIndex::Index(node.selected_indexes[dim]));
+            }
+        }
+        let hyperslap = Hyperslab::from(slice);
+        Some((ds.clone(), Selection::Hyperslab(hyperslap)))
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {

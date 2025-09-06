@@ -10,6 +10,7 @@ use super::state::{AppState, Focus, LastFocused, Mode};
 pub mod attributes;
 pub mod command;
 pub mod content;
+pub mod mchart;
 pub mod search;
 pub mod tree;
 
@@ -27,6 +28,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
 
     match state.mode {
         Mode::Command => command::handle_command_event(state, event),
+        Mode::MultiChart => mchart::handle_mchart_event(state, event),
         Mode::Normal => {
             if let Event::Key(key_event) = event {
                 match (key_event.code, key_event.modifiers) {
@@ -55,6 +57,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     }
                     (KeyCode::Char('?'), _) => {
                         state.mode = Mode::Help;
+                        Ok(EventResult::Redraw)
+                    }
+                    (KeyCode::Char('M'), _) => {
+                        state.mode = Mode::MultiChart;
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Right, KeyModifiers::SHIFT) => {

@@ -53,8 +53,12 @@ cargo install h5v
 
 ## Roadmap
 
+- [ ] Add support for removing loaded datasets from multichart
+- [ ] Add legends for multicharts
+- [ ] Add multichart hint on dataset tree view
+- [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
-- [ ] Add preview for groups. ie. multi-chart preview, via attributes.
+- [ ] Add preview for groups. ie. engine based previews, via attributes.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
 

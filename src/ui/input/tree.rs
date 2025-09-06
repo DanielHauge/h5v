@@ -167,6 +167,13 @@ pub fn handle_normal_tree_event(
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
+                (KeyCode::Char('m'), _) => {
+                    let Some((ds, sel)) = state.get_1d_selection() else {
+                        return Ok(EventResult::Continue);
+                    };
+                    state.multi_chart.add_linspace_series(ds, sel);
+                    Ok(EventResult::Redraw)
+                }
                 (KeyCode::Char(' '), _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     tree_item.node.borrow_mut().expand_toggle()?;

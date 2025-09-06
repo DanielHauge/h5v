@@ -8,6 +8,7 @@ pub mod image_preview;
 pub mod input;
 pub mod main_display;
 pub mod matrix;
+pub mod mchart;
 pub mod preview;
 pub mod preview_chart;
 pub mod segment_scroll;

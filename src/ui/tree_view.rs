@@ -300,7 +300,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 offset += 1;
             }
         }
-        Mode::Help => unreachable!(),
+        Mode::Help | Mode::MultiChart => unreachable!(),
     }
 }
 

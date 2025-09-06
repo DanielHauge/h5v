@@ -22,7 +22,12 @@ use ratatui::{
 };
 use ratatui_image::picker::Picker;
 
-use crate::{error::AppError, h5f, search::Searcher, ui::input::EventResult};
+use crate::{
+    error::AppError,
+    h5f,
+    search::Searcher,
+    ui::{input::EventResult, mchart::MultiChartState},
+};
 
 use super::{
     command::{Command, CommandState},
@@ -129,7 +134,7 @@ fn main_recover_loop(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
-        picker,
+        picker: picker.clone(),
     };
 
     let matrix_view_state = MatrixViewState {
@@ -154,6 +159,7 @@ fn main_recover_loop(
 
     let mut state = AppState {
         root: h5f.root.clone(),
+        multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         command_state,
         treeview: vec![],
@@ -179,6 +185,9 @@ fn main_recover_loop(
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
         if let Mode::Help = state.mode {
             return render_help(frame);
+        }
+        if let Mode::MultiChart = state.mode {
+            return state.multi_chart.render(frame);
         }
 
         let show_tree_view = state.show_tree_view;
