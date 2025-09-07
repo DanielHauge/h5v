@@ -4,11 +4,12 @@ use hdf5_metno::{Dataset, Selection};
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     prelude::{BitMapBackend, IntoDrawingArea, WHITE},
-    style::{IntoFont, Palette},
+    style::{Color as _, IntoFont, Palette},
 };
 use ratatui::{
     layout::Alignment,
     style::{Style, Stylize},
+    text::Line,
     widgets::{Block, Borders, Paragraph},
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
@@ -195,7 +196,7 @@ impl MultiChartState {
     }
 
     fn render_empty(&mut self, f: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        let no_data_message = "No data to plot";
+        let no_data_message = "No data to plot.\nSelect datasets with 'm' to visualize them here.";
         let paragraph = ratatui::widgets::Paragraph::new(no_data_message)
             .alignment(Alignment::Center)
             .wrap(ratatui::widgets::Wrap { trim: true });
@@ -203,11 +204,12 @@ impl MultiChartState {
     }
 
     fn render_multi_chart(&mut self, f: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
+        let series_len = self.line_series.len();
         let split = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints(
                 [
-                    ratatui::layout::Constraint::Length(3),
+                    ratatui::layout::Constraint::Length(series_len as u16),
                     ratatui::layout::Constraint::Min(0),
                 ]
                 .as_ref(),
@@ -216,22 +218,18 @@ impl MultiChartState {
         let header_area = split[0];
         let chart_area = split[1];
 
-        let msg = format!(
-            "Chart area dims: {}x{}. Showing {} series",
-            chart_area.width,
-            chart_area.height,
-            self.line_series.len()
-        );
+        let mut legends: Vec<Line> = vec![];
+        for (i, name) in self.line_series.keys().enumerate() {
+            let color = plotters::prelude::Palette99::pick(i);
+            let rgb = color.to_rgba();
+            let colored_name = Line::from(format!("  ■ {name}\n"))
+                .fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2))
+                .bold();
+            legends.push(colored_name);
+        }
+        let text = ratatui::text::Text::from(legends);
 
-        let paragraph = Paragraph::new(msg)
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .bg(color_consts::BG_COLOR)
-                    .fg(color_consts::TITLE),
-            )
-            .wrap(ratatui::widgets::Wrap { trim: true });
-        f.render_widget(paragraph, header_area);
+        f.render_widget(text, header_area);
 
         let (x, y) = self.picker.font_size();
         let new_height = chart_area.height as u32 * y as u32;
