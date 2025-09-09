@@ -620,7 +620,7 @@ impl H5FNode {
                     return "?".to_string();
                 };
                 if meta.is_link {
-                    "~".to_string()
+                    "🔗".to_string()
                 } else {
                     " ".to_string()
                 }
@@ -631,7 +631,7 @@ impl H5FNode {
                 };
                 if meta.is_link {
                     // Dont do a file icon, just a link icon
-                    "󰈚~".to_string()
+                    "󰈚🔗".to_string()
                 } else {
                     "󰈚 ".to_string()
                 }
