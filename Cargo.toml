@@ -1,6 +1,6 @@
 [package]
 name = "h5v"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Daniel <animcuil@gmail.com>"]
 description = "A terminal viewer for HDF5 files with chart, image, string, matrix, attributes support"
