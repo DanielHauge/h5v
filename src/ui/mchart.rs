@@ -33,6 +33,7 @@ pub struct MultiChartState {
     pub width: u32,
     pub plot_buffer: Vec<u8>,
     pub picker: Picker,
+    pub idx: usize,
     stateful_protocol: Option<StatefulProtocol>,
 }
 
@@ -41,6 +42,7 @@ impl MultiChartState {
         Self {
             line_series: HashMap::new(),
             modified: false,
+            idx: 0,
             height: 0,
             width: 0,
             plot_buffer: Vec::new(),
@@ -54,10 +56,17 @@ impl MultiChartState {
         self.modified = true;
     }
 
-    pub fn clear_ds(&mut self, dataset_name: &str) {
-        if self.line_series.remove(dataset_name).is_some() {
-            self.modified = true;
-        }
+    pub fn clear_selected(&mut self) {
+        self.line_series
+            .iter()
+            .nth(self.idx)
+            .map(|(k, _)| k.clone())
+            .map(|k| {
+                self.line_series.remove(&k);
+                self.modified = true;
+            })
+            .unwrap_or(());
+        self.idx = self.idx.clamp(0, self.line_series.len().saturating_sub(1));
     }
 
     pub fn add_linspace_series(&mut self, dataset: Dataset, selection: Selection) {
@@ -93,6 +102,7 @@ impl MultiChartState {
         if !self.modified {
             return false;
         }
+        self.idx = self.idx.clamp(0, self.line_series.len().saturating_sub(1));
         self.modified = false;
 
         let width = self.width;
@@ -144,7 +154,6 @@ impl MultiChartState {
             .draw()
             .unwrap();
 
-        // Add each line series but also add the name as legend
         for (i, (name, ls)) in self.line_series.iter().enumerate() {
             let color = plotters::prelude::Palette99::pick(i);
             let data = ls.points.iter().map(|(x, y)| (*x, *y));
@@ -222,9 +231,12 @@ impl MultiChartState {
         for (i, name) in self.line_series.keys().enumerate() {
             let color = plotters::prelude::Palette99::pick(i);
             let rgb = color.to_rgba();
-            let colored_name = Line::from(format!("  ■ {name}\n"))
-                .fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2))
-                .bold();
+            let colored_name = Line::from(format!(
+                "{} ■ {name}\n",
+                if i == self.idx { ">" } else { " " }
+            ))
+            .fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2))
+            .bold();
             legends.push(colored_name);
         }
         let text = ratatui::text::Text::from(legends);

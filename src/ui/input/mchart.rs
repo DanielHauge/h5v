@@ -20,6 +20,34 @@ pub(crate) fn handle_mchart_event(
                 }
 
                 (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
+
+                (KeyCode::Delete, _) => {
+                    state.multi_chart.clear_selected();
+                    Ok(EventResult::Redraw)
+                }
+
+                (KeyCode::Backspace, _) => {
+                    state.multi_chart.clear_selected();
+                    Ok(EventResult::Redraw)
+                }
+
+                (KeyCode::Char('d'), _) => {
+                    state.multi_chart.clear_selected();
+                    Ok(EventResult::Redraw)
+                }
+
+                (KeyCode::Down, _) => {
+                    state.multi_chart.idx = state
+                        .multi_chart
+                        .idx
+                        .saturating_add(1)
+                        .clamp(0, state.multi_chart.line_series.len().saturating_sub(1));
+                    Ok(EventResult::Redraw)
+                }
+                (KeyCode::Up, _) => {
+                    state.multi_chart.idx = state.multi_chart.idx.saturating_sub(1);
+                    Ok(EventResult::Redraw)
+                }
                 (KeyCode::Char('M'), _) => {
                     state.mode = Mode::Normal;
                     Ok(EventResult::Redraw)
