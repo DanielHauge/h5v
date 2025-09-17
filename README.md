@@ -31,9 +31,16 @@ h5v path/to/file.h5
 - `x`/`X`: Shift x-axis selector in preview mode.
 - `g`/`Home`: Go to the top
 - `G`/`End`: Go to the bottom
+- `m`: Add currently selected preview to multichart
+- `M`: Toggle multichart mode
 - `:` Enter command mode
 - `.` repeat last command
 - `?`: Show help
+
+## Multichart mode
+
+- `backspace/delete/d`: Remove currently selected source from multichart
+- `M`: Toggle back to normal mode
 
 ## Commands
 
@@ -53,12 +60,11 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Add support for removing loaded datasets from multichart
-- [ ] Add legends for multicharts
 - [ ] Add multichart hint on dataset tree view
+- [ ] Add better search capabilities
+- [ ] Enable dataset values focus to copy values easily
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
-- [ ] Add preview for groups. ie. engine based previews, via attributes.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
 
