@@ -3,7 +3,11 @@ use content::handle_normal_content_event;
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use tree::handle_normal_tree_event;
 
-use crate::{error::AppError, h5f::Node};
+use crate::{
+    error::AppError,
+    h5f::Node,
+    search::{full_traversal, Searcher},
+};
 
 use super::state::{AppState, Focus, LastFocused, Mode};
 
@@ -19,6 +23,7 @@ pub enum EventResult {
     Redraw,
     Copying,
     Continue,
+    Error(String),
 }
 
 pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {
@@ -40,8 +45,18 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     }
                     (KeyCode::Char('.'), _) => state.reexecute_command(),
                     (KeyCode::Char('/'), _) => {
-                        state.searcher.borrow_mut().query.clear();
-                        state.searcher.borrow_mut().line_cursor = 0;
+                        if state.searcher.is_none() {
+                            let Node::File(ref file) = state.root.borrow().node else {
+                                panic!("Root node is not a file");
+                            };
+                            let all_h5_paths = full_traversal(&file.as_group().unwrap());
+                            state.searcher = Some(Searcher::new(all_h5_paths));
+                        }
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("Search not available".to_string()));
+                        };
+                        searcher.query.clear();
+                        searcher.line_cursor = 0;
                         state.mode = Mode::Search;
                         Ok(EventResult::Redraw)
                     }

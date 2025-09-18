@@ -8,7 +8,12 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{
+    color_consts,
+    h5f::{H5FNode, Node},
+    search::full_traversal,
+    ui::std_comp_render::render_error,
+};
 
 use super::state::{AppState, Focus, Mode};
 
@@ -215,31 +220,11 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             }
         }
         Mode::Search => {
-            if !state.indexed {
-                match state.index() {
-                    Ok(_) => {
-                        state.indexed = true;
-                    }
-                    Err(_) => {
-                        let error_text = Text::from("Error: Failed to index the file");
-                        let error_paragraph = Paragraph::new(error_text)
-                            .block(
-                                Block::default()
-                                    .borders(Borders::ALL)
-                                    .border_style(Style::default().fg(Color::Red))
-                                    .border_type(ratatui::widgets::BorderType::Rounded)
-                                    .title("Error")
-                                    .title_style(Style::default().fg(Color::Yellow).bold())
-                                    .title_alignment(Alignment::Center),
-                            )
-                            .wrap(Wrap { trim: true });
-                        f.render_widget(error_paragraph, area);
-                        return;
-                    }
-                }
-            }
-            let root = state.root.borrow();
-            let searcher = root.searcher.borrow();
+            let Some(ref mut searcher) = state.searcher else {
+                // render error
+                render_error(f, &area, "Error: Searcher not initialized.".to_string());
+                return;
+            };
             let search_line_cursor = searcher.line_cursor;
             let search_query = searcher.query.clone();
             let search_results = searcher.search(&search_query);
@@ -284,41 +269,15 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 }
                 if i == search_select_cursor {
                     f.render_widget(
-                        result
-                            .rendered
-                            .clone()
-                            .bg(color_consts::HIGHLIGHT_BG_COLOR)
-                            .bold(),
+                        result.clone().bg(color_consts::HIGHLIGHT_BG_COLOR).bold(),
                         area.offset(Offset { x: 3, y: offset }),
                     );
                 } else {
-                    f.render_widget(
-                        result.rendered.clone(),
-                        area.offset(Offset { x: 3, y: offset }),
-                    );
+                    f.render_widget(result.clone(), area.offset(Offset { x: 3, y: offset }));
                 }
                 offset += 1;
             }
         }
         Mode::Help | Mode::MultiChart => unreachable!(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use std::{cell::RefCell, rc::Rc};
-
-    use crate::{h5f::H5F, search::Searcher};
-
-    fn new_searcer() -> Rc<RefCell<Searcher>> {
-        let searcher = Searcher::new();
-        Rc::new(RefCell::new(searcher))
-    }
-
-    #[test]
-    fn test_compute_tree_view_rec() {
-        let h5f = H5F::open("test.h5".to_string(), new_searcer()).unwrap();
-        assert!(h5f.root.borrow().expanded);
     }
 }

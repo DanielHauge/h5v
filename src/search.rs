@@ -1,8 +1,9 @@
-use std::{collections::HashMap, fmt::Debug, ops::Range, sync::mpsc::Sender};
+use std::{collections::HashMap, fmt::Debug, ops::Range, sync::mpsc::Sender, vec};
 
 use bktree::{levenshtein_distance, BkTree};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use hdf5_metno::{File, Group};
+use ratatui::text::{Line, Span};
 
 use crate::h5f::{H5FNodeRef, HasPath};
 
@@ -26,8 +27,7 @@ impl AsRef<str> for Entry {
 }
 
 pub struct Searcher {
-    tree: BkTree<Entry>,
-    lookup: HashMap<H5Path, H5FNodeRef>,
+    paths: Vec<String>,
     pub query: String,
     pub line_cursor: usize,
     pub select_cursor: usize,
@@ -39,7 +39,7 @@ impl Debug for Searcher {
     }
 }
 
-fn full_traversal(g: &Group) -> Vec<String> {
+pub fn full_traversal(g: &Group) -> Vec<String> {
     g.iter_visit_default(vec![], |group, name, _, acc| match group.group(name) {
         Ok(g) => {
             acc.push(g.name());
@@ -115,11 +115,35 @@ fn indices_to_spans(highlight_idx: &[usize]) -> Vec<Range<usize>> {
     spans
 }
 
+fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
+    let highlight_idx = fuzzy_highlight(path, query);
+    let highlight_spans = indices_to_spans(&highlight_idx);
+
+    let mut spans = vec![];
+    let mut last_end = 0;
+
+    for span in highlight_spans {
+        if span.start > last_end {
+            spans.push(Span::raw(&path[last_end..span.start]));
+        }
+        spans.push(Span::styled(
+            &path[span.start..span.end],
+            ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+        ));
+        last_end = span.end;
+    }
+
+    if last_end < path.len() {
+        spans.push(Span::raw(&path[last_end..]));
+    }
+
+    Line::from(spans)
+}
+
 impl Searcher {
-    pub fn new() -> Self {
+    pub fn new(paths: Vec<String>) -> Self {
         Searcher {
-            tree: BkTree::new(levenshtein_distance),
-            lookup: HashMap::new(),
+            paths,
             query: String::new(),
             line_cursor: 0,
             select_cursor: 0,
@@ -131,45 +155,13 @@ impl Searcher {
         results.len()
     }
 
-    pub fn add(&mut self, noderef: H5FNodeRef) {
-        let path = noderef.node.borrow().node.path();
-        let name = noderef.name.clone();
-        let entry = Entry {
-            name,
-            value: EntryValue::Path(path.clone()),
-        };
-        self.tree.insert(entry);
-        self.lookup.insert(path, noderef);
-    }
-
-    pub fn search(&self, query: &str) -> Vec<&H5FNodeRef> {
-        let query_entry = Entry {
-            name: query.to_string(),
-            value: EntryValue::Query,
-        };
-        let mut matches = self.tree.find(query_entry, 8);
-        matches.sort_by_key(|m| m.1);
-        let mut results = vec![];
-        for m in matches {
-            let entry_value = &m.0.value;
-            match entry_value {
-                EntryValue::Path(path) => {
-                    if let Some(noderef) = self.lookup.get(path) {
-                        results.push(noderef);
-                    } else {
-                        // This case should not happen in a well-formed tree
-                        // since we are searching for a query.
-                        panic!("Unexpected path entry found in search results");
-                    }
-                }
-                EntryValue::Query => {
-                    // This case should not happen in a well-formed tree
-                    // since we are searching for a query.
-                    panic!("Unexpected query entry found in search results");
-                }
-            }
-        }
-        results
+    pub fn search(&self, query: &str) -> Vec<Line<'_>> {
+        let results = fuzzy_search(&self.paths, query);
+        let rendered_lines = results
+            .into_iter()
+            .map(|p| render_line_with_highlight(p, query))
+            .collect();
+        rendered_lines
     }
 }
 

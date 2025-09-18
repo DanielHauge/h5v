@@ -122,7 +122,7 @@ pub struct AppState<'a> {
     pub multi_chart: MultiChartState,
     pub mode: Mode,
     pub indexed: bool,
-    pub searcher: Rc<RefCell<Searcher>>,
+    pub searcher: Option<Searcher>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
     pub img_state: ImgState,
@@ -133,13 +133,6 @@ pub struct AppState<'a> {
 
 type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
-    pub fn index(&mut self) -> Result<()> {
-        let mut root = self.root.borrow_mut();
-        root.index(true)?;
-        self.indexed = true;
-        Ok(())
-    }
-
     pub fn swap_content_show_mode(&mut self, available: Vec<ContentShowMode>) {
         if available.is_empty() {
             return;

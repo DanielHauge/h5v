@@ -45,12 +45,20 @@ use super::{
     tree_view::render_tree,
 };
 
-fn make_panels_rect(area: Rect) -> Rc<[Rect]> {
-    let chunks = Layout::default()
-        .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
-        .split(area);
-    chunks
+fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
+    if let Mode::Search = mode {
+        let chunks = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(100), Constraint::Percentage(0)].as_ref())
+            .split(area);
+        chunks
+    } else {
+        let chunks = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+            .split(area);
+        chunks
+    }
 }
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -107,9 +115,7 @@ fn main_recover_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     filename: String,
 ) -> Result<IntendedMainLoopBreak> {
-    let searcher = Rc::new(RefCell::new(Searcher::new()));
-
-    let h5f = h5f::H5F::open(filename, searcher.clone()).map_err(|e| {
+    let h5f = h5f::H5F::open(filename).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",
             e
@@ -173,7 +179,7 @@ fn main_recover_loop(
         mode: Mode::Normal,
         copying: false,
         indexed: false,
-        searcher,
+        searcher: None,
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
         img_state,
@@ -194,7 +200,7 @@ fn main_recover_loop(
 
         let main_display_area = match show_tree_view {
             true => {
-                let areas = make_panels_rect(frame.area());
+                let areas = make_panels_rect(frame.area(), state.mode.clone());
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
                 render_tree(frame, tree_area, state);
                 main_display_area
@@ -202,13 +208,18 @@ fn main_recover_loop(
             false => frame.area(),
         };
 
-        let selected_node = state.treeview[state.tree_view_cursor].node.clone();
-        match render_main_display(frame, &main_display_area, &selected_node, state) {
-            Ok(()) => {}
-            Err(e) => render_error(frame, &format!("Error: {}", e)),
-        }
-        if let Mode::Command = state.mode {
-            render_command_dialog(frame, state);
+        match state.mode {
+            Mode::Search => {}
+            Mode::Command => render_command_dialog(frame, state),
+            Mode::Normal => {
+                let selected_node = state.treeview[state.tree_view_cursor].node.clone();
+                match render_main_display(frame, &main_display_area, &selected_node, state) {
+                    Ok(()) => {}
+                    Err(e) => render_error(frame, &format!("Error: {}", e)),
+                }
+            }
+            Mode::Help => {}       // already handled above,
+            Mode::MultiChart => {} // already handled above,
         }
     };
 
@@ -236,6 +247,15 @@ fn main_recover_loop(
                     // sleep for 50 ms
                     state.copying = false;
                     thread::sleep(std::time::Duration::from_millis(100));
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                EventResult::Error(e) => {
+                    terminal.draw(|f| {
+                        render_error(f, &e);
+                    })?;
+                    thread::sleep(std::time::Duration::from_secs(2));
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;

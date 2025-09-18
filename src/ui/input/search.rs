@@ -18,13 +18,17 @@ pub fn handle_search_event(
                 // Only allow A-Z, a-z, 0-9, underscore, dash and dot
                 match (key_event.code, key_event.modifiers) {
                     (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         searcher.query.clear();
                         searcher.line_cursor = 0;
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char(c), _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         let current_cursor = searcher.line_cursor;
                         if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' {
                             if current_cursor == searcher.query.len() {
@@ -47,13 +51,17 @@ pub fn handle_search_event(
                     }
                     (KeyCode::Backspace, _) => match key_event.modifiers {
                         ratatui::crossterm::event::KeyModifiers::CONTROL => {
-                            let mut searcher = state.searcher.borrow_mut();
+                            let Some(ref mut searcher) = state.searcher else {
+                                return Ok(EventResult::Error("No searcher available".into()));
+                            };
                             searcher.query.clear();
                             searcher.line_cursor = 0;
                             Ok(EventResult::Redraw)
                         }
                         _ => {
-                            let mut searcher = state.searcher.borrow_mut();
+                            let Some(ref mut searcher) = state.searcher else {
+                                return Ok(EventResult::Error("No searcher available".into()));
+                            };
                             if searcher.line_cursor > 0 {
                                 searcher.query.pop();
                                 searcher.line_cursor -= 1;
@@ -64,27 +72,35 @@ pub fn handle_search_event(
                         }
                     },
                     (KeyCode::Delete, _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         searcher.query.clear();
                         searcher.line_cursor = 0;
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Left, _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         if searcher.line_cursor > 0 {
                             searcher.line_cursor -= 1;
                         }
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Right, _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         if searcher.line_cursor < searcher.query.len() {
                             searcher.line_cursor += 1;
                         }
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Up, _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         if searcher.select_cursor > 0 {
                             searcher.select_cursor -= 1;
                         }
@@ -95,7 +111,9 @@ pub fn handle_search_event(
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Down, _) => {
-                        let mut searcher = state.searcher.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Error("No searcher available".into()));
+                        };
                         let searcher_count = searcher.count_results();
                         if searcher_count > 0 && searcher.select_cursor < searcher_count - 1 {
                             searcher.select_cursor += 1;
@@ -104,8 +122,9 @@ pub fn handle_search_event(
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Enter, _) => {
-                        let searcher_rc = state.searcher.clone();
-                        let searcher = searcher_rc.borrow_mut();
+                        let Some(ref mut searcher) = state.searcher else {
+                            return Ok(EventResult::Continue);
+                        };
 
                         let results = searcher.search(&searcher.query);
 
@@ -120,20 +139,18 @@ pub fn handle_search_event(
                         } else {
                             selected_node
                         };
-                        results[selected_index_corrected]
-                            .node
-                            .borrow_mut()
-                            .expand()?;
-                        let selected_path =
-                            results[selected_index_corrected].node.borrow().node.path();
-                        state.root.borrow_mut().expanded = true;
-                        state.root.borrow_mut().expand_path(&selected_path[1..])?;
+
+                        let selected_result = results[selected_index_corrected].to_string();
+                        let mut root = state.root.borrow_mut();
+                        root.collapse();
+                        root.expand_path(selected_result.strip_prefix("/").unwrap())?;
+                        drop(root);
 
                         state.mode = Mode::Normal;
                         state.focus = Focus::Tree(LastFocused::Attributes);
                         state.compute_tree_view();
                         for (i, tree_item) in state.treeview.iter().enumerate() {
-                            if tree_item.node.borrow().node.path() == selected_path {
+                            if tree_item.node.borrow().node.path() == selected_result {
                                 state.tree_view_cursor = i;
                                 break;
                             }

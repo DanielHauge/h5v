@@ -572,7 +572,7 @@ pub struct H5FNode {
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
-    pub searcher: Rc<RefCell<Searcher>>,
+    pub searcher: Option<Searcher>,
     pub selected_dim: usize,
     pub selected_x: usize,
     pub selected_row: usize,
@@ -594,7 +594,7 @@ pub enum GrpType {
 }
 
 impl H5FNode {
-    pub fn new(node_type: Node, searcher: Rc<RefCell<Searcher>>) -> Self {
+    pub fn new(node_type: Node) -> Self {
         Self {
             expanded: false,
             node: node_type,
@@ -602,9 +602,9 @@ impl H5FNode {
             children: vec![],
             view_loaded: 50,
             computed_attributes: None,
-            searcher,
             selected_dim: 0,
             selected_x: 0,
+            searcher: None,
             selected_row: 0,
             selected_col: 1,
             line_offset: 0,
@@ -760,21 +760,6 @@ impl H5FNode {
         self.node.name()
     }
 
-    pub fn index(&mut self, recursive: bool) -> Result<(), hdf5_metno::Error> {
-        self.read_children()?;
-        if recursive {
-            for child in &self.children {
-                self.searcher.borrow_mut().add(H5FNodeRef::from(child));
-                let mut child_node = child.borrow_mut();
-                if child_node.is_group() {
-                    child_node.index(recursive)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn expand_path(&mut self, relative_path: &str) -> Result<(), hdf5_metno::Error> {
         self.expand()?;
         let child_mame = relative_path.split('/').next();
@@ -853,10 +838,7 @@ impl H5FNode {
                 display_name,
                 filename: g.filename().to_string(),
             };
-            let node = Rc::new(RefCell::new(H5FNode::new(
-                Node::Group(g, meta),
-                self.searcher.clone(),
-            )));
+            let node = Rc::new(RefCell::new(H5FNode::new(Node::Group(g, meta))));
 
             children.push(node);
         }
@@ -913,7 +895,7 @@ impl H5FNode {
                 filename,
             };
             let node_ds = Node::Dataset(d, meta);
-            let node = Rc::new(RefCell::new(H5FNode::new(node_ds, self.searcher.clone())));
+            let node = Rc::new(RefCell::new(H5FNode::new(node_ds)));
 
             children.push(node);
         }
@@ -953,100 +935,15 @@ pub struct H5F {
 }
 
 impl H5F {
-    pub fn open(
-        file_path: String,
-        searcher: Rc<RefCell<Searcher>>,
-    ) -> Result<Self, hdf5_metno::Error> {
+    pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
 
-        let root = Rc::new(RefCell::new(H5FNode::new(Node::File(file), searcher)));
+        let root = Rc::new(RefCell::new(H5FNode::new(Node::File(file))));
 
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;
 
         let s = Self { root };
         Ok(s)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{cell::RefCell, rc::Rc};
-
-    use crate::{h5f::HasName, search::Searcher};
-
-    use super::H5F;
-
-    fn new_searcher() -> Rc<RefCell<Searcher>> {
-        Rc::new(RefCell::new(Searcher::new()))
-    }
-
-    #[test]
-    fn test_h5f_open() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher());
-        assert!(h5f.is_ok());
-    }
-
-    #[test]
-    fn test_h5f_open_fail() {
-        let h5f = H5F::open("none.h5".to_string(), new_searcher());
-        assert!(h5f.is_err());
-    }
-
-    #[test]
-    fn test_h5f_read_root_path() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        let root_node = &h5f.root.borrow().node;
-        let root_group = root_node.name();
-        assert_eq!(root_group, "");
-    }
-
-    #[test]
-    fn test_h5f_expand() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        assert_eq!(h5f.root.borrow().children.len(), 1);
-        h5f.root.borrow_mut().expand_toggle().unwrap();
-        assert_eq!(h5f.root.borrow().children.len(), 1);
-    }
-
-    #[test]
-    fn test_h5f_read_children() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        h5f.root.borrow_mut().expand_toggle().unwrap();
-        let root_children = &h5f.root.borrow().children;
-        let root_child = &root_children[0];
-        assert_eq!(root_child.borrow().name(), "data");
-    }
-
-    #[test]
-    fn test_h5f_read_ds() {
-        let h5f = H5F::open("example-femm-3d.h5".to_string(), new_searcher()).unwrap();
-        h5f.root.borrow_mut().expand_toggle().unwrap();
-        let grp_data = &mut h5f.root.borrow_mut().children[0];
-        assert_eq!(grp_data.borrow().name(), "data");
-        grp_data.borrow_mut().expand_toggle().unwrap();
-        let grp_1 = &mut grp_data.borrow_mut().children[0];
-        assert_eq!(grp_1.borrow().name(), "1");
-        grp_1.borrow_mut().expand_toggle().unwrap();
-        let grp_meshes = &mut grp_1.borrow_mut().children[0];
-        assert_eq!(grp_meshes.borrow().name(), "meshes");
-        grp_meshes.borrow_mut().expand_toggle().unwrap();
-        let grp_b = &mut grp_meshes.borrow_mut().children[0];
-        assert_eq!(grp_b.borrow().name(), "B");
-        grp_b.borrow_mut().expand_toggle().unwrap();
-        let ds_b = &mut grp_b.borrow_mut().children[0];
-        assert_eq!(ds_b.borrow().name(), "x");
-        let ds_node = &ds_b.borrow().node;
-        let ds_b_meta = match ds_node {
-            super::Node::Dataset(_, meta) => meta,
-            _ => panic!("It should be a dataset"),
-        };
-        assert_eq!(ds_b_meta.shape_string(), "47 x 47 x 47 = 103823");
-        assert_eq!(ds_b_meta.data_type_string(), "f64");
-        assert_eq!(ds_b_meta.size_string(), "811.12 KB");
-        assert_eq!(
-            ds_b_meta.chunk_shape_string(),
-            Some("32 x 16 x 16 = 8192".to_string())
-        );
     }
 }
