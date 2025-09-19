@@ -297,6 +297,31 @@ pub enum ImageLoadedResult {
     Failure(String),
 }
 
+enum BitDepth {
+    Bit8,
+    Bit12,
+    Unknown,
+}
+
+trait PixelBitDepth {
+    fn bit_depth(&self) -> BitDepth;
+}
+
+impl PixelBitDepth for Dataset {
+    fn bit_depth(&self) -> BitDepth {
+        let dtype = self
+            .dtype()
+            .expect("Should get dtype from dataset")
+            .to_descriptor()
+            .unwrap();
+        match dtype {
+            hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => BitDepth::Bit8,
+            hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U2) => BitDepth::Bit12,
+            _ => BitDepth::Unknown,
+        }
+    }
+}
+
 pub fn handle_image_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
@@ -309,58 +334,130 @@ pub fn handle_image_load(
                 ImageType::Grayscale => {
                     let shape = ds_reader.shape();
                     // panic!("idx: {idx}, shape: {shape:?}");
-                    let data: Array2<u8> = match shape.len() {
-                        2 => match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                tx_events
-                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                        e.to_string(),
-                                    )))
-                                    .expect("Failed to send image loaded event");
-                                continue;
+                    let bit_depth = ds_reader.bit_depth();
+
+                    let dyn_img = match bit_depth {
+                        BitDepth::Bit8 => {
+                            let data: Array2<u8> = match shape.len() {
+                                2 => match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                3 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                4 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., 0]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                _ => {
+                                    tx_events
+                                        .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                            "Invalid shape for Grayscale image".to_string(),
+                                        )))
+                                        .expect("Failed to send image loaded event");
+                                    continue;
+                                }
+                            };
+                            let shape = data.shape();
+                            let mut image_buffer =
+                                image::GrayImage::new(shape[1] as u32, shape[0] as u32);
+                            for i in 0..shape[1] {
+                                for j in 0..shape[0] {
+                                    let pixel = image::Luma([data[[j, i]]]);
+                                    image_buffer.put_pixel(i as u32, j as u32, pixel);
+                                }
                             }
-                        },
-                        3 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., ..]) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                tx_events
-                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                        e.to_string(),
-                                    )))
-                                    .expect("Failed to send image loaded event");
-                                continue;
+                            image::DynamicImage::ImageLuma8(image_buffer)
+                        }
+                        BitDepth::Bit12 => {
+                            let data: Array2<u16> = match shape.len() {
+                                2 => match ds_reader.read_slice::<u16, _, _>(s![.., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                3 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., ..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                4 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., .., 0]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        tx_events
+                                            .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                                e.to_string(),
+                                            )))
+                                            .expect("Failed to send image loaded event");
+                                        continue;
+                                    }
+                                },
+                                _ => {
+                                    tx_events
+                                        .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
+                                            "Invalid shape for Grayscale image".to_string(),
+                                        )))
+                                        .expect("Failed to send image loaded event");
+                                    continue;
+                                }
+                            };
+                            // Convert 12-bit to 8-bit. We dont want the full 16-bit range, only
+                            // up to 4096 (2^12)
+                            // first set anything larger than 4095 to 4095
+                            let data = data.mapv(|x| if x > 4095 { 4095 } else { x });
+                            // then scale to 0-255
+                            let data = data.mapv(|x| ((x as f32 / 4095.0) * 255.0) as u8);
+                            let shape = data.shape();
+                            let mut image_buffer =
+                                image::GrayImage::new(shape[1] as u32, shape[0] as u32);
+                            for i in 0..shape[1] {
+                                for j in 0..shape[0] {
+                                    let pixel = image::Luma([data[[j, i]]]);
+                                    image_buffer.put_pixel(i as u32, j as u32, pixel);
+                                }
                             }
-                        },
-                        4 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., 0]) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                tx_events
-                                    .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                        e.to_string(),
-                                    )))
-                                    .expect("Failed to send image loaded event");
-                                continue;
-                            }
-                        },
-                        _ => {
-                            tx_events
-                                .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
-                                    "Invalid shape for Grayscale image".to_string(),
-                                )))
-                                .expect("Failed to send image loaded event");
-                            continue;
+                            image::DynamicImage::ImageLuma8(image_buffer)
+                        }
+                        BitDepth::Unknown => {
+                            unimplemented!("Unknown bit depth for Grayscale image")
                         }
                     };
-                    let shape = data.shape();
-                    let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
-                    for i in 0..shape[1] {
-                        for j in 0..shape[0] {
-                            let pixel = image::Luma([data[[j, i]]]);
-                            image_buffer.put_pixel(i as u32, j as u32, pixel);
-                        }
-                    }
-                    let dyn_img = image::DynamicImage::ImageLuma8(image_buffer);
+
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
