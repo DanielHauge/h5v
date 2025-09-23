@@ -436,11 +436,7 @@ pub fn handle_image_load(
                                     continue;
                                 }
                             };
-                            // Convert 12-bit to 8-bit. We dont want the full 16-bit range, only
-                            // up to 4096 (2^12)
-                            // first set anything larger than 4095 to 4095
                             let data = data.mapv(|x| if x > 4095 { 4095 } else { x });
-                            // then scale to 0-255
                             let data = data.mapv(|x| ((x as f32 / 4095.0) * 255.0) as u8);
                             let shape = data.shape();
                             let mut image_buffer =
