@@ -339,7 +339,7 @@ impl AppState<'_> {
         }
     }
 
-    pub fn dec(&mut self, dec: usize) -> Result<EventResult> {
+    pub fn up(&mut self, dec: usize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
@@ -395,7 +395,7 @@ impl AppState<'_> {
         }
     }
 
-    pub fn inc(&mut self, inc: usize) -> Result<EventResult> {
+    pub fn down(&mut self, inc: usize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
@@ -485,8 +485,8 @@ impl AppState<'_> {
 
     pub fn execute_command(&mut self, command: &Command) -> Result<EventResult> {
         match command {
-            super::command::Command::Increment(increment) => self.inc(*increment),
-            super::command::Command::Decrement(decrement) => self.dec(*decrement),
+            super::command::Command::Increment(increment) => self.down(*increment),
+            super::command::Command::Decrement(decrement) => self.up(*decrement),
             super::command::Command::Seek(seek) => self.set(*seek),
             super::command::Command::Noop => Ok(EventResult::Redraw),
         }
@@ -495,5 +495,39 @@ impl AppState<'_> {
     pub fn reexecute_command(&mut self) -> Result<EventResult> {
         let last_command = &self.command_state.last_command.clone();
         self.execute_command(last_command)
+    }
+
+    pub fn right(&mut self, arg: isize) -> Result<EventResult> {
+        match self.content_mode {
+            ContentShowMode::Preview => match self.segment_state.segumented {
+                SegmentType::Image => self.down(1),
+                SegmentType::Chart => Ok(EventResult::Continue),
+                SegmentType::NoSegment => {
+                    let current_node = &self.treeview[self.tree_view_cursor];
+                    let mut node = current_node.node.borrow_mut();
+                    let new_col_offset = node.col_offset.saturating_add(arg).max(0);
+                    node.col_offset = new_col_offset;
+                    Ok(EventResult::Redraw)
+                }
+            },
+            ContentShowMode::Matrix => self.change_col(arg),
+        }
+    }
+
+    pub fn left(&mut self, arg: isize) -> Result<EventResult> {
+        match self.content_mode {
+            ContentShowMode::Preview => match self.segment_state.segumented {
+                SegmentType::Image => self.up(1),
+                SegmentType::Chart => Ok(EventResult::Continue),
+                SegmentType::NoSegment => {
+                    let current_node = &self.treeview[self.tree_view_cursor];
+                    let mut node = current_node.node.borrow_mut();
+                    let new_col_offset = node.col_offset.saturating_sub(arg).max(0);
+                    node.col_offset = new_col_offset;
+                    Ok(EventResult::Redraw)
+                }
+            },
+            ContentShowMode::Matrix => self.change_col(-(arg as isize)),
+        }
     }
 }

@@ -572,12 +572,12 @@ pub struct H5FNode {
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
-    pub searcher: Option<Searcher>,
     pub selected_dim: usize,
     pub selected_x: usize,
     pub selected_row: usize,
     pub selected_col: usize,
     pub line_offset: usize,
+    pub col_offset: isize,
     pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
 }
 
@@ -604,10 +604,10 @@ impl H5FNode {
             computed_attributes: None,
             selected_dim: 0,
             selected_x: 0,
-            searcher: None,
             selected_row: 0,
             selected_col: 1,
             line_offset: 0,
+            col_offset: 0,
             selected_indexes: [0; 15], // WARN: Will we ever need more than 15 dimensions?
         }
     }

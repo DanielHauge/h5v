@@ -127,58 +127,12 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::PageDown, KeyModifiers::ALT) => state.change_selected_index(10),
                     (KeyCode::Left, KeyModifiers::ALT) => state.change_selected_dimension(-1),
                     (KeyCode::Right, KeyModifiers::ALT) => state.change_selected_dimension(1),
-                    (KeyCode::Up, KeyModifiers::CONTROL) => state.dec(1),
-                    (KeyCode::Down, KeyModifiers::CONTROL) => state.inc(1),
-                    (KeyCode::Right, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => state.inc(1),
-                        super::state::ContentShowMode::Matrix => {
-                            let node = &state.treeview[state.tree_view_cursor].node.borrow_mut();
-                            let current_node = &node.node;
-                            if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > node.selected_col {
-                                    let col_selected_shape = dsattr.shape[node.selected_col];
-                                    state.matrix_view_state.col_offset =
-                                        (state.matrix_view_state.col_offset + 1).min(
-                                            col_selected_shape
-                                                - state.matrix_view_state.cols_currently_available,
-                                        );
-                                    Ok(EventResult::Redraw)
-                                } else {
-                                    Ok(EventResult::Continue)
-                                }
-                            } else {
-                                Ok(EventResult::Continue)
-                            }
-                        }
-                    },
-                    (KeyCode::Left, KeyModifiers::CONTROL) => match state.content_mode {
-                        super::state::ContentShowMode::Preview => state.dec(1),
-                        super::state::ContentShowMode::Matrix => {
-                            // If we are at the first column, do nothing
-                            let node = &state.treeview[state.tree_view_cursor].node.borrow_mut();
-                            let current_node = &node.node;
-                            if state.matrix_view_state.col_offset == 0 {
-                                return Ok(EventResult::Continue);
-                            }
-                            if let Node::Dataset(_, dsattr) = current_node {
-                                if dsattr.shape.len() > node.selected_col {
-                                    let col_selected_shape = dsattr.shape[node.selected_col];
-                                    state.matrix_view_state.col_offset =
-                                        (state.matrix_view_state.col_offset - 1).min(
-                                            col_selected_shape
-                                                - state.matrix_view_state.cols_currently_available,
-                                        );
-                                    Ok(EventResult::Redraw)
-                                } else {
-                                    Ok(EventResult::Continue)
-                                }
-                            } else {
-                                Ok(EventResult::Continue)
-                            }
-                        }
-                    },
-                    (KeyCode::PageDown, _) => state.inc(20),
-                    (KeyCode::PageUp, _) => state.dec(20),
+                    (KeyCode::Up, KeyModifiers::CONTROL) => state.up(1),
+                    (KeyCode::Down, KeyModifiers::CONTROL) => state.down(1),
+                    (KeyCode::Right, KeyModifiers::CONTROL) => state.right(1),
+                    (KeyCode::Left, KeyModifiers::CONTROL) => state.left(1),
+                    (KeyCode::PageDown, _) => state.down(20),
+                    (KeyCode::PageUp, _) => state.up(20),
                     _ => match state.focus {
                         Focus::Tree(_) => handle_normal_tree_event(state, event),
                         Focus::Attributes => handle_normal_attributes(state, event),

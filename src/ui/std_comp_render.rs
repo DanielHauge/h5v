@@ -152,8 +152,22 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
     let line_num = (node.line_offset + area.height as usize).to_string().len() as u16;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
     render_linenums(f, &line_num_area, node);
-    let string = string.to_string().lines().skip(node.line_offset).join("");
+    let col_offset = node.col_offset;
+    let string = string
+        .to_string()
+        .lines()
+        .skip(node.line_offset)
+        .map(|line| {
+            if line.len() > col_offset as usize {
+                line[col_offset as usize..].to_string()
+            } else {
+                "".to_string()
+            }
+        })
+        .map(|s| Line::from(s))
+        .collect_vec();
     let string = Text::from(string);
+
     f.render_widget(string, text_area);
 }
 
