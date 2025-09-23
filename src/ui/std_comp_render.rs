@@ -164,7 +164,7 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
                 "".to_string()
             }
         })
-        .map(|s| Line::from(s))
+        .map(Line::from)
         .collect_vec();
     let string = Text::from(string);
 

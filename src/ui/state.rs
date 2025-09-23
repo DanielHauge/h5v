@@ -121,7 +121,6 @@ pub struct AppState<'a> {
     pub focus: Focus,
     pub multi_chart: MultiChartState,
     pub mode: Mode,
-    pub indexed: bool,
     pub searcher: Option<Searcher>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
@@ -181,12 +180,6 @@ impl AppState<'_> {
             }
             _ => Ok(EventResult::Continue),
         }
-    }
-
-    pub fn read_1d(&self) -> Option<Vec<f64>> {
-        let (ds, selection) = self.get_1d_selection()?;
-        let data = ds.read_slice_1d::<f64, _>(selection).ok()?.to_vec();
-        Some(data)
     }
 
     pub fn get_1d_selection(&self) -> Option<(Dataset, Selection)> {
@@ -527,7 +520,7 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
             },
-            ContentShowMode::Matrix => self.change_col(-(arg as isize)),
+            ContentShowMode::Matrix => self.change_col(-arg),
         }
     }
 }

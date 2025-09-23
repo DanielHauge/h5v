@@ -8,7 +8,6 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    search::Searcher,
     sprint_attributes::sprint_attribute,
     sprint_typedesc::{
         encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
@@ -639,25 +638,6 @@ impl H5FNode {
         }
     }
 
-    pub fn render(&self) -> Line<'static> {
-        let icon = self.icon();
-        let icon_color = match self.is_group() {
-            true => color_consts::GROUP_COLOR,
-            false => color_consts::DATASET_FILE_COLOR,
-        };
-
-        let icon_span = Span::styled(icon, Style::default().fg(icon_color));
-        let name_color = match self.is_group() {
-            true => color_consts::VARIABLE_BLUE,
-            false => color_consts::DATASET_COLOR,
-        };
-        Line::from(vec![
-            icon_span,
-            Span::styled(" ", Style::default().fg(color_consts::LINES_COLOR)),
-            Span::styled(self.name(), Style::default().fg(name_color).bold()),
-        ])
-    }
-
     pub fn content_show_modes(&self) -> Vec<ContentShowMode> {
         let mut result = vec![];
 
@@ -901,32 +881,6 @@ impl H5FNode {
         }
         self.children = children;
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct H5FNodeRef {
-    pub name: String,
-    pub node: Rc<RefCell<H5FNode>>,
-    pub rendered: Line<'static>,
-}
-
-impl From<&Rc<RefCell<H5FNode>>> for H5FNodeRef {
-    fn from(node: &Rc<RefCell<H5FNode>>) -> Self {
-        let name = node.borrow().name();
-        let node = Rc::clone(node);
-        let rendered = node.borrow().render();
-        Self {
-            name,
-            node,
-            rendered,
-        }
-    }
-}
-
-impl AsRef<str> for H5FNodeRef {
-    fn as_ref(&self) -> &str {
-        self.name.as_str()
     }
 }
 

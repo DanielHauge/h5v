@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     io::stdout,
     rc::Rc,
     sync::mpsc::{channel, Sender},
@@ -25,7 +24,6 @@ use ratatui_image::picker::Picker;
 use crate::{
     error::AppError,
     h5f,
-    search::Searcher,
     ui::{input::EventResult, mchart::MultiChartState},
 };
 
@@ -178,7 +176,6 @@ fn main_recover_loop(
         clipboard,
         mode: Mode::Normal,
         copying: false,
-        indexed: false,
         searcher: None,
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,

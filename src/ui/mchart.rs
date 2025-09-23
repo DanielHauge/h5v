@@ -10,7 +10,7 @@ use ratatui::{
     layout::Alignment,
     style::{Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders},
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
@@ -49,11 +49,6 @@ impl MultiChartState {
             picker,
             stateful_protocol: None,
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.line_series.clear();
-        self.modified = true;
     }
 
     pub fn clear_selected(&mut self) {

@@ -4,16 +4,11 @@ use ratatui::{
     layout::{Alignment, Margin, Offset, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders},
     Frame,
 };
 
-use crate::{
-    color_consts,
-    h5f::{H5FNode, Node},
-    search::full_traversal,
-    ui::std_comp_render::render_error,
-};
+use crate::{color_consts, h5f::H5FNode, ui::std_comp_render::render_error};
 
 use super::state::{AppState, Focus, Mode};
 

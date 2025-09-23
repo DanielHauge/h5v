@@ -1,30 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, ops::Range, sync::mpsc::Sender, vec};
+use std::{fmt::Debug, ops::Range, vec};
 
-use bktree::{levenshtein_distance, BkTree};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use hdf5_metno::{File, Group};
+use hdf5_metno::Group;
 use ratatui::text::{Line, Span};
-
-use crate::h5f::{H5FNodeRef, HasPath};
-
-type EntryKey = String;
-type H5Path = String;
-
-enum EntryValue {
-    Path(H5Path),
-    Query,
-}
-
-struct Entry {
-    name: EntryKey,
-    value: EntryValue,
-}
-
-impl AsRef<str> for Entry {
-    fn as_ref(&self) -> &str {
-        self.name.as_ref()
-    }
-}
 
 pub struct Searcher {
     paths: Vec<String>,
@@ -59,10 +37,6 @@ pub fn full_traversal(g: &Group) -> Vec<String> {
         }
     })
     .expect("Failed to get children")
-}
-
-fn index(file: File, result: Sender<()>) {
-    let all_h5_paths = full_traversal(&file);
 }
 
 fn fuzzy_search<'a>(paths: &'a [String], query: &str) -> Vec<&'a str> {
@@ -162,50 +136,5 @@ impl Searcher {
             .map(|p| render_line_with_highlight(p, query))
             .collect();
         rendered_lines
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_indexing() {
-        let file = File::open("test.h5").unwrap();
-        let all_h5_paths = full_traversal(&file);
-        for path in all_h5_paths {
-            eprintln!("{}", path);
-        }
-        panic!();
-    }
-
-    #[test]
-    fn test_fuzzy_search() {
-        let file = File::open("test.h5").unwrap();
-        let all_h5_paths = full_traversal(&file);
-
-        let query = "sins";
-        let results = fuzzy_search(&all_h5_paths, query);
-        for r in results.iter() {
-            eprintln!("{}", r);
-        }
-        eprintln!("Total results: {}", results.len());
-        panic!();
-    }
-
-    #[test]
-    fn test_fuzzy_highlights() {
-        let file = File::open("test.h5").unwrap();
-        let all_h5_paths = full_traversal(&file);
-
-        let query = "sins";
-        let results = fuzzy_search(&all_h5_paths, query);
-        for r in results.iter() {
-            let highlight_idx = fuzzy_highlight(r, query);
-            let highlight_spans = indices_to_spans(&highlight_idx);
-            eprintln!("{query:?} {r:?} {highlight_idx:?} {highlight_spans:?}");
-        }
-        eprintln!("Total results: {}", results.len());
-        panic!("This test only for quick ctx free exploration");
     }
 }
