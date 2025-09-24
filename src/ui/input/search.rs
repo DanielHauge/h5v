@@ -123,7 +123,7 @@ pub fn handle_search_event(
                     }
                     (KeyCode::Enter, _) => {
                         let Some(ref mut searcher) = state.searcher else {
-                            return Ok(EventResult::Continue);
+                            return Ok(EventResult::Error("No searcher available".into()));
                         };
 
                         let results = searcher.search(&searcher.query);
@@ -131,7 +131,7 @@ pub fn handle_search_event(
                         let selected_node = searcher.select_cursor;
                         if results.is_empty() {
                             state.mode = Mode::Normal;
-                            return Ok(EventResult::Redraw);
+                            return Ok(EventResult::Error("No results found".into()));
                         }
 
                         let selected_index_corrected = if selected_node >= results.len() {

@@ -740,23 +740,24 @@ impl H5FNode {
         self.node.name()
     }
 
-    pub fn expand_path(&mut self, relative_path: &str) -> Result<(), hdf5_metno::Error> {
+    pub fn expand_path(&mut self, relative_path: &str) -> Result<Option<usize>, hdf5_metno::Error> {
         self.expand()?;
         let child_mame = relative_path.split('/').next();
 
         match child_mame {
             Some(n) => {
-                for child in &self.children {
+                for (i, child) in self.children.iter().enumerate() {
                     let child_name = match child.try_borrow() {
                         Ok(c) => c.name(),
-                        Err(_) => return Ok(()),
+                        Err(_) => return Ok(Some(i)),
                     };
                     if child_name == n {
                         let mut child_node = child.borrow_mut();
+                        self.view_loaded = (i + 50) as u32;
                         if relative_path.len() > n.len() + 1 {
-                            child_node.expand_path(&relative_path[n.len() + 1..])?;
+                            return child_node.expand_path(&relative_path[n.len() + 1..]);
                         }
-                        return Ok(());
+                        return Ok(Some(i));
                     }
                 }
                 panic!(
@@ -765,7 +766,7 @@ impl H5FNode {
                     relative_path
                 );
             }
-            None => Ok(()),
+            None => Ok(None),
         }
     }
 
