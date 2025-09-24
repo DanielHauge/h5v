@@ -60,8 +60,6 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Add multichart hint on dataset tree view
-- [ ] Add better search capabilities
 - [ ] Enable dataset values focus to copy values easily
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.

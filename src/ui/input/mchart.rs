@@ -23,16 +23,19 @@ pub(crate) fn handle_mchart_event(
 
                 (KeyCode::Delete, _) => {
                     state.multi_chart.clear_selected();
+                    state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
 
                 (KeyCode::Backspace, _) => {
                     state.multi_chart.clear_selected();
+                    state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
 
                 (KeyCode::Char('d'), _) => {
                     state.multi_chart.clear_selected();
+                    state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
 

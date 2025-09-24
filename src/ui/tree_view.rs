@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
+use plotters::style::{Color as _, Palette};
 use ratatui::{
     layout::{Alignment, Margin, Offset, Rect},
     style::{Color, Style, Stylize},
@@ -8,7 +9,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode, ui::std_comp_render::render_error};
+use crate::{
+    color_consts,
+    h5f::{H5FNode, HasPath},
+    ui::{mchart::MultiChartState, std_comp_render::render_error},
+};
 
 use super::state::{AppState, Focus, Mode};
 
@@ -34,7 +39,12 @@ impl AppState<'_> {
             line: text,
         };
         tree_view.push(root_tree_item);
-        let children = compute_tree_view_rec(&self.root, vec![Span::raw("".to_string())], 0);
+        let children = compute_tree_view_rec(
+            &self.root,
+            vec![Span::raw("".to_string())],
+            0,
+            &self.multi_chart,
+        );
         tree_view.extend(children);
         self.treeview = tree_view;
     }
@@ -44,6 +54,7 @@ fn compute_tree_view_rec<'a>(
     node: &Rc<RefCell<H5FNode>>,
     prefix: Vec<Span<'a>>,
     indent: u8,
+    mchart: &MultiChartState,
 ) -> Vec<TreeItem<'a>> {
     let mut tree_view = Vec::new();
     if !node.borrow().expanded {
@@ -62,7 +73,6 @@ fn compute_tree_view_rec<'a>(
         if loading > node_binding.view_loaded {
             // If we have more than 50 children, we stop rendering to avoid performance issues.
             // This is a simple way to handle large datasets.
-            // TODO: Add load more
             let adds = vec![
                 Span::styled(
                     format!("{} ", "└─"),
@@ -134,6 +144,17 @@ fn compute_tree_view_rec<'a>(
             child.borrow().name(),
             Style::default().fg(name_color),
         ));
+        for (i, (key, _)) in mchart.line_series.iter().enumerate() {
+            if key == &child.borrow().node.path() {
+                let color = plotters::prelude::Palette99::pick(i);
+                let rgb = color.to_rgba();
+                line_vec.push(Span::raw(" "));
+                line_vec.push(Span::styled(
+                    "●",
+                    Style::default().fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2)),
+                ));
+            }
+        }
 
         let line = Line::from(line_vec);
 
@@ -155,7 +176,7 @@ fn compute_tree_view_rec<'a>(
         };
 
         if child.borrow().is_group() {
-            let children = compute_tree_view_rec(child, prefix_clone, indent);
+            let children = compute_tree_view_rec(child, prefix_clone, indent, mchart);
             tree_view.extend(children);
         }
     }

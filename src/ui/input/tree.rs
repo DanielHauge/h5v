@@ -172,6 +172,7 @@ pub fn handle_normal_tree_event(
                         return Ok(EventResult::Continue);
                     };
                     state.multi_chart.add_linspace_series(ds, sel);
+                    state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
                 (KeyCode::Char(' '), _) => {
