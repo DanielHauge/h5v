@@ -245,6 +245,8 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             let search_query = searcher.query.clone();
             let search_results = searcher.search(&search_query);
 
+            let mut view_offset = 0;
+
             let search_select_cursor = if searcher.select_cursor > search_results.len() {
                 if search_results.is_empty() {
                     0
@@ -254,6 +256,13 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             } else {
                 searcher.select_cursor
             };
+
+            let mut highlight_index = searcher.select_cursor;
+            if area.height <= search_select_cursor as u16 {
+                let half = area.height / 2;
+                view_offset = search_select_cursor as u16 - half;
+                highlight_index = half as usize;
+            }
             let results_count = search_results.len();
 
             // render search title with a search symbol:
@@ -279,11 +288,11 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             f.set_cursor_position(area_pos);
 
             let mut offset = 1;
-            for (i, result) in search_results.iter().enumerate() {
-                if i >= area.height as usize {
+            for (i, result) in search_results.iter().skip(view_offset as usize).enumerate() {
+                if i >= (area.height - 1) as usize {
                     break;
                 }
-                if i == search_select_cursor {
+                if i == highlight_index {
                     f.render_widget(
                         result.clone().bg(color_consts::HIGHLIGHT_BG_COLOR).bold(),
                         area.offset(Offset { x: 3, y: offset }),
