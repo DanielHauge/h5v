@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::{
     error::AppError,
@@ -21,6 +21,26 @@ pub(crate) fn handle_mchart_event(
 
                 (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
 
+                (KeyCode::Up, KeyModifiers::SHIFT) => {
+                    state.multi_chart.zoom_in(10.0);
+                    Ok(EventResult::Redraw)
+                }
+                (KeyCode::Down, KeyModifiers::SHIFT) => {
+                    state.multi_chart.zoom_out(10.0);
+                    Ok(EventResult::Redraw)
+                }
+                (KeyCode::Left, KeyModifiers::SHIFT) => {
+                    state.multi_chart.pan_left(10.0);
+                    Ok(EventResult::Redraw)
+                }
+                (KeyCode::Right, KeyModifiers::SHIFT) => {
+                    state.multi_chart.pan_right(10.0);
+                    Ok(EventResult::Redraw)
+                }
+                (KeyCode::Char('c'), _) => {
+                    state.multi_chart.clear_zoom();
+                    Ok(EventResult::Redraw)
+                }
                 (KeyCode::Delete, _) => {
                     state.multi_chart.clear_selected();
                     state.compute_tree_view();

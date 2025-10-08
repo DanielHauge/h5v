@@ -41,6 +41,9 @@ h5v path/to/file.h5
 
 - `backspace/delete/d`: Remove currently selected source from multichart
 - `M`: Toggle back to normal mode
+- `c`: Clear zoom
+- `shift` + `right`/`left`: Pan right/left
+- `shift` + `up`/`down`: Zoom in/out by 10%
 
 ## Commands
 
@@ -62,6 +65,7 @@ cargo install h5v
 
 - [ ] Enable dataset values focus to copy values easily
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
+- [ ] Fix issue related to segmentation errors (last segment fetched too many)
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)

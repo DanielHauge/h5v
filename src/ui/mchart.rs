@@ -21,8 +21,8 @@ pub struct LineSerie {
     points: Vec<Point>,
     y_max: f64,
     y_min: f64,
-    x_max: f64,
-    x_min: f64,
+    x_max: usize,
+    x_min: usize,
 }
 pub type DatasetName = String;
 
@@ -34,6 +34,8 @@ pub struct MultiChartState {
     pub plot_buffer: Vec<u8>,
     pub picker: Picker,
     pub idx: usize,
+    pub aoi_from: Option<usize>,
+    pub aoi_to: Option<usize>,
     stateful_protocol: Option<StatefulProtocol>,
 }
 
@@ -47,9 +49,144 @@ impl MultiChartState {
             width: 0,
             plot_buffer: Vec::new(),
             picker,
+            aoi_from: None,
+            aoi_to: None,
             stateful_protocol: None,
         }
     }
+
+    pub fn zoom_in(&mut self, percent: f64) {
+        let max_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_max)
+            .fold(usize::MIN, usize::max);
+        let min_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_min)
+            .fold(usize::MAX, usize::min);
+        let actual_min = min_x.max(self.aoi_from.unwrap_or(min_x));
+        let actual_max = max_x.min(self.aoi_to.unwrap_or(max_x));
+        let range = actual_max - actual_min;
+        let delta = range as f64 * percent / 100.0;
+        let new_from = ((actual_min as f64 + delta).round() as usize).min(actual_max - 1);
+        let new_to = ((actual_max as f64 - delta).round() as usize).max(actual_min + 1);
+        self.aoi_from = Some(new_from);
+        self.aoi_to = Some(new_to);
+        self.modified = true;
+    }
+
+    pub fn clear_zoom(&mut self) {
+        self.aoi_from = None;
+        self.aoi_to = None;
+        self.modified = true;
+    }
+
+    pub fn zoom_out(&mut self, percent: f64) {
+        if self.aoi_from.is_none() && self.aoi_to.is_none() {
+            return;
+        }
+        let max_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_max)
+            .fold(usize::MIN, usize::max);
+        let min_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_min)
+            .fold(usize::MAX, usize::min);
+        let actual_min = self.aoi_from.unwrap_or(min_x).max(min_x);
+        let actual_max = self.aoi_to.unwrap_or(max_x).min(max_x);
+        let range = actual_max - actual_min;
+        let delta = range as f64 * percent / 100.0;
+        let new_min = (actual_min as f64 - delta).round() as usize;
+        let new_max = (actual_max as f64 + delta).round() as usize;
+        if new_min <= min_x {
+            self.aoi_from = None;
+        } else {
+            self.aoi_from = Some(new_min);
+        }
+        if new_max >= max_x {
+            self.aoi_to = None;
+        } else {
+            self.aoi_to = Some(new_max);
+        }
+        self.modified = true;
+    }
+
+    pub fn pan_left(&mut self, percent: f64) {
+        if self.aoi_from.is_none() && self.aoi_to.is_none() {
+            return;
+        }
+        let max_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_max)
+            .fold(usize::MIN, usize::max);
+        let min_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_min)
+            .fold(usize::MAX, usize::min);
+        let actual_min = self.aoi_from.unwrap_or(min_x).max(min_x);
+        let actual_max = self.aoi_to.unwrap_or(max_x).min(max_x);
+        let range = actual_max - actual_min;
+        let delta = (range as f64 * percent / 100.0).round() as usize;
+        let new_min = actual_min.saturating_sub(delta);
+        let new_max = actual_max.saturating_sub(delta);
+        if new_min <= min_x {
+            self.aoi_from = None;
+        } else {
+            self.aoi_from = Some(new_min);
+        }
+        if new_max >= max_x {
+            self.aoi_to = None;
+        } else {
+            self.aoi_to = Some(new_max);
+        }
+        self.modified = true;
+    }
+
+    pub fn pan_right(&mut self, percent: f64) {
+        if self.aoi_from.is_none() && self.aoi_to.is_none() {
+            return;
+        }
+        let max_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_max)
+            .fold(usize::MIN, usize::max);
+        let min_x = self
+            .line_series
+            .values()
+            .map(|ls| ls.x_min)
+            .fold(usize::MAX, usize::min);
+        let actual_min = self.aoi_from.unwrap_or(min_x).max(min_x);
+        let actual_max = self.aoi_to.unwrap_or(max_x).min(max_x);
+        let range = actual_max - actual_min;
+        let delta = (range as f64 * percent / 100.0).round() as usize;
+        let new_min = actual_min.saturating_add(delta);
+        let new_max = actual_max.saturating_add(delta);
+        if new_min <= min_x {
+            self.aoi_from = None;
+        } else {
+            self.aoi_from = Some(new_min);
+        }
+        if new_max >= max_x {
+            self.aoi_to = None;
+        } else {
+            self.aoi_to = Some(new_max);
+        }
+        self.modified = true;
+    }
+
+    // Zoom:
+    // - up ( zoom in 5% )
+    // - down ( zoom out 5% )
+    // - left ( move left 5% )
+    // - right ( move right 5% )
 
     pub fn clear_selected(&mut self) {
         self.line_series
@@ -84,8 +221,8 @@ impl MultiChartState {
                 points,
                 y_max,
                 y_min,
-                x_min: 0.0,
-                x_max: points_len as f64,
+                x_min: 0,
+                x_max: points_len,
             };
             self.line_series
                 .insert(dataset.name().to_string(), line_serie);
@@ -109,39 +246,146 @@ impl MultiChartState {
         if self.line_series.is_empty() {
             return false;
         }
-        let global_y_max = self
-            .line_series
-            .values()
-            .map(|ls| ls.y_max)
-            .fold(f64::MIN, f64::max);
-        let global_y_min = self
-            .line_series
-            .values()
-            .map(|ls| ls.y_min)
-            .fold(f64::MAX, f64::min);
-        let global_x_max = self
-            .line_series
-            .values()
-            .map(|ls| ls.x_max)
-            .fold(f64::MIN, f64::max);
-        let global_x_min = self
-            .line_series
-            .values()
-            .map(|ls| ls.x_min)
-            .fold(f64::MAX, f64::min);
 
-        let y_label_area_size = format!("{global_y_max:.4}").len() as u32 * 3 + 30;
+        let (x_min, x_max) = match (self.aoi_from, self.aoi_to) {
+            (None, None) => {
+                let global_x_max = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.x_max)
+                    .fold(usize::MIN, usize::max);
+                let global_x_min = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.x_min)
+                    .fold(usize::MAX, usize::min);
+                (global_x_min, global_x_max)
+            }
+            (Some(from), None) => {
+                let global_x_max = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.x_max)
+                    .fold(usize::MIN, usize::max);
+                let actual_from = from;
+                (actual_from, global_x_max.max(actual_from))
+            }
+            (None, Some(to)) => {
+                let global_x_min = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.x_min)
+                    .fold(usize::MAX, usize::min);
+                let actual_to = to;
+                (global_x_min.min(actual_to), actual_to)
+            }
+            (Some(from), Some(to)) => {
+                let actual_from = from;
+                let actual_to = to;
+                if actual_from >= actual_to {
+                    return false;
+                }
+                (actual_from, actual_to)
+            }
+        };
+
+        let data_series = self.line_series.iter().map(|(name, ls)| {
+            let local_x_min = ls.x_min.max(x_min).clamp(ls.x_min, ls.x_max);
+            let local_x_max = ls.x_max.min(x_max).clamp(ls.x_min, ls.x_max);
+            let data_points = ls.points[local_x_min..local_x_max]
+                .iter()
+                .map(|(x, y)| (*x, *y));
+            (name.clone(), data_points)
+        });
+
+        let (y_max, y_min) = match (self.aoi_from, self.aoi_to) {
+            (None, None) => {
+                let global_y_max = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.y_max)
+                    .fold(f64::MIN, f64::max);
+                let global_y_min = self
+                    .line_series
+                    .values()
+                    .map(|ls| ls.y_min)
+                    .fold(f64::MAX, f64::min);
+                (global_y_max, global_y_min)
+            }
+            (Some(from), None) => {
+                // Quikcly iter all y's in all series to find the global max and min
+                let mut global_y_max = f64::MIN;
+                let mut global_y_min = f64::MAX;
+                for ls in self.line_series.values() {
+                    if from >= ls.x_max {
+                        continue;
+                    }
+                    let local_x_min = ls.x_min.max(from);
+                    let local_x_max = ls.x_max.min(x_max);
+                    for &(_, y) in &ls.points[local_x_min..local_x_max] {
+                        if y > global_y_max {
+                            global_y_max = y;
+                        }
+                        if y < global_y_min {
+                            global_y_min = y;
+                        }
+                    }
+                }
+                (global_y_max, global_y_min)
+            }
+            (None, Some(to)) => {
+                let mut global_y_max = f64::MIN;
+                let mut global_y_min = f64::MAX;
+                for ls in self.line_series.values() {
+                    if to <= ls.x_min {
+                        continue;
+                    }
+                    let x_min = ls.x_min.max(x_min);
+                    let to = ls.x_max.min(to);
+                    for &(_, y) in &ls.points[x_min..to] {
+                        if y > global_y_max {
+                            global_y_max = y;
+                        }
+                        if y < global_y_min {
+                            global_y_min = y;
+                        }
+                    }
+                }
+                (global_y_max, global_y_min)
+            }
+            (Some(from), Some(to)) => {
+                let mut global_y_max = f64::MIN;
+                let mut global_y_min = f64::MAX;
+                for ls in self.line_series.values() {
+                    if to <= ls.x_min || from >= ls.x_max {
+                        continue;
+                    }
+                    let from = ls.x_min.max(from);
+                    let to = ls.x_max.min(to);
+                    for &(_, y) in &ls.points[from..to] {
+                        if y > global_y_max {
+                            global_y_max = y;
+                        }
+                        if y < global_y_min {
+                            global_y_min = y;
+                        }
+                    }
+                }
+                (global_y_max, global_y_min)
+            }
+        };
+
+        let y_label_area_size = format!("{y_max:.4}").len() as u32 * 3 + 30;
         let chart = plotters::prelude::ChartBuilder::on(&root)
             .margin(10)
             .x_label_area_size(30)
             .y_label_area_size(y_label_area_size)
-            .build_cartesian_2d(global_x_min..global_x_max, global_y_min..global_y_max);
+            .build_cartesian_2d(x_min as f64..x_max as f64, y_min..y_max);
 
         let mut chart = match chart {
             Ok(c) => c,
             Err(_) => return false,
         };
-        // Draw the mesh (grid lines)
         chart
             .configure_mesh()
             .x_label_style(("sans-serif", 18).into_font())
@@ -149,9 +393,9 @@ impl MultiChartState {
             .draw()
             .unwrap();
 
-        for (i, (name, ls)) in self.line_series.iter().enumerate() {
+        for (i, (name, ls)) in data_series.enumerate() {
             let color = plotters::prelude::Palette99::pick(i);
-            let data = ls.points.iter().map(|(x, y)| (*x, *y));
+            let data = ls;
             let line_series = plotters::prelude::LineSeries::new(data, &color);
             chart
                 .draw_series(line_series)
