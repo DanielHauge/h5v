@@ -1,6 +1,6 @@
 [package]
 name = "h5v"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Daniel <animcuil@gmail.com>"]
 description = "A terminal viewer for HDF5 files with chart, image, string, matrix, attributes support"
@@ -13,7 +13,6 @@ bktree = "1.0.1"
 clap = { version = "4.5.32", features = ["derive"] }
 cli-clipboard = "0.4.0"
 fuzzy-matcher = "0.3.7"
-git-version = "0.3.9"
 hdf5-metno = { version = "0.10.1", features = [
     "blosc-all",
     "lzf",

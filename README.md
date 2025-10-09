@@ -69,9 +69,3 @@ cargo install h5v
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)
-
-## Script ideas
-
-- Previewing (Like preview multiple datasets for a group for example)
-- Send data to External App or store or something else.
-- Scaling/Formatting data. (Add script to datasets, so data could be transformed before viewing Matrix + Preview.)
