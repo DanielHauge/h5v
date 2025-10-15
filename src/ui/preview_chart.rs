@@ -155,12 +155,13 @@ pub fn render_chart_preview(
             Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
         render_segment_scroll(f, &areas_split[1], state)?;
 
+        let max_len = shape[node.selected_x];
         let data_preview = ds.plot(PreviewSelection {
             x: node.selected_x,
             index: node.selected_indexes[0..total_dims].to_vec(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
-                MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize,
+                (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
             ),
         })?;
         (areas_split[0], data_preview)
