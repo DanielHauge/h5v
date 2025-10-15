@@ -175,8 +175,6 @@ pub fn render_chart_preview(
     };
 
     if image_capable_terminal() {
-        // TODO: Optimize this, store the image buffer in the node, and just reuse it.
-        // TODO: Optimize this, store the image buffer in the node .
         let (x, y) = state.img_state.picker.font_size();
         let height = chart_area.height as u32 * y as u32;
         let width = chart_area.width as u32 * x as u32;
