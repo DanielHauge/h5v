@@ -39,9 +39,9 @@ pub fn render_img(
     let node = &selected_node_refc.node;
     let area = if let SegmentType::Image = state.segment_state.segumented {
         let areas_split =
-            Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
-        render_segment_scroll(f, &areas_split[0], state)?;
-        areas_split[1]
+            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
+        render_segment_scroll(f, &areas_split[1], state)?;
+        areas_split[0]
     } else {
         *area
     };
@@ -232,7 +232,12 @@ pub fn handle_imagefs_load(
     let (tx_load, rx_load) = channel::<(BufReader<ByteReader>, ImageFormat)>();
 
     thread::spawn(move || loop {
-        if let Ok((ds_reader, img_format)) = rx_load.recv() {
+        if let Ok((mut ds_reader, mut img_format)) = rx_load.recv() {
+            // We drain to the latest
+            while let Ok(queued) = rx_load.try_recv() {
+                ds_reader = queued.0;
+                img_format = queued.1;
+            }
             if let Ok(dyn_img) = image::load(ds_reader, img_format) {
                 let stateful_protocol = picker.new_resize_protocol(dyn_img);
                 let thread_protocol =
@@ -256,7 +261,13 @@ pub fn handle_imagefsvlen_load(
     let (tx_load, rx_load) = channel::<(Dataset, i32, ImageFormat)>();
 
     thread::spawn(move || loop {
-        if let Ok((ds, idx, img_format)) = rx_load.recv() {
+        if let Ok((mut ds, mut idx, mut img_format)) = rx_load.recv() {
+            // We drain to the latest
+            while let Ok(queued) = rx_load.try_recv() {
+                ds = queued.0;
+                idx = queued.1;
+                img_format = queued.2;
+            }
             let data =
                 match ds.read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All) {
                     Ok(d) => d[idx as usize].as_slice().to_vec(),
@@ -329,7 +340,13 @@ pub fn handle_image_load(
 ) -> Sender<(Dataset, i32, ImageType)> {
     let (tx_load, rx_load) = channel::<(Dataset, i32, ImageType)>();
     thread::spawn(move || loop {
-        if let Ok((ds_reader, idx, img_format)) = rx_load.recv() {
+        if let Ok((mut ds_reader, mut idx, mut img_format)) = rx_load.recv() {
+            while let Ok(queued) = rx_load.try_recv() {
+                // We drain to the latest
+                ds_reader = queued.0;
+                idx = queued.1;
+                img_format = queued.2;
+            }
             match img_format {
                 ImageType::Grayscale => {
                     let shape = ds_reader.shape();

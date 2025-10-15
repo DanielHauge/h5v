@@ -1,3 +1,5 @@
+use std::os::linux::raw::stat;
+
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     chart::ChartBuilder,
@@ -150,8 +152,8 @@ pub fn render_chart_preview(
         state.segment_state.segment_count =
             (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
         let areas_split =
-            Layout::vertical(vec![Constraint::Length(2), Constraint::Min(1)]).split(*area);
-        render_segment_scroll(f, &areas_split[0], state)?;
+            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
+        render_segment_scroll(f, &areas_split[1], state)?;
 
         let data_preview = ds.plot(PreviewSelection {
             x: node.selected_x,
@@ -161,7 +163,7 @@ pub fn render_chart_preview(
                 MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize,
             ),
         })?;
-        (areas_split[1], data_preview)
+        (areas_split[0], data_preview)
     } else {
         let data_preview = ds.plot(PreviewSelection {
             x: node.selected_x,
@@ -178,7 +180,13 @@ pub fn render_chart_preview(
         let height = chart_area.height as u32 * y as u32;
         let width = chart_area.width as u32 * x as u32;
         let mut buffer = vec![0; (height * width * 3) as usize];
-        render_image_chart(&mut buffer, width, height, data_preview)?;
+        let x_min = if state.segment_state.idx > 0 {
+            MAX_SEGMENT_SIZE as f64 * state.segment_state.idx as f64
+        } else {
+            0.0
+        };
+        // TODO: Maybe multithread this bitch?
+        render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
         let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer)
             .expect("buffer size mismatch");
         let image_widget = StatefulImage::default();
@@ -248,6 +256,7 @@ fn render_image_chart(
     buffer: &mut [u8],
     width: u32,
     height: u32,
+    x_min: f64,
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
@@ -260,7 +269,7 @@ fn render_image_chart(
         .x_label_area_size(30)
         .y_label_area_size(y_label_area_size)
         .build_cartesian_2d(
-            0.0..data_preview.length as f64,
+            x_min..(x_min + data_preview.length as f64),
             data_preview.min..data_preview.max,
         )
         .unwrap();
@@ -273,7 +282,7 @@ fn render_image_chart(
         .draw()
         .unwrap();
 
-    let data = data_preview.data.iter().map(|(x, y)| (*x, *y));
+    let data = data_preview.data.iter().map(|(x, y)| (x_min + *x, *y));
     let line_series = plotters::prelude::LineSeries::new(data, plotters::prelude::BLUE);
     chart.draw_series(line_series).unwrap();
     root.present().unwrap();
