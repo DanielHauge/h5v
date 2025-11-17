@@ -9,6 +9,7 @@ use image::ImageFormat;
 use ndarray::{s, Array2, Array3};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
+    style::Style,
     Frame,
 };
 use ratatui_image::{
@@ -41,7 +42,20 @@ pub fn render_img(
         let areas_split =
             Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
         render_segment_scroll(f, &areas_split[1], state)?;
-        areas_split[0]
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(1), Constraint::Min(2)]).split(areas_split[0]);
+        // center styles
+        let idx = state.segment_state.idx + 1;
+        let segment_count = state.segment_state.segment_count;
+        let block = ratatui::widgets::Block::default()
+            .title(format!(" Image {}/{} ", idx, segment_count))
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(ratatui::widgets::Borders::TOP)
+            .border_type(ratatui::widgets::BorderType::Plain)
+            .style(Style::default().fg(ratatui::style::Color::DarkGray));
+
+        f.render_widget(block, areas_split[0]);
+        areas_split[1]
     } else {
         *area
     };
