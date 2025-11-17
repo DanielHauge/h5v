@@ -1,6 +1,6 @@
 [package]
 name = "h5v"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Daniel <animcuil@gmail.com>"]
 description = "A terminal viewer for HDF5 files with chart, image, string, matrix, attributes support"
@@ -10,23 +10,23 @@ license = "Apache-2.0"
 
 [dependencies]
 bktree = "1.0.1"
-clap = { version = "4.5.32", features = ["derive"] }
+clap = { version = "4.5.51", features = ["derive"] }
 cli-clipboard = "0.4.0"
 fuzzy-matcher = "0.3.7"
-hdf5-metno = { version = "0.10.1", features = [
+hdf5-metno = { version = "0.10.2", features = [
     "blosc-all",
     "lzf",
     "static",
     "zlib",
 ] }
-image = "0.25.6"
+image = "0.25.9"
 itertools = "0.14.0"
-ndarray = "0.16.1"
+ndarray = "0.17.1"
 plotters = "0.3.7"
 ratatui = { version = "0.29.0", features = ["all-widgets"] }
-ratatui-image = "8.0.1"
-serde_json = "1.0.143"
-syntect = { version = "5.2.0", features = ["default-fancy"] }
+ratatui-image = "8.0.2"
+serde_json = "1.0.145"
+syntect = { version = "5.3.0", features = ["default-fancy"] }
 
 
 [profile.release]
