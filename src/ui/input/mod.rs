@@ -110,8 +110,12 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         Ok(EventResult::Redraw)
                     }
                     (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                        state.focus = Focus::Content;
                         state.show_tree_view = !state.show_tree_view;
+                        if state.show_tree_view {
+                            state.focus = Focus::Tree(LastFocused::Content);
+                        } else {
+                            state.focus = Focus::Content;
+                        }
 
                         Ok(EventResult::Redraw)
                     }

@@ -51,6 +51,13 @@ fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
             .split(area);
         chunks
     } else {
+        if area.width < 100 {
+            let chunks = Layout::default()
+                .direction(ratatui::layout::Direction::Horizontal)
+                .constraints([Constraint::Percentage(100), Constraint::Percentage(0)].as_ref())
+                .split(area);
+            return chunks;
+        }
         let chunks = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
