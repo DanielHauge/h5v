@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "h5v"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bktree",
  "clap",
@@ -1020,9 +1020,9 @@ checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
 
 [[package]]
 name = "hdf5-metno"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7ea56bf7d2353603da59755c81101b148592f1621bf22e7bf363f79abc02d94"
+checksum = "9a6c90397db1fe43273705a49b49e0595bd0d49f4aac990b116103ae5bf52961"
 dependencies = [
  "bitflags 2.10.0",
  "blosc-src",
