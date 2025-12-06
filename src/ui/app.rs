@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use cli_clipboard::{ClipboardContext, ClipboardProvider};
+use arboard::Clipboard;
 use ratatui::{
     crossterm::{
         event::{self},
@@ -154,7 +154,8 @@ fn main_recover_loop(
         rows_currently_available: 0,
         cols_currently_available: 0,
     };
-    let clipboard = ClipboardContext::new().expect("Failed to create clipboard context");
+    let clipboard = Clipboard::new()
+        .map_err(|e| AppError::ClipboardError(format!("Failed to initialize clipboard: {}", e)))?;
 
     let segment_state = state::SegmentState {
         idx: 0,

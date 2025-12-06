@@ -130,11 +130,11 @@ pub fn render_matrix<T: H5Type + Display>(
             let idx_area = areas_split[0];
             let value_area = areas_split[1];
             let val_bg_color = match (row_idx % 2) == 0 {
-                true => match (state.matrix_view_state.row_offset % 2) == 0 {
+                true => match state.matrix_view_state.row_offset.is_multiple_of(2) {
                     true => color_consts::BG_VAL3_COLOR,
                     false => color_consts::BG_VAL4_COLOR,
                 },
-                false => match (state.matrix_view_state.row_offset % 2) == 0 {
+                false => match state.matrix_view_state.row_offset.is_multiple_of(2) {
                     true => color_consts::BG_VAL4_COLOR,
                     false => color_consts::BG_VAL3_COLOR,
                 },
@@ -188,8 +188,8 @@ pub fn render_matrix<T: H5Type + Display>(
                 let val_area = col_areas[(j + 1) as usize];
 
                 let val_bg_color = match (
-                    (i as usize + state.matrix_view_state.row_offset) % 2 == 0,
-                    (j as usize + state.matrix_view_state.col_offset) % 2 == 0,
+                    (i as usize + state.matrix_view_state.row_offset).is_multiple_of(2),
+                    (j as usize + state.matrix_view_state.col_offset).is_multiple_of(2),
                 ) {
                     (true, true) => color_consts::BG_VAL3_COLOR,
                     (true, false) => color_consts::BG_VAL4_COLOR,

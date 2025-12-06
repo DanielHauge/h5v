@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    widgets::{Paragraph, Scrollbar, ScrollbarState},
+    widgets::{Scrollbar, ScrollbarState},
     Frame,
 };
 

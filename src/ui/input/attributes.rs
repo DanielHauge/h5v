@@ -1,4 +1,3 @@
-use cli_clipboard::ClipboardProvider;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
@@ -85,7 +84,7 @@ pub fn handle_normal_attributes(
                                     .trim_end()
                                     .to_string();
 
-                                match state.clipboard.set_contents(name.to_string()) {
+                                match state.clipboard.set_text(name.to_string()) {
                                     Ok(()) => Ok(EventResult::Copying),
                                     Err(e) => Err(AppError::ClipboardError(format!(
                                         "Failed to copy attribute name to clipboard: {}",
@@ -101,7 +100,7 @@ pub fn handle_normal_attributes(
                         Value => {
                             if let Some(attribute) = selected_rendered_attribute {
                                 let value_string = attribute.1.to_string();
-                                match state.clipboard.set_contents(value_string) {
+                                match state.clipboard.set_text(value_string) {
                                     Ok(()) => Ok(EventResult::Copying),
                                     Err(e) => Err(AppError::ClipboardError(format!(
                                         "Failed to copy attribute value to clipboard: {}",

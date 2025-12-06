@@ -1,6 +1,6 @@
 [package]
 name = "h5v"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 authors = ["Daniel <animcuil@gmail.com>"]
 description = "A terminal viewer for HDF5 files with chart, image, string, matrix, attributes support"
@@ -9,9 +9,12 @@ repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
 
 [dependencies]
+arboard = { version = "3.6.1", features = [
+    "wl-clipboard-rs",
+    "wayland-data-control",
+] }
 bktree = "1.0.1"
 clap = { version = "4.5.51", features = ["derive"] }
-cli-clipboard = "0.4.0"
 fuzzy-matcher = "0.3.7"
 hdf5-metno = { version = "0.11.0", features = [
     "blosc-all",

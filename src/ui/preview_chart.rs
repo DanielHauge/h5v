@@ -1,5 +1,3 @@
-use std::os::linux::raw::stat;
-
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     chart::ChartBuilder,
