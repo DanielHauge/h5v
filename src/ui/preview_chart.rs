@@ -54,8 +54,8 @@ pub fn render_chart_preview(
         .map(|(i, _)| i)
         .collect();
 
+    // TODO: Read scalar
     if x_selectable_dims.is_empty() {
-        // TODO: Read scalar
         match ds_meta.matrixable {
             Some(t) => match t {
                 crate::sprint_typedesc::MatrixRenderType::Float64 => {
@@ -182,14 +182,26 @@ pub fn render_chart_preview(
         } else {
             0.0
         };
-        // TODO: Maybe multithread this bitch?
-        render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
-        let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer)
-            .expect("buffer size mismatch");
-        let image_widget = StatefulImage::default();
-        let dyn_img = DynamicImage::ImageRgb8(image);
-        let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
-        f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
+        if data_preview.min.is_nan()
+            || data_preview.max.is_nan()
+            || data_preview.min.is_infinite()
+            || data_preview.min >= data_preview.max
+        {
+            render_error(
+                f,
+                &chart_area,
+                "Data not valid, could not establish min and max bounds for chart\nIt seems the data only contains NaN or infinite values.",
+            );
+        } else {
+            // TODO: Maybe multithread this bitch?
+            render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
+            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer)
+                .expect("buffer size mismatch");
+            let image_widget = StatefulImage::default();
+            let dyn_img = DynamicImage::ImageRgb8(image);
+            let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
+            f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
+        }
     } else {
         let x_label_count = match chart_area.width {
             0 => 0,
@@ -261,6 +273,7 @@ fn render_image_chart(
     root.fill(&plotters::prelude::WHITE).unwrap();
     let max = data_preview.max;
     let y_label_area_size = format!("{max:.4}").len() as u32 * 3 + 30;
+
     let mut chart = ChartBuilder::on(&root)
         .margin(10)
         .x_label_area_size(30)

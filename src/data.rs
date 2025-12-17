@@ -1,3 +1,5 @@
+use core::f64;
+
 use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
@@ -124,8 +126,8 @@ impl Previewable for Dataset {
             .map(|(i, y)| (i as f64, *y))
             .collect::<Vec<_>>();
         let length = data.len();
-        let max = data.iter().map(|(_, y)| *y).fold(f64::MIN, f64::max);
-        let min = data.iter().map(|(_, y)| *y).fold(f64::MAX, f64::min);
+        let max = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::max);
+        let min = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::min);
         Ok(DatasetPlotingData {
             data,
             length,
