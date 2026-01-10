@@ -178,6 +178,7 @@ fn main_recover_loop(
         tree_view_cursor: 0,
         attributes_view_cursor: AttributeCursor {
             attribute_index: 0,
+            attribute_offset: 0,
             attribute_view_selection: state::AttributeViewSelection::Name,
         },
         focus: Focus::Tree(LastFocused::Attributes),

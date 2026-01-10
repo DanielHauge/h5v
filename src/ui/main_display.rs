@@ -29,7 +29,7 @@ fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(
             [
-                Constraint::Length(attributes_count as u16 + 2),
+                Constraint::Length(attributes_count.min(10) as u16),
                 Constraint::Min(0),
             ]
             .as_ref(),

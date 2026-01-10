@@ -90,6 +90,7 @@ pub enum AttributeViewSelection {
 pub struct AttributeCursor {
     pub attribute_index: usize,
     pub attribute_view_selection: AttributeViewSelection,
+    pub attribute_offset: usize,
 }
 
 pub struct MatrixViewState {
