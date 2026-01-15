@@ -2,6 +2,7 @@ use std::{fmt::Display, sync::mpsc::SendError};
 
 #[derive(Debug)]
 pub enum AppError {
+    FileError(String),
     Io(std::io::Error),
     Hdf5(hdf5_metno::Error),
     ChannelError(String),
@@ -17,6 +18,7 @@ impl Display for AppError {
             AppError::ChannelError(c) => write!(f, "Channel Error: {}", c),
             AppError::ClipboardError(msg) => write!(f, "Clipboard Error: {}", msg),
             AppError::InvalidCommand(cmd) => write!(f, "Invalid Command: {}", cmd),
+            AppError::FileError(x) => write!(f, "File error: {x}"),
         }
     }
 }

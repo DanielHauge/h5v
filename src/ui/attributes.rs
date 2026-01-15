@@ -97,14 +97,16 @@ pub fn render_info_attributes(
     let height = name_area.height as i32;
     let heightu = height as usize;
 
-    let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
-        .end_symbol(Some("v"))
-        .thumb_symbol("█")
-        .begin_symbol(Some("^"));
-    let mut scrollbar_state = ScrollbarState::new(attributes.rendered_attributes.len())
-        .viewport_content_length(height as usize)
-        .position(state.attributes_view_cursor.attribute_index);
-    f.render_stateful_widget(scrollbar, *scroll_area, &mut scrollbar_state);
+    if scroll_area.height > 0 && scroll_area.width > 0 {
+        let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
+            .end_symbol(Some("v"))
+            .thumb_symbol("█")
+            .begin_symbol(Some("^"));
+        let mut scrollbar_state = ScrollbarState::new(attributes.rendered_attributes.len())
+            .viewport_content_length(height as usize)
+            .position(state.attributes_view_cursor.attribute_index);
+        f.render_stateful_widget(scrollbar, *scroll_area, &mut scrollbar_state);
+    }
 
     let mut offset = 0;
 

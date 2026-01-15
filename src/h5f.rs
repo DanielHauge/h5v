@@ -350,7 +350,14 @@ pub trait HasName {
 impl HasName for Node {
     fn name(&self) -> String {
         match self {
-            Node::File(file) => file.name().split('/').next_back().unwrap_or("").to_string(),
+            Node::File(file) => {
+                let f_name = file.filename();
+                file.name()
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(&f_name)
+                    .to_string()
+            }
             Node::Group(_, meta) => meta.display_name.clone(),
             Node::Dataset(_, meta) => meta.display_name.clone(),
         }
@@ -812,7 +819,12 @@ impl H5FNode {
                 GrpType::External(g) => (g, true),
                 GrpType::Soft(g) => (g, true),
             };
-            let display_name = g.name().split('/').next_back().unwrap_or("").to_string();
+            let display_name = g
+                .name()
+                .split('/')
+                .next_back()
+                .unwrap_or("Hidden")
+                .to_string();
 
             let meta = GroupMeta {
                 is_link,

@@ -82,6 +82,10 @@ pub fn init(filename: String) -> Result<()> {
         match main_recover_loop(&mut terminal, filename.clone()) {
             Ok(_) => break,
             Err(e) => match e {
+                AppError::FileError(_) => {
+                    last_message = Some("No files given error".to_string());
+                }
+
                 AppError::Io(error) => {
                     last_message = Some(format!("IO Error: - {error}"));
                 }
@@ -305,6 +309,7 @@ fn main_recover_loop(
     Ok(IntendedMainLoopBreak {})
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum AppEvent {
     TermEvent(event::Event),
     ImageResized(ImageResizeResult),
