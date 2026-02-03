@@ -18,25 +18,26 @@ impl Debug for Searcher {
 }
 
 pub fn full_traversal(g: &Group) -> Vec<String> {
-    g.iter_visit_default(vec![], |group, name, _, acc| match group.group(name) {
-        Ok(g) => {
-            acc.push(g.name());
-            let grand_children = full_traversal(&g);
-            acc.extend(grand_children);
+    let traversal_result =
+        g.iter_visit_default(vec![], |group, name, _, acc| match group.group(name) {
+            Ok(g) => {
+                acc.push(g.name());
+                let grand_children = full_traversal(&g);
+                acc.extend(grand_children);
 
-            true
-        }
-        Err(_) => {
-            let base_name = if group.name() == "/" {
-                "/".to_string()
-            } else {
-                group.name() + "/"
-            };
-            acc.push(format!("{}{}", base_name, name));
-            true
-        }
-    })
-    .expect("Failed to get children")
+                true
+            }
+            Err(_) => {
+                let base_name = if group.name() == "/" {
+                    "/".to_string()
+                } else {
+                    group.name() + "/"
+                };
+                acc.push(format!("{}{}", base_name, name));
+                true
+            }
+        });
+    traversal_result.unwrap_or_default()
 }
 
 fn fuzzy_search<'a>(paths: &'a [String], query: &str) -> Vec<&'a str> {

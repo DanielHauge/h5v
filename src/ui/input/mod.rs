@@ -47,9 +47,16 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     (KeyCode::Char('/'), _) => {
                         if state.searcher.is_none() {
                             let Node::File(ref file) = state.root.borrow().node else {
-                                panic!("Root node is not a file");
+                                return Ok(EventResult::Error(
+                                    "Search only available for HDF5 files".to_string(),
+                                ));
                             };
-                            let all_h5_paths = full_traversal(&file.as_group().unwrap());
+                            let Ok(file_as_group) = file.as_group() else {
+                                return Ok(EventResult::Error(
+                                    "Search only available for HDF5 files with roots that can polymorp as group.".to_string(),
+                                ));
+                            };
+                            let all_h5_paths = full_traversal(&file_as_group);
                             state.searcher = Some(Searcher::new(all_h5_paths));
                         }
                         let Some(ref mut searcher) = state.searcher else {

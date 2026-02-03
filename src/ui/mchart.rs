@@ -14,7 +14,7 @@ use ratatui::{
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
-use crate::color_consts;
+use crate::{color_consts, error::log_error};
 
 pub type Point = (f64, f64);
 pub struct LineSerie {
@@ -230,6 +230,7 @@ impl MultiChartState {
         }
     }
 
+    // TODO: Generally turn this into Result to prop the errs
     fn render_chart(&mut self) -> bool {
         if !self.modified {
             return false;
@@ -242,8 +243,14 @@ impl MultiChartState {
         self.plot_buffer = vec![0; (width * height * 3) as usize];
         let root =
             BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
+        if let Err(e) = root.fill(&WHITE) {
+            log_error(e);
+            // TODO: render some sort of error message image
+            return false;
+        }
+
         if self.line_series.is_empty() {
+            // TODO: render some sort of empty image
             return false;
         }
 
@@ -386,12 +393,16 @@ impl MultiChartState {
             Ok(c) => c,
             Err(_) => return false,
         };
-        chart
+
+        if let Err(e) = chart
             .configure_mesh()
             .x_label_style(("sans-serif", 18).into_font())
             .y_label_style(("sans-serif", 18).into_font())
             .draw()
-            .unwrap();
+        {
+            log_error(e);
+            // TODO: Render some error image?
+        }
 
         for (i, (name, ls)) in data_series.enumerate() {
             let color = plotters::prelude::Palette99::pick(i);
@@ -455,13 +466,10 @@ impl MultiChartState {
         let series_len = self.line_series.len();
         let split = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
-            .constraints(
-                [
-                    ratatui::layout::Constraint::Length(series_len as u16),
-                    ratatui::layout::Constraint::Min(0),
-                ]
-                .as_ref(),
-            )
+            .constraints([
+                ratatui::layout::Constraint::Length(series_len as u16),
+                ratatui::layout::Constraint::Min(0),
+            ])
             .split(area);
         let header_area = split[0];
         let chart_area = split[1];

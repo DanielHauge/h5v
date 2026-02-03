@@ -17,10 +17,10 @@ pub struct CommandState {
 impl CommandState {
     pub fn parse_command(&mut self) -> Result<Command, AppError> {
         let command = self.command_buffer.trim();
-        if command.is_empty() {
+        let first_symbol_opt = command.chars().next();
+        let Some(first_symbol) = first_symbol_opt else {
             return Ok(Command::Noop);
-        }
-        let first_symbol = command.chars().next().expect("Command should not be empty");
+        };
         match first_symbol {
             '+' => {
                 let increment: usize = command[1..].trim().parse().map_err(|_| {

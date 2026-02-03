@@ -4,8 +4,8 @@ use hdf5_metno::types::VarLenUnicode;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
-    text::Span,
-    widgets::{block::Title, Block, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Paragraph, Wrap},
     Frame,
 };
 
@@ -27,13 +27,10 @@ use super::{
 fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(attributes_count.saturating_add(2).min(10) as u16),
-                Constraint::Min(0),
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(attributes_count.saturating_add(2).min(10) as u16),
+            Constraint::Min(0),
+        ])
         .split(area);
     (chunks[0], chunks[1])
 }
@@ -101,7 +98,7 @@ pub fn render_main_display(
         }
     }
 
-    let title = Title::from(tab_titles);
+    let title = Line::from(tab_titles);
 
     let bg_color = match (&state.focus, &state.mode) {
         (ui::state::Focus::Content, ui::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,

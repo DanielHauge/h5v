@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use hdf5_metno::File;
 
-use crate::error::AppError;
+use crate::error::{log_error, AppError};
 
 pub fn link(paths: &[String]) -> Result<String, AppError> {
     let paths_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
@@ -42,7 +42,7 @@ pub fn link(paths: &[String]) -> Result<String, AppError> {
                 format!("/{}/{}", fname, grp.name()).as_ref(),
             )?;
         }
-        for attr_name in hdf5_file.attr_names()? {
+        for _attr_name in hdf5_file.attr_names()? {
             //TODO: Gotta implement attr copying/linking
         }
     }

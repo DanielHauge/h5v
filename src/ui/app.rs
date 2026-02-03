@@ -22,7 +22,7 @@ use ratatui::{
 use ratatui_image::picker::Picker;
 
 use crate::{
-    error::AppError,
+    error::{log_error, AppError},
     h5f,
     ui::{input::EventResult, mchart::MultiChartState},
 };
@@ -45,24 +45,24 @@ use super::{
 
 fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
     if let Mode::Search = mode {
-        let chunks = Layout::default()
+        
+        Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([Constraint::Percentage(100), Constraint::Percentage(0)].as_ref())
-            .split(area);
-        chunks
+            .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
+            .split(area)
     } else {
         if area.width < 100 {
             let chunks = Layout::default()
                 .direction(ratatui::layout::Direction::Horizontal)
-                .constraints([Constraint::Percentage(100), Constraint::Percentage(0)].as_ref())
+                .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
                 .split(area);
             return chunks;
         }
-        let chunks = Layout::default()
+        
+        Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
-            .split(area);
-        chunks
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(area)
     }
 }
 
@@ -239,7 +239,14 @@ fn main_recover_loop(
     handle_term_events(tx_events);
 
     loop {
-        let event = rx_events.recv().expect("Oh no, something horrible went wrong. Could no longer receive events from events channel.");
+        let event = rx_events.recv();
+        let event = match event {
+            Ok(event) => event,
+            Err(error) => {
+                log_error(error);
+                panic!("Terminal events channel closed unexpectedly.")
+            }
+        };
         match event {
             AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)? {
                 EventResult::Quit => break,
@@ -322,7 +329,7 @@ fn handle_term_events(tx_events: Sender<AppEvent>) {
             if let Ok(event) = event::read() {
                 match tx_events.send(AppEvent::TermEvent(event)) {
                     Ok(_) => {}
-                    Err(_e) => {} // TODO: log to a file maybe
+                    Err(e) => log_error(e),
                 }
             }
         }

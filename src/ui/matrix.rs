@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use hdf5_metno::H5Type;
 use ratatui::{
-    layout::{Alignment::Center, Constraint, Layout, Offset, Rect},
+    layout::{Constraint, Layout, Offset, Rect},
     style::Stylize,
     text::Line,
     Frame,
@@ -130,18 +130,18 @@ pub fn render_matrix<T: H5Type + Display>(
             let idx_area = areas_split[0];
             let value_area = areas_split[1];
             let val_bg_color = match (row_idx % 2) == 0 {
-                true => match state.matrix_view_state.row_offset % 2 == 0 {
+                true => match state.matrix_view_state.row_offset.is_multiple_of(2) {
                     true => color_consts::BG_VAL3_COLOR,
                     false => color_consts::BG_VAL4_COLOR,
                 },
-                false => match state.matrix_view_state.row_offset % 2 == 0 {
+                false => match state.matrix_view_state.row_offset.is_multiple_of(2) {
                     true => color_consts::BG_VAL4_COLOR,
                     false => color_consts::BG_VAL3_COLOR,
                 },
             };
             let idx_line = Line::from(format!("{i}")).left_aligned();
             let value_line = Line::from(format!("{d}"))
-                .alignment(Center)
+                .alignment(ratatui::layout::Alignment::Center)
                 .bg(val_bg_color);
             f.render_widget(idx_line, idx_area);
             f.render_widget(value_line, value_area);
@@ -188,8 +188,8 @@ pub fn render_matrix<T: H5Type + Display>(
                 let val_area = col_areas[(j + 1) as usize];
 
                 let val_bg_color = match (
-                    (i as usize + state.matrix_view_state.row_offset) % 2 == 0,
-                    (j as usize + state.matrix_view_state.col_offset) % 2 == 0,
+                    (i as usize + state.matrix_view_state.row_offset).is_multiple_of(2),
+                    (j as usize + state.matrix_view_state.col_offset).is_multiple_of(2),
                 ) {
                     (true, true) => color_consts::BG_VAL3_COLOR,
                     (true, false) => color_consts::BG_VAL4_COLOR,

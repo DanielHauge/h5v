@@ -33,7 +33,9 @@ fn main() -> Result<(), AppError> {
     let args = Args::parse();
 
     match &args.files[..] {
-        [] => Err(AppError::FileError(String::from("No files given"))), // TODO: Provide some usage tip etc.
+        [] => Err(AppError::FileError(String::from(
+            "No files given.\n Usage: h5v /path/to/file.h5",
+        ))),
         [single] => ui::app::init(single.clone()),
         multiple => ui::app::init(linking::link(multiple)?),
     }

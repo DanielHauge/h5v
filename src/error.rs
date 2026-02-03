@@ -1,4 +1,6 @@
-use std::{fmt::Display, sync::mpsc::SendError};
+use std::fmt::Display;
+use std::io::Write;
+use std::sync::mpsc::SendError;
 
 #[derive(Debug)]
 pub enum AppError {
@@ -39,4 +41,20 @@ impl<T> From<SendError<T>> for AppError {
     fn from(x: SendError<T>) -> Self {
         AppError::ChannelError(format!("Failed to send message: {}", x))
     }
+}
+
+pub fn log_error(str: impl Display) {
+    // TODO: Maybe fallback logpath with "dirs"
+    let log_path_opt = option_env!("H5V_LOGPATH");
+    if let Some(log_path) = log_path_opt {
+        if let Ok(mut log_file) = std::fs::File::open(log_path) {
+            // write!(log_file, "{}", str);
+            let _ = write!(log_file, "{}", str);
+        }
+    }
+}
+
+pub fn log_error_panic(str: impl Display) {
+    log_error(&str);
+    panic!("{}", str);
 }

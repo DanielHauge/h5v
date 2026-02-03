@@ -38,7 +38,7 @@ pub fn render_dim_selector(
     let (labels_area, dims_area) = {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(8), Constraint::Min(0)].as_ref())
+            .constraints([Constraint::Length(8), Constraint::Min(0)])
             .split(inner_area);
         (chunks[0], chunks[1])
     };

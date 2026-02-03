@@ -127,7 +127,7 @@ pub fn render_hl_string<T: ToString>(
 fn split_string_linenumber(area: Rect, max: u16) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([Constraint::Length(max), Constraint::Min(0)].as_ref())
+        .constraints([Constraint::Length(max), Constraint::Min(0)])
         .spacing(1)
         .split(area);
     (chunks[0], chunks[1])

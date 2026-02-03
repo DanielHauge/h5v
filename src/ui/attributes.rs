@@ -16,25 +16,22 @@ use crate::{
 use super::state::{AppState, AttributeViewSelection, Focus, Mode};
 
 fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
-    let chunks = Layout::default()
+    
+    Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Length(min_first_panel + 3),
-                Constraint::Fill(u16::MAX),
-            ]
-            .as_ref(),
-        )
-        .split(area);
-    chunks
+        .constraints([
+            Constraint::Length(min_first_panel + 3),
+            Constraint::Fill(u16::MAX),
+        ])
+        .split(area)
 }
 
 fn make_panels_scroll(area: Rect, scroll_size: u16) -> Rc<[Rect]> {
-    let chunks = Layout::default()
+    
+    Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([Constraint::Max(u16::MAX), Constraint::Length(scroll_size)].as_ref())
-        .split(area);
-    chunks
+        .constraints([Constraint::Max(u16::MAX), Constraint::Length(scroll_size)])
+        .split(area)
 }
 
 fn render_text_overflow_handled(f: &mut Frame, area: &Rect, line: &Line) {

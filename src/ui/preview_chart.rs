@@ -54,35 +54,40 @@ pub fn render_chart_preview(
         .map(|(i, _)| i)
         .collect();
 
-    // TODO: Read scalar
     if x_selectable_dims.is_empty() {
         match ds_meta.matrixable {
             Some(t) => match t {
                 crate::sprint_typedesc::MatrixRenderType::Float64 => {
                     let ds = ds.read_scalar::<f64>();
-                    if let Err(e) = ds {
-                        render_error(f, area, format!("Error reading scalar: {}", e));
-                        return Ok(());
-                    }
-                    let ds = ds.unwrap();
+                    let ds = match ds {
+                        Ok(ds) => ds,
+                        Err(e) => {
+                            render_error(f, area, format!("Error reading scalar: {}", e));
+                            return Ok(());
+                        }
+                    };
                     render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Uint64 => {
                     let ds = ds.read_scalar::<u64>();
-                    if let Err(e) = ds {
-                        render_error(f, area, format!("Error reading scalar: {}", e));
-                        return Ok(());
-                    }
-                    let ds = ds.unwrap();
+                    let ds = match ds {
+                        Ok(ds) => ds,
+                        Err(e) => {
+                            render_error(f, area, format!("Error reading scalar: {}", e));
+                            return Ok(());
+                        }
+                    };
                     render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Int64 => {
                     let ds = ds.read_scalar::<i64>();
-                    if let Err(e) = ds {
-                        render_error(f, area, format!("Error reading scalar: {}", e));
-                        return Ok(());
-                    }
-                    let ds = ds.unwrap();
+                    let ds = match ds {
+                        Ok(ds) => ds,
+                        Err(e) => {
+                            render_error(f, area, format!("Error reading scalar: {}", e));
+                            return Ok(());
+                        }
+                    };
                     render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Compound => {
