@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use hdf5_metno::File;
 
-use crate::error::{log_error, AppError};
+use crate::error::AppError;
 
 pub fn link(paths: &[String]) -> Result<String, AppError> {
     let paths_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();

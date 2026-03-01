@@ -240,31 +240,15 @@ pub trait HasChildren {
     fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
     fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
     fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
-    fn get_external_datasets(&self) -> Result<Vec<ExternalDataset>, hdf5_metno::Error>;
+    fn get_externals(&self) -> Result<Vec<ExternalObject>, hdf5_metno::Error>;
     fn get_soft_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
-    fn get_external_groups(&self) -> Result<Vec<ExternalGroup>, hdf5_metno::Error>;
 }
 
-pub enum ExternalDataset {
-    LinkEstablished(Dataset),
+#[derive(Debug)]
+pub enum ExternalObject {
+    Dataset(Dataset),
+    Group(Group),
     LinkBroken(String, String),
-}
-
-pub enum ExternalGroup {
-    LinkEstablished(Group),
-    LinkBroken(String, String),
-}
-
-impl From<Dataset> for ExternalDataset {
-    fn from(value: Dataset) -> Self {
-        ExternalDataset::LinkEstablished(value)
-    }
-}
-
-impl From<Group> for ExternalGroup {
-    fn from(value: Group) -> Self {
-        ExternalGroup::LinkEstablished(value)
-    }
 }
 
 impl HasChildren for Group {
@@ -332,47 +316,25 @@ impl HasChildren for Group {
         Ok(datasets)
     }
 
-    fn get_external_datasets(&self) -> Result<Vec<ExternalDataset>, hdf5_metno::Error> {
+    fn get_externals(&self) -> Result<Vec<ExternalObject>, hdf5_metno::Error> {
         let external_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
             if LinkType::External == link.link_type {
-                match group.dataset(name) {
-                    Ok(ds) => {
-                        let ds = ExternalDataset::LinkEstablished(ds);
-                        objects.push(ds);
-                    }
-                    Err(e) => {
-                        let broken_link = ExternalDataset::LinkBroken(
-                            name.to_string(),
-                            group.filename().to_string(),
-                        );
-                        objects.push(broken_link);
-                        return true;
-                    }
+                if let Ok(ds) = group.dataset(name) {
+                    let ds = ExternalObject::Dataset(ds);
+                    objects.push(ds);
+                } else if let Ok(grp) = group.group(name) {
+                    let grp = ExternalObject::Group(grp);
+                    objects.push(grp);
+                } else {
+                    let name = name.to_string();
+                    let broken_link =
+                        ExternalObject::LinkBroken(name, group.filename().to_string());
+                    objects.push(broken_link);
                 }
             }
             true
         })?;
         Ok(external_datasets)
-    }
-
-    fn get_external_groups(&self) -> Result<Vec<ExternalGroup>, hdf5_metno::Error> {
-        let external_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::External == link.link_type {
-                match group.group(name) {
-                    Ok(g) => objects.push(g.into()),
-                    Err(_) => {
-                        let broken_link = ExternalGroup::LinkBroken(
-                            name.to_string(),
-                            group.filename().to_string(),
-                        );
-                        objects.push(broken_link);
-                        return true; // we simply ignore it, and move on.
-                    }
-                }
-            }
-            true
-        })?;
-        Ok(external_groups)
     }
 }
 
@@ -792,7 +754,7 @@ impl H5FNode {
             Node::File(f) => f.filename().split("/").last().unwrap_or("").to_string(),
             Node::Group(g, _) => g.filename().split("/").last().unwrap_or("").to_string(),
             Node::Dataset(ds, _) => ds.filename().split("/").last().unwrap_or("").to_string(),
-            Node::Broken(_, _, fname) => fname.clone(),
+            Node::Broken(t, path, fname) => path.clone(),
         }
     }
 
@@ -851,31 +813,25 @@ impl H5FNode {
         };
 
         let mut groups = vec![];
+        let mut datasets = vec![];
         for g in has_children.get_hard_groups()? {
             groups.push(GrpType::Hard(g));
         }
-        for eg in has_children.get_external_groups()? {
-            match eg {
-                ExternalGroup::LinkEstablished(g) => groups.push(GrpType::External(g)),
-                ExternalGroup::LinkBroken(name, fname) => {
-                    groups.push(GrpType::BrokenLink(name, fname))
+
+        for external in has_children.get_externals()? {
+            match external {
+                ExternalObject::Dataset(dataset) => datasets.push(DSType::External(dataset)),
+                ExternalObject::Group(group) => groups.push(GrpType::External(group)),
+                ExternalObject::LinkBroken(fname, name) => {
+                    datasets.push(DSType::BrokenLink(fname, name))
                 }
             }
         }
         for g in has_children.get_soft_groups()? {
             groups.push(GrpType::Soft(g));
         }
-        let mut datasets = vec![];
         for d in has_children.get_hard_datasets()? {
             datasets.push(DSType::Hard(d));
-        }
-        for ed in has_children.get_external_datasets()? {
-            match ed {
-                ExternalDataset::LinkEstablished(d) => datasets.push(DSType::External(d)),
-                ExternalDataset::LinkBroken(name, fname) => {
-                    datasets.push(DSType::BrokenLink(name, fname))
-                }
-            }
         }
         for d in has_children.get_soft_datasets()? {
             datasets.push(DSType::Soft(d));
