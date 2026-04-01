@@ -36,7 +36,7 @@ fn main() -> Result<(), AppError> {
         [] => Err(AppError::FileError(String::from(
             "No files given.\n Usage: h5v /path/to/file.h5",
         ))),
-        [single] => ui::app::init(single.clone()),
-        multiple => ui::app::init(linking::link(multiple)?),
+        [single] => ui::app::init(single.clone(), false),
+        multiple => ui::app::init(linking::link(multiple)?, true),
     }
 }

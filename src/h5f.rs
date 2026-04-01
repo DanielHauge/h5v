@@ -580,6 +580,7 @@ impl ComputedAttributes {
 
 #[derive(Debug)]
 pub struct H5FNode {
+    pub display_name: Option<String>,
     pub expanded: bool,
     pub node: Node,
     pub computed_attributes: Option<ComputedAttributes>,
@@ -612,6 +613,7 @@ pub enum GrpType {
 impl H5FNode {
     pub fn new(node_type: Node) -> Self {
         Self {
+            display_name: None,
             expanded: false,
             node: node_type,
             read: false,
@@ -750,6 +752,9 @@ impl H5FNode {
     }
 
     pub fn full_path(&self) -> String {
+        if let Some(ref name) = self.display_name {
+            return name.clone();
+        }
         match &self.node {
             Node::File(f) => f.filename().split("/").last().unwrap_or("").to_string(),
             Node::Group(g, _) => g.filename().split("/").last().unwrap_or("").to_string(),
@@ -954,10 +959,16 @@ pub struct H5F {
 }
 
 impl H5F {
-    pub fn open(file_path: String) -> Result<Self, hdf5_metno::Error> {
+    pub fn open(file_path: String, linked: bool) -> Result<Self, hdf5_metno::Error> {
         let file = hdf5_metno::file::File::open(&file_path)?;
 
-        let root = Rc::new(RefCell::new(H5FNode::new(Node::File(file))));
+        let member_count = file.member_names()?.len();
+        let mut h5node = H5FNode::new(Node::File(file));
+        if linked {
+            h5node.display_name = Some(format!(" ({member_count}) linked ").to_string());
+        }
+
+        let root = Rc::new(RefCell::new(h5node));
 
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;

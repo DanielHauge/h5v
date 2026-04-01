@@ -45,7 +45,6 @@ use super::{
 
 fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
     if let Mode::Search = mode {
-        
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
@@ -58,7 +57,7 @@ fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
                 .split(area);
             return chunks;
         }
-        
+
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
@@ -70,7 +69,7 @@ type Result<T> = std::result::Result<T, AppError>;
 
 pub struct IntendedMainLoopBreak {}
 
-pub fn init(filename: String) -> Result<()> {
+pub fn init(filename: String, link: bool) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
@@ -79,7 +78,7 @@ pub fn init(filename: String) -> Result<()> {
     let mut last_message = None;
 
     loop {
-        match main_recover_loop(&mut terminal, filename.clone()) {
+        match main_recover_loop(&mut terminal, filename.clone(), link) {
             Ok(_) => break,
             Err(e) => match e {
                 AppError::FileError(_) => {
@@ -123,8 +122,9 @@ pub fn init(filename: String) -> Result<()> {
 fn main_recover_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     filename: String,
+    link: bool,
 ) -> Result<IntendedMainLoopBreak> {
-    let h5f = h5f::H5F::open(filename).map_err(|e| {
+    let h5f = h5f::H5F::open(filename, link).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",
             e
