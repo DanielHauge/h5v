@@ -754,7 +754,7 @@ impl H5FNode {
             Node::File(f) => f.filename().split("/").last().unwrap_or("").to_string(),
             Node::Group(g, _) => g.filename().split("/").last().unwrap_or("").to_string(),
             Node::Dataset(ds, _) => ds.filename().split("/").last().unwrap_or("").to_string(),
-            Node::Broken(t, path, fname) => path.clone(),
+            Node::Broken(_t, path, _fname) => path.clone(),
         }
     }
 
