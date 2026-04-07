@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use hdf5_metno::{types::VarLenUnicode, Attribute, Dataset, File, Group, LinkType};
 use ratatui::{
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span},
 };
 
@@ -607,7 +607,6 @@ pub enum GrpType {
     Soft(Group),
     Hard(Group),
     External(Group),
-    BrokenLink(String, String),
 }
 
 impl H5FNode {
@@ -848,7 +847,7 @@ impl H5FNode {
                 GrpType::Hard(g) => (Some(g), false, None),
                 GrpType::External(g) => (Some(g), true, None),
                 GrpType::Soft(g) => (Some(g), true, None),
-                GrpType::BrokenLink(name, fname) => (None, true, Some((name, fname))),
+                // GrpType::BrokenLink(name, fname) => (None, true, Some((name, fname))),
             };
             if let Some((broken_name, broken_file)) = broken {
                 let node = Rc::new(RefCell::new(H5FNode::new(Node::Broken(

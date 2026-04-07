@@ -14,7 +14,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     text::Text,
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
@@ -132,6 +132,7 @@ fn main_recover_loop(
     })?;
 
     let (tx_events, rx_events) = channel();
+    #[allow(deprecated)]
     let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
     let tx_events_2 = tx_events.clone();
     let tx_load_img = handle_image_resize(tx_events_2);
@@ -157,6 +158,8 @@ fn main_recover_loop(
         row_offset: 0,
         rows_currently_available: 0,
         cols_currently_available: 0,
+        cursor_row: 0,
+        cursor_col: 0,
     };
     let clipboard = Clipboard::new()
         .map_err(|e| AppError::ClipboardError(format!("Failed to initialize clipboard: {}", e)))?;

@@ -54,6 +54,7 @@ pub fn log_error(str: impl Display) {
     }
 }
 
+#[allow(dead_code)]
 pub fn log_error_panic(str: impl Display) {
     log_error(&str);
     panic!("{}", str);

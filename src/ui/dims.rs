@@ -1,7 +1,7 @@
 use hdf5_metno::{Error, Hyperslab, Selection, SliceOrIndex};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Offset, Rect},
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,

@@ -13,6 +13,7 @@ use crate::{
     data::{MatrixTable, MatrixValues},
     error::AppError,
     h5f::{DatasetMeta, H5FNode},
+    ui::state::Focus,
 };
 
 use super::{
@@ -139,6 +140,19 @@ pub fn render_matrix<T: H5Type + Display>(
                     false => color_consts::BG_VAL3_COLOR,
                 },
             };
+            let val_bg_color = if row_idx == state.matrix_view_state.cursor_row {
+                let copying = state.copying;
+                if let (true, Focus::Content) = (copying, &state.focus) {
+                    state.clipboard.set_text(format!("{d}")).map_err(|_| {
+                        AppError::ClipboardError("Could not copy data as text".to_string())
+                    })?;
+                    color_consts::HIGHLIGHT_BG_COLOR_COPY
+                } else {
+                    color_consts::HIGHLIGHT_BG_COLOR
+                }
+            } else {
+                val_bg_color
+            };
             let idx_line = Line::from(format!("{i}")).left_aligned();
             let value_line = Line::from(format!("{d}"))
                 .alignment(ratatui::layout::Alignment::Center)
@@ -201,7 +215,27 @@ pub fn render_matrix<T: H5Type + Display>(
                 } else {
                     (i as usize, j as usize)
                 };
+
                 let val = data.data.get(idx);
+                let val_bg_color = if idx.1 == state.matrix_view_state.cursor_col
+                    && idx.0 == state.matrix_view_state.cursor_row
+                {
+                    let copying = state.copying;
+                    if let (true, Focus::Content) = (copying, &state.focus) {
+                        if let Some(v) = val {
+                            state.clipboard.set_text(format!("{v}")).map_err(|_| {
+                                AppError::ClipboardError("Could not copy data as text".to_string())
+                            })?;
+                            color_consts::HIGHLIGHT_BG_COLOR_COPY
+                        } else {
+                            color_consts::ERROR_COLOR
+                        }
+                    } else {
+                        color_consts::HIGHLIGHT_BG_COLOR
+                    }
+                } else {
+                    val_bg_color
+                };
 
                 match val {
                     Some(v) => f.render_widget(

@@ -98,6 +98,9 @@ pub struct MatrixViewState {
     pub row_offset: usize,
     pub rows_currently_available: usize,
     pub cols_currently_available: usize,
+    // The selected cursor index
+    pub cursor_row: usize,
+    pub cursor_col: usize,
 }
 
 pub enum SegmentType {

@@ -16,7 +16,6 @@ use crate::{
 use super::state::{AppState, AttributeViewSelection, Focus, Mode};
 
 fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
-    
     Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints([
@@ -27,7 +26,6 @@ fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
 }
 
 fn make_panels_scroll(area: Rect, scroll_size: u16) -> Rc<[Rect]> {
-    
     Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints([Constraint::Max(u16::MAX), Constraint::Length(scroll_size)])
@@ -113,8 +111,12 @@ pub fn render_info_attributes(
         .saturating_sub(state.attributes_view_cursor.attribute_offset)
         .clamp(0, heightu.saturating_sub(1));
 
-    let highlighted_bg_color = if state.copying {
-        color_consts::HIGHLIGHT_BG_COLOR_COPY
+    let highlighted_bg_color = if let Focus::Attributes = state.focus {
+        if state.copying {
+            color_consts::HIGHLIGHT_BG_COLOR_COPY
+        } else {
+            color_consts::HIGHLIGHT_BG_COLOR
+        }
     } else {
         color_consts::HIGHLIGHT_BG_COLOR
     };
