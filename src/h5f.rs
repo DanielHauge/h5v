@@ -1,6 +1,9 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, str::FromStr, string};
 
-use hdf5_metno::{types::VarLenUnicode, Attribute, Dataset, File, Group, LinkType};
+use hdf5_metno::{
+    types::{FixedAscii, VarLenAscii, VarLenUnicode},
+    Attribute, Dataset, File, Group, H5Type, LinkType,
+};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -8,6 +11,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
+    error::{log_error_panic, AppError},
     sprint_attributes::sprint_attribute,
     sprint_typedesc::{
         encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
@@ -629,6 +633,39 @@ impl H5FNode {
         }
     }
 
+    pub fn update_attribute(&self, attr_name: &str, new_value: String) -> Result<(), AppError> {
+        let attr = self.node.attribute(attr_name)?;
+        let type_desc = attr.dtype()?.to_descriptor()?;
+        match type_desc {
+            hdf5_metno::types::TypeDescriptor::Integer(int_size) => match int_size {
+                hdf5_metno::types::IntSize::U1 => todo!(),
+                hdf5_metno::types::IntSize::U2 => todo!(),
+                hdf5_metno::types::IntSize::U4 => todo!(),
+                hdf5_metno::types::IntSize::U8 => todo!(),
+            },
+            hdf5_metno::types::TypeDescriptor::Unsigned(int_size) => todo!(),
+            hdf5_metno::types::TypeDescriptor::Float(float_size) => todo!(),
+            hdf5_metno::types::TypeDescriptor::Boolean => todo!(),
+            hdf5_metno::types::TypeDescriptor::Enum(enum_type) => todo!(),
+            hdf5_metno::types::TypeDescriptor::Compound(compound_type) => todo!(),
+            hdf5_metno::types::TypeDescriptor::FixedArray(type_descriptor, _) => todo!(),
+            hdf5_metno::types::TypeDescriptor::FixedAscii(_) => todo!(),
+            hdf5_metno::types::TypeDescriptor::FixedUnicode(_) => todo!(),
+            hdf5_metno::types::TypeDescriptor::VarLenArray(type_descriptor) => todo!(),
+            hdf5_metno::types::TypeDescriptor::VarLenAscii => {
+                let ascii = VarLenAscii::from_ascii(&new_value).unwrap();
+                attr.write_scalar(&ascii).unwrap();
+            }
+            hdf5_metno::types::TypeDescriptor::VarLenUnicode => {
+                let unicode = VarLenUnicode::from_str(&new_value).unwrap();
+                attr.write_scalar(&unicode).unwrap();
+            }
+            hdf5_metno::types::TypeDescriptor::Reference(reference) => todo!(),
+        }
+
+        Ok(())
+    }
+
     pub fn icon(&self) -> String {
         if let Node::Broken(_, _, _) = &self.node {
             return "*- ".to_string();
@@ -721,6 +758,11 @@ impl H5FNode {
         }
     }
 
+    pub fn recompute_attributes(&mut self) -> Result<(), hdf5_metno::Error> {
+        self.computed_attributes = Some(ComputedAttributes::new(&self.node)?);
+        Ok(())
+    }
+
     pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
         self.read_children()?;
         if !self.expanded {
@@ -748,6 +790,12 @@ impl H5FNode {
             }
         }
         Ok(())
+    }
+
+    pub fn close(self) {
+        if let Node::File(file) = self.node {
+            file.close().unwrap();
+        }
     }
 
     pub fn full_path(&self) -> String {
@@ -954,12 +1002,19 @@ impl H5FNode {
 }
 
 pub struct H5F {
+    pub file_path: String,
+    pub linked: bool,
+    pub writable: bool,
     pub root: Rc<RefCell<H5FNode>>,
 }
 
 impl H5F {
-    pub fn open(file_path: String, linked: bool) -> Result<Self, hdf5_metno::Error> {
-        let file = hdf5_metno::file::File::open(&file_path)?;
+    pub fn open(file_path: String, linked: bool, write: bool) -> Result<Self, hdf5_metno::Error> {
+        let file = if write {
+            hdf5_metno::file::File::open_rw(&file_path)?
+        } else {
+            hdf5_metno::file::File::open(&file_path)?
+        };
 
         let member_count = file.member_names()?.len();
         let mut h5node = H5FNode::new(Node::File(file));
@@ -972,7 +1027,12 @@ impl H5F {
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;
 
-        let s = Self { root };
+        let s = Self {
+            root,
+            file_path,
+            linked,
+            writable: false,
+        };
         Ok(s)
     }
 }

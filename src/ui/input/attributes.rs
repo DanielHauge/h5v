@@ -96,10 +96,33 @@ pub fn handle_normal_attributes(
                         // TODO: better handling?
                         return Ok(EventResult::Continue);
                     };
-                    let content = format!("{}={}", attribute.0, attribute.1);
+                    let attr_name = attribute
+                        .0
+                        .to_string()
+                        .trim_end_matches('=')
+                        .trim_end_matches('─')
+                        .trim_end()
+                        .to_string();
+                    //TODO: What if attribute is system attribute?
+                    let content = match state.attributes_view_cursor.attribute_view_selection {
+                        Name => attr_name.clone(),
+                        Value => attribute
+                            .1
+                            .to_string()
+                            .trim_start_matches("\"")
+                            .trim_end_matches("\"")
+                            .to_string(),
+                    };
                     drop(selected_node);
 
-                    perform_edit(state, content)?;
+                    let new_value = perform_edit(state, content)?;
+                    let mut selected_node =
+                        state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    selected_node
+                        .update_attribute(&attr_name, new_value)
+                        .unwrap();
+
+                    selected_node.recompute_attributes().unwrap();
 
                     Ok(EventResult::FullRedraw)
                 }

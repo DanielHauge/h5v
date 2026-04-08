@@ -1,3 +1,7 @@
+use hdf5_metno::{types::TypeDescriptor, Attribute, H5Type};
+
+use crate::error::AppError;
+
 pub fn image_capable_terminal() -> bool {
     if std::env::var("KITTY_WINDOW_ID").is_ok() {
         return true;

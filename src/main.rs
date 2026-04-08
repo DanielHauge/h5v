@@ -27,6 +27,9 @@ const GIR_VERSION: &str =
 struct Args {
     /// Path to the HDF5 file to open
     files: Vec<String>,
+
+    #[clap(short, long)]
+    write: bool,
 }
 
 fn main() -> Result<(), AppError> {
@@ -36,7 +39,7 @@ fn main() -> Result<(), AppError> {
         [] => Err(AppError::FileError(String::from(
             "No files given.\n Usage: h5v /path/to/file.h5",
         ))),
-        [single] => ui::app::init(single.clone(), false),
-        multiple => ui::app::init(linking::link(multiple)?, true),
+        [single] => ui::app::init(single.clone(), false, args.write),
+        multiple => ui::app::init(linking::link(multiple)?, true, args.write),
     }
 }

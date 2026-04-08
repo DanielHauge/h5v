@@ -73,7 +73,7 @@ type Result<T> = std::result::Result<T, AppError>;
 
 pub struct IntendedMainLoopBreak {}
 
-pub fn init(filename: String, link: bool) -> Result<()> {
+pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
@@ -82,7 +82,7 @@ pub fn init(filename: String, link: bool) -> Result<()> {
     let mut last_message = None;
 
     loop {
-        match main_recover_loop(&mut terminal, filename.clone(), link) {
+        match main_recover_loop(&mut terminal, filename.clone(), link, writable) {
             Ok(_) => break,
             Err(e) => match e {
                 AppError::FileError(_) => {
@@ -127,8 +127,9 @@ fn main_recover_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     filename: String,
     link: bool,
+    writable: bool,
 ) -> Result<IntendedMainLoopBreak> {
-    let h5f = h5f::H5F::open(filename, link).map_err(|e| {
+    let h5f = h5f::H5F::open(filename, link, writable).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",
             e
@@ -181,8 +182,10 @@ fn main_recover_loop(
     };
     let edit_pause = Arc::new(RwLock::new(()));
 
+    let root_node = h5f.root.clone();
     let mut state = AppState {
-        root: h5f.root.clone(),
+        h5f,
+        root: root_node,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         edit_pause: edit_pause.clone(),

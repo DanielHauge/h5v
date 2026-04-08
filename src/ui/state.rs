@@ -12,7 +12,7 @@ use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
 use crate::{
     error::AppError,
-    h5f::{H5FNode, ImageType, Node},
+    h5f::{H5FNode, ImageType, Node, H5F},
     search::Searcher,
     ui::mchart::MultiChartState,
 };
@@ -121,6 +121,7 @@ pub struct SegmentState {
 }
 
 pub struct AppState<'a> {
+    pub h5f: H5F,
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub edit_pause: Arc<RwLock<()>>,

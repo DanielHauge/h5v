@@ -50,13 +50,16 @@ pub fn perform_edit(state: &mut AppState<'_>, content: String) -> Result<String,
     leave_h5v()?;
     let edit_pause = state.edit_pause.write().unwrap();
     let (mut file, path) = create_tmp_file()?;
-    file.write_all(&content.into_bytes());
+    file.write_all(&content.into_bytes()).unwrap();
+    drop(file);
 
     let editor = option_env!("EDITOR").unwrap_or("vi");
-    let editor_proc = Command::new(editor).arg(path).spawn();
-    editor_proc.unwrap().wait_with_output();
+    let editor_proc = Command::new(editor).arg(&path).spawn();
+    editor_proc.unwrap().wait_with_output().unwrap();
     let mut new_content = String::new();
-    file.read_to_string(&mut new_content);
+
+    let mut file = File::open(path).unwrap();
+    file.read_to_string(&mut new_content).unwrap();
     drop(edit_pause);
     reenter_h5v()?;
     Ok(new_content)
