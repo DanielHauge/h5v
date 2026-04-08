@@ -21,6 +21,7 @@ pub mod tree;
 pub enum EventResult {
     Quit,
     Redraw,
+    FullRedraw,
     Copying,
     Continue,
     Error(String),

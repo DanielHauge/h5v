@@ -1,10 +1,28 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
+use std::{
+    env::temp_dir,
+    fs::File,
+    io::{stdout, Stdin, Write},
+    os::linux::raw::stat,
+    process::Command,
+    thread::sleep,
+    time::Duration,
+};
+
+use ratatui::crossterm::{
+    event::{Event, KeyCode, KeyEventKind},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
+use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    ui::state::{
-        AppState,
-        AttributeViewSelection::{Name, Value},
+    ui::{
+        edit::perform_edit,
+        state::{
+            AppState,
+            AttributeViewSelection::{Name, Value},
+        },
     },
 };
 
@@ -65,6 +83,25 @@ pub fn handle_normal_attributes(
                         Value => {}
                     }
                     Ok(EventResult::Redraw)
+                }
+
+                (KeyCode::Char('e'), _) => {
+                    let mut selected_node =
+                        state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let attributes = selected_node.read_attributes()?;
+                    let selected_rendered_attribute = attributes
+                        .rendered_attributes
+                        .get(state.attributes_view_cursor.attribute_index);
+                    let Some(attribute) = selected_rendered_attribute else {
+                        // TODO: better handling?
+                        return Ok(EventResult::Continue);
+                    };
+                    let content = format!("{}={}", attribute.0, attribute.1);
+                    drop(selected_node);
+
+                    perform_edit(state, content)?;
+
+                    Ok(EventResult::FullRedraw)
                 }
                 (KeyCode::Char('y'), _) => {
                     let mut selected_node =

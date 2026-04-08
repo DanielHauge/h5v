@@ -1,8 +1,12 @@
 use std::{
     io::stdout,
     rc::Rc,
-    sync::mpsc::{channel, Sender},
+    sync::{
+        mpsc::{channel, Sender},
+        Arc, Mutex, RwLock,
+    },
     thread,
+    time::Duration,
 };
 
 use arboard::Clipboard;
@@ -175,11 +179,13 @@ fn main_recover_loop(
         last_command: Command::Noop,
         cursor: 0,
     };
+    let edit_pause = Arc::new(RwLock::new(()));
 
     let mut state = AppState {
         root: h5f.root.clone(),
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
+        edit_pause: edit_pause.clone(),
         command_state,
         treeview: vec![],
         tree_view_cursor: 0,
@@ -239,7 +245,7 @@ fn main_recover_loop(
     // First time draw nice state
     terminal.draw(|f| draw_closure(f, &mut state))?;
 
-    handle_term_events(tx_events);
+    handle_term_events(tx_events, edit_pause);
 
     loop {
         let event = rx_events.recv();
@@ -255,6 +261,13 @@ fn main_recover_loop(
                 EventResult::Quit => break,
                 EventResult::Continue => {}
                 EventResult::Redraw => {
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                EventResult::FullRedraw => {
+                    terminal.clear()?;
+                    terminal.flush()?;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
@@ -326,9 +339,11 @@ pub enum AppEvent {
     ImageLoad(ImageLoadedResult),
 }
 
-fn handle_term_events(tx_events: Sender<AppEvent>) {
+fn handle_term_events(tx_events: Sender<AppEvent>, paused: Arc<RwLock<()>>) {
     thread::spawn(move || loop {
         if event::poll(std::time::Duration::from_millis(16)).is_ok() {
+            let pause = paused.read().unwrap();
+            drop(pause);
             if let Ok(event) = event::read() {
                 match tx_events.send(AppEvent::TermEvent(event)) {
                     Ok(_) => {}

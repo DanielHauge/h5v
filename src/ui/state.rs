@@ -1,4 +1,9 @@
-use std::{cell::RefCell, io::BufReader, rc::Rc, sync::mpsc::Sender};
+use std::{
+    cell::RefCell,
+    io::BufReader,
+    rc::Rc,
+    sync::{mpsc::Sender, Arc, Mutex, RwLock},
+};
 
 use arboard::Clipboard;
 use hdf5_metno::{ByteReader, Dataset, Hyperslab, Selection, SliceOrIndex};
@@ -118,6 +123,7 @@ pub struct SegmentState {
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
+    pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,
     pub clipboard: Clipboard,
     pub copying: bool,
