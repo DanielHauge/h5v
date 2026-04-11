@@ -3,10 +3,9 @@ use std::{
     rc::Rc,
     sync::{
         mpsc::{channel, Sender},
-        Arc, Mutex, RwLock,
+        Arc, RwLock,
     },
     thread,
-    time::Duration,
 };
 
 use arboard::Clipboard;
@@ -18,7 +17,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style},
+    style::{Color, Style, Stylize},
     text::Text,
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
@@ -26,9 +25,14 @@ use ratatui::{
 use ratatui_image::picker::Picker;
 
 use crate::{
+    color_consts,
     error::{log_error, AppError},
     h5f,
-    ui::{input::EventResult, mchart::MultiChartState},
+    ui::{
+        input::EventResult,
+        mchart::MultiChartState,
+        state::{AppToast, AttributeViewSelection},
+    },
 };
 
 use super::{
@@ -184,8 +188,9 @@ fn main_recover_loop(
 
     let root_node = h5f.root.clone();
     let mut state = AppState {
-        h5f,
         root: root_node,
+        editing: false,
+        toast: AppToast::Empty,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         edit_pause: edit_pause.clone(),
@@ -195,7 +200,7 @@ fn main_recover_loop(
         attributes_view_cursor: AttributeCursor {
             attribute_index: 0,
             attribute_offset: 0,
-            attribute_view_selection: state::AttributeViewSelection::Name,
+            attribute_view_selection: AttributeViewSelection::Name,
         },
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
@@ -220,14 +225,19 @@ fn main_recover_loop(
 
         let show_tree_view = state.show_tree_view;
 
+        let frame_area = match state.toast {
+            AppToast::Empty => frame.area(),
+            AppToast::Info(_) | AppToast::Error(_) => split_render_toast(frame, state),
+        };
+
         let main_display_area = match show_tree_view {
             true => {
-                let areas = make_panels_rect(frame.area(), state.mode.clone());
+                let areas = make_panels_rect(frame_area, state.mode.clone());
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
                 render_tree(frame, tree_area, state);
                 main_display_area
             }
-            false => frame.area(),
+            false => frame_area,
         };
 
         match state.mode {
@@ -259,23 +269,21 @@ fn main_recover_loop(
                 panic!("Terminal events channel closed unexpectedly.")
             }
         };
+        if state.editing {
+            continue;
+        }
         match event {
             AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)? {
                 EventResult::Quit => break,
                 EventResult::Continue => {}
                 EventResult::Redraw => {
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
-                }
-                EventResult::FullRedraw => {
-                    terminal.clear()?;
-                    terminal.flush()?;
+                    state.toast = AppToast::Empty;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
                 }
                 EventResult::Copying => {
+                    state.toast = AppToast::Empty;
                     state.copying = true;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
@@ -292,6 +300,16 @@ fn main_recover_loop(
                         render_error(f, &e);
                     })?;
                     thread::sleep(std::time::Duration::from_secs(2));
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                EventResult::Toast(toast, full_redraw) => {
+                    if full_redraw {
+                        terminal.clear()?;
+                        terminal.flush()?;
+                    }
+                    state.toast = toast;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
@@ -340,6 +358,45 @@ pub enum AppEvent {
     TermEvent(event::Event),
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
+}
+
+fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
+    let area = frame.area();
+    match state.toast {
+        AppToast::Empty => area,
+        AppToast::Info(ref msg) | AppToast::Error(ref msg) => {
+            let areas = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(3)])
+                .split(area);
+
+            let toast_area = areas[1];
+            let toast_text = Text::from(msg.to_string());
+            let toast_paragraph = Paragraph::new(toast_text)
+                .block(
+                    Block::default()
+                        .bg(color_consts::BG_COLOR)
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(match state.toast {
+                            AppToast::Info(_) => Color::LightGreen,
+                            AppToast::Error(_) => Color::Red,
+                            _ => Color::White,
+                        }))
+                        .border_type(ratatui::widgets::BorderType::Rounded)
+                        .title(match state.toast {
+                            AppToast::Info(_) => "Info",
+                            AppToast::Error(_) => "Error",
+                            _ => "",
+                        })
+                        .title_style(Style::default().fg(Color::Yellow).bold())
+                        .title_alignment(Alignment::Center),
+                )
+                .wrap(Wrap { trim: true });
+            frame.render_widget(toast_paragraph, toast_area);
+
+            areas[0]
+        }
+    }
 }
 
 fn handle_term_events(tx_events: Sender<AppEvent>, paused: Arc<RwLock<()>>) {

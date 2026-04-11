@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     io::BufReader,
     rc::Rc,
-    sync::{mpsc::Sender, Arc, Mutex, RwLock},
+    sync::{mpsc::Sender, Arc, RwLock},
 };
 
 use arboard::Clipboard;
@@ -12,7 +12,7 @@ use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
 use crate::{
     error::AppError,
-    h5f::{H5FNode, ImageType, Node, H5F},
+    h5f::{H5FNode, ImageType, Node},
     search::Searcher,
     ui::mchart::MultiChartState,
 };
@@ -120,14 +120,21 @@ pub struct SegmentState {
     pub segment_count: i32,
 }
 
+pub enum AppToast {
+    Empty,
+    Info(String),
+    Error(String),
+}
+
 pub struct AppState<'a> {
-    pub h5f: H5F,
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
+    pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,
     pub clipboard: Clipboard,
     pub copying: bool,
+    pub toast: AppToast,
     pub attributes_view_cursor: AttributeCursor,
     pub focus: Focus,
     pub multi_chart: MultiChartState,

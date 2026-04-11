@@ -1,9 +1,7 @@
 use std::{
     fs::File,
     io::{stdout, Read, Write},
-    path::Path,
     process::Command,
-    sync::{Arc, RwLock},
 };
 
 use ratatui::crossterm::{
@@ -12,13 +10,7 @@ use ratatui::crossterm::{
 };
 use uuid::Uuid;
 
-use crate::{
-    error::AppError,
-    ui::{
-        input::content,
-        state::{self, AppState},
-    },
-};
+use crate::{error::AppError, ui::state::AppState};
 
 pub fn leave_h5v() -> Result<(), AppError> {
     stdout().execute(LeaveAlternateScreen)?;

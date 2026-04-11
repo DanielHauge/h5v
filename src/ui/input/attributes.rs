@@ -1,26 +1,12 @@
-use std::{
-    env::temp_dir,
-    fs::File,
-    io::{stdout, Stdin, Write},
-    os::linux::raw::stat,
-    process::Command,
-    thread::sleep,
-    time::Duration,
-};
-
-use ratatui::crossterm::{
-    event::{Event, KeyCode, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
-};
-use uuid::Uuid;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
     error::AppError,
+    h5f::SYSTEM_ATTRIBUTES,
     ui::{
         edit::perform_edit,
         state::{
-            AppState,
+            AppState, AppToast,
             AttributeViewSelection::{Name, Value},
         },
     },
@@ -84,8 +70,8 @@ pub fn handle_normal_attributes(
                     }
                     Ok(EventResult::Redraw)
                 }
-
-                (KeyCode::Char('e'), _) => {
+                (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => {
+                    state.editing = true;
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
                     let attributes = selected_node.read_attributes()?;
@@ -93,8 +79,10 @@ pub fn handle_normal_attributes(
                         .rendered_attributes
                         .get(state.attributes_view_cursor.attribute_index);
                     let Some(attribute) = selected_rendered_attribute else {
-                        // TODO: better handling?
-                        return Ok(EventResult::Continue);
+                        return Ok(EventResult::Toast(
+                            AppToast::Error("No attribute selected".to_string()),
+                            true,
+                        ));
                     };
                     let attr_name = attribute
                         .0
@@ -103,7 +91,15 @@ pub fn handle_normal_attributes(
                         .trim_end_matches('─')
                         .trim_end()
                         .to_string();
-                    //TODO: What if attribute is system attribute?
+                    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+                        return Ok(EventResult::Toast(
+                            AppToast::Error(format!(
+                                "Editing metainfo-attribute '{}' is not allowed",
+                                attr_name
+                            )),
+                            true,
+                        ));
+                    }
                     let content = match state.attributes_view_cursor.attribute_view_selection {
                         Name => attr_name.clone(),
                         Value => attribute
@@ -123,8 +119,12 @@ pub fn handle_normal_attributes(
                         .unwrap();
 
                     selected_node.recompute_attributes().unwrap();
+                    state.editing = false;
 
-                    Ok(EventResult::FullRedraw)
+                    Ok(EventResult::Toast(
+                        AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),
+                        true,
+                    ))
                 }
                 (KeyCode::Char('y'), _) => {
                     let mut selected_node =

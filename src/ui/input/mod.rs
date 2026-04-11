@@ -7,6 +7,7 @@ use crate::{
     error::AppError,
     h5f::Node,
     search::{full_traversal, Searcher},
+    ui::state::AppToast,
 };
 
 use super::state::{AppState, Focus, LastFocused, Mode};
@@ -21,10 +22,10 @@ pub mod tree;
 pub enum EventResult {
     Quit,
     Redraw,
-    FullRedraw,
     Copying,
     Continue,
     Error(String),
+    Toast(AppToast, bool),
 }
 
 pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {

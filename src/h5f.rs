@@ -1,8 +1,8 @@
-use std::{cell::RefCell, rc::Rc, str::FromStr, string};
+use std::{cell::RefCell, rc::Rc, str::FromStr};
 
 use hdf5_metno::{
-    types::{FixedAscii, VarLenAscii, VarLenUnicode},
-    Attribute, Dataset, File, Group, H5Type, LinkType,
+    types::{VarLenAscii, VarLenUnicode},
+    Attribute, Dataset, File, Group, LinkType,
 };
 use ratatui::{
     style::Style,
@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    error::{log_error_panic, AppError},
+    error::AppError,
     sprint_attributes::sprint_attribute,
     sprint_typedesc::{
         encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
@@ -116,6 +116,9 @@ impl GroupMeta {
         lines
     }
 }
+
+// type, size, shape etc.
+pub static SYSTEM_ATTRIBUTES: [&str; 6] = ["type", "size", "shape", "chunk", "link", "path"];
 
 impl DatasetMeta {
     pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
@@ -1002,9 +1005,6 @@ impl H5FNode {
 }
 
 pub struct H5F {
-    pub file_path: String,
-    pub linked: bool,
-    pub writable: bool,
     pub root: Rc<RefCell<H5FNode>>,
 }
 
@@ -1027,12 +1027,7 @@ impl H5F {
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;
 
-        let s = Self {
-            root,
-            file_path,
-            linked,
-            writable: false,
-        };
+        let s = Self { root };
         Ok(s)
     }
 }
