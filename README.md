@@ -63,7 +63,7 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Enable dataset values focus to copy values easily
+- [ ] Adding/Updating/Deletion of attributes/matrix values
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix issue related to segmentation errors (last segment fetched too many)
 - [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
