@@ -79,6 +79,7 @@ pub fn handle_normal_attributes(
                         .rendered_attributes
                         .get(state.attributes_view_cursor.attribute_index);
                     let Some(attribute) = selected_rendered_attribute else {
+                        state.editing = false;
                         return Ok(EventResult::Toast(
                             AppToast::Error("No attribute selected".to_string()),
                             true,
@@ -92,6 +93,7 @@ pub fn handle_normal_attributes(
                         .trim_end()
                         .to_string();
                     if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+                        state.editing = false;
                         return Ok(EventResult::Toast(
                             AppToast::Error(format!(
                                 "Editing metainfo-attribute '{}' is not allowed",
