@@ -1,7 +1,7 @@
-use std::{cell::RefCell, rc::Rc, str::FromStr};
+use std::{cell::RefCell, io::Read, rc::Rc, str::FromStr};
 
 use hdf5_metno::{
-    types::{VarLenAscii, VarLenUnicode},
+    types::{TypeDescriptor, VarLenAscii, VarLenUnicode},
     Attribute, Dataset, File, Group, LinkType,
 };
 use ratatui::{
@@ -241,6 +241,7 @@ pub trait HasAttributes {
     fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error>;
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
+    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), hdf5_metno::Error>;
 }
 
 pub trait HasChildren {
@@ -411,6 +412,71 @@ impl HasAttributes for Node {
                 "Cannot read from broken link",
             ))),
         }
+    }
+
+    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), hdf5_metno::Error> {
+        let group = match self {
+            Node::File(file) => file.as_group()?,
+            Node::Group(group, _) => group.as_group()?,
+            Node::Dataset(dataset, _) => dataset.as_group()?,
+            Node::Broken(_, _, _) => {
+                return Err(hdf5_metno::Error::Internal(String::from(
+                    "Cannot update attribute on broken link",
+                )))
+            }
+        };
+
+        let attr = group.attr(old_name)?;
+        let type_desc = attr.dtype()?.to_descriptor()?;
+        match type_desc {
+            TypeDescriptor::Integer(_)
+            | TypeDescriptor::Enum(_)
+            | TypeDescriptor::Unsigned(_)
+            | TypeDescriptor::Reference(_)
+            | TypeDescriptor::Compound(_)
+            | TypeDescriptor::Float(_) => {
+                let buf: Vec<u8> = attr.read_raw()?;
+                group
+                    .new_attr_builder()
+                    .with_data_as(&buf, &type_desc)
+                    .create(new_name)?;
+            }
+            TypeDescriptor::Boolean => {
+                let bool_value = attr.read_raw::<bool>()?;
+            }
+            TypeDescriptor::FixedAscii(_) => {
+                let ascii_value = attr.read_scalar::<VarLenAscii>()?;
+                group
+                    .new_attr_builder()
+                    .with_data_as(&ascii_value, &type_desc)
+                    .create(new_name)?;
+            }
+            TypeDescriptor::VarLenAscii => {
+                let ascii_value = attr.read_scalar::<VarLenAscii>()?;
+                group
+                    .new_attr_builder()
+                    .with_data_as(&ascii_value, &type_desc)
+                    .create(new_name)?;
+            }
+            TypeDescriptor::FixedUnicode(_) => {
+                let unicode_value = attr.read_scalar::<VarLenUnicode>()?;
+                group
+                    .new_attr_builder()
+                    .with_data_as(&unicode_value, &type_desc)
+                    .create(new_name)?;
+            }
+            TypeDescriptor::VarLenUnicode => {
+                let unicode_value = attr.read_scalar::<VarLenUnicode>()?;
+                group
+                    .new_attr_builder()
+                    .with_data_as(&unicode_value, &type_desc)
+                    .create(new_name)?;
+            }
+            TypeDescriptor::VarLenArray(type_descriptor) => todo!(),
+            TypeDescriptor::FixedArray(type_descriptor, _) => todo!(),
+        }
+        group.delete_attr(old_name)?;
+        Ok(())
     }
 }
 
@@ -636,34 +702,170 @@ impl H5FNode {
         }
     }
 
+    pub fn update_attribute_name(&self, attr_name: &str, new_name: &str) -> Result<(), AppError> {
+        self.node.update_attr_name(attr_name, new_name)?;
+        Ok(())
+    }
+
     pub fn update_attribute(&self, attr_name: &str, new_value: String) -> Result<(), AppError> {
         let attr = self.node.attribute(attr_name)?;
         let type_desc = attr.dtype()?.to_descriptor()?;
         match type_desc {
-            hdf5_metno::types::TypeDescriptor::Integer(int_size) => match int_size {
-                hdf5_metno::types::IntSize::U1 => todo!(),
-                hdf5_metno::types::IntSize::U2 => todo!(),
-                hdf5_metno::types::IntSize::U4 => todo!(),
-                hdf5_metno::types::IntSize::U8 => todo!(),
+            TypeDescriptor::Integer(int_size) => match int_size {
+                hdf5_metno::types::IntSize::U1 => {
+                    let int_value = i8::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to i8: {}", e))
+                    })?;
+                    attr.write_scalar(&int_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U2 => {
+                    let int_value = i16::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to i16: {}", e))
+                    })?;
+                    attr.write_scalar(&int_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U4 => {
+                    let int_value = i32::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to i32: {}", e))
+                    })?;
+                    attr.write_scalar(&int_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U8 => {
+                    let int_value = i64::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to i64: {}", e))
+                    })?;
+                    attr.write_scalar(&int_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
             },
-            hdf5_metno::types::TypeDescriptor::Unsigned(int_size) => todo!(),
-            hdf5_metno::types::TypeDescriptor::Float(float_size) => todo!(),
-            hdf5_metno::types::TypeDescriptor::Boolean => todo!(),
-            hdf5_metno::types::TypeDescriptor::Enum(enum_type) => todo!(),
-            hdf5_metno::types::TypeDescriptor::Compound(compound_type) => todo!(),
-            hdf5_metno::types::TypeDescriptor::FixedArray(type_descriptor, _) => todo!(),
-            hdf5_metno::types::TypeDescriptor::FixedAscii(_) => todo!(),
-            hdf5_metno::types::TypeDescriptor::FixedUnicode(_) => todo!(),
-            hdf5_metno::types::TypeDescriptor::VarLenArray(type_descriptor) => todo!(),
-            hdf5_metno::types::TypeDescriptor::VarLenAscii => {
-                let ascii = VarLenAscii::from_ascii(&new_value).unwrap();
-                attr.write_scalar(&ascii).unwrap();
+            TypeDescriptor::Unsigned(size) => match size {
+                hdf5_metno::types::IntSize::U1 => {
+                    let uint_value = u8::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to u8: {}", e))
+                    })?;
+                    attr.write_scalar(&uint_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U2 => {
+                    let uint_value = u16::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to u16: {}", e))
+                    })?;
+                    attr.write_scalar(&uint_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U4 => {
+                    let uint_value = u32::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to u32: {}", e))
+                    })?;
+                    attr.write_scalar(&uint_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::IntSize::U8 => {
+                    let uint_value = u64::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to u64: {}", e))
+                    })?;
+                    attr.write_scalar(&uint_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+            },
+            TypeDescriptor::Float(float_size) => match float_size {
+                hdf5_metno::types::FloatSize::U4 => {
+                    let float_value = f32::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to f32: {}", e))
+                    })?;
+                    attr.write_scalar(&float_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+                hdf5_metno::types::FloatSize::U8 => {
+                    let float_value = f64::from_str(&new_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to convert to f64: {}", e))
+                    })?;
+                    attr.write_scalar(&float_value).map_err(|e| {
+                        AppError::EditError(format!("Failed to write attribute: {}", e))
+                    })?;
+                }
+            },
+            TypeDescriptor::Boolean => {
+                let bool_value = bool::from_str(&new_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to convert to bool: {}", e))
+                })?;
+                attr.write_scalar(&bool_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to write attribute: {}", e))
+                })?;
             }
-            hdf5_metno::types::TypeDescriptor::VarLenUnicode => {
-                let unicode = VarLenUnicode::from_str(&new_value).unwrap();
-                attr.write_scalar(&unicode).unwrap();
+            TypeDescriptor::Enum(_) => {
+                // TODO: Support enums
+                return Err(AppError::EditError(
+                    "Editing enum attributes is not supported".to_string(),
+                ));
             }
-            hdf5_metno::types::TypeDescriptor::Reference(reference) => todo!(),
+            TypeDescriptor::Compound(_) => {
+                // TODO: Support compounds maybe, through json interfacing or similar?
+                return Err(AppError::EditError(
+                    "Editing compound attributes is not supported".to_string(),
+                ));
+            }
+            TypeDescriptor::FixedArray(_, _) => {
+                // TODO: Support arrays.
+                return Err(AppError::EditError(
+                    "Editing array attributes is not supported".to_string(),
+                ));
+            }
+            TypeDescriptor::FixedAscii(_) => {
+                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
+                })?;
+                attr.write_scalar(&unicode).map_err(|e| {
+                    AppError::EditError(format!("Failed to write attribute: {}", e))
+                })?;
+            }
+            TypeDescriptor::FixedUnicode(_) => {
+                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
+                })?;
+                attr.write_scalar(&unicode).map_err(|e| {
+                    AppError::EditError(format!("Failed to write attribute: {}", e))
+                })?;
+            }
+            TypeDescriptor::VarLenArray(_) => {
+                //TODO: Support arrays.
+                return Err(AppError::EditError(
+                    "Editing array attributes is not supported".to_string(),
+                ));
+            }
+            TypeDescriptor::VarLenAscii => {
+                let ascii = VarLenAscii::from_ascii(&new_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to convert to VarLenAscii: {}", e))
+                })?;
+                attr.write_scalar(&ascii).map_err(|e| {
+                    AppError::EditError(format!("Failed to write attribute: {}", e))
+                })?;
+            }
+            TypeDescriptor::VarLenUnicode => {
+                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
+                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
+                })?;
+                attr.write_scalar(&unicode).map_err(|e| {
+                    AppError::EditError(format!("Failed to write attribute: {}", e))
+                })?;
+            }
+            TypeDescriptor::Reference(_) => {
+                return Err(AppError::EditError(
+                    "Editing reference attributes is not supported".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -793,12 +995,6 @@ impl H5FNode {
             }
         }
         Ok(())
-    }
-
-    pub fn close(self) {
-        if let Node::File(file) = self.node {
-            file.close().unwrap();
-        }
     }
 
     pub fn full_path(&self) -> String {

@@ -92,7 +92,6 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
                 AppError::FileError(_) => {
                     last_message = Some("No files given error".to_string());
                 }
-
                 AppError::Io(error) => {
                     last_message = Some(format!("IO Error: - {error}"));
                 }
@@ -113,6 +112,10 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
                 }
                 AppError::InvalidCommand(cmd) => {
                     last_message = Some(format!("Invalid Command: - {cmd}"));
+                    break;
+                }
+                AppError::EditError(e) => {
+                    last_message = Some(format!("Edit Error: - {e}"));
                     break;
                 }
             },

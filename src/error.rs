@@ -10,6 +10,7 @@ pub enum AppError {
     ChannelError(String),
     ClipboardError(String),
     InvalidCommand(String),
+    EditError(String),
 }
 
 impl Display for AppError {
@@ -21,6 +22,7 @@ impl Display for AppError {
             AppError::ClipboardError(msg) => write!(f, "Clipboard Error: {}", msg),
             AppError::InvalidCommand(cmd) => write!(f, "Invalid Command: {}", cmd),
             AppError::FileError(x) => write!(f, "File error: {x}"),
+            AppError::EditError(x) => write!(f, "Edit error: {x}"),
         }
     }
 }

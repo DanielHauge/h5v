@@ -116,9 +116,18 @@ pub fn handle_normal_attributes(
                     let new_value = perform_edit(state, content)?;
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
-                    selected_node
-                        .update_attribute(&attr_name, new_value)
-                        .unwrap();
+                    match state.attributes_view_cursor.attribute_view_selection {
+                        Name => {
+                            selected_node
+                                .update_attribute_name(&attr_name, &new_value)
+                                .unwrap();
+                        }
+                        Value => {
+                            selected_node
+                                .update_attribute(&attr_name, new_value)
+                                .unwrap();
+                        }
+                    }
 
                     selected_node.recompute_attributes().unwrap();
                     state.editing = false;
