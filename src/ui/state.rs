@@ -179,6 +179,12 @@ impl AppState<'_> {
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
                     let shape = dsattr.shape.clone();
+                    if shape.len() == 2 {
+                        let temp = current_node.selected_row;
+                        current_node.selected_row = current_node.selected_col;
+                        current_node.selected_col = temp;
+                        return Ok(EventResult::Redraw);
+                    }
                     let new_selected_row = ((current_node.selected_row as isize + delta)
                         % shape.len() as isize) as usize
                         % shape.len();
@@ -309,6 +315,13 @@ impl AppState<'_> {
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
                     let shape = dsattr.shape.clone();
+                    if shape.len() == 2 {
+                        // Just swap row and col.
+                        let temp = current_node.selected_row;
+                        current_node.selected_row = current_node.selected_col;
+                        current_node.selected_col = temp;
+                        return Ok(EventResult::Redraw);
+                    }
                     let new_selected_col = ((current_node.selected_col as isize + delta)
                         % shape.len() as isize) as usize
                         % shape.len();

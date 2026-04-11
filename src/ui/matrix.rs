@@ -67,9 +67,9 @@ pub fn render_matrix<T: H5Type + Display>(
             }
         }
 
-        if !x_selectable_dims.contains(&node.selected_row) {
-            node.selected_row = x_selectable_dims[0];
-        }
+        // if !x_selectable_dims.contains(&node.selected_row) {
+        //     node.selected_row = x_selectable_dims[0];
+        // }
         if node.selected_dim == node.selected_row || node.selected_dim == node.selected_col {
             node.selected_dim = x_selectable_dims
                 .iter()
