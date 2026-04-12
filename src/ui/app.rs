@@ -193,6 +193,7 @@ fn main_recover_loop(
     let mut state = AppState {
         root: root_node,
         editing: false,
+        file: h5f.file,
         toast: AppToast::Empty,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,

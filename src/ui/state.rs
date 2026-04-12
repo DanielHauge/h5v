@@ -6,7 +6,7 @@ use std::{
 };
 
 use arboard::Clipboard;
-use hdf5_metno::{ByteReader, Dataset, Hyperslab, Selection, SliceOrIndex};
+use hdf5_metno::{ByteReader, Dataset, File, Hyperslab, Selection, SliceOrIndex};
 use image::ImageFormat;
 use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
@@ -129,6 +129,7 @@ pub enum AppToast {
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
+    pub file: File,
     pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,

@@ -1,9 +1,10 @@
-use std::{cell::RefCell, io::Read, rc::Rc, str::FromStr};
+use std::{cell::RefCell, rc::Rc, str::FromStr};
 
 use hdf5_metno::{
-    types::{TypeDescriptor, VarLenAscii, VarLenUnicode},
-    Attribute, Dataset, File, Group, LinkType,
+    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
+    Attribute, Dataset, File, Group, H5Type, LinkType, ObjectReference2,
 };
+use ndarray::IxDyn;
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -241,7 +242,7 @@ pub trait HasAttributes {
     fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error>;
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
-    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), hdf5_metno::Error>;
+    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError>;
 }
 
 pub trait HasChildren {
@@ -414,7 +415,7 @@ impl HasAttributes for Node {
         }
     }
 
-    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), hdf5_metno::Error> {
+    fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError> {
         let group = match self {
             Node::File(file) => file.as_group()?,
             Node::Group(group, _) => group.as_group()?,
@@ -422,62 +423,135 @@ impl HasAttributes for Node {
             Node::Broken(_, _, _) => {
                 return Err(hdf5_metno::Error::Internal(String::from(
                     "Cannot update attribute on broken link",
-                )))
+                ))
+                .into())
             }
         };
 
         let attr = group.attr(old_name)?;
         let type_desc = attr.dtype()?.to_descriptor()?;
         match type_desc {
-            TypeDescriptor::Integer(_)
-            | TypeDescriptor::Enum(_)
-            | TypeDescriptor::Unsigned(_)
-            | TypeDescriptor::Reference(_)
-            | TypeDescriptor::Compound(_)
-            | TypeDescriptor::Float(_) => {
-                let buf: Vec<u8> = attr.read_raw()?;
-                group
+            TypeDescriptor::Boolean => copy_to_group::<bool>(&attr, &group, &type_desc, new_name)?,
+            TypeDescriptor::Integer(int_size) => match int_size {
+                hdf5_metno::types::IntSize::U1 => {
+                    copy_to_group::<i8>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U2 => {
+                    copy_to_group::<i16>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U4 => {
+                    copy_to_group::<i32>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U8 => {
+                    copy_to_group::<i64>(&attr, &group, &type_desc, new_name)?
+                }
+            },
+            TypeDescriptor::Unsigned(int_size) => match int_size {
+                hdf5_metno::types::IntSize::U1 => {
+                    copy_to_group::<u8>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U2 => {
+                    copy_to_group::<u16>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U4 => {
+                    copy_to_group::<u32>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::IntSize::U8 => {
+                    copy_to_group::<u64>(&attr, &group, &type_desc, new_name)?
+                }
+            },
+            TypeDescriptor::Float(float_size) => match float_size {
+                hdf5_metno::types::FloatSize::U4 => {
+                    copy_to_group::<f32>(&attr, &group, &type_desc, new_name)?
+                }
+                hdf5_metno::types::FloatSize::U8 => {
+                    copy_to_group::<f64>(&attr, &group, &type_desc, new_name)?
+                }
+            },
+            TypeDescriptor::Enum(_) => {
+                let data: Vec<u8> = attr.read_raw()?;
+                let new_attr = group
                     .new_attr_builder()
-                    .with_data_as(&buf, &type_desc)
+                    .empty_as(&type_desc)
                     .create(new_name)?;
+                new_attr.write_raw(&data)?;
             }
-            TypeDescriptor::Boolean => {
-                let bool_value = attr.read_raw::<bool>()?;
-            }
-            TypeDescriptor::FixedAscii(_) => {
-                let ascii_value = attr.read_scalar::<VarLenAscii>()?;
-                group
+            TypeDescriptor::Compound(_) => {
+                let data: Vec<u8> = attr.read_raw()?;
+                let new_attr = group
                     .new_attr_builder()
-                    .with_data_as(&ascii_value, &type_desc)
+                    .empty_as(&type_desc)
                     .create(new_name)?;
+                new_attr.write_raw(&data)?;
             }
+            TypeDescriptor::Reference(_) => {
+                let data: ObjectReference2 = attr.read_scalar()?;
+                let new_attr = group
+                    .new_attr_builder()
+                    .empty_as(&type_desc)
+                    .create(new_name)?;
+                new_attr.write_scalar(&data)?;
+            }
+            TypeDescriptor::FixedUnicode(size) => match size {
+                0..255 => copy_to_group::<FixedUnicode<255>>(&attr, &group, &type_desc, new_name)?,
+                255..4096 => {
+                    copy_to_group::<FixedUnicode<4096>>(&attr, &group, &type_desc, new_name)?
+                }
+                _ => copy_to_group::<VarLenUnicode>(&attr, &group, &type_desc, new_name)?,
+            },
+
+            TypeDescriptor::VarLenArray(_) => {
+                return Err(AppError::EditError(
+                    "Edit of VarLenArray types are unsupported".to_string(),
+                ))
+            }
+            TypeDescriptor::FixedArray(_, _) => {
+                return Err(AppError::EditError(
+                    "Edit of FixedArray types are unsupported".to_string(),
+                ))
+            }
+            TypeDescriptor::FixedAscii(size) => match size {
+                0..255 => copy_to_group::<FixedAscii<255>>(&attr, &group, &type_desc, new_name)?,
+                255..4096 => {
+                    copy_to_group::<FixedAscii<4096>>(&attr, &group, &type_desc, new_name)?
+                }
+                _ => copy_to_group::<VarLenAscii>(&attr, &group, &type_desc, new_name)?,
+            },
             TypeDescriptor::VarLenAscii => {
-                let ascii_value = attr.read_scalar::<VarLenAscii>()?;
-                group
-                    .new_attr_builder()
-                    .with_data_as(&ascii_value, &type_desc)
-                    .create(new_name)?;
-            }
-            TypeDescriptor::FixedUnicode(_) => {
-                let unicode_value = attr.read_scalar::<VarLenUnicode>()?;
-                group
-                    .new_attr_builder()
-                    .with_data_as(&unicode_value, &type_desc)
-                    .create(new_name)?;
+                copy_to_group::<VarLenAscii>(&attr, &group, &type_desc, new_name)?
             }
             TypeDescriptor::VarLenUnicode => {
-                let unicode_value = attr.read_scalar::<VarLenUnicode>()?;
-                group
-                    .new_attr_builder()
-                    .with_data_as(&unicode_value, &type_desc)
-                    .create(new_name)?;
+                copy_to_group::<VarLenUnicode>(&attr, &group, &type_desc, new_name)?
             }
-            TypeDescriptor::VarLenArray(type_descriptor) => todo!(),
-            TypeDescriptor::FixedArray(type_descriptor, _) => todo!(),
         }
         group.delete_attr(old_name)?;
+
         Ok(())
     }
+}
+
+fn copy_to_group<T: H5Type>(
+    attr: &Attribute,
+    grp: &Group,
+    td: &TypeDescriptor,
+    new_name: &str,
+) -> Result<(), hdf5_metno::Error> {
+    if attr.is_scalar() {
+        let data: T = attr.read_scalar().unwrap();
+        let new_attr = grp
+            .new_attr_builder()
+            .empty_as(td)
+            .create(new_name)
+            .unwrap();
+        new_attr.write_scalar(&data).unwrap();
+    } else {
+        let data = attr.read::<T, IxDyn>().unwrap();
+        grp.new_attr_builder()
+            .with_data_as(&data, td)
+            .create(new_name)
+            .unwrap();
+    }
+    Ok(())
 }
 
 impl DatasetMeta {
@@ -703,7 +777,10 @@ impl H5FNode {
     }
 
     pub fn update_attribute_name(&self, attr_name: &str, new_name: &str) -> Result<(), AppError> {
-        self.node.update_attr_name(attr_name, new_name)?;
+        let new_name = new_name.trim_matches('=').trim_matches('─').trim();
+        if !attr_name.eq(new_name) {
+            self.node.update_attr_name(attr_name, new_name)?;
+        }
         Ok(())
     }
 
@@ -1202,6 +1279,7 @@ impl H5FNode {
 
 pub struct H5F {
     pub root: Rc<RefCell<H5FNode>>,
+    pub file: File,
 }
 
 impl H5F {
@@ -1213,7 +1291,7 @@ impl H5F {
         };
 
         let member_count = file.member_names()?.len();
-        let mut h5node = H5FNode::new(Node::File(file));
+        let mut h5node = H5FNode::new(Node::File(file.clone()));
         if linked {
             h5node.display_name = Some(format!(" ({member_count}) linked ").to_string());
         }
@@ -1223,7 +1301,7 @@ impl H5F {
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;
 
-        let s = Self { root };
+        let s = Self { root, file };
         Ok(s)
     }
 }
