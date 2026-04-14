@@ -17,7 +17,7 @@ use crate::{
     sprint_typedesc::{
         encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
     },
-    ui::state::ContentShowMode,
+    ui::state::{AttributeCursor, ContentShowMode},
 };
 
 #[derive(Debug, Clone)]
@@ -731,6 +731,7 @@ pub struct H5FNode {
     pub expanded: bool,
     pub node: Node,
     pub computed_attributes: Option<ComputedAttributes>,
+    pub attributes_view_cursor: AttributeCursor,
     pub read: bool,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
@@ -761,6 +762,7 @@ impl H5FNode {
         Self {
             display_name: None,
             expanded: false,
+            attributes_view_cursor: Default::default(),
             node: node_type,
             read: false,
             children: vec![],

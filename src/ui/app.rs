@@ -28,11 +28,7 @@ use crate::{
     color_consts,
     error::{log_error, AppError},
     h5f,
-    ui::{
-        input::EventResult,
-        mchart::MultiChartState,
-        state::{AppToast, AttributeViewSelection},
-    },
+    ui::{input::EventResult, mchart::MultiChartState, state::AppToast},
 };
 
 use super::{
@@ -44,10 +40,7 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{
-        self, AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused,
-        MatrixViewState, Mode,
-    },
+    state::{self, AppState, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState, Mode},
     tree_view::render_tree,
 };
 
@@ -201,11 +194,6 @@ fn main_recover_loop(
         command_state,
         treeview: vec![],
         tree_view_cursor: 0,
-        attributes_view_cursor: AttributeCursor {
-            attribute_index: 0,
-            attribute_offset: 0,
-            attribute_view_selection: AttributeViewSelection::Name,
-        },
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
         mode: Mode::Normal,
