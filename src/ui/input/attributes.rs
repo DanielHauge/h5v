@@ -117,6 +117,7 @@ pub fn handle_normal_attributes(
                     drop(node);
 
                     let new_value = perform_edit(state, content)?;
+                    state.editing = false;
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
                     match node_attributes_view_cursor.attribute_view_selection {
@@ -142,7 +143,6 @@ pub fn handle_normal_attributes(
 
                     selected_node.recompute_attributes()?;
                     state.file.flush()?;
-                    state.editing = false;
 
                     Ok(EventResult::Toast(
                         AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),

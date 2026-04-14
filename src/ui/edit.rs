@@ -52,6 +52,7 @@ pub fn perform_edit(state: &mut AppState<'_>, content: String) -> Result<String,
 
     let mut file = File::open(path).unwrap();
     file.read_to_string(&mut new_content).unwrap();
+    let new_content = new_content.trim().to_string();
     drop(edit_pause);
     reenter_h5v()?;
     Ok(new_content)
