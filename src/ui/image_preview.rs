@@ -312,11 +312,13 @@ pub fn handle_imagefsvlen_load(
     tx_load
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum ImageResizeResult {
     Success(ResizeResponse),
     Error(String),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum ImageLoadedResult {
     Success(ThreadProtocol),
     Failure(String),

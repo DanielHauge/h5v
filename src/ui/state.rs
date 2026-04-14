@@ -6,7 +6,7 @@ use std::{
 };
 
 use arboard::Clipboard;
-use hdf5_metno::{ByteReader, Dataset, Hyperslab, Selection, SliceOrIndex};
+use hdf5_metno::{ByteReader, Dataset, File, Hyperslab, Selection, SliceOrIndex};
 use image::ImageFormat;
 use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
@@ -141,6 +141,7 @@ pub enum AppToast {
 pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
+    pub file: File,
     pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,
@@ -532,7 +533,7 @@ impl AppState<'_> {
         self.execute_command(last_command)
     }
 
-    pub fn right(&mut self, arg: isize) -> Result<EventResult> {
+    pub fn right(&mut self, inc: isize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => self.down(1),
@@ -540,16 +541,28 @@ impl AppState<'_> {
                 SegmentType::NoSegment => {
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
-                    let new_col_offset = node.col_offset.saturating_add(arg).max(0);
+                    let new_col_offset = node.col_offset.saturating_add(inc).max(0);
                     node.col_offset = new_col_offset;
                     Ok(EventResult::Redraw)
                 }
             },
-            ContentShowMode::Matrix => self.change_col(arg),
+            ContentShowMode::Matrix => {
+                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let current_node = &node.node;
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let col_selected_shape = dsattr.shape[node.selected_col];
+                    self.matrix_view_state.col_offset = (self.matrix_view_state.col_offset
+                        + inc as usize)
+                        .min(col_selected_shape - self.matrix_view_state.cols_currently_available);
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Redraw)
+                }
+            }
         }
     }
 
-    pub fn left(&mut self, arg: isize) -> Result<EventResult> {
+    pub fn left(&mut self, inc: isize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => self.up(1),
@@ -557,12 +570,33 @@ impl AppState<'_> {
                 SegmentType::NoSegment => {
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
-                    let new_col_offset = node.col_offset.saturating_sub(arg).max(0);
+                    let new_col_offset = node.col_offset.saturating_sub(inc).max(0);
                     node.col_offset = new_col_offset;
                     Ok(EventResult::Redraw)
                 }
             },
-            ContentShowMode::Matrix => self.change_col(-arg),
+            ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let node = &current_node.node.borrow_mut();
+                let current_node = &node.node;
+                if self.matrix_view_state.col_offset == 0 {
+                    return Ok(EventResult::Redraw);
+                }
+                if let Node::Dataset(_, dsattr) = current_node {
+                    let col_selected_shape = dsattr.shape[node.selected_col];
+                    self.matrix_view_state.col_offset = (self
+                        .matrix_view_state
+                        .col_offset
+                        .saturating_sub(inc as usize))
+                    .min(
+                        col_selected_shape
+                            .saturating_sub(self.matrix_view_state.cols_currently_available),
+                    );
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Redraw)
+                }
+            }
         }
     }
 }

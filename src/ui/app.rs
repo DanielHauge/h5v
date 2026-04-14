@@ -28,11 +28,7 @@ use crate::{
     color_consts,
     error::{log_error, AppError},
     h5f,
-    ui::{
-        input::EventResult,
-        mchart::MultiChartState,
-        state::{AppToast, AttributeViewSelection},
-    },
+    ui::{input::EventResult, mchart::MultiChartState, state::AppToast},
 };
 
 use super::{
@@ -44,10 +40,7 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{
-        self, AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused,
-        MatrixViewState, Mode,
-    },
+    state::{self, AppState, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState, Mode},
     tree_view::render_tree,
 };
 
@@ -193,6 +186,7 @@ fn main_recover_loop(
     let mut state = AppState {
         root: root_node,
         editing: false,
+        file: h5f.file,
         toast: AppToast::Empty,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,

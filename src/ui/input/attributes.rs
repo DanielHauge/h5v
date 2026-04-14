@@ -121,18 +121,27 @@ pub fn handle_normal_attributes(
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
                     match node_attributes_view_cursor.attribute_view_selection {
                         Name => {
-                            selected_node
-                                .update_attribute_name(&attr_name, &new_value)
-                                .unwrap();
+                            if let Err(e) =
+                                selected_node.update_attribute_name(&attr_name, &new_value)
+                            {
+                                return Ok(EventResult::Toast(
+                                    AppToast::Error(e.to_string()),
+                                    true,
+                                ));
+                            };
                         }
                         Value => {
-                            selected_node
-                                .update_attribute(&attr_name, new_value)
-                                .unwrap();
+                            if let Err(e) = selected_node.update_attribute(&attr_name, new_value) {
+                                return Ok(EventResult::Toast(
+                                    AppToast::Error(e.to_string()),
+                                    true,
+                                ));
+                            }
                         }
                     }
 
-                    selected_node.recompute_attributes().unwrap();
+                    selected_node.recompute_attributes()?;
+                    state.file.flush()?;
                     state.editing = false;
 
                     Ok(EventResult::Toast(
