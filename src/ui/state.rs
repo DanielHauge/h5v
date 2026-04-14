@@ -87,15 +87,27 @@ impl ImgState {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum AttributeViewSelection {
     Name,
     Value,
 }
 
+#[derive(Debug, Clone)]
 pub struct AttributeCursor {
     pub attribute_index: usize,
     pub attribute_view_selection: AttributeViewSelection,
     pub attribute_offset: usize,
+}
+
+impl Default for AttributeCursor {
+    fn default() -> Self {
+        Self {
+            attribute_index: 0,
+            attribute_view_selection: AttributeViewSelection::Name,
+            attribute_offset: 0,
+        }
+    }
 }
 
 pub struct MatrixViewState {
@@ -135,7 +147,6 @@ pub struct AppState<'a> {
     pub clipboard: Clipboard,
     pub copying: bool,
     pub toast: AppToast,
-    pub attributes_view_cursor: AttributeCursor,
     pub focus: Focus,
     pub multi_chart: MultiChartState,
     pub mode: Mode,

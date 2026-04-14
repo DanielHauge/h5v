@@ -200,11 +200,6 @@ fn main_recover_loop(
         command_state,
         treeview: vec![],
         tree_view_cursor: 0,
-        attributes_view_cursor: AttributeCursor {
-            attribute_index: 0,
-            attribute_offset: 0,
-            attribute_view_selection: AttributeViewSelection::Name,
-        },
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
         mode: Mode::Normal,

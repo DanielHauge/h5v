@@ -70,6 +70,7 @@ pub fn render_info_attributes(
         vertical: 1,
     });
 
+    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
     let attributes = node.read_attributes()?;
     let min_first_panel = match attributes.longest_name_length {
         0..5 => 5,
@@ -99,16 +100,15 @@ pub fn render_info_attributes(
             .begin_symbol(Some("^"));
         let mut scrollbar_state = ScrollbarState::new(attributes.rendered_attributes.len())
             .viewport_content_length(height as usize)
-            .position(state.attributes_view_cursor.attribute_index);
+            .position(node_attributes_view_cursor.attribute_index);
         f.render_stateful_widget(scrollbar, *scroll_area, &mut scrollbar_state);
     }
 
     let mut offset = 0;
 
-    let highlighted_index = &state
-        .attributes_view_cursor
+    let highlighted_index = &node_attributes_view_cursor
         .attribute_index
-        .saturating_sub(state.attributes_view_cursor.attribute_offset)
+        .saturating_sub(node_attributes_view_cursor.attribute_offset)
         .clamp(0, heightu.saturating_sub(1));
 
     let highlighted_bg_color = if let Focus::Attributes = state.focus {
@@ -121,23 +121,21 @@ pub fn render_info_attributes(
         color_consts::HIGHLIGHT_BG_COLOR
     };
 
-    let new_attr_offset = if state.attributes_view_cursor.attribute_index
+    let new_attr_offset = if node_attributes_view_cursor.attribute_index
         > heightu
             .saturating_sub(1)
-            .saturating_add(state.attributes_view_cursor.attribute_offset)
+            .saturating_add(node_attributes_view_cursor.attribute_offset)
     {
-        state
-            .attributes_view_cursor
+        node_attributes_view_cursor
             .attribute_index
             .saturating_sub(height.saturating_sub(1) as usize)
-    } else if state.attributes_view_cursor.attribute_index
-        <= state.attributes_view_cursor.attribute_offset
+    } else if node_attributes_view_cursor.attribute_index
+        <= node_attributes_view_cursor.attribute_offset
     {
-        state.attributes_view_cursor.attribute_index
+        node_attributes_view_cursor.attribute_index
     } else {
-        state.attributes_view_cursor.attribute_offset
+        node_attributes_view_cursor.attribute_offset
     };
-    state.attributes_view_cursor.attribute_offset = new_attr_offset;
     let mut attributes_to_skip = new_attr_offset;
 
     #[allow(clippy::explicit_counter_loop)]
@@ -147,7 +145,7 @@ pub fn render_info_attributes(
             continue;
         }
         if offset == *highlighted_index as i32 {
-            match state.attributes_view_cursor.attribute_view_selection {
+            match node_attributes_view_cursor.attribute_view_selection {
                 AttributeViewSelection::Name => {
                     f.render_widget(
                         name_line.clone().bg(highlighted_bg_color),
@@ -183,6 +181,8 @@ pub fn render_info_attributes(
         }
         offset += 1;
     }
+
+    node.attributes_view_cursor.attribute_offset = new_attr_offset;
 
     Ok(())
 }

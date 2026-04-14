@@ -23,48 +23,51 @@ pub fn handle_normal_attributes(
             KeyEventKind::Press => match (key_event.code, key_event.modifiers) {
                 (KeyCode::Up, _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    let mut current_node = tree_item.node.borrow_mut();
-                    let attributes_count =
-                        current_node.read_attributes()?.rendered_attributes.len();
-                    if state.attributes_view_cursor.attribute_index > 0 {
-                        if state.attributes_view_cursor.attribute_index >= attributes_count {
-                            state.attributes_view_cursor.attribute_index = attributes_count - 2;
+                    let mut node = tree_item.node.borrow_mut();
+                    let attributes_count = node.read_attributes()?.rendered_attributes.len();
+                    if node.attributes_view_cursor.attribute_index > 0 {
+                        if node.attributes_view_cursor.attribute_index >= attributes_count {
+                            node.attributes_view_cursor.attribute_index = attributes_count - 2;
                         } else {
-                            state.attributes_view_cursor.attribute_index -= 1;
+                            node.attributes_view_cursor.attribute_index -= 1;
                         }
                         Ok(EventResult::Redraw)
                     } else {
-                        state.attributes_view_cursor.attribute_index = 0;
+                        node.attributes_view_cursor.attribute_index = 0;
                         Ok(EventResult::Continue)
                     }
                 }
                 (KeyCode::Down, _) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    let mut current_node = tree_item.node.borrow_mut();
-                    let attributes_count =
-                        current_node.read_attributes()?.rendered_attributes.len();
+                    let mut node = tree_item.node.borrow_mut();
+                    let attributes_count = node.read_attributes()?.rendered_attributes.len();
 
-                    if state.attributes_view_cursor.attribute_index < attributes_count - 1 {
-                        state.attributes_view_cursor.attribute_index += 1;
+                    if node.attributes_view_cursor.attribute_index < attributes_count - 1 {
+                        node.attributes_view_cursor.attribute_index += 1;
+
                         Ok(EventResult::Redraw)
                     } else {
-                        state.attributes_view_cursor.attribute_index = attributes_count - 1;
+                        node.attributes_view_cursor.attribute_index = attributes_count - 1;
                         Ok(EventResult::Continue)
                     }
                 }
                 (KeyCode::Left, _) => {
-                    match state.attributes_view_cursor.attribute_view_selection {
+                    let tree_item = &state.treeview[state.tree_view_cursor];
+                    let mut node = tree_item.node.borrow_mut();
+                    match node.attributes_view_cursor.attribute_view_selection {
                         Name => {}
                         Value => {
-                            state.attributes_view_cursor.attribute_view_selection = Name;
+                            node.attributes_view_cursor.attribute_view_selection = Name;
                         }
                     }
                     Ok(EventResult::Redraw)
                 }
                 (KeyCode::Right, _) => {
-                    match state.attributes_view_cursor.attribute_view_selection {
+                    let tree_item = &state.treeview[state.tree_view_cursor];
+                    let mut node = tree_item.node.borrow_mut();
+                    match node.attributes_view_cursor.attribute_view_selection {
                         Name => {
-                            state.attributes_view_cursor.attribute_view_selection = Value;
+                            node.attributes_view_cursor.attribute_view_selection = Value;
                         }
                         Value => {}
                     }
@@ -72,12 +75,12 @@ pub fn handle_normal_attributes(
                 }
                 (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => {
                     state.editing = true;
-                    let mut selected_node =
-                        state.treeview[state.tree_view_cursor].node.borrow_mut();
-                    let attributes = selected_node.read_attributes()?;
+                    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
+                    let attributes = node.read_attributes()?;
                     let selected_rendered_attribute = attributes
                         .rendered_attributes
-                        .get(state.attributes_view_cursor.attribute_index);
+                        .get(node_attributes_view_cursor.attribute_index);
                     let Some(attribute) = selected_rendered_attribute else {
                         state.editing = false;
                         return Ok(EventResult::Toast(
@@ -102,7 +105,7 @@ pub fn handle_normal_attributes(
                             true,
                         ));
                     }
-                    let content = match state.attributes_view_cursor.attribute_view_selection {
+                    let content = match node_attributes_view_cursor.attribute_view_selection {
                         Name => attr_name.clone(),
                         Value => attribute
                             .1
@@ -111,12 +114,12 @@ pub fn handle_normal_attributes(
                             .trim_end_matches("\"")
                             .to_string(),
                     };
-                    drop(selected_node);
+                    drop(node);
 
                     let new_value = perform_edit(state, content)?;
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
-                    match state.attributes_view_cursor.attribute_view_selection {
+                    match node_attributes_view_cursor.attribute_view_selection {
                         Name => {
                             selected_node
                                 .update_attribute_name(&attr_name, &new_value)
@@ -138,14 +141,14 @@ pub fn handle_normal_attributes(
                     ))
                 }
                 (KeyCode::Char('y'), _) => {
-                    let mut selected_node =
-                        state.treeview[state.tree_view_cursor].node.borrow_mut();
-                    let attributes = selected_node.read_attributes()?;
+                    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
+                    let attributes = node.read_attributes()?;
                     let selected_rendered_attribute = attributes
                         .rendered_attributes
-                        .get(state.attributes_view_cursor.attribute_index);
+                        .get(node_attributes_view_cursor.attribute_index);
 
-                    match state.attributes_view_cursor.attribute_view_selection {
+                    match node_attributes_view_cursor.attribute_view_selection {
                         Name => {
                             if let Some(attribute) = selected_rendered_attribute {
                                 let attr_name = attribute.0.to_string();
