@@ -115,7 +115,6 @@ pub struct MatrixViewState {
     pub row_offset: usize,
     pub rows_currently_available: usize,
     pub cols_currently_available: usize,
-    // The selected cursor index
     pub cursor_row: usize,
     pub cursor_col: usize,
 }
@@ -379,7 +378,9 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
-                    if self.img_state.idx_to_load >= (dec as i32) {
+                    if self.img_state.idx_to_load >= (dec as i32)
+                        && self.img_state.idx_to_load - dec as i32 >= 0
+                    {
                         self.img_state.idx_to_load -= dec as i32;
                         Ok(EventResult::Redraw)
                     } else {
@@ -435,8 +436,11 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
-                    if self.img_state.idx_to_load <= self.segment_state.segment_count - inc as i32 {
-                        self.img_state.idx_to_load += 20;
+                    if self.img_state.idx_to_load <= self.segment_state.segment_count - inc as i32
+                        && self.img_state.idx_to_load + inc as i32
+                            <= self.segment_state.segment_count - 1
+                    {
+                        self.img_state.idx_to_load += inc as i32;
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)

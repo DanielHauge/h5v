@@ -90,6 +90,10 @@ pub fn handle_normal_content_event(
 
                         Ok(EventResult::Redraw)
                     }
+                    (KeyCode::Down, _, ContentShowMode::Preview) => state.down(1),
+                    (KeyCode::Up, _, ContentShowMode::Preview) => state.up(1),
+                    (KeyCode::Right, _, ContentShowMode::Preview) => state.right(1),
+                    (KeyCode::Left, _, ContentShowMode::Preview) => state.left(1),
                     (KeyCode::Char('y'), _, ContentShowMode::Matrix) => Ok(EventResult::Copying),
                     _ => Ok(EventResult::Continue),
                 }
