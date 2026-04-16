@@ -9,7 +9,6 @@ use std::{
 };
 
 use arboard::Clipboard;
-use hdf5_metno::file;
 use ratatui::{
     crossterm::{
         event::{self},
