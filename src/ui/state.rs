@@ -379,8 +379,8 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
-                    if self.img_state.idx_to_load > 0 {
-                        self.img_state.idx_to_load -= 1;
+                    if self.img_state.idx_to_load >= (dec as i32) {
+                        self.img_state.idx_to_load -= dec as i32;
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
@@ -435,8 +435,8 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
-                    if self.img_state.idx_to_load < self.segment_state.segment_count - 1 {
-                        self.img_state.idx_to_load += 1;
+                    if self.img_state.idx_to_load <= self.segment_state.segment_count - inc as i32 {
+                        self.img_state.idx_to_load += 20;
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
