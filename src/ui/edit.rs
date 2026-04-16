@@ -31,7 +31,7 @@ fn create_tmp_file() -> Result<(File, String), AppError> {
     let tmp_dir = dirs::cache_dir()
         .unwrap_or_default()
         .to_str()
-        .unwrap()
+        .unwrap_or("/tmp")
         .to_string();
     let tmp_file_path = format!("{tmp_dir}/h5v_edit_{uuid}");
     let file = File::create(&tmp_file_path)?;
@@ -39,20 +39,27 @@ fn create_tmp_file() -> Result<(File, String), AppError> {
 }
 
 pub fn perform_edit(state: &mut AppState<'_>, content: String) -> Result<String, AppError> {
+    if state.readonly {
+        return Err(AppError::EditError(
+            "Cannot edit in read-only mode, open file with -w flag".to_string(),
+        ));
+    }
+
     leave_h5v()?;
-    let edit_pause = state.edit_pause.write().unwrap();
+    let edit_pause = state.edit_pause.write()?;
     let (mut file, path) = create_tmp_file()?;
-    file.write_all(&content.into_bytes()).unwrap();
+    file.write_all(&content.into_bytes())?;
     drop(file);
 
     let editor = option_env!("EDITOR").unwrap_or("vi");
-    let editor_proc = Command::new(editor).arg(&path).spawn();
-    editor_proc.unwrap().wait_with_output().unwrap();
+    let editor_proc = Command::new(editor).arg(&path).spawn()?;
+    editor_proc.wait_with_output()?;
     let mut new_content = String::new();
 
-    let mut file = File::open(path).unwrap();
-    file.read_to_string(&mut new_content).unwrap();
+    let mut file = File::open(path)?;
+    file.read_to_string(&mut new_content)?;
     let new_content = new_content.trim().to_string();
+    state.file.flush()?;
     drop(edit_pause);
     reenter_h5v()?;
     Ok(new_content)

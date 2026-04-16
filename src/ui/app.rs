@@ -9,6 +9,7 @@ use std::{
 };
 
 use arboard::Clipboard;
+use hdf5_metno::file;
 use ratatui::{
     crossterm::{
         event::{self},
@@ -111,6 +112,18 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
                     last_message = Some(format!("Edit Error: - {e}"));
                     break;
                 }
+                AppError::ChildNotFound(e) => {
+                    last_message = Some(format!("Child not found: - {e}"));
+                    break;
+                }
+                AppError::PoisionedLockError(e) => {
+                    last_message = Some(format!("Poisioned lock error: - {e}"));
+                    break;
+                }
+                AppError::DrawingError(e) => {
+                    last_message = Some(format!("Drawing error: - {e}"));
+                    break;
+                }
             },
         }
     }
@@ -184,6 +197,7 @@ fn main_recover_loop(
 
     let root_node = h5f.root.clone();
     let mut state = AppState {
+        readonly: !writable,
         root: root_node,
         editing: false,
         file: h5f.file,
@@ -258,14 +272,19 @@ fn main_recover_loop(
             Ok(event) => event,
             Err(error) => {
                 log_error(error);
-                panic!("Terminal events channel closed unexpectedly.")
+                return Err(AppError::ChannelError(format!(
+                    "Failed to receive event from channel: {}",
+                    error
+                )));
             }
         };
         if state.editing {
             continue;
         }
         match event {
-            AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)? {
+            AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)
+                .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false))
+            {
                 EventResult::Quit => break,
                 EventResult::Continue => {}
                 EventResult::Redraw => {
@@ -280,7 +299,6 @@ fn main_recover_loop(
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
-                    // sleep for 50 ms
                     state.copying = false;
                     thread::sleep(std::time::Duration::from_millis(100));
                     terminal.draw(|f| {
@@ -342,6 +360,7 @@ fn main_recover_loop(
             },
         }
     }
+    state.file.close()?;
     Ok(IntendedMainLoopBreak {})
 }
 
@@ -394,7 +413,12 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
 fn handle_term_events(tx_events: Sender<AppEvent>, paused: Arc<RwLock<()>>) {
     thread::spawn(move || loop {
         if event::poll(std::time::Duration::from_millis(16)).is_ok() {
-            let pause = paused.read().unwrap();
+            let Ok(pause) = paused.read() else {
+                tx_events
+                    .send(AppEvent::TermEvent(event::Event::Resize(0, 0)))
+                    .unwrap_or_else(log_error);
+                return;
+            };
             drop(pause);
             if let Ok(event) = event::read() {
                 match tx_events.send(AppEvent::TermEvent(event)) {

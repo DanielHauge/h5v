@@ -77,7 +77,7 @@ pub fn render_main_display(
     let display_index = supported_display_modes
         .iter()
         .position(|x| x == display_mode)
-        .expect("Display mode expected to be found in list otherwise not reach this point");
+        .unwrap_or(0);
 
     // Do tab titles:
 

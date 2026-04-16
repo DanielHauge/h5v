@@ -143,7 +143,10 @@ pub fn handle_search_event(
                         let selected_result = results[selected_index_corrected].to_string();
                         let mut root = state.root.borrow_mut();
                         root.collapse();
-                        root.expand_path(selected_result.strip_prefix("/").unwrap())?;
+                        let selected_result = selected_result
+                            .strip_prefix("/")
+                            .unwrap_or(&selected_result);
+                        root.expand_path(selected_result)?;
                         drop(root);
 
                         state.mode = Mode::Normal;

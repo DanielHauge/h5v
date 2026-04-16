@@ -408,23 +408,29 @@ impl MultiChartState {
             let color = plotters::prelude::Palette99::pick(i);
             let data = ls;
             let line_series = plotters::prelude::LineSeries::new(data, &color);
-            chart
-                .draw_series(line_series)
-                .unwrap()
-                .label(name)
-                .legend(move |(x, y)| {
-                    plotters::prelude::PathElement::new(
-                        vec![(x, y), (x + 20, y)],
-                        plotters::prelude::ShapeStyle {
-                            filled: true,
-                            stroke_width: 2,
-                            color: plotters::style::Color::to_rgba(&color),
-                        },
-                    )
-                });
+            let series = match chart.draw_series(line_series) {
+                Ok(s) => s,
+                Err(e) => {
+                    log_error(e);
+                    continue;
+                }
+            };
+
+            series.label(name).legend(move |(x, y)| {
+                plotters::prelude::PathElement::new(
+                    vec![(x, y), (x + 20, y)],
+                    plotters::prelude::ShapeStyle {
+                        filled: true,
+                        stroke_width: 2,
+                        color: plotters::style::Color::to_rgba(&color),
+                    },
+                )
+            });
         }
 
-        root.present().unwrap();
+        if let Err(e) = root.present() {
+            log_error(e);
+        }
 
         true
     }
@@ -504,8 +510,11 @@ impl MultiChartState {
                 self.width,
                 self.height,
                 self.plot_buffer.clone(),
-            )
-            .expect("buffer size mismatch");
+            );
+            let Some(image) = image else {
+                log_error("Failed to create image buffer from plot buffer");
+                return;
+            };
             let dyn_img = DynamicImage::ImageRgb8(image);
             let stateful_protocol = self.picker.new_resize_protocol(dyn_img);
             self.stateful_protocol = Some(stateful_protocol)

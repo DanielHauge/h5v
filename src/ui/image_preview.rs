@@ -172,11 +172,7 @@ fn render_raw_img(
         false => {
             state.img_state.protocol = None;
             state.img_state.ds = Some(ds.name());
-            let typedesc = ds
-                .dtype()
-                .expect("Dataset dtype should be set")
-                .to_descriptor()
-                .unwrap();
+            let typedesc = ds.dtype()?.to_descriptor()?;
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
@@ -185,8 +181,7 @@ fn render_raw_img(
                     state
                         .img_state
                         .tx_load_imgfs
-                        .send((ds_buffered, img_format))
-                        .expect("Failed to send image load request");
+                        .send((ds_buffered, img_format))?;
                 }
                 hdf5_metno::types::TypeDescriptor::VarLenArray(arr_type) => {
                     if matches!(
@@ -201,8 +196,7 @@ fn render_raw_img(
                         state
                             .img_state
                             .tx_load_imgfsvlen
-                            .send((ds.clone(), i, img_format))
-                            .expect("Failed to send image load request");
+                            .send((ds.clone(), i, img_format))?;
                     }
                 }
                 _ => {
@@ -224,14 +218,20 @@ pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest>
     thread::spawn(move || loop {
         if let Ok(request) = rx_worker.recv() {
             match request.resize_encode() {
-                Ok(r) => tx_events
-                    .send(AppEvent::ImageResized(ImageResizeResult::Success(r)))
-                    .expect("Failed to send image redraw event"),
-                Err(e) => tx_events
-                    .send(AppEvent::ImageResized(ImageResizeResult::Error(
-                        e.to_string(),
-                    )))
-                    .expect("Failed to send image redraw event"),
+                Ok(r) => {
+                    if let Err(e) =
+                        tx_events.send(AppEvent::ImageResized(ImageResizeResult::Success(r)))
+                    {
+                        eprintln!("Failed to send image redraw event: {}", e);
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = tx_events.send(AppEvent::ImageResized(
+                        ImageResizeResult::Error(e.to_string()),
+                    )) {
+                        eprintln!("Failed to send image redraw event: {}", e);
+                    }
+                }
             }
         }
     });
@@ -256,6 +256,7 @@ pub fn handle_imagefs_load(
                 let stateful_protocol = picker.new_resize_protocol(dyn_img);
                 let thread_protocol =
                     ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                #[allow(clippy::expect_used)]
                 tx_events
                     .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
                         thread_protocol,
@@ -286,6 +287,7 @@ pub fn handle_imagefsvlen_load(
                 match ds.read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All) {
                     Ok(d) => d[idx as usize].as_slice().to_vec(),
                     Err(e) => {
+                        #[allow(clippy::expect_used)]
                         tx_events
                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                 e.to_string(),
@@ -301,6 +303,7 @@ pub fn handle_imagefsvlen_load(
                 let stateful_protocol = picker.new_resize_protocol(dyn_img);
                 let thread_protocol =
                     ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                #[allow(clippy::expect_used)]
                 tx_events
                     .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
                         thread_protocol,
@@ -336,12 +339,13 @@ trait PixelBitDepth {
 
 impl PixelBitDepth for Dataset {
     fn bit_depth(&self) -> BitDepth {
-        let dtype = self
-            .dtype()
-            .expect("Should get dtype from dataset")
-            .to_descriptor()
-            .unwrap();
-        match dtype {
+        match match self.dtype() {
+            Ok(d) => match d.to_descriptor() {
+                Ok(desc) => desc,
+                Err(_) => return BitDepth::Unknown,
+            },
+            Err(_) => return BitDepth::Unknown,
+        } {
             hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => BitDepth::Bit8,
             hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U2) => BitDepth::Bit12,
             _ => BitDepth::Unknown,
@@ -375,6 +379,7 @@ pub fn handle_image_load(
                                 2 => match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -386,6 +391,7 @@ pub fn handle_image_load(
                                 3 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -397,6 +403,7 @@ pub fn handle_image_load(
                                 4 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., 0]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -406,6 +413,7 @@ pub fn handle_image_load(
                                     }
                                 },
                                 _ => {
+                                    #[allow(clippy::expect_used)]
                                     tx_events
                                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                             "Invalid shape for Grayscale image".to_string(),
@@ -430,6 +438,7 @@ pub fn handle_image_load(
                                 2 => match ds_reader.read_slice::<u16, _, _>(s![.., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -441,6 +450,7 @@ pub fn handle_image_load(
                                 3 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -452,6 +462,7 @@ pub fn handle_image_load(
                                 4 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., .., 0]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -461,6 +472,7 @@ pub fn handle_image_load(
                                     }
                                 },
                                 _ => {
+                                    #[allow(clippy::expect_used)]
                                     tx_events
                                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                             "Invalid shape for Grayscale image".to_string(),
@@ -490,6 +502,7 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                    #[allow(clippy::expect_used)]
                     tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
                             thread_protocol,
@@ -501,6 +514,7 @@ pub fn handle_image_load(
                     let data: Array2<bool> = match ds_reader.read_slice::<bool, _, _>(s![.., ..]) {
                         Ok(d) => d,
                         Err(e) => {
+                            #[allow(clippy::expect_used)]
                             tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                     e.to_string(),
@@ -524,6 +538,7 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                    #[allow(clippy::expect_used)]
                     tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
                             thread_protocol,
@@ -538,6 +553,7 @@ pub fn handle_image_load(
                                 match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -553,6 +569,7 @@ pub fn handle_image_load(
                                 match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
+                                        #[allow(clippy::expect_used)]
                                         tx_events
                                             .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                                 e.to_string(),
@@ -564,6 +581,7 @@ pub fn handle_image_load(
                             data
                         }
                         _ => {
+                            #[allow(clippy::expect_used)]
                             tx_events
                                 .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                                     "Invalid shape for Truecolor image".to_string(),
@@ -609,6 +627,7 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+                    #[allow(clippy::expect_used)]
                     tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Success(
                             thread_protocol,
@@ -616,6 +635,7 @@ pub fn handle_image_load(
                         .expect("Failed to send image loaded event");
                 }
                 ImageType::Indexed(_interlace) => {
+                    #[allow(clippy::expect_used)]
                     tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                             "Unsupported image format".to_string(),
@@ -624,6 +644,7 @@ pub fn handle_image_load(
                     continue;
                 }
                 _ => {
+                    #[allow(clippy::expect_used)]
                     tx_events
                         .send(AppEvent::ImageLoad(ImageLoadedResult::Failure(
                             "Unsupported image format".to_string(),

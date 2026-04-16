@@ -83,12 +83,16 @@ pub fn render_info_attributes(
     };
     let area = make_panels_rect(area_inner, min_first_panel);
     let [name_area, value_area] = area.as_ref() else {
-        panic!("Could not get the areas for the info attribute panels");
+        return Err(hdf5_metno::Error::Internal(
+            "Could not get the areas for attribute panels.".to_string(),
+        ));
     };
 
     let value_scrol_areas = make_panels_scroll(*value_area, scroll_size);
     let [value_area, scroll_area] = value_scrol_areas.as_ref() else {
-        panic!("Could not get the areas for scroll panels.");
+        return Err(hdf5_metno::Error::Internal(
+            "Could not get the areas for attribute panels.".to_string(),
+        ));
     };
     let height = name_area.height as i32;
     let heightu = height as usize;

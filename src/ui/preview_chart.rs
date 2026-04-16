@@ -200,12 +200,15 @@ pub fn render_chart_preview(
         } else {
             // TODO: Maybe multithread this bitch?
             render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
-            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer)
-                .expect("buffer size mismatch");
-            let image_widget = StatefulImage::default();
-            let dyn_img = DynamicImage::ImageRgb8(image);
-            let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
-            f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
+            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer);
+            if let Some(image) = image {
+                let image_widget = StatefulImage::default();
+                let dyn_img = DynamicImage::ImageRgb8(image);
+                let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
+                f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
+            } else {
+                render_error(f, &chart_area, "Could not create image buffer");
+            }
         }
     } else {
         let x_label_count = match chart_area.width {
@@ -275,7 +278,8 @@ fn render_image_chart(
 ) -> Result<(), AppError> {
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     root.margin(10, 10, 10, 10);
-    root.fill(&plotters::prelude::WHITE).unwrap();
+    root.fill(&plotters::prelude::WHITE)
+        .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
     let max = data_preview.max;
     let y_label_area_size = format!("{max:.4}").len() as u32 * 3 + 30;
 
@@ -287,7 +291,7 @@ fn render_image_chart(
             x_min..(x_min + data_preview.length as f64),
             data_preview.min..data_preview.max,
         )
-        .unwrap();
+        .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
 
     // Draw the mesh (grid lines)
     chart
@@ -295,11 +299,14 @@ fn render_image_chart(
         .x_label_style(("sans-serif", 18).into_font())
         .y_label_style(("sans-serif", 18).into_font())
         .draw()
-        .unwrap();
+        .map_err(|e| AppError::DrawingError(format!("Error drawing mesh: {}", e)))?;
 
     let data = data_preview.data.iter().map(|(x, y)| (x_min + *x, *y));
     let line_series = plotters::prelude::LineSeries::new(data, plotters::prelude::BLUE);
-    chart.draw_series(line_series).unwrap();
-    root.present().unwrap();
+    chart
+        .draw_series(line_series)
+        .map_err(|e| AppError::DrawingError(format!("Error drawing line series: {}", e)))?;
+    root.present()
+        .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
     Ok(())
 }

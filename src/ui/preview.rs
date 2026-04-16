@@ -63,7 +63,15 @@ pub fn render_string_preview(
     let selected_node = &node.node;
     let (dataset, meta) = match selected_node {
         Node::Dataset(ds, attr) => (ds, attr),
-        _ => panic!("Expected a string dataset to preview string data"),
+        _ => {
+            render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Selected node is not a dataset, cannot render string preview",
+            );
+            return Ok(());
+        }
     };
 
     match meta.encoding {

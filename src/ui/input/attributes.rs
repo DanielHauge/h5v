@@ -116,7 +116,16 @@ pub fn handle_normal_attributes(
                     };
                     drop(node);
 
-                    let new_value = perform_edit(state, content)?;
+                    let new_value = match perform_edit(state, content) {
+                        Ok(new_value) => new_value,
+                        Err(e) => {
+                            state.editing = false;
+                            return Ok(EventResult::Toast(
+                                AppToast::Error(format!("Failed to edit attribute: {}", e)),
+                                true,
+                            ));
+                        }
+                    };
                     state.editing = false;
                     let mut selected_node =
                         state.treeview[state.tree_view_cursor].node.borrow_mut();
@@ -142,7 +151,6 @@ pub fn handle_normal_attributes(
                     }
 
                     selected_node.recompute_attributes()?;
-                    state.file.flush()?;
 
                     Ok(EventResult::Toast(
                         AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),

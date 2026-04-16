@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::io::Write;
 use std::sync::mpsc::SendError;
+use std::sync::PoisonError;
 
 #[derive(Debug)]
 pub enum AppError {
@@ -11,6 +12,9 @@ pub enum AppError {
     ClipboardError(String),
     InvalidCommand(String),
     EditError(String),
+    ChildNotFound(String),
+    PoisionedLockError(String),
+    DrawingError(String),
 }
 
 impl Display for AppError {
@@ -23,7 +27,22 @@ impl Display for AppError {
             AppError::InvalidCommand(cmd) => write!(f, "Invalid Command: {}", cmd),
             AppError::FileError(x) => write!(f, "File error: {x}"),
             AppError::EditError(x) => write!(f, "Edit error: {x}"),
+            AppError::ChildNotFound(x) => write!(f, "Child not found: {x}"),
+            AppError::PoisionedLockError(x) => write!(f, "Poisioned lock error: {x}"),
+            AppError::DrawingError(x) => write!(f, "Drawing error: {x}"),
         }
+    }
+}
+
+// impl<T> From<DrawingAreaError<T>> for AppError {
+//     fn from(err: DrawingAreaError<T>) -> Self {
+//         AppError::DrawingError(format!("Drawing area error: {}", err))
+//     }
+// }
+
+impl<T> From<PoisonError<T>> for AppError {
+    fn from(err: PoisonError<T>) -> Self {
+        AppError::PoisionedLockError(format!("Poisoned lock error: {}", err))
     }
 }
 
@@ -54,10 +73,4 @@ pub fn log_error(str: impl Display) {
             let _ = write!(log_file, "{}", str);
         }
     }
-}
-
-#[allow(dead_code)]
-pub fn log_error_panic(str: impl Display) {
-    log_error(&str);
-    panic!("{}", str);
 }

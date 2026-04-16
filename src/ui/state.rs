@@ -138,6 +138,7 @@ pub enum AppToast {
 }
 
 pub struct AppState<'a> {
+    pub readonly: bool,
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub file: File,

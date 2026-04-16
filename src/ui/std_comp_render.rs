@@ -102,8 +102,9 @@ pub fn render_hl_string<T: ToString>(
 
     let mut skips = node.line_offset;
     for line in LinesWithEndings::from(&string) {
-        let ranges: Vec<(syntect::highlighting::Style, &str)> =
-            h.highlight_line(line, &ps).unwrap();
+        let ranges: Vec<(syntect::highlighting::Style, &str)> = h
+            .highlight_line(line, &ps)
+            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
         let mut spans = vec![];
         for (style, text) in ranges {
             let style = syntect_to_ratatui_style(style);

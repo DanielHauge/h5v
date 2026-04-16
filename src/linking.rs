@@ -38,7 +38,7 @@ pub fn link(paths: &[String]) -> Result<String, AppError> {
     let tmp_dir = dirs::cache_dir()
         .unwrap_or_default()
         .to_str()
-        .unwrap()
+        .unwrap_or("/tmp")
         .to_string();
     let tmp_link_file_path = format!("{tmp_dir}/{uuid}.h5");
     let new_tmp_link_file = File::create(&tmp_link_file_path)?;

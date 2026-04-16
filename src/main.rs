@@ -1,3 +1,7 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+// #![deny(clippy::unreachable)]
 use clap::Parser;
 
 mod color_consts;
@@ -11,7 +15,6 @@ mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;
 mod utils;
-
 use git_version::git_version;
 
 use crate::error::AppError;

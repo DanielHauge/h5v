@@ -45,6 +45,10 @@ h5v path/to/file.h5
 - `shift` + `right`/`left`: Pan right/left
 - `shift` + `up`/`down`: Zoom in/out by 10%
 
+## Edit mode
+
+Shift focus to an attribute name or value or preview value and press `enter` or `e` to enter edit mode. Edit mode will open \"$EDITOR\" with the current value. Edit the value then save and close the editor to update the value in the file.
+
 ## Commands
 
 - `:n` Go the nth item
@@ -63,9 +67,14 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Adding/Updating/Deletion of attributes/matrix values
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
+- [ ] Fix attribute write on fixed length string attributes
+- [ ] Add edit value for dataset values (scalar and single values)
 - [ ] Fix issue related to segmentation errors (last segment fetched too many)
-- [ ] Fix issue related to many attributes then ending up taking all space. Maybe constrain to 25% and then add browse mode thing to navigate attributes when many.
+- [ ] Prebuilt binaries for common platforms (distribution)
+
+## Future features
+
+- [ ] Adding/Updating/Deletion of attributes/matrix values
 - [ ] Add matrix support for compounds
 - [ ] Add preview support for compounds (select fields to preview)

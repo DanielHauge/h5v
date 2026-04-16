@@ -537,19 +537,14 @@ fn copy_to_group<T: H5Type>(
     new_name: &str,
 ) -> Result<(), hdf5_metno::Error> {
     if attr.is_scalar() {
-        let data: T = attr.read_scalar().unwrap();
-        let new_attr = grp
-            .new_attr_builder()
-            .empty_as(td)
-            .create(new_name)
-            .unwrap();
-        new_attr.write_scalar(&data).unwrap();
+        let data: T = attr.read_scalar()?;
+        let new_attr = grp.new_attr_builder().empty_as(td).create(new_name)?;
+        new_attr.write_scalar(&data)?;
     } else {
-        let data = attr.read::<T, IxDyn>().unwrap();
+        let data = attr.read::<T, IxDyn>()?;
         grp.new_attr_builder()
             .with_data_as(&data, td)
-            .create(new_name)
-            .unwrap();
+            .create(new_name)?;
     }
     Ok(())
 }
@@ -1092,7 +1087,7 @@ impl H5FNode {
         self.node.name()
     }
 
-    pub fn expand_path(&mut self, relative_path: &str) -> Result<Option<usize>, hdf5_metno::Error> {
+    pub fn expand_path(&mut self, relative_path: &str) -> Result<Option<usize>, AppError> {
         self.expand()?;
         let child_mame = relative_path.split('/').next();
 
@@ -1112,11 +1107,7 @@ impl H5FNode {
                         return Ok(Some(i));
                     }
                 }
-                panic!(
-                    "Child not found {} {}",
-                    child_mame.unwrap_or("N/A"),
-                    relative_path
-                );
+                Err(AppError::ChildNotFound(relative_path.to_string()))
             }
             None => Ok(None),
         }
