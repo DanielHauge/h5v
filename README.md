@@ -67,14 +67,19 @@ cargo install h5v
 
 ## Roadmap
 
+### Pre-release distribution features
+
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix attribute write on fixed length string attributes
-- [ ] Add edit value for dataset values (scalar and single values)
 - [ ] Fix issue related to segmentation errors (last segment fetched too many)
 - [ ] Prebuilt binaries for common platforms (distribution)
 
-## Future features
+### Post pre-release features
 
+- [ ] Edit file on readonly -> ask to open in write mode.
+- [ ] Add edit value for dataset values (scalar and single values)
 - [ ] Adding/Updating/Deletion of attributes/matrix values
-- [ ] Add matrix support for compounds
-- [ ] Add preview support for compounds (select fields to preview)
+- [ ] Add support for enums
+- [ ] Add support for compounds
+- [ ] Add support for compounds (treeview repr of fields recursively + select fields and if field is regular then preview as usual)
+- [ ] Add more command support: All actions could be cmd'able -> delete attribute, remove dataset from multi-chart, go up 50, etc. Anything that could change the state basically.
