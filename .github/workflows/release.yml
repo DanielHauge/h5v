@@ -125,6 +125,7 @@ jobs:
           fi
 
           cp "target/${{ matrix.build.TARGET }}/release/$bin" release/
+          sha512sum "target/${{ matrix.build.TARGET }}/release/$bin" > "release/${bin}.sha512"
           mv release/ "h5v-${RELEASE_VERSION}/"
 
       - name: Publish to GitHub
