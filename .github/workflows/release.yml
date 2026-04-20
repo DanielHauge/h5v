@@ -9,8 +9,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-test:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify crate
+        run: cargo publish --dry-run --allow-dirty --locked -p h5v
+
   generate-changelog:
     name: Generate changelog and tag
+    needs: build-test
     runs-on: ubuntu-latest
     outputs:
       release_body: ${{ steps.git-cliff.outputs.content }}
@@ -90,10 +112,6 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.build.TARGET }}
-
-      - name: Verify crate
-        if: matrix.build.NAME == 'linux-x64-glibc'
-        run: cargo publish --dry-run --allow-dirty --locked -p h5v
 
       - name: Prepare release assets
         shell: bash
