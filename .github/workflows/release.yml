@@ -1,4 +1,5 @@
 name: Deployment
+
 permissions:
   contents: write
   packages: write
@@ -40,21 +41,13 @@ jobs:
 
       - name: Create and push tag
         if: ${{ !env.ACT }}
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           tag="v${{ steps.version.outputs.version }}"
 
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "Tag already exists locally: $tag"
-          else
-            git tag "$tag"
-          fi
-
+          git tag "$tag"
           git push origin "$tag"
 
   publish-binaries:
