@@ -127,36 +127,12 @@ jobs:
           cp "target/${{ matrix.build.TARGET }}/release/$bin" release/
           mv release/ "h5v-${RELEASE_VERSION}/"
 
-      - name: Install 7zip (Windows)
-        if: runner.os == 'Windows'
-        run: choco install 7zip -y
-
-      - name: Create release artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          NAME="h5v-${RELEASE_VERSION}-${{ matrix.build.TARGET }}"
-          DIR="h5v-${RELEASE_VERSION}"
-
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            7z a "${NAME}.zip" "${DIR}"
-            FILE="${NAME}.zip"
-          else
-            tar -czf "${NAME}.tar.gz" "${DIR}"
-            FILE="${NAME}.tar.gz"
-          fi
-
-          sha512sum "$FILE" > "$FILE.sha512"
-
-          echo "ARTIFACT_FILE=$FILE" >> $GITHUB_ENV
-
       - name: Publish to GitHub
         uses: svenstaro/upload-release-action@v2
         if: ${{ !env.ACT }}
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.ARTIFACT_FILE }}
+          file: h5v-${{ env.RELEASE_VERSION }}/*
           file_glob: true
           overwrite: false
           tag: v${{ env.RELEASE_VERSION }}
