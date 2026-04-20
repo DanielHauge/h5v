@@ -63,9 +63,9 @@ jobs:
           - NAME: linux-x64-glibc
             OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
-          # - NAME: windows-x64-msvc
-          #   OS: windows-latest
-          #   TARGET: x86_64-pc-windows-msvc
+          - NAME: windows-x64-msvc
+            OS: windows-latest
+            TARGET: x86_64-pc-windows-msvc
 
     env:
       RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
