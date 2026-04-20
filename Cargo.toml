@@ -9,6 +9,8 @@ repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
 
 [dependencies]
+
+] }
 arboard = { version = "3.6.1", features = [
     "wl-clipboard-rs",
     "wayland-data-control",
@@ -35,10 +37,7 @@ ratatui-image = { version = "10.0.6", default-features = false, features = [
 ] }
 serde_json = "1.0.149"
 syntect = { version = "5.3.0", default-features = false, features = [
-    "dump-load",
-    "default-syntaxes",
-    "default-themes",
-    "regex-fancy",
+    "default-fancy",
 ] }
 uuid = { version = "1.23.1", features = ["v8"] }
 
