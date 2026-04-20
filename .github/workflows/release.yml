@@ -1,4 +1,8 @@
 name: Deployment
+permissions:
+  contents: write
+  packages: write
+  actions: write
 
 on:
   workflow_dispatch:
@@ -35,8 +39,9 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag
-        # only do this if not run with act
         if: ${{ !env.ACT }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           git config user.name "github-actions"
