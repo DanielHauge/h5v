@@ -26,7 +26,8 @@ jobs:
         id: git-cliff
         with:
           config: cliff.toml
-          args: -vv --bump
+          # Only generate a changelog for the latest release, and bump the version in Cargo.toml
+          args: -vv --bump --unreleased
 
       - name: Extract version
         id: version
