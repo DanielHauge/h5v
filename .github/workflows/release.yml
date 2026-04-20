@@ -5,21 +5,52 @@ on:
 
 jobs:
   generate-changelog:
-    name: Generate changelog
+    name: Generate changelog and tag
     runs-on: ubuntu-latest
     outputs:
       release_body: ${{ steps.git-cliff.outputs.content }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+
       - name: Generate a changelog
-        uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de # main
+        uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
         id: git-cliff
         with:
           config: cliff.toml
-          args: -vv --latest --no-exec
+          args: -vv --bump
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          version=$(echo "${{ steps.git-cliff.outputs.content }}" | grep -m1 -oP '(?<=## \[)[^]]+')
+          if [ -z "$version" ]; then
+            echo "Failed to extract version from changelog"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        # only do this if not run with act
+        if: ${{ !env.ACT }}
+        shell: bash
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          tag="v${{ steps.version.outputs.version }}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag already exists locally: $tag"
+          else
+            git tag "$tag"
+          fi
+
+          git push origin "$tag"
 
   publish-binaries:
     name: Publish binaries
@@ -33,34 +64,34 @@ jobs:
           - NAME: linux-x64-glibc
             OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
+          # - NAME: windows-x64-msvc
+          #   OS: windows-latest
+          #   TARGET: x86_64-pc-windows-msvc
+
+    env:
+      RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set the release version
-        shell: bash
-        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake build-essential pkg-config
 
-      # ✅ Replace deprecated actions-rs
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.build.TARGET }}
 
-      # ✅ Cache (big speed win)
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.build.TARGET }}
 
-      # ✅ Dry run before publish (important)
       - name: Verify crate
         if: matrix.build.NAME == 'linux-x64-glibc'
         run: cargo publish --dry-run --allow-dirty --locked -p h5v
@@ -68,48 +99,44 @@ jobs:
       - name: Prepare release assets
         shell: bash
         run: |
-          mkdir release
+          mkdir -p release
 
-          if [ "${{ matrix.build.OS }}" = "windows-2025" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
             bin="h5v.exe"
           else
             bin="h5v"
           fi
 
           cp "target/${{ matrix.build.TARGET }}/release/$bin" release/
-          mv release/ h5v-${{ env.RELEASE_VERSION }}/
+          mv release/ "h5v-${RELEASE_VERSION}/"
 
       - name: Create release artifacts
         shell: bash
         run: |
-          if [ "${{ matrix.build.OS }}" = "windows-2025" ]; then
-            7z a -tzip "h5v-${{ env.RELEASE_VERSION }}-${{ matrix.build.TARGET }}.zip" \
-              h5v-${{ env.RELEASE_VERSION }}/
-          else
-            tar -czvf h5v-${{ env.RELEASE_VERSION }}-${{ matrix.build.TARGET }}.tar.gz \
-              h5v-${{ env.RELEASE_VERSION }}/
+          tar -czvf "h5v-${RELEASE_VERSION}-${{ matrix.build.TARGET }}.tar.gz" \
+            "h5v-${RELEASE_VERSION}/"
 
-            sha512sum h5v-${{ env.RELEASE_VERSION }}-${{ matrix.build.TARGET }}.tar.gz \
-              > h5v-${{ env.RELEASE_VERSION }}-${{ matrix.build.TARGET }}.tar.gz.sha512
-          fi
+          sha512sum "h5v-${RELEASE_VERSION}-${{ matrix.build.TARGET }}.tar.gz" \
+            > "h5v-${RELEASE_VERSION}-${{ matrix.build.TARGET }}.tar.gz.sha512"
 
       - name: Publish to GitHub
         uses: svenstaro/upload-release-action@v2
+        if: ${{ !env.ACT }}
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: h5v-${{ env.RELEASE_VERSION }}-${{ matrix.build.TARGET }}*
           file_glob: true
-          overwrite: true
-          tag: ${{ github.ref }}
-          release_name: "Release v${{ env.RELEASE_VERSION }}"
-          body: "${{ needs.generate-changelog.outputs.release_body }}"
+          overwrite: false
+          tag: v${{ env.RELEASE_VERSION }}
+          release_name: Release v${{ env.RELEASE_VERSION }}
+          body: ${{ needs.generate-changelog.outputs.release_body }}
 
       - name: Publish to crates.io
-        if: matrix.build.NAME == 'linux-x64-glibc' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.build.NAME == 'linux-x64-glibc' && !env.ACT
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
         run: |
-          for i in 1 2 3; do
+          for i in {1..5}; do
             cargo publish --locked -p h5v && break
             echo "Publish failed, retrying in 10s..."
             sleep 10
