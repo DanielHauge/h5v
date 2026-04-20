@@ -9,8 +9,6 @@ repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
 
 [dependencies]
-
-] }
 arboard = { version = "3.6.1", features = [
     "wl-clipboard-rs",
     "wayland-data-control",
