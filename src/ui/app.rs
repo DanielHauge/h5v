@@ -321,6 +321,7 @@ fn main_recover_loop(
                 }
                 EventResult::Toast(toast, full_redraw) => {
                     if full_redraw {
+                        state.compute_tree_view();
                         terminal.clear()?;
                         terminal.flush()?;
                     }

@@ -243,6 +243,7 @@ pub trait HasAttributes {
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
     fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError>;
+    fn as_group(&self) -> Result<Group, hdf5_metno::Error>;
 }
 
 pub trait HasChildren {
@@ -393,6 +394,17 @@ impl HasAttributes for Node {
             attrs.push((name, attr));
         }
         Ok(attrs)
+    }
+
+    fn as_group(&self) -> Result<Group, hdf5_metno::Error> {
+        match self {
+            Node::File(file) => file.as_group(),
+            Node::Group(group, _) => group.as_group(),
+            Node::Dataset(dataset, _) => dataset.as_group(),
+            Node::Broken(_, _, _) => Err(hdf5_metno::Error::Internal(String::from(
+                "Cannot treat broken link as group",
+            ))),
+        }
     }
 
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error> {
@@ -781,8 +793,13 @@ impl H5FNode {
         Ok(())
     }
 
-    pub fn update_attribute(&self, attr_name: &str, new_value: String) -> Result<(), AppError> {
+    pub fn update_attribute(&mut self, attr_name: &str, new_value: String) -> Result<(), AppError> {
         let attr = self.node.attribute(attr_name)?;
+        if !attr.is_scalar() {
+            return Err(AppError::EditError(
+                "Only scalar attributes can be edited".to_string(),
+            ));
+        }
         let type_desc = attr.dtype()?.to_descriptor()?;
         match type_desc {
             TypeDescriptor::Integer(int_size) => match int_size {
@@ -901,7 +918,14 @@ impl H5FNode {
                 let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
                     AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
                 })?;
-                attr.write_scalar(&unicode).map_err(|e| {
+                let grp = self.node.as_group()?;
+                // delete old one and create new one as unicode
+                grp.delete_attr(attr_name)?;
+                let new_attr = grp
+                    .new_attr_builder()
+                    .empty_as(&TypeDescriptor::VarLenUnicode)
+                    .create(attr_name)?;
+                new_attr.write_scalar(&unicode).map_err(|e| {
                     AppError::EditError(format!("Failed to write attribute: {}", e))
                 })?;
             }
@@ -909,7 +933,14 @@ impl H5FNode {
                 let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
                     AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
                 })?;
-                attr.write_scalar(&unicode).map_err(|e| {
+                let grp = self.node.as_group()?;
+                // delete old one and create new one as unicode
+                grp.delete_attr(attr_name)?;
+                let new_attr = grp
+                    .new_attr_builder()
+                    .empty_as(&TypeDescriptor::VarLenUnicode)
+                    .create(attr_name)?;
+                new_attr.write_scalar(&unicode).map_err(|e| {
                     AppError::EditError(format!("Failed to write attribute: {}", e))
                 })?;
             }
@@ -941,6 +972,7 @@ impl H5FNode {
                 ));
             }
         }
+        self.recompute_attributes()?;
 
         Ok(())
     }
@@ -1044,17 +1076,6 @@ impl H5FNode {
 
     pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
         self.read_children()?;
-        if !self.expanded {
-            self.expand_toggle()?;
-        }
-        Ok(())
-    }
-
-    pub fn collapse(&mut self) {
-        self.expanded = false;
-    }
-
-    pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
         if self.expanded {
             self.expanded = false;
             self.view_loaded = 50;
@@ -1067,6 +1088,19 @@ impl H5FNode {
             if child_node.is_group() {
                 child_node.read_children()?;
             }
+        }
+        Ok(())
+    }
+
+    pub fn collapse(&mut self) {
+        self.expanded = false;
+    }
+
+    pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
+        if self.expanded {
+            self.collapse();
+        } else {
+            self.expand()?;
         }
         Ok(())
     }
