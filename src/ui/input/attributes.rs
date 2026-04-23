@@ -142,6 +142,12 @@ pub fn handle_normal_attributes(
                         }
                         Value => {
                             if let Err(e) = selected_node.update_attribute(&attr_name, new_value) {
+                                if let AppError::EditWarning(warning) = &e {
+                                    return Ok(EventResult::Toast(
+                                        AppToast::Warning(warning.to_string()),
+                                        true,
+                                    ));
+                                }
                                 return Ok(EventResult::Toast(
                                     AppToast::Error(e.to_string()),
                                     true,
@@ -149,8 +155,6 @@ pub fn handle_normal_attributes(
                             }
                         }
                     }
-
-                    selected_node.recompute_attributes()?;
 
                     Ok(EventResult::Toast(
                         AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),

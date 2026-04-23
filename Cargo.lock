@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "h5v"
-version = "0.2.5"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "bktree",

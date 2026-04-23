@@ -12,6 +12,7 @@ pub enum AppError {
     ClipboardError(String),
     InvalidCommand(String),
     EditError(String),
+    EditWarning(String),
     ChildNotFound(String),
     PoisionedLockError(String),
     DrawingError(String),
@@ -29,6 +30,7 @@ impl Display for AppError {
             AppError::EditError(x) => write!(f, "Edit error: {x}"),
             AppError::ChildNotFound(x) => write!(f, "Child not found: {x}"),
             AppError::PoisionedLockError(x) => write!(f, "Poisioned lock error: {x}"),
+            AppError::EditWarning(x) => write!(f, "Edit warning: {x}"),
             AppError::DrawingError(x) => write!(f, "Drawing error: {x}"),
         }
     }

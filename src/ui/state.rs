@@ -134,6 +134,7 @@ pub struct SegmentState {
 pub enum AppToast {
     Empty,
     Info(String),
+    Warning(String),
     Error(String),
 }
 

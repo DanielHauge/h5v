@@ -69,6 +69,7 @@ cargo install h5v
 
 ### Pre-release distribution features
 
+- [ ] Fix bug about children cache disappearing when open/close lots
 - [ ] Improve rendering UX -> Multithread -> Rendering spinner
 - [ ] Fix attribute write on fixed length string attributes
 - [ ] Fix issue related to segmentation errors (last segment fetched too many)

@@ -111,6 +111,10 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
                     last_message = Some(format!("Edit Error: - {e}"));
                     break;
                 }
+                AppError::EditWarning(e) => {
+                    last_message = Some(format!("Edit Warning: - {e}"));
+                    break;
+                }
                 AppError::ChildNotFound(e) => {
                     last_message = Some(format!("Child not found: - {e}"));
                     break;
@@ -232,7 +236,9 @@ fn main_recover_loop(
 
         let frame_area = match state.toast {
             AppToast::Empty => frame.area(),
-            AppToast::Info(_) | AppToast::Error(_) => split_render_toast(frame, state),
+            AppToast::Info(_) | AppToast::Warning(_) | AppToast::Error(_) => {
+                split_render_toast(frame, state)
+            }
         };
 
         let main_display_area = match show_tree_view {
@@ -374,7 +380,7 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
     let area = frame.area();
     match state.toast {
         AppToast::Empty => area,
-        AppToast::Info(ref msg) | AppToast::Error(ref msg) => {
+        AppToast::Info(ref msg) | AppToast::Error(ref msg) | AppToast::Warning(ref msg) => {
             let areas = Layout::default()
                 .direction(ratatui::layout::Direction::Vertical)
                 .constraints([Constraint::Min(0), Constraint::Length(3)])
@@ -390,12 +396,14 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
                         .border_style(Style::default().fg(match state.toast {
                             AppToast::Info(_) => Color::LightGreen,
                             AppToast::Error(_) => Color::Red,
+                            AppToast::Warning(_) => Color::Yellow,
                             _ => Color::White,
                         }))
                         .border_type(ratatui::widgets::BorderType::Rounded)
                         .title(match state.toast {
                             AppToast::Info(_) => "Info",
                             AppToast::Error(_) => "Error",
+                            AppToast::Warning(_) => "Warning",
                             _ => "",
                         })
                         .title_style(Style::default().fg(Color::Yellow).bold())
