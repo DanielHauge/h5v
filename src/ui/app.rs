@@ -22,13 +22,18 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
-use ratatui_image::picker::Picker;
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::{
     color_consts,
     error::{log_error, AppError},
     h5f,
-    ui::{input::EventResult, mchart::MultiChartState, state::AppToast},
+    ui::{
+        image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
+        input::EventResult,
+        mchart::MultiChartState,
+        state::{AppToast, ChartPreviwState},
+    },
 };
 
 use super::{
@@ -161,6 +166,9 @@ fn main_recover_loop(
     let tx_load_imgfsvlen =
         handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
     let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
+    let tx_chart_preview_resize = handle_chartpreview_resize(tx_events.clone());
+    let tx_load_chartpreview =
+        handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -171,7 +179,14 @@ fn main_recover_loop(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
-        picker: picker.clone(),
+    };
+
+    let chart_preview_state = ChartPreviwState {
+        ds_loaded: None,
+        protocol: None,
+        error: None,
+        ds_selection: None,
+        tx_load_chartpreview,
     };
 
     let matrix_view_state = MatrixViewState {
@@ -220,6 +235,7 @@ fn main_recover_loop(
         content_mode: ContentShowMode::Preview,
         img_state,
         matrix_view_state,
+        chart_preview_state,
     };
 
     state.compute_tree_view();
@@ -286,6 +302,7 @@ fn main_recover_loop(
         if state.editing {
             continue;
         }
+
         match event {
             AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)
                 .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false))
@@ -364,6 +381,40 @@ fn main_recover_loop(
                     })?;
                 }
             },
+            AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
+                ImageLoadedResult::Success(thread_protocol) => {
+                    state.chart_preview_state.protocol = Some(thread_protocol);
+                    state.chart_preview_state.error = None;
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+                ImageLoadedResult::Failure(f) => {
+                    state.chart_preview_state.protocol = None;
+                    state.chart_preview_state.error = Some(f);
+
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+            },
+            AppEvent::PreviewChartResized(image_resize_result) => match image_resize_result {
+                ImageResizeResult::Success(resize_response) => {
+                    if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+                        let _ = protocol.update_resized_protocol(resize_response);
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                }
+                ImageResizeResult::Error(e) => {
+                    state.chart_preview_state.error =
+                        Some(format!("Error resizing chart preview: {}", e));
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+            },
         }
     }
     state.file.close()?;
@@ -375,6 +426,8 @@ pub enum AppEvent {
     TermEvent(event::Event),
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
+    PreviewChartLoad(ImageLoadedResult),
+    PreviewChartResized(ImageResizeResult),
 }
 
 fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {

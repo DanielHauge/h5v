@@ -4,7 +4,7 @@ use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
 pub trait Previewable {
-    fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error>;
+    fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error>;
 }
 
 pub trait MatrixTable {
@@ -62,16 +62,37 @@ pub struct DatasetValuesData<T> {
     pub data: Array1<T>,
 }
 
+#[derive(Debug, Clone)]
 pub enum SliceSelection {
     All,
     FromTo(usize, usize),
 }
+
+impl PartialEq for SliceSelection {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SliceSelection::All, SliceSelection::All) => true,
+            (SliceSelection::FromTo(a1, b1), SliceSelection::FromTo(a2, b2)) => {
+                a1 == a2 && b1 == b2
+            }
+            _ => false,
+        }
+    }
+}
+
 type XAxis = usize;
 
+#[derive(Debug, Clone)]
 pub struct PreviewSelection {
     pub index: Vec<usize>,
     pub x: XAxis,
     pub slice: SliceSelection,
+}
+
+impl PartialEq for PreviewSelection {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.x == other.x && self.slice == other.slice
+    }
 }
 
 impl MatrixTable for Dataset {
@@ -97,7 +118,7 @@ impl MatrixValues for Dataset {
 }
 
 impl Previewable for Dataset {
-    fn plot(&self, selection: PreviewSelection) -> Result<DatasetPlotingData, Error> {
+    fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error> {
         let slice = match selection.slice {
             SliceSelection::All => 0..self.shape()[selection.x],
             SliceSelection::FromTo(a, b) => a..b,

@@ -5,7 +5,7 @@ use std::{
 };
 
 use hdf5_metno::{types::IntSize, ByteReader, Dataset, Selection};
-use image::ImageFormat;
+use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use ndarray::{s, Array2, Array3};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -19,8 +19,13 @@ use ratatui_image::{
 };
 
 use crate::{
+    data::Previewable,
     error::AppError,
     h5f::{H5FNode, ImageType, InterlaceMode, Node},
+    ui::{
+        preview_chart::{render_image_chart, MAX_SEGMENT_SIZE},
+        state::{ChartPreviewLoadRequest, IsFromDs},
+    },
 };
 
 use super::{
@@ -236,6 +241,119 @@ pub fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest>
         }
     });
     tx_worker
+}
+
+pub fn handle_chartpreview_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
+    let (tx_worker, rx_worker) = channel::<ResizeRequest>();
+
+    thread::spawn(move || loop {
+        if let Ok(request) = rx_worker.recv() {
+            match request.resize_encode() {
+                Ok(r) => {
+                    if let Err(e) =
+                        tx_events.send(AppEvent::PreviewChartResized(ImageResizeResult::Success(r)))
+                    {
+                        eprintln!("Failed to send chart preview redraw event: {}", e);
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = tx_events.send(AppEvent::PreviewChartResized(
+                        ImageResizeResult::Error(e.to_string()),
+                    )) {
+                        eprintln!("Failed to send chart preview redraw event: {}", e);
+                    }
+                }
+            }
+        }
+    });
+    tx_worker
+}
+
+pub fn handle_chartpreview_load(
+    tx_events: Sender<AppEvent>,
+    tx_worker: Sender<ResizeRequest>,
+    picker: Picker,
+) -> Sender<ChartPreviewLoadRequest> {
+    let (tx_load, rx_load) = channel::<ChartPreviewLoadRequest>();
+
+    let (x, y) = picker.font_size();
+
+    thread::spawn(move || loop {
+        if let Ok(mut req) = rx_load.recv() {
+            while let Ok(queued) = rx_load.try_recv() {
+                req = queued;
+            }
+            let height = req.height as u32 * y as u32;
+            let width = req.width as u32 * x as u32;
+
+            let mut buffer = vec![0; (height * width * 3) as usize];
+            let x_min = if req.segment_state.idx > 0 {
+                MAX_SEGMENT_SIZE as f64 * req.segment_state.idx as f64
+            } else {
+                0.0
+            };
+
+            let data_preview = match req.ds.plot(&req.selection) {
+                Ok(data_preview) => data_preview,
+                Err(e) => {
+                    #[allow(clippy::expect_used)]
+                    tx_events
+                        .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
+                            format!("Failed to plot data for chart preview: {}", e),
+                        )))
+                        .expect("Failed to send chart preview loaded event");
+                    continue;
+                }
+            };
+
+            if data_preview.min.is_nan()
+                || data_preview.max.is_nan()
+                || data_preview.min.is_infinite()
+            {
+                #[allow(clippy::expect_used)]
+                tx_events
+                    .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
+                        "Data not valid, could not establish min and max bounds for chart\nIt seems the data only contains NaN or infinite values.".to_string(),
+                    )))
+                    .expect("Failed to send chart preview loaded event");
+                continue;
+            }
+
+            if let Err(e) = render_image_chart(&mut buffer, width, height, x_min, data_preview) {
+                #[allow(clippy::expect_used)]
+                tx_events
+                    .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
+                        format!("Failed to render chart preview: {}", e),
+                    )))
+                    .expect("Failed to send chart preview loaded event");
+                continue;
+            }
+
+            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer);
+
+            let Some(image) = image else {
+                #[allow(clippy::expect_used)]
+                tx_events
+                    .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
+                        "Failed to create image buffer for chart preview".to_string(),
+                    )))
+                    .expect("Failed to send chart preview loaded event");
+                continue;
+            };
+
+            let dyn_img = DynamicImage::ImageRgb8(image);
+
+            let stateful_protocol = picker.new_resize_protocol(dyn_img);
+            let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+            #[allow(clippy::expect_used)]
+            tx_events
+                .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Success(
+                    thread_protocol,
+                )))
+                .expect("Failed to send chart preview loaded event");
+        }
+    });
+    tx_load
 }
 
 pub fn handle_imagefs_load(

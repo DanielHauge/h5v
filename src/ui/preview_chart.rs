@@ -1,4 +1,3 @@
-use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     chart::ChartBuilder,
     prelude::{BitMapBackend, IntoDrawingArea},
@@ -19,18 +18,20 @@ use crate::{
     color_consts,
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::AppError,
-    h5f::{H5FNode, Node},
+    h5f::{H5FNode, HasPath, Node},
     ui::{
         dims::render_dim_selector,
         preview::render_string_preview,
         segment_scroll::render_segment_scroll,
-        state::SegmentType,
+        state::{ChartPreviewLoadRequest, IsFromDs, SegmentType},
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
     utils::image_capable_terminal,
 };
 
 use super::state::AppState;
+
+pub const MAX_SEGMENT_SIZE: usize = 250000;
 
 pub fn render_chart_preview(
     f: &mut Frame,
@@ -149,8 +150,7 @@ pub fn render_chart_preview(
         })
     };
 
-    const MAX_SEGMENT_SIZE: usize = 250000;
-    let (chart_area, data_preview) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
+    let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
             (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
@@ -159,58 +159,87 @@ pub fn render_chart_preview(
         render_segment_scroll(f, &areas_split[1], state)?;
 
         let max_len = shape[node.selected_x];
-        let data_preview = ds.plot(PreviewSelection {
+        let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: node.selected_indexes[0..total_dims].to_vec(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
                 (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
             ),
-        })?;
-        (areas_split[0], data_preview)
+        };
+        (areas_split[0], data_preview_selection)
     } else {
-        let data_preview = ds.plot(PreviewSelection {
+        let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: node.selected_indexes[0..total_dims].to_vec(),
             slice: SliceSelection::All,
-        })?;
-        (chart_area, data_preview)
+        };
+
+        (chart_area, data_preview_selection)
     };
 
-    if image_capable_terminal() {
-        let (x, y) = state.img_state.picker.font_size();
-        let height = chart_area.height as u32 * y as u32;
-        let width = chart_area.width as u32 * x as u32;
-        let mut buffer = vec![0; (height * width * 3) as usize];
-        let x_min = if state.segment_state.idx > 0 {
-            MAX_SEGMENT_SIZE as f64 * state.segment_state.idx as f64
-        } else {
-            0.0
-        };
-        if data_preview.min.is_nan()
-            || data_preview.max.is_nan()
-            || data_preview.min.is_infinite()
-            || data_preview.min >= data_preview.max
-        {
+    let image_capable = image_capable_terminal();
+    let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
+
+    if image_capable
+        && state.chart_preview_state.is_from_ds(&node.node)
+        && loaded_preview_selection == Some(data_preview_selection.clone())
+    {
+        if let Some(ref error) = state.chart_preview_state.error {
             render_error(
                 f,
                 &chart_area,
-                "Data not valid, could not establish min and max bounds for chart\nIt seems the data only contains NaN or infinite values.",
+                format!("Error loading chart preview: {}", error),
             );
-        } else {
-            // TODO: Maybe multithread this bitch?
-            render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
-            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer);
-            if let Some(image) = image {
-                let image_widget = StatefulImage::default();
-                let dyn_img = DynamicImage::ImageRgb8(image);
-                let mut stateful_protocol = state.img_state.picker.new_resize_protocol(dyn_img);
-                f.render_stateful_widget(image_widget, chart_area, &mut stateful_protocol);
-            } else {
-                render_error(f, &chart_area, "Could not create image buffer");
-            }
+            return Ok(());
         }
+        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
+        } else {
+            render_string(
+                f,
+                &chart_area,
+                node,
+                "Loading chart preview...".to_string(),
+                None,
+            );
+        }
+        return Ok(());
+    }
+
+    if image_capable {
+        state.chart_preview_state.ds_loaded = Some(node.node.path());
+        state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
+        state.chart_preview_state.error = None;
+        state.chart_preview_state.protocol = None;
+        let chart_preview_load_request = ChartPreviewLoadRequest {
+            ds,
+            width: chart_area.width,
+            height: chart_area.height,
+            selection: data_preview_selection.clone(),
+            segment_state: state.segment_state.clone(),
+        };
+        state
+            .chart_preview_state
+            .tx_load_chartpreview
+            .send(chart_preview_load_request)
+            .ok();
+
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
     } else {
+        let data_preview = match ds.plot(&data_preview_selection) {
+            Ok(dp) => dp,
+            Err(e) => {
+                render_error(f, &chart_area, format!("Error plotting data: {}", e));
+                return Ok(());
+            }
+        };
         let x_label_count = match chart_area.width {
             0 => 0,
             _ => chart_area.width / 8,
@@ -269,7 +298,7 @@ pub fn render_chart_preview(
     Ok(())
 }
 
-fn render_image_chart(
+pub fn render_image_chart(
     buffer: &mut [u8],
     width: u32,
     height: u32,

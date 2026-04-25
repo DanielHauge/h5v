@@ -11,6 +11,7 @@ use image::ImageFormat;
 use ratatui_image::{picker::Picker, thread::ThreadProtocol};
 
 use crate::{
+    data::PreviewSelection,
     error::AppError,
     h5f::{H5FNode, ImageType, Node},
     search::Searcher,
@@ -51,6 +52,22 @@ pub enum ContentShowMode {
     Matrix,
 }
 
+pub struct ChartPreviewLoadRequest {
+    pub ds: Dataset,
+    pub selection: PreviewSelection,
+    pub segment_state: SegmentState,
+    pub width: u16,
+    pub height: u16,
+}
+
+pub struct ChartPreviwState {
+    pub ds_loaded: Option<String>,
+    pub protocol: Option<ThreadProtocol>,
+    pub error: Option<String>,
+    pub ds_selection: Option<PreviewSelection>,
+    pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
+}
+
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
     pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
@@ -60,30 +77,44 @@ pub struct ImgState {
     pub error: Option<String>,
     pub idx_to_load: i32,
     pub idx_loaded: i32,
-    pub picker: Picker,
 }
 
-impl ImgState {
-    pub fn is_from_ds(&self, node: &Node) -> bool {
-        if self.ds.is_none() {
-            return false;
-        }
+pub trait IsFromDsReq {
+    fn get_ds_name(&self) -> Option<String>;
+}
+
+pub trait IsFromDs {
+    fn is_from_ds(&self, node: &Node) -> bool;
+}
+
+impl<T: IsFromDsReq> IsFromDs for T {
+    fn is_from_ds(&self, node: &Node) -> bool {
+        let ds_name = match self.get_ds_name() {
+            Some(name) => name,
+            None => return false,
+        };
         match node {
             Node::Dataset(ds, _) => {
                 let name = &ds.name();
-                let ds_name_str = match &self.ds {
-                    Some(ds_name) => ds_name.as_str(),
-                    None => {
-                        return false;
-                    }
-                };
-                if *name == ds_name_str && self.idx_to_load == self.idx_loaded {
+                if *name == ds_name {
                     return true;
                 }
                 false
             }
             _ => false,
         }
+    }
+}
+
+impl IsFromDsReq for ChartPreviwState {
+    fn get_ds_name(&self) -> Option<String> {
+        self.ds_loaded.clone()
+    }
+}
+
+impl IsFromDsReq for ImgState {
+    fn get_ds_name(&self) -> Option<String> {
+        self.ds.clone()
     }
 }
 
@@ -119,12 +150,14 @@ pub struct MatrixViewState {
     pub cursor_col: usize,
 }
 
+#[derive(Clone)]
 pub enum SegmentType {
     Image,
     Chart,
     NoSegment,
 }
 
+#[derive(Clone)]
 pub struct SegmentState {
     pub idx: i32,
     pub segumented: SegmentType,
@@ -157,6 +190,7 @@ pub struct AppState<'a> {
     pub content_mode: ContentShowMode,
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
+    pub chart_preview_state: ChartPreviwState,
     pub segment_state: SegmentState,
     pub command_state: CommandState,
 }
