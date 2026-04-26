@@ -1,8 +1,10 @@
+use itertools::Itertools;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::SYSTEM_ATTRIBUTES,
+    h5f::{HasAttributes, SYSTEM_ATTRIBUTES},
+    sprint_attributes::AttributeEditable,
     ui::{
         edit::perform_edit,
         state::{
@@ -76,6 +78,7 @@ pub fn handle_normal_attributes(
                 (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => {
                     state.editing = true;
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+
                     let node_attributes_view_cursor = node.attributes_view_cursor.clone();
                     let attributes = node.read_attributes()?;
                     let selected_rendered_attribute = attributes
@@ -95,6 +98,7 @@ pub fn handle_normal_attributes(
                         .trim_end_matches('─')
                         .trim_end()
                         .to_string();
+
                     if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
                         state.editing = false;
                         return Ok(EventResult::Toast(
@@ -105,6 +109,28 @@ pub fn handle_normal_attributes(
                             true,
                         ));
                     }
+
+                    let (_, attr) = attributes
+                        .attributes
+                        .iter()
+                        .find(|(name, _)| name == &attr_name)
+                        .ok_or_else(|| {
+                            AppError::EditError(format!("Attribute '{}' not found", attr_name))
+                        })?;
+
+                    if let Err(e) = attr.can_edit() {
+                        if let Value = node_attributes_view_cursor.attribute_view_selection {
+                            state.editing = false;
+                            return Ok(EventResult::Toast(
+                                AppToast::Error(format!(
+                                    "Attribute '{}' value cannot be edited: {}",
+                                    attr_name, e
+                                )),
+                                false,
+                            ));
+                        }
+                    }
+
                     let content = match node_attributes_view_cursor.attribute_view_selection {
                         Name => attr_name.clone(),
                         Value => attribute
@@ -155,6 +181,17 @@ pub fn handle_normal_attributes(
                             }
                         }
                     }
+
+                    eprintln!("Attribute '{}' updated successfully", attr_name);
+                    match selected_node.computed_attributes {
+                        Some(ref x) => {
+                            eprintln!("Computed attributes:");
+                            for (ref key, ref value, ref t) in x.rendered_attributes.iter() {
+                                eprintln!("  {} = {} ({})", key, value, t);
+                            }
+                        }
+                        None => eprintln!("No computed attributes"),
+                    };
 
                     Ok(EventResult::Toast(
                         AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),

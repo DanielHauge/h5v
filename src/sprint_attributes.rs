@@ -4,7 +4,7 @@ use hdf5_metno::{
     types::{
         self, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenAscii, VarLenUnicode,
     },
-    Error,
+    Attribute, Error,
 };
 use ratatui::{text::Line, text::Span};
 
@@ -407,5 +407,31 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
     } else {
         let line = Line::from("Ivalid Attribute").style(color_consts::ERROR_COLOR);
         Ok(line)
+    }
+}
+
+pub trait AttributeEditable {
+    fn can_edit(&self) -> Result<(), String>;
+}
+
+impl AttributeEditable for Attribute {
+    fn can_edit(&self) -> Result<(), String> {
+        if self.is_valid() {
+            let dtype = self.dtype().map_err(|e| e.to_string())?;
+            let type_desc = dtype.to_descriptor().map_err(|e| e.to_string())?;
+            match type_desc {
+                TypeDescriptor::Integer(_) => Ok(()),
+                TypeDescriptor::Unsigned(_) => Ok(()),
+                TypeDescriptor::Float(_) => Ok(()),
+                TypeDescriptor::Boolean => Ok(()),
+                TypeDescriptor::VarLenAscii => Ok(()),
+                TypeDescriptor::VarLenUnicode => Ok(()),
+                _ => Err(format!(
+                    "{type_desc} attribute type is not supported for editing. Delete it and create a new one with a supported type if you want to edit it."
+                )),
+            }
+        } else {
+            Err("Invalid attribute".to_string())
+        }
     }
 }

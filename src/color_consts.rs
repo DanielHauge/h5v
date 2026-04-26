@@ -41,6 +41,11 @@ pub const SEARCH_TEXT_COLOR: Color = Color::Rgb(222, 222, 222);
 pub const SEARCH_COUNT_COLOR: Color = Color::DarkGray;
 pub const DATASET_FILE_COLOR: Color = Color::Rgb(38, 166, 154);
 
+// Slightly greyed out
+// pub const TYPE_DESC_COLOR: ratatui::prelude::Color = Color::Rgb(150, 150, 150);
+// More grey
+pub const TYPE_DESC_COLOR: ratatui::prelude::Color = Color::Rgb(150, 150, 150);
+
 pub const LOAD_MORE_COLOR: Color = Color::Yellow;
 
 pub const LINE_NUM_COLOR: Color = Color::DarkGray;

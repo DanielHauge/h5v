@@ -7,7 +7,7 @@ use hdf5_metno::{
 use ndarray::IxDyn;
 use ratatui::{
     style::Style,
-    text::{Line, Span},
+    text::{Line, Span, ToSpan},
 };
 
 use crate::{
@@ -72,7 +72,7 @@ pub struct DatasetMeta {
     pub filename: String,
 }
 impl GroupMeta {
-    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
+    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
@@ -95,7 +95,7 @@ impl GroupMeta {
             data_set_attrs.push((external_filename, external_value));
         }
 
-        let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
+        let mut lines: Vec<(Line<'static>, Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
             let name_len = name.width();
             let extra_name_space = match min_first_panel as usize - name_len {
@@ -111,7 +111,8 @@ impl GroupMeta {
             let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
-            lines.push((name_line, value_line));
+            let empty_line = Line::from(vec![Span::raw("")]);
+            lines.push((name_line, value_line, empty_line));
         }
 
         lines
@@ -122,7 +123,7 @@ impl GroupMeta {
 pub static SYSTEM_ATTRIBUTES: [&str; 6] = ["type", "size", "shape", "chunk", "link", "path"];
 
 impl DatasetMeta {
-    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>)> {
+    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
@@ -215,7 +216,7 @@ impl DatasetMeta {
             data_set_attrs.push((link_name_span, link_value_span));
         }
 
-        let mut lines: Vec<(Line<'static>, Line<'static>)> = vec![];
+        let mut lines: Vec<(Line<'static>, Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
             let name_len = name.width();
             let extra_name_space = match min_first_panel as usize - name_len {
@@ -231,7 +232,8 @@ impl DatasetMeta {
             let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
-            lines.push((name_line, value_line));
+            let empty_line = Line::from(vec![Span::raw("")]);
+            lines.push((name_line, value_line, empty_line));
         }
 
         lines
@@ -627,7 +629,7 @@ pub enum Node {
 }
 
 impl Node {
-    pub fn render(&self, longest_name: u16) -> (Line<'static>, Line<'static>) {
+    pub fn render(&self, longest_name: u16) -> (Line<'static>, Line<'static>, Line<'static>) {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
@@ -653,7 +655,8 @@ impl Node {
                 .bold(),
         );
         let path_line = Line::from(vec![path_styled]);
-        (name_line, path_line)
+        let empty_line = Line::from(vec![Span::raw("")]);
+        (name_line, path_line, empty_line)
     }
 }
 
@@ -662,7 +665,7 @@ pub struct ComputedAttributes {
     pub longest_name_length: u16,
     #[allow(dead_code)]
     pub attributes: Vec<(String, Attribute)>,
-    pub rendered_attributes: Vec<(Line<'static>, Line<'static>)>,
+    pub rendered_attributes: Vec<(Line<'static>, Line<'static>, Line<'static>)>,
 }
 
 impl ComputedAttributes {
@@ -689,7 +692,7 @@ impl ComputedAttributes {
             .into_iter()
             .chain(rendered_ds_attributes)
             .chain(rendered_custom_attributes)
-            .collect::<Vec<(Line<'static>, Line<'static>)>>();
+            .collect::<Vec<(Line<'static>, Line<'static>, Line<'static>)>>();
 
         Ok(Self {
             longest_name_length,
@@ -698,10 +701,38 @@ impl ComputedAttributes {
         })
     }
 
+    fn update_value_inplace(
+        &mut self,
+        attr_name: &str,
+        new_value: String,
+        typedesc: String,
+    ) -> Result<(), AppError> {
+        for (name_line, value_line, type_desc) in &mut self.rendered_attributes {
+            if name_line.to_span().to_string().starts_with(attr_name) {
+                // Set content of value_line to new_value, but keep the style
+                let first_span = value_line.spans.get_mut(0).ok_or_else(|| {
+                    AppError::EditError(format!(
+                        "Value line for attribute '{}' has no spans",
+                        attr_name
+                    ))
+                })?;
+                first_span.content = new_value.into();
+
+                let new_type_desc_line = Line::from(vec![Span::styled(
+                    format!(" ({})", typedesc),
+                    Style::default().fg(color_consts::TYPE_DESC_COLOR),
+                )]);
+                *type_desc = new_type_desc_line;
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn render_attributes(
         attributes: &Vec<(String, Attribute)>,
         name_area_width: usize,
-    ) -> Vec<(Line<'static>, Line<'static>)> {
+    ) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
         let mut rendered_attributes = vec![];
         for (name, attr) in attributes {
             let name = name.to_string();
@@ -726,7 +757,20 @@ impl ComputedAttributes {
                     Style::default().fg(color_consts::ERROR_COLOR),
                 ),
             };
-            rendered_attributes.push((name_line, value_line));
+            let type_desc_str = match attr.dtype() {
+                Ok(dtype) => match dtype.to_descriptor() {
+                    Ok(td) => td.to_string(),
+                    Err(e) => format!("Error getting type descriptor: {}", e),
+                },
+                Err(e) => format!("Error getting dtype: {}", e),
+            };
+            // Make a small grey (type) string at the end of the value line
+            let type_desc = Line::styled(
+                format!(" ({})", type_desc_str),
+                Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            );
+
+            rendered_attributes.push((name_line, value_line, type_desc));
         }
         rendered_attributes
     }
@@ -785,11 +829,16 @@ impl H5FNode {
         }
     }
 
-    pub fn update_attribute_name(&self, attr_name: &str, new_name: &str) -> Result<(), AppError> {
+    pub fn update_attribute_name(
+        &mut self,
+        attr_name: &str,
+        new_name: &str,
+    ) -> Result<(), AppError> {
         let new_name = new_name.trim_matches('=').trim_matches('─').trim();
         if !attr_name.eq(new_name) {
             self.node.update_attr_name(attr_name, new_name)?;
         }
+        self.recompute_attributes()?;
         Ok(())
     }
 
@@ -915,34 +964,10 @@ impl H5FNode {
                 ));
             }
             TypeDescriptor::FixedAscii(_) => {
-                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
-                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
-                })?;
-                let grp = self.node.as_group()?;
-                // delete old one and create new one as unicode
-                grp.delete_attr(attr_name)?;
-                let new_attr = grp
-                    .new_attr_builder()
-                    .empty_as(&TypeDescriptor::VarLenUnicode)
-                    .create(attr_name)?;
-                new_attr.write_scalar(&unicode).map_err(|e| {
-                    AppError::EditError(format!("Failed to write attribute: {}", e))
-                })?;
+                return Err(AppError::EditWarning("Editing FixedAscii attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()));
             }
             TypeDescriptor::FixedUnicode(_) => {
-                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
-                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
-                })?;
-                let grp = self.node.as_group()?;
-                // delete old one and create new one as unicode
-                grp.delete_attr(attr_name)?;
-                let new_attr = grp
-                    .new_attr_builder()
-                    .empty_as(&TypeDescriptor::VarLenUnicode)
-                    .create(attr_name)?;
-                new_attr.write_scalar(&unicode).map_err(|e| {
-                    AppError::EditError(format!("Failed to write attribute: {}", e))
-                })?;
+                return Err(AppError::EditWarning("Editing FixedUnicode attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()));
             }
             TypeDescriptor::VarLenArray(_) => {
                 //TODO: Support arrays.
@@ -972,7 +997,20 @@ impl H5FNode {
                 ));
             }
         }
-        self.recompute_attributes()?;
+        match &mut self.computed_attributes {
+            Some(computed_attributes) => {
+                computed_attributes.update_value_inplace(
+                    attr_name,
+                    new_value,
+                    type_desc.to_string(),
+                )?;
+            }
+            None => {
+                Err(AppError::EditError(
+                    "Failed to update attribute view: Computed attributes not found".to_string(),
+                ))?;
+            }
+        }
 
         Ok(())
     }
