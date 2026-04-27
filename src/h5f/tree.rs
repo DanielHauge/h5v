@@ -120,9 +120,9 @@ impl H5FNode {
             return name.clone();
         }
         match &self.node {
-            Node::File(f) => f.filename().split('/').last().unwrap_or("").to_string(),
-            Node::Group(g, _) => g.filename().split('/').last().unwrap_or("").to_string(),
-            Node::Dataset(ds, _) => ds.filename().split('/').last().unwrap_or("").to_string(),
+            Node::File(f) => f.filename().split('/').next_back().unwrap_or("").to_string(),
+            Node::Group(g, _) => g.filename().split('/').next_back().unwrap_or("").to_string(),
+            Node::Dataset(ds, _) => ds.filename().split('/').next_back().unwrap_or("").to_string(),
             Node::Broken(_, path, _) => path.clone(),
         }
     }
