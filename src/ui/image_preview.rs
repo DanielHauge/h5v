@@ -110,7 +110,11 @@ fn render_ds_img(
         horizontal: 2,
         vertical: 1,
     });
-    match state.img_state.is_from_ds(selected_node) {
+    let image_loaded = state.img_state.is_from_ds(selected_node)
+        && (!matches!(state.segment_state.segumented, SegmentType::Image)
+            || state.img_state.idx_loaded == state.img_state.idx_to_load);
+
+    match image_loaded {
         true => {
             if let Some(e) = &state.img_state.error {
                 let error_msg = format!("Error loading image: {}", e);
@@ -161,7 +165,11 @@ fn render_raw_img(
         vertical: 1,
     });
 
-    match state.img_state.is_from_ds(selected_node) {
+    let image_loaded = state.img_state.is_from_ds(selected_node)
+        && (!matches!(state.segment_state.segumented, SegmentType::Image)
+            || state.img_state.idx_loaded == state.img_state.idx_to_load);
+
+    match image_loaded {
         true => match state.img_state.error {
             Some(ref e) => {
                 let error_msg = format!("Error loading image - {}", e);
@@ -176,12 +184,14 @@ fn render_raw_img(
         },
         false => {
             state.img_state.protocol = None;
+            state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
             let typedesc = ds.dtype()?.to_descriptor()?;
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
                     state.segment_state.segumented = SegmentType::NoSegment;
+                    state.img_state.idx_loaded = state.img_state.idx_to_load;
                     let ds_buffered = BufReader::new(ds_reader);
                     state
                         .img_state
