@@ -9,6 +9,7 @@ use ratatui::{text::Line, text::Span};
 
 use crate::{
     color_consts,
+    h5f::scalar_text_codec,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
 
@@ -342,16 +343,12 @@ impl AttributeEditable for Attribute {
         if self.is_valid() {
             let dtype = self.dtype().map_err(|e| e.to_string())?;
             let type_desc = dtype.to_descriptor().map_err(|e| e.to_string())?;
-            match type_desc {
-                TypeDescriptor::Integer(_) => Ok(()),
-                TypeDescriptor::Unsigned(_) => Ok(()),
-                TypeDescriptor::Float(_) => Ok(()),
-                TypeDescriptor::Boolean => Ok(()),
-                TypeDescriptor::VarLenAscii => Ok(()),
-                TypeDescriptor::VarLenUnicode => Ok(()),
-                _ => Err(format!(
+            if scalar_text_codec(&type_desc).is_some() {
+                Ok(())
+            } else {
+                Err(format!(
                     "{type_desc} attribute type is not supported for editing. Delete it and create a new one with a supported type if you want to edit it."
-                )),
+                ))
             }
         } else {
             Err("Invalid attribute".to_string())

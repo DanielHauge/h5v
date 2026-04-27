@@ -1,4 +1,3 @@
-use hdf5_metno::types::{FixedAscii, FixedUnicode, VarLenAscii, VarLenUnicode};
 use ratatui::{layout::Rect, Frame};
 
 use super::{
@@ -9,7 +8,7 @@ use super::{
 };
 use crate::{
     error::AppError,
-    h5f::{Encoding, H5FNode, Node},
+    h5f::{read_scalar_string_dataset, Encoding, H5FNode, Node},
 };
 
 pub fn render_preview(
@@ -91,22 +90,12 @@ pub fn render_string_preview(
                 "Unknown encoding not supported for string data",
             );
         }
-        Encoding::Ascii => match dataset.read_scalar::<VarLenAscii>() {
-            Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
-            Err(e) => render_error(f, area, format!("Error: {}", e)),
-        },
-        Encoding::UTF8 => match dataset.read_scalar::<VarLenUnicode>() {
-            Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
-            Err(e) => render_error(f, area, format!("Error: {}", e)),
-        },
-        Encoding::UTF8Fixed => match dataset.read_scalar::<FixedUnicode<32768>>() {
-            Ok(x) => render_string(f, area, node, x.to_string(), meta.hl.clone()),
-            Err(e) => render_error(f, area, format!("Error: {}", e)),
-        },
-        Encoding::AsciiFixed => match dataset.read_scalar::<FixedAscii<32768>>() {
-            Ok(x) => render_string(f, area, node, x.to_string(), meta.hl.clone()),
-            Err(e) => render_error(f, area, format!("Error: {}", e)),
-        },
+        Encoding::Ascii | Encoding::UTF8 | Encoding::UTF8Fixed | Encoding::AsciiFixed => {
+            match read_scalar_string_dataset(dataset, &meta.encoding) {
+                Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
+                Err(e) => render_error(f, area, format!("Error: {}", e)),
+            }
+        }
     }
     Ok(())
 }

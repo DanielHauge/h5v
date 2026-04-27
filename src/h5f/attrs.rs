@@ -1,10 +1,4 @@
-use std::str::FromStr;
-
-use hdf5_metno::{
-    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
-    Attribute, Group, H5Type, ObjectReference2,
-};
-use ndarray::IxDyn;
+use hdf5_metno::Attribute;
 use ratatui::{
     style::Style,
     text::{Line, Span, ToSpan},
@@ -12,7 +6,10 @@ use ratatui::{
 
 use crate::{color_consts, error::AppError, sprint_attributes::sprint_attribute};
 
-use super::model::{H5FNode, Node};
+use super::{
+    codec::{copy_attr_to_group, write_scalar_attr_from_text},
+    model::{H5FNode, Node},
+};
 
 pub trait HasAttributes {
     fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error>;
@@ -104,121 +101,11 @@ impl HasAttributes for Node {
         };
 
         let attr = group.attr(old_name)?;
-        let type_desc = attr.dtype()?.to_descriptor()?;
-        match type_desc {
-            TypeDescriptor::Boolean => copy_to_group::<bool>(&attr, &group, &type_desc, new_name)?,
-            TypeDescriptor::Integer(int_size) => match int_size {
-                hdf5_metno::types::IntSize::U1 => {
-                    copy_to_group::<i8>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U2 => {
-                    copy_to_group::<i16>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U4 => {
-                    copy_to_group::<i32>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U8 => {
-                    copy_to_group::<i64>(&attr, &group, &type_desc, new_name)?
-                }
-            },
-            TypeDescriptor::Unsigned(int_size) => match int_size {
-                hdf5_metno::types::IntSize::U1 => {
-                    copy_to_group::<u8>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U2 => {
-                    copy_to_group::<u16>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U4 => {
-                    copy_to_group::<u32>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::IntSize::U8 => {
-                    copy_to_group::<u64>(&attr, &group, &type_desc, new_name)?
-                }
-            },
-            TypeDescriptor::Float(float_size) => match float_size {
-                hdf5_metno::types::FloatSize::U4 => {
-                    copy_to_group::<f32>(&attr, &group, &type_desc, new_name)?
-                }
-                hdf5_metno::types::FloatSize::U8 => {
-                    copy_to_group::<f64>(&attr, &group, &type_desc, new_name)?
-                }
-            },
-            TypeDescriptor::Enum(_) => {
-                let data: Vec<u8> = attr.read_raw()?;
-                let new_attr = group
-                    .new_attr_builder()
-                    .empty_as(&type_desc)
-                    .create(new_name)?;
-                new_attr.write_raw(&data)?;
-            }
-            TypeDescriptor::Compound(_) => {
-                let data: Vec<u8> = attr.read_raw()?;
-                let new_attr = group
-                    .new_attr_builder()
-                    .empty_as(&type_desc)
-                    .create(new_name)?;
-                new_attr.write_raw(&data)?;
-            }
-            TypeDescriptor::Reference(_) => {
-                let data: ObjectReference2 = attr.read_scalar()?;
-                let new_attr = group
-                    .new_attr_builder()
-                    .empty_as(&type_desc)
-                    .create(new_name)?;
-                new_attr.write_scalar(&data)?;
-            }
-            TypeDescriptor::FixedUnicode(size) => match size {
-                0..255 => copy_to_group::<FixedUnicode<255>>(&attr, &group, &type_desc, new_name)?,
-                255..4096 => {
-                    copy_to_group::<FixedUnicode<4096>>(&attr, &group, &type_desc, new_name)?
-                }
-                _ => copy_to_group::<VarLenUnicode>(&attr, &group, &type_desc, new_name)?,
-            },
-            TypeDescriptor::VarLenArray(_) => {
-                return Err(AppError::EditError(
-                    "Edit of VarLenArray types are unsupported".to_string(),
-                ))
-            }
-            TypeDescriptor::FixedArray(_, _) => {
-                return Err(AppError::EditError(
-                    "Edit of FixedArray types are unsupported".to_string(),
-                ))
-            }
-            TypeDescriptor::FixedAscii(size) => match size {
-                0..255 => copy_to_group::<FixedAscii<255>>(&attr, &group, &type_desc, new_name)?,
-                255..4096 => {
-                    copy_to_group::<FixedAscii<4096>>(&attr, &group, &type_desc, new_name)?
-                }
-                _ => copy_to_group::<VarLenAscii>(&attr, &group, &type_desc, new_name)?,
-            },
-            TypeDescriptor::VarLenAscii => {
-                copy_to_group::<VarLenAscii>(&attr, &group, &type_desc, new_name)?
-            }
-            TypeDescriptor::VarLenUnicode => {
-                copy_to_group::<VarLenUnicode>(&attr, &group, &type_desc, new_name)?
-            }
-        }
+        copy_attr_to_group(&attr, &group, new_name)?;
         group.delete_attr(old_name)?;
 
         Ok(())
     }
-}
-
-fn copy_to_group<T: H5Type>(
-    attr: &Attribute,
-    grp: &Group,
-    td: &TypeDescriptor,
-    new_name: &str,
-) -> Result<(), hdf5_metno::Error> {
-    if attr.is_scalar() {
-        let data: T = attr.read_scalar()?;
-        let new_attr = grp.new_attr_builder().empty_as(td).create(new_name)?;
-        new_attr.write_scalar(&data)?;
-    } else {
-        let data = attr.read::<T, IxDyn>()?;
-        grp.new_attr_builder().with_data_as(&data, td).create(new_name)?;
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -351,145 +238,13 @@ impl H5FNode {
                 "Only scalar attributes can be edited".to_string(),
             ));
         }
-        let type_desc = attr.dtype()?.to_descriptor()?;
-        match type_desc {
-            TypeDescriptor::Integer(int_size) => match int_size {
-                hdf5_metno::types::IntSize::U1 => {
-                    let int_value = i8::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to i8: {}", e)))?;
-                    attr.write_scalar(&int_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U2 => {
-                    let int_value = i16::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to i16: {}", e)))?;
-                    attr.write_scalar(&int_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U4 => {
-                    let int_value = i32::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to i32: {}", e)))?;
-                    attr.write_scalar(&int_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U8 => {
-                    let int_value = i64::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to i64: {}", e)))?;
-                    attr.write_scalar(&int_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-            },
-            TypeDescriptor::Unsigned(size) => match size {
-                hdf5_metno::types::IntSize::U1 => {
-                    let uint_value = u8::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to u8: {}", e)))?;
-                    attr.write_scalar(&uint_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U2 => {
-                    let uint_value = u16::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to u16: {}", e)))?;
-                    attr.write_scalar(&uint_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U4 => {
-                    let uint_value = u32::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to u32: {}", e)))?;
-                    attr.write_scalar(&uint_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::IntSize::U8 => {
-                    let uint_value = u64::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to u64: {}", e)))?;
-                    attr.write_scalar(&uint_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-            },
-            TypeDescriptor::Float(float_size) => match float_size {
-                hdf5_metno::types::FloatSize::U4 => {
-                    let float_value = f32::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to f32: {}", e)))?;
-                    attr.write_scalar(&float_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-                hdf5_metno::types::FloatSize::U8 => {
-                    let float_value = f64::from_str(&new_value)
-                        .map_err(|e| AppError::EditError(format!("Failed to convert to f64: {}", e)))?;
-                    attr.write_scalar(&float_value).map_err(|e| {
-                        AppError::EditError(format!("Failed to write attribute: {}", e))
-                    })?;
-                }
-            },
-            TypeDescriptor::Boolean => {
-                let bool_value = bool::from_str(&new_value)
-                    .map_err(|e| AppError::EditError(format!("Failed to convert to bool: {}", e)))?;
-                attr.write_scalar(&bool_value).map_err(|e| {
-                    AppError::EditError(format!("Failed to write attribute: {}", e))
-                })?;
-            }
-            TypeDescriptor::Enum(_) => {
-                return Err(AppError::EditError(
-                    "Editing enum attributes is not supported".to_string(),
-                ));
-            }
-            TypeDescriptor::Compound(_) => {
-                return Err(AppError::EditError(
-                    "Editing compound attributes is not supported".to_string(),
-                ));
-            }
-            TypeDescriptor::FixedArray(_, _) => {
-                return Err(AppError::EditError(
-                    "Editing array attributes is not supported".to_string(),
-                ));
-            }
-            TypeDescriptor::FixedAscii(_) => {
-                return Err(AppError::EditWarning("Editing FixedAscii attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()));
-            }
-            TypeDescriptor::FixedUnicode(_) => {
-                return Err(AppError::EditWarning("Editing FixedUnicode attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()));
-            }
-            TypeDescriptor::VarLenArray(_) => {
-                return Err(AppError::EditError(
-                    "Editing array attributes is not supported".to_string(),
-                ));
-            }
-            TypeDescriptor::VarLenAscii => {
-                let ascii = VarLenAscii::from_ascii(&new_value).map_err(|e| {
-                    AppError::EditError(format!("Failed to convert to VarLenAscii: {}", e))
-                })?;
-                attr.write_scalar(&ascii).map_err(|e| {
-                    AppError::EditError(format!("Failed to write attribute: {}", e))
-                })?;
-            }
-            TypeDescriptor::VarLenUnicode => {
-                let unicode = VarLenUnicode::from_str(&new_value).map_err(|e| {
-                    AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
-                })?;
-                attr.write_scalar(&unicode).map_err(|e| {
-                    AppError::EditError(format!("Failed to write attribute: {}", e))
-                })?;
-            }
-            TypeDescriptor::Reference(_) => {
-                return Err(AppError::EditError(
-                    "Editing reference attributes is not supported".to_string(),
-                ));
-            }
-        }
+        let type_desc = write_scalar_attr_from_text(&attr, &new_value)?;
         match &mut self.computed_attributes {
             Some(computed_attributes) => {
                 computed_attributes.update_value_inplace(
                     attr_name,
                     new_value,
-                    type_desc.to_string(),
+                    type_desc,
                 )?;
             }
             None => {
