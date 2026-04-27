@@ -1,9 +1,8 @@
-use itertools::Itertools;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::{HasAttributes, SYSTEM_ATTRIBUTES},
+    h5f::SYSTEM_ATTRIBUTES,
     sprint_attributes::AttributeEditable,
     ui::{
         edit::perform_edit,

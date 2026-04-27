@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::types::VarLenUnicode;
+use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
@@ -14,7 +14,10 @@ use crate::{
     error::AppError,
     h5f::{H5FNode, Node},
     sprint_typedesc::MatrixRenderType,
-    ui,
+    ui::{
+        self,
+        matrix::{DefaultMatrixResultRenderIntercept, EnumRenderer},
+    },
 };
 
 use super::{
@@ -128,16 +131,34 @@ pub fn render_main_display(
                 None => {
                     return Ok(());
                 }
-                Some(x) => match x {
-                    MatrixRenderType::Float64 => {
-                        render_matrix::<f64>(f, &content_area, &ds, &attr, &mut node, state)?
-                    }
-                    MatrixRenderType::Uint64 => {
-                        render_matrix::<u64>(f, &content_area, &ds, &attr, &mut node, state)?
-                    }
-                    MatrixRenderType::Int64 => {
-                        render_matrix::<i64>(f, &content_area, &ds, &attr, &mut node, state)?
-                    }
+                Some(ref x) => match x {
+                    MatrixRenderType::Float64 => render_matrix::<f64>(
+                        f,
+                        &content_area,
+                        &ds,
+                        &attr,
+                        &mut node,
+                        state,
+                        DefaultMatrixResultRenderIntercept,
+                    )?,
+                    MatrixRenderType::Uint64 => render_matrix::<u64>(
+                        f,
+                        &content_area,
+                        &ds,
+                        &attr,
+                        &mut node,
+                        state,
+                        DefaultMatrixResultRenderIntercept,
+                    )?,
+                    MatrixRenderType::Int64 => render_matrix::<i64>(
+                        f,
+                        &content_area,
+                        &ds,
+                        &attr,
+                        &mut node,
+                        state,
+                        DefaultMatrixResultRenderIntercept,
+                    )?,
                     MatrixRenderType::Compound => {
                         render_not_yet_implemented(f, &content_area, "Compound matrix")
                     }
@@ -148,7 +169,24 @@ pub fn render_main_display(
                         &attr,
                         &mut node,
                         state,
+                        DefaultMatrixResultRenderIntercept,
                     )?,
+                    MatrixRenderType::Enum => {
+                        let TypeDescriptor::Enum(et) = ds.dtype()?.to_descriptor()? else {
+                            unreachable!("MatrixRenderType::Enum should only be set for enum types")
+                        };
+
+                        let enum_mapper = EnumRenderer::new(et);
+                        render_matrix::<u64>(
+                            f,
+                            &content_area,
+                            &ds,
+                            &attr,
+                            &mut node,
+                            state,
+                            enum_mapper,
+                        )?
+                    }
                 },
             }
         }

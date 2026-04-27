@@ -22,7 +22,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use ratatui_image::picker::Picker;
 
 use crate::{
     color_consts,

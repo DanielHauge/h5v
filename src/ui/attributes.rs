@@ -1,10 +1,9 @@
 use std::rc::Rc;
 
-use hdf5_metno::{types::TypeDescriptor, H5Type};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Offset, Rect},
     style::{Color, Style, Stylize},
-    text::{Line, Span, ToSpan},
+    text::Line,
     widgets::{Block, Borders, Scrollbar, ScrollbarState},
     Frame,
 };
@@ -149,15 +148,6 @@ pub fn render_info_attributes(
             attributes_to_skip -= 1;
             continue;
         }
-        // merge value_line and type_line with a space in between
-        // let value_lne = Line::from_iter(
-        //     value_line
-        //         .spans
-        //         .iter()
-        //         .cloned()
-        //         .chain(std::iter::once(Span::raw(" ")))
-        //         .chain(type_line.spans.iter().cloned()),
-        // );
         if offset == *highlighted_index as i32 {
             match node_attributes_view_cursor.attribute_view_selection {
                 AttributeViewSelection::Name => {
@@ -169,7 +159,15 @@ pub fn render_info_attributes(
                     render_text_overflow_handled(
                         f,
                         &value_area.offset(Offset { x: 1, y: offset }),
-                        value_line,
+                        &value_line.clone().bg(highlighted_bg_color),
+                    );
+                    render_text_overflow_handled(
+                        f,
+                        &value_area.offset(Offset {
+                            x: 1 + value_line.width() as i32,
+                            y: offset,
+                        }),
+                        &type_line.clone().bg(highlighted_bg_color),
                     );
                 }
                 AttributeViewSelection::Value => {

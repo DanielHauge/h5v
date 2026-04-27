@@ -245,7 +245,6 @@ pub trait HasAttributes {
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
     fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError>;
-    fn as_group(&self) -> Result<Group, hdf5_metno::Error>;
 }
 
 pub trait HasChildren {
@@ -396,17 +395,6 @@ impl HasAttributes for Node {
             attrs.push((name, attr));
         }
         Ok(attrs)
-    }
-
-    fn as_group(&self) -> Result<Group, hdf5_metno::Error> {
-        match self {
-            Node::File(file) => file.as_group(),
-            Node::Group(group, _) => group.as_group(),
-            Node::Dataset(dataset, _) => dataset.as_group(),
-            Node::Broken(_, _, _) => Err(hdf5_metno::Error::Internal(String::from(
-                "Cannot treat broken link as group",
-            ))),
-        }
     }
 
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error> {
@@ -1072,16 +1060,20 @@ impl H5FNode {
                         }
                         result.push(ContentShowMode::Preview);
                     }
-                    MatrixRenderType::Compound => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        }
-                    }
                     MatrixRenderType::Strings => {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
                         }
                         result.push(ContentShowMode::Preview);
+                    }
+                    MatrixRenderType::Enum => {
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
+                        result.push(ContentShowMode::Preview);
+                    }
+                    MatrixRenderType::Compound => {
+                        todo!("Compound matrix rendering is not yet supported");
                     }
                 },
                 None => result.push(ContentShowMode::Preview),

@@ -27,8 +27,18 @@ pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
             hdf5_metno::types::FloatSize::U8 => "f64".to_string(),
         },
         TypeDescriptor::Boolean => "bool".to_string(),
-        TypeDescriptor::Enum(_) => "enum".to_string(),
-        TypeDescriptor::Compound(_) => "compound".to_string(),
+        TypeDescriptor::Enum(x) => {
+            let base_type = x.base_type();
+            format!("enum({base_type})[{}]", x.members.len())
+        }
+        TypeDescriptor::Compound(c) => {
+            let field_strings: Vec<String> = c
+                .fields
+                .iter()
+                .map(|field| field.name.to_string())
+                .collect();
+            format!("{{{}}}", field_strings.join(", "))
+        }
         TypeDescriptor::FixedArray(inner, l) => {
             format!("[{l}]{}", sprint_typedescriptor(inner))
         }
@@ -108,7 +118,7 @@ pub fn is_type_matrixable(type_desc: &TypeDescriptor) -> Option<MatrixRenderType
         TypeDescriptor::Unsigned(_) => Some(MatrixRenderType::Uint64),
         TypeDescriptor::Float(_) => Some(MatrixRenderType::Float64),
         TypeDescriptor::Boolean => Some(MatrixRenderType::Uint64),
-        TypeDescriptor::Enum(_) => None,
+        TypeDescriptor::Enum(_) => Some(MatrixRenderType::Enum),
         TypeDescriptor::Compound(_) => Some(MatrixRenderType::Compound),
         TypeDescriptor::FixedArray(_, _) => None,
         TypeDescriptor::FixedAscii(_) => Some(MatrixRenderType::Strings),
@@ -125,7 +135,7 @@ pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
         TypeDescriptor::Unsigned(_) => Encoding::LittleEndian,
         TypeDescriptor::Float(_) => Encoding::LittleEndian,
         TypeDescriptor::Boolean => Encoding::LittleEndian,
-        TypeDescriptor::Enum(_) => Encoding::Unknown,
+        TypeDescriptor::Enum(_) => Encoding::UTF8,
         TypeDescriptor::Compound(_) => Encoding::Unknown,
         TypeDescriptor::FixedArray(_, _) => Encoding::Unknown,
         TypeDescriptor::FixedAscii(_) => Encoding::AsciiFixed,
@@ -144,4 +154,5 @@ pub enum MatrixRenderType {
     Int64,
     Compound,
     Strings,
+    Enum,
 }

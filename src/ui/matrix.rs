@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
-use hdf5_metno::H5Type;
+use hdf5_metno::{types::EnumType, H5Type};
 use ratatui::{
     layout::{Constraint, Layout, Offset, Rect},
     style::Stylize,
-    text::Line,
+    text::{Line, Span},
     Frame,
 };
 
@@ -37,6 +37,60 @@ pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
     );
 }
 
+pub trait RenderIntercept<T: H5Type + Display> {
+    fn render_as_line(&self, value: &T) -> Line<'static>;
+    fn render_as_span(&self, value: &T) -> Span<'static>;
+}
+
+pub struct DefaultMatrixResultRenderIntercept;
+
+impl<T: H5Type + Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
+    fn render_as_line(&self, value: &T) -> Line<'static> {
+        Line::from(format!("{value}"))
+    }
+
+    fn render_as_span(&self, value: &T) -> Span<'static> {
+        Span::from(format!("{value}"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumRenderer {
+    pub enum_mapping: Vec<(u64, String)>,
+}
+
+impl EnumRenderer {
+    pub fn new(enum_mapping: EnumType) -> Self {
+        let enum_mapping = enum_mapping
+            .members
+            .into_iter()
+            .map(|v| (v.value, v.name))
+            .collect();
+        Self { enum_mapping }
+    }
+}
+
+impl RenderIntercept<u64> for EnumRenderer {
+    fn render_as_line(&self, value: &u64) -> Line<'static> {
+        let mapped = self
+            .enum_mapping
+            .iter()
+            .find(|(v, _)| v == value)
+            .map(|(_, s)| s.clone())
+            .unwrap_or_else(|| format!("Unknown enum value: {value}"));
+        Line::from(mapped).fg(color_consts::NUMBER_COLOR)
+    }
+    fn render_as_span(&self, value: &u64) -> Span<'static> {
+        let mapped = self
+            .enum_mapping
+            .iter()
+            .find(|(v, _)| v == value)
+            .map(|(_, s)| s.clone())
+            .unwrap_or_else(|| format!("Unknown enum value: {value}"));
+        Span::from(mapped).fg(color_consts::NUMBER_COLOR)
+    }
+}
+
 pub fn render_matrix<T: H5Type + Display>(
     f: &mut Frame,
     area: &Rect,
@@ -44,6 +98,7 @@ pub fn render_matrix<T: H5Type + Display>(
     attr: &DatasetMeta,
     node: &mut H5FNode,
     state: &mut AppState,
+    result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
@@ -154,7 +209,8 @@ pub fn render_matrix<T: H5Type + Display>(
                 val_bg_color
             };
             let idx_line = Line::from(format!("{i}")).left_aligned();
-            let value_line = Line::from(format!("{d}"))
+            let value_line = result_render
+                .render_as_line(d)
                 .alignment(ratatui::layout::Alignment::Center)
                 .bg(val_bg_color);
             f.render_widget(idx_line, idx_area);
@@ -239,7 +295,7 @@ pub fn render_matrix<T: H5Type + Display>(
 
                 match val {
                     Some(v) => f.render_widget(
-                        Line::from(format!("{v}")).bg(val_bg_color).centered(),
+                        result_render.render_as_line(v).bg(val_bg_color).centered(),
                         val_area,
                     ),
                     None => f.render_widget("None", val_area),

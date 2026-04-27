@@ -8,7 +8,7 @@ use std::{
 use arboard::Clipboard;
 use hdf5_metno::{ByteReader, Dataset, File, Hyperslab, Selection, SliceOrIndex};
 use image::ImageFormat;
-use ratatui_image::{picker::Picker, thread::ThreadProtocol};
+use ratatui_image::thread::ThreadProtocol;
 
 use crate::{
     data::PreviewSelection,

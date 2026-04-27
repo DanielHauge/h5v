@@ -1,3 +1,4 @@
+use hdf5_metno::types::TypeDescriptor;
 use plotters::{
     chart::ChartBuilder,
     prelude::{BitMapBackend, IntoDrawingArea},
@@ -21,6 +22,7 @@ use crate::{
     h5f::{H5FNode, HasPath, Node},
     ui::{
         dims::render_dim_selector,
+        matrix::{EnumRenderer, RenderIntercept},
         preview::render_string_preview,
         segment_scroll::render_segment_scroll,
         state::{ChartPreviewLoadRequest, IsFromDs, SegmentType},
@@ -102,6 +104,17 @@ pub fn render_chart_preview(
                 }
                 crate::sprint_typedesc::MatrixRenderType::Strings => {
                     render_string_preview(f, area, node)?;
+                    return Ok(());
+                }
+                crate::sprint_typedesc::MatrixRenderType::Enum => {
+                    let TypeDescriptor::Enum(et) = ds.dtype()?.to_descriptor()? else {
+                        unreachable!("MatrixRenderType::Enum should only be set for enum types")
+                    };
+                    let enum_rendere = EnumRenderer::new(et);
+                    let scalar_value = ds.read_scalar::<u64>()?;
+                    let string = enum_rendere.render_as_line(&scalar_value);
+                    f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
+
                     return Ok(());
                 }
             },

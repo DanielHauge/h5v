@@ -2,13 +2,17 @@ use std::f64;
 
 use hdf5_metno::{
     types::{
-        self, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenAscii, VarLenUnicode,
+        self, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenArray, VarLenAscii,
+        VarLenUnicode,
     },
     Attribute, Error,
 };
 use ratatui::{text::Line, text::Span};
 
-use crate::color_consts;
+use crate::{
+    color_consts,
+    ui::matrix::{EnumRenderer, RenderIntercept},
+};
 
 pub trait Renderable {
     fn render(self) -> Span<'static>;
@@ -153,9 +157,9 @@ fn sprint_attribute_scalar<'a>(
         },
         types::TypeDescriptor::Boolean => attr.read_scalar::<bool>()?.render(),
         types::TypeDescriptor::Enum(enum_type) => {
-            let s = format!("{:?}", enum_type);
-            let span = Span::from(s).style(color_consts::BOOL_COLOR);
-            span
+            let enum_rendere = EnumRenderer::new(enum_type);
+            let v = attr.read_scalar::<u64>()?;
+            enum_rendere.render_as_span(&v)
         }
         types::TypeDescriptor::FixedAscii(a) => match a {
             0..32 => attr.read_scalar::<FixedAscii<32>>()?.render(),
@@ -310,8 +314,23 @@ fn spring_attribute_array(
             .into_iter()
             .collect::<Vec<bool>>()
             .render(),
-        TypeDescriptor::Enum(_) => vec![render_unsupported_type("enum array")],
-        TypeDescriptor::Compound(_) => vec![render_unsupported_type("compound array")],
+        TypeDescriptor::Enum(e) => {
+            let enum_renderer = EnumRenderer::new(e);
+            let spans: Vec<Span<'static>> = attr
+                .read_1d::<u64>()?
+                .into_iter()
+                .map(|v| enum_renderer.render_as_span(&v))
+                .collect();
+            let spans_iter = spans.into_iter();
+            let spans_interspersed: Vec<Span<'static>> = itertools::intersperse(
+                spans_iter,
+                Span::raw(", ").style(color_consts::SYMBOL_COLOR),
+            )
+            .collect();
+
+            spans_interspersed
+        }
+        TypeDescriptor::Compound(c) => vec![render_unsupported_type("compound array")],
         TypeDescriptor::FixedArray(type_descriptor, size) => {
             vec![render_unsupported_type(format!(
                 "fixed array of {type_descriptor} with size {size}"
@@ -364,9 +383,67 @@ fn spring_attribute_array(
                 .collect::<Vec<FixedUnicode<8192>>>()
                 .render(),
         },
-        TypeDescriptor::VarLenArray(type_descriptor) => vec![render_unsupported_type(format!(
-            "varlen array of {type_descriptor}"
-        ))],
+        TypeDescriptor::VarLenArray(type_descriptor) => match type_descriptor.as_ref() {
+            TypeDescriptor::Integer(_)
+            | TypeDescriptor::Unsigned(_)
+            | TypeDescriptor::Float(_)
+            | TypeDescriptor::Boolean => {
+                vec![render_unsupported_type("varlen array of primitive type")]
+            }
+            TypeDescriptor::Enum(enum_type) => {
+                let enum_renderer = EnumRenderer::new(enum_type.clone());
+                let varlen_enums = attr.read_1d::<VarLenArray<u64>>()?;
+                let spans: Vec<Span<'static>> = varlen_enums
+                    .into_iter()
+                    .flat_map(|varlen_enum| {
+                        let enum_values = varlen_enum
+                            .iter()
+                            .map(|v| enum_renderer.render_as_span(v))
+                            .collect::<Vec<Span<'static>>>();
+                        let spans_iter = enum_values.into_iter();
+                        itertools::intersperse(
+                            spans_iter,
+                            Span::raw(", ").style(color_consts::SYMBOL_COLOR),
+                        )
+                        .collect::<Vec<Span<'static>>>()
+                    })
+                    .collect();
+
+                spans
+            }
+            TypeDescriptor::Compound(compound_type) => {
+                vec![render_unsupported_type(format!(
+                    "varlen array of compound type with fields: {}",
+                    compound_type
+                        .fields
+                        .iter()
+                        .map(|f| f.name.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ))]
+            }
+            TypeDescriptor::FixedArray(type_descriptor, _) => {
+                vec![render_unsupported_type(format!(
+                    "recursive limit reached - varlen array of fixed array of {type_descriptor}"
+                ))]
+            }
+            TypeDescriptor::VarLenAscii
+            | TypeDescriptor::VarLenUnicode
+            | TypeDescriptor::FixedAscii(_)
+            | TypeDescriptor::FixedUnicode(_) => {
+                vec![render_unsupported_type("varlen array of strings should be handled by non scalar variants of those types")]
+            }
+            TypeDescriptor::VarLenArray(type_descriptor) => {
+                vec![render_unsupported_type(format!(
+                    "recursive limit reached - varlen array of varlen array of {type_descriptor}"
+                ))]
+            }
+            TypeDescriptor::Reference(_) => {
+                vec![render_unsupported_type(
+                    "varlen array of reference".to_string(),
+                )]
+            }
+        },
         TypeDescriptor::VarLenAscii => attr
             .read_1d::<VarLenAscii>()?
             .into_iter()
