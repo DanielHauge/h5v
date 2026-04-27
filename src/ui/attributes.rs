@@ -159,7 +159,7 @@ pub fn render_info_attributes(
                     render_text_overflow_handled(
                         f,
                         &value_area.offset(Offset { x: 1, y: offset }),
-                        &value_line.clone().bg(highlighted_bg_color),
+                        &value_line.clone(),
                     );
                     render_text_overflow_handled(
                         f,
@@ -167,7 +167,7 @@ pub fn render_info_attributes(
                             x: 1 + value_line.width() as i32,
                             y: offset,
                         }),
-                        &type_line.clone().bg(highlighted_bg_color),
+                        &type_line.clone(),
                     );
                 }
                 AttributeViewSelection::Value => {
