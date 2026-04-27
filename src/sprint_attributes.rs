@@ -1,5 +1,3 @@
-use std::f64;
-
 use hdf5_metno::{
     types::{
         self, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenArray, VarLenAscii,
@@ -18,13 +16,38 @@ pub trait Renderable {
     fn render(self) -> Span<'static>;
 }
 
+fn styled_span(value: impl std::fmt::Display, color: ratatui::style::Color) -> Span<'static> {
+    Span::from(value.to_string()).style(color)
+}
+
+fn string_span(value: impl std::fmt::Display) -> Span<'static> {
+    styled_span(format_args!("\"{value}\""), color_consts::STRING_COLOR)
+}
+
+fn symbol_span(value: &'static str) -> Span<'static> {
+    Span::raw(value).style(color_consts::SYMBOL_COLOR)
+}
+
+fn comma_separated<I>(spans: I) -> Vec<Span<'static>>
+where
+    I: IntoIterator<Item = Span<'static>>,
+{
+    itertools::intersperse(spans, symbol_span(", ")).collect()
+}
+
+fn render_values<T>(values: impl IntoIterator<Item = T>) -> Vec<Span<'static>>
+where
+    T: Renderable,
+{
+    comma_separated(values.into_iter().map(Renderable::render))
+}
+
 macro_rules! impl_uint_renderable {
     ($($t:ty),*) => {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    let s = format!("{self}");
-                    Span::from(s.clone()).style(color_consts::UINT_COLOR)
+                    styled_span(self, color_consts::UINT_COLOR)
                 }
             }
         )*
@@ -37,8 +60,7 @@ macro_rules! impl_int_renderable {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    let s = format!("{self}");
-                    Span::from(s.clone()).style(color_consts::INT_COLOR)
+                    styled_span(self, color_consts::INT_COLOR)
                 }
             }
         )*
@@ -52,8 +74,7 @@ macro_rules! impl_float_renderable {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    let s = format!("{self}");
-                    Span::from(s.clone()).style(color_consts::FLOAT_COLOR)
+                    styled_span(self, color_consts::FLOAT_COLOR)
                 }
             }
         )*
@@ -63,74 +84,87 @@ impl_float_renderable!(f32, f64);
 
 impl Renderable for bool {
     fn render(self) -> Span<'static> {
-        let s = format!("{self}");
-        Span::from(s).style(color_consts::BOOL_COLOR)
+        styled_span(self, color_consts::BOOL_COLOR)
     }
 }
 
 impl<const N: usize> Renderable for FixedAscii<N> {
     fn render(self) -> Span<'static> {
-        let s = format!("\"{self}\"");
-        Span::from(s.to_string()).style(color_consts::STRING_COLOR)
+        string_span(self)
     }
 }
 
 impl<const N: usize> Renderable for FixedUnicode<N> {
     fn render(self) -> Span<'static> {
-        let s = format!("\"{self}\"");
-        Span::from(s.to_string()).style(color_consts::STRING_COLOR)
+        string_span(self)
     }
 }
 
 impl Renderable for VarLenAscii {
     fn render(self) -> Span<'static> {
-        let s = format!("\"{self}\"");
-        Span::from(s.to_string()).style(color_consts::STRING_COLOR)
+        string_span(self)
     }
 }
 
 impl Renderable for VarLenUnicode {
     fn render(self) -> Span<'static> {
-        let s = format!("\"{self}\"");
-        Span::from(s.to_string()).style(color_consts::STRING_COLOR)
+        string_span(self)
     }
 }
 
-trait RenderableVec {
-    fn render(self) -> Vec<Span<'static>>;
-}
-
-impl<T> RenderableVec for Vec<T>
-where
-    T: Renderable,
-{
-    fn render(self) -> Vec<Span<'static>> {
-        let spans: Vec<Span<'static>> = self.into_iter().map(|item| item.render()).collect();
-        let spans_iter = spans.into_iter();
-        let spans_interspersed: Vec<Span<'static>> = itertools::intersperse(
-            spans_iter,
-            Span::raw(", ").style(color_consts::SYMBOL_COLOR),
-        )
-        .collect();
-
-        spans_interspersed
+fn render_fixed_ascii_scalar(attr: &Attribute, size: usize) -> Result<Span<'static>, Error> {
+    match size {
+        0..32 => Ok(attr.read_scalar::<FixedAscii<32>>()?.render()),
+        32..64 => Ok(attr.read_scalar::<FixedAscii<64>>()?.render()),
+        64..128 => Ok(attr.read_scalar::<FixedAscii<128>>()?.render()),
+        128..256 => Ok(attr.read_scalar::<FixedAscii<256>>()?.render()),
+        256..512 => Ok(attr.read_scalar::<FixedAscii<512>>()?.render()),
+        512..1024 => Ok(attr.read_scalar::<FixedAscii<1024>>()?.render()),
+        1024..2048 => Ok(attr.read_scalar::<FixedAscii<2048>>()?.render()),
+        2048..4096 => Ok(attr.read_scalar::<FixedAscii<4096>>()?.render()),
+        _ => Ok(attr.read_scalar::<FixedAscii<8192>>()?.render()),
     }
 }
 
-impl<T> RenderableVec for &[T]
-where
-    T: Renderable + Clone, // Needed because we iterate over references
-{
-    fn render(self) -> Vec<Span<'static>> {
-        let spans: Vec<Span<'static>> = self.iter().map(|item| item.clone().render()).collect();
-        let spans_iter = spans.into_iter();
-        let spans_interspersed: Vec<Span<'static>> = itertools::intersperse(
-            spans_iter,
-            Span::raw(", ").style(color_consts::SYMBOL_COLOR),
-        )
-        .collect();
+fn render_fixed_unicode_scalar(attr: &Attribute, size: usize) -> Result<Span<'static>, Error> {
+    match size {
+        0..32 => Ok(attr.read_scalar::<FixedUnicode<32>>()?.render()),
+        32..64 => Ok(attr.read_scalar::<FixedUnicode<64>>()?.render()),
+        64..128 => Ok(attr.read_scalar::<FixedUnicode<128>>()?.render()),
+        128..256 => Ok(attr.read_scalar::<FixedUnicode<256>>()?.render()),
+        256..512 => Ok(attr.read_scalar::<FixedUnicode<512>>()?.render()),
+        512..1024 => Ok(attr.read_scalar::<FixedUnicode<1024>>()?.render()),
+        1024..2048 => Ok(attr.read_scalar::<FixedUnicode<2048>>()?.render()),
+        2048..4096 => Ok(attr.read_scalar::<FixedUnicode<4096>>()?.render()),
+        _ => Ok(attr.read_scalar::<FixedUnicode<8192>>()?.render()),
+    }
+}
 
-        spans_interspersed
+fn render_fixed_ascii_array(attr: &Attribute, size: usize) -> Result<Vec<Span<'static>>, Error> {
+    match size {
+        0..32 => Ok(render_values(attr.read_1d::<FixedAscii<32>>()?)),
+        32..64 => Ok(render_values(attr.read_1d::<FixedAscii<64>>()?)),
+        64..128 => Ok(render_values(attr.read_1d::<FixedAscii<128>>()?)),
+        128..256 => Ok(render_values(attr.read_1d::<FixedAscii<256>>()?)),
+        256..512 => Ok(render_values(attr.read_1d::<FixedAscii<512>>()?)),
+        512..1024 => Ok(render_values(attr.read_1d::<FixedAscii<1024>>()?)),
+        1024..2048 => Ok(render_values(attr.read_1d::<FixedAscii<2048>>()?)),
+        2048..4096 => Ok(render_values(attr.read_1d::<FixedAscii<4096>>()?)),
+        _ => Ok(render_values(attr.read_1d::<FixedAscii<8192>>()?)),
+    }
+}
+
+fn render_fixed_unicode_array(attr: &Attribute, size: usize) -> Result<Vec<Span<'static>>, Error> {
+    match size {
+        0..32 => Ok(render_values(attr.read_1d::<FixedUnicode<32>>()?)),
+        32..64 => Ok(render_values(attr.read_1d::<FixedUnicode<64>>()?)),
+        64..128 => Ok(render_values(attr.read_1d::<FixedUnicode<128>>()?)),
+        128..256 => Ok(render_values(attr.read_1d::<FixedUnicode<256>>()?)),
+        256..512 => Ok(render_values(attr.read_1d::<FixedUnicode<512>>()?)),
+        512..1024 => Ok(render_values(attr.read_1d::<FixedUnicode<1024>>()?)),
+        1024..2048 => Ok(render_values(attr.read_1d::<FixedUnicode<2048>>()?)),
+        2048..4096 => Ok(render_values(attr.read_1d::<FixedUnicode<4096>>()?)),
+        _ => Ok(render_values(attr.read_1d::<FixedUnicode<8192>>()?)),
     }
 }
 
@@ -157,32 +191,12 @@ fn sprint_attribute_scalar<'a>(
         },
         types::TypeDescriptor::Boolean => attr.read_scalar::<bool>()?.render(),
         types::TypeDescriptor::Enum(enum_type) => {
-            let enum_rendere = EnumRenderer::new(enum_type);
+            let enum_renderer = EnumRenderer::new(enum_type);
             let v = attr.read_scalar::<u64>()?;
-            enum_rendere.render_as_span(&v)
+            enum_renderer.render_as_span(&v)
         }
-        types::TypeDescriptor::FixedAscii(a) => match a {
-            0..32 => attr.read_scalar::<FixedAscii<32>>()?.render(),
-            32..64 => attr.read_scalar::<FixedAscii<64>>()?.render(),
-            64..128 => attr.read_scalar::<FixedAscii<128>>()?.render(),
-            128..256 => attr.read_scalar::<FixedAscii<256>>()?.render(),
-            256..512 => attr.read_scalar::<FixedAscii<512>>()?.render(),
-            512..1024 => attr.read_scalar::<FixedAscii<1024>>()?.render(),
-            1024..2048 => attr.read_scalar::<FixedAscii<2048>>()?.render(),
-            2048..4096 => attr.read_scalar::<FixedAscii<4096>>()?.render(),
-            _ => attr.read_scalar::<FixedAscii<8192>>()?.render(),
-        },
-        types::TypeDescriptor::FixedUnicode(a) => match a {
-            0..32 => attr.read_scalar::<FixedUnicode<32>>()?.render(),
-            32..64 => attr.read_scalar::<FixedUnicode<64>>()?.render(),
-            64..128 => attr.read_scalar::<FixedUnicode<128>>()?.render(),
-            128..256 => attr.read_scalar::<FixedUnicode<256>>()?.render(),
-            256..512 => attr.read_scalar::<FixedUnicode<512>>()?.render(),
-            512..1024 => attr.read_scalar::<FixedUnicode<1024>>()?.render(),
-            1024..2048 => attr.read_scalar::<FixedUnicode<2048>>()?.render(),
-            2048..4096 => attr.read_scalar::<FixedUnicode<4096>>()?.render(),
-            _ => attr.read_scalar::<FixedUnicode<8192>>()?.render(),
-        },
+        types::TypeDescriptor::FixedAscii(a) => render_fixed_ascii_scalar(attr, a)?,
+        types::TypeDescriptor::FixedUnicode(a) => render_fixed_unicode_scalar(attr, a)?,
         types::TypeDescriptor::VarLenAscii => attr.read_scalar::<VarLenAscii>()?.render(),
         types::TypeDescriptor::VarLenUnicode => attr.read_scalar::<VarLenUnicode>()?.render(),
         types::TypeDescriptor::Reference(Reference::Object) => render_unsupported_type("ref obj"),
@@ -207,182 +221,38 @@ fn spring_attribute_array(
 ) -> Result<Vec<Span<'static>>, Error> {
     let gg = match type_desc {
         TypeDescriptor::Integer(int_size) => match int_size {
-            types::IntSize::U1 => attr
-                .read_1d::<i8>()?
-                .into_iter()
-                .collect::<Vec<i8>>()
-                .render(),
-            types::IntSize::U2 => attr
-                .read_1d::<i16>()?
-                .into_iter()
-                .collect::<Vec<i16>>()
-                .render(),
-            types::IntSize::U4 => attr
-                .read_1d::<i32>()?
-                .into_iter()
-                .collect::<Vec<i32>>()
-                .render(),
-            types::IntSize::U8 => attr
-                .read_1d::<i64>()?
-                .into_iter()
-                .collect::<Vec<i64>>()
-                .render(),
+            types::IntSize::U1 => render_values(attr.read_1d::<i8>()?),
+            types::IntSize::U2 => render_values(attr.read_1d::<i16>()?),
+            types::IntSize::U4 => render_values(attr.read_1d::<i32>()?),
+            types::IntSize::U8 => render_values(attr.read_1d::<i64>()?),
         },
         TypeDescriptor::Unsigned(int_size) => match int_size {
-            types::IntSize::U1 => attr
-                .read_1d::<u8>()?
-                .into_iter()
-                .collect::<Vec<u8>>()
-                .render(),
-            types::IntSize::U2 => attr
-                .read_1d::<u16>()?
-                .into_iter()
-                .collect::<Vec<u16>>()
-                .render(),
-            types::IntSize::U4 => attr
-                .read_1d::<u32>()?
-                .into_iter()
-                .collect::<Vec<u32>>()
-                .render(),
-            types::IntSize::U8 => attr
-                .read_1d::<u64>()?
-                .into_iter()
-                .collect::<Vec<u64>>()
-                .render(),
+            types::IntSize::U1 => render_values(attr.read_1d::<u8>()?),
+            types::IntSize::U2 => render_values(attr.read_1d::<u16>()?),
+            types::IntSize::U4 => render_values(attr.read_1d::<u32>()?),
+            types::IntSize::U8 => render_values(attr.read_1d::<u64>()?),
         },
         TypeDescriptor::Float(float_size) => match float_size {
-            types::FloatSize::U4 => attr
-                .read_1d::<f32>()?
-                .into_iter()
-                .collect::<Vec<f32>>()
-                .render(),
-            types::FloatSize::U8 => attr
-                .read_1d::<f64>()?
-                .into_iter()
-                .collect::<Vec<f64>>()
-                .render(),
+            types::FloatSize::U4 => render_values(attr.read_1d::<f32>()?),
+            types::FloatSize::U8 => render_values(attr.read_1d::<f64>()?),
         },
-        TypeDescriptor::FixedAscii(n) => match n {
-            0..32 => attr
-                .read_1d::<FixedAscii<32>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<32>>>()
-                .render(),
-            32..64 => attr
-                .read_1d::<FixedAscii<64>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<64>>>()
-                .render(),
-            64..128 => attr
-                .read_1d::<FixedAscii<128>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<128>>>()
-                .render(),
-            128..256 => attr
-                .read_1d::<FixedAscii<256>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<256>>>()
-                .render(),
-            256..512 => attr
-                .read_1d::<FixedAscii<512>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<512>>>()
-                .render(),
-            512..1024 => attr
-                .read_1d::<FixedAscii<1024>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<1024>>>()
-                .render(),
-            1024..2048 => attr
-                .read_1d::<FixedAscii<2048>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<2048>>>()
-                .render(),
-            2048..4096 => attr
-                .read_1d::<FixedAscii<4096>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<4096>>>()
-                .render(),
-            _ => attr
-                .read_1d::<FixedAscii<8192>>()?
-                .into_iter()
-                .collect::<Vec<FixedAscii<8192>>>()
-                .render(),
-        },
-        TypeDescriptor::Boolean => attr
-            .read_1d::<bool>()?
-            .into_iter()
-            .collect::<Vec<bool>>()
-            .render(),
+        TypeDescriptor::FixedAscii(n) => render_fixed_ascii_array(attr, n)?,
+        TypeDescriptor::Boolean => render_values(attr.read_1d::<bool>()?),
         TypeDescriptor::Enum(e) => {
             let enum_renderer = EnumRenderer::new(e);
-            let spans: Vec<Span<'static>> = attr
-                .read_1d::<u64>()?
-                .into_iter()
-                .map(|v| enum_renderer.render_as_span(&v))
-                .collect();
-            let spans_iter = spans.into_iter();
-            let spans_interspersed: Vec<Span<'static>> = itertools::intersperse(
-                spans_iter,
-                Span::raw(", ").style(color_consts::SYMBOL_COLOR),
+            comma_separated(
+                attr.read_1d::<u64>()?
+                    .into_iter()
+                    .map(|v| enum_renderer.render_as_span(&v)),
             )
-            .collect();
-
-            spans_interspersed
         }
-        TypeDescriptor::Compound(c) => vec![render_unsupported_type("compound array")],
+        TypeDescriptor::Compound(_) => vec![render_unsupported_type("compound array")],
         TypeDescriptor::FixedArray(type_descriptor, size) => {
             vec![render_unsupported_type(format!(
                 "fixed array of {type_descriptor} with size {size}"
             ))]
         }
-        TypeDescriptor::FixedUnicode(size) => match size {
-            0..32 => attr
-                .read_1d::<FixedUnicode<32>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<32>>>()
-                .render(),
-            32..64 => attr
-                .read_1d::<FixedUnicode<64>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<64>>>()
-                .render(),
-            64..128 => attr
-                .read_1d::<FixedUnicode<128>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<128>>>()
-                .render(),
-            128..256 => attr
-                .read_1d::<FixedUnicode<256>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<256>>>()
-                .render(),
-            256..512 => attr
-                .read_1d::<FixedUnicode<512>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<512>>>()
-                .render(),
-            512..1024 => attr
-                .read_1d::<FixedUnicode<1024>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<1024>>>()
-                .render(),
-            1024..2048 => attr
-                .read_1d::<FixedUnicode<2048>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<2048>>>()
-                .render(),
-            2048..4096 => attr
-                .read_1d::<FixedUnicode<4096>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<4096>>>()
-                .render(),
-            _ => attr
-                .read_1d::<FixedUnicode<8192>>()?
-                .into_iter()
-                .collect::<Vec<FixedUnicode<8192>>>()
-                .render(),
-        },
+        TypeDescriptor::FixedUnicode(size) => render_fixed_unicode_array(attr, size)?,
         TypeDescriptor::VarLenArray(type_descriptor) => match type_descriptor.as_ref() {
             TypeDescriptor::Integer(_)
             | TypeDescriptor::Unsigned(_)
@@ -393,23 +263,12 @@ fn spring_attribute_array(
             TypeDescriptor::Enum(enum_type) => {
                 let enum_renderer = EnumRenderer::new(enum_type.clone());
                 let varlen_enums = attr.read_1d::<VarLenArray<u64>>()?;
-                let spans: Vec<Span<'static>> = varlen_enums
+                varlen_enums
                     .into_iter()
                     .flat_map(|varlen_enum| {
-                        let enum_values = varlen_enum
-                            .iter()
-                            .map(|v| enum_renderer.render_as_span(v))
-                            .collect::<Vec<Span<'static>>>();
-                        let spans_iter = enum_values.into_iter();
-                        itertools::intersperse(
-                            spans_iter,
-                            Span::raw(", ").style(color_consts::SYMBOL_COLOR),
-                        )
-                        .collect::<Vec<Span<'static>>>()
+                        comma_separated(varlen_enum.iter().map(|v| enum_renderer.render_as_span(v)))
                     })
-                    .collect();
-
-                spans
+                    .collect()
             }
             TypeDescriptor::Compound(compound_type) => {
                 vec![render_unsupported_type(format!(
@@ -444,16 +303,8 @@ fn spring_attribute_array(
                 )]
             }
         },
-        TypeDescriptor::VarLenAscii => attr
-            .read_1d::<VarLenAscii>()?
-            .into_iter()
-            .collect::<Vec<VarLenAscii>>()
-            .render(),
-        TypeDescriptor::VarLenUnicode => attr
-            .read_1d::<VarLenUnicode>()?
-            .into_iter()
-            .collect::<Vec<VarLenUnicode>>()
-            .render(),
+        TypeDescriptor::VarLenAscii => render_values(attr.read_1d::<VarLenAscii>()?),
+        TypeDescriptor::VarLenUnicode => render_values(attr.read_1d::<VarLenUnicode>()?),
         TypeDescriptor::Reference(_) => vec![render_unsupported_type("reference array")],
     };
     Ok(gg)
@@ -469,20 +320,15 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
         } else {
             let attr_type = attr.dtype()?.to_descriptor()?;
             let spans = spring_attribute_array(attr, attr_type)?;
-            let start_start = Span::raw("[").style(color_consts::SYMBOL_COLOR);
-            let start_end = Span::raw("]").style(color_consts::SYMBOL_COLOR);
-            let start = vec![start_start];
-            let end = vec![start_end];
-            let spans = start
-                .into_iter()
+            let spans = std::iter::once(symbol_span("["))
                 .chain(spans)
-                .chain(end)
+                .chain(std::iter::once(symbol_span("]")))
                 .collect::<Vec<Span<'static>>>();
             let line = Line::from(spans);
             Ok(line)
         }
     } else {
-        let line = Line::from("Ivalid Attribute").style(color_consts::ERROR_COLOR);
+        let line = Line::from("Invalid attribute").style(color_consts::ERROR_COLOR);
         Ok(line)
     }
 }
