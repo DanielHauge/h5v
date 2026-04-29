@@ -15,7 +15,7 @@ use ratatui::{
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
@@ -510,7 +510,7 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
 
 fn render_help(frame: &mut Frame<'_>) {
     let area = frame.area();
-    let popup = centered_rect(area, 74, 24);
+    let popup = centered_rect(area, 140, 28);
 
     frame.render_widget(
         Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
@@ -518,23 +518,121 @@ fn render_help(frame: &mut Frame<'_>) {
     );
     frame.render_widget(Clear, popup);
 
-    let help_paragraph = Paragraph::new(render_help_text())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .title(" Help ")
-                .title_style(Style::default().fg(color_consts::TITLE).bold())
-                .title_bottom(Line::from(vec![
-                    Span::styled(" Esc ", help_key_style()),
-                    Span::styled(" close ", help_desc_style()),
-                ]))
-                .title_alignment(Alignment::Center),
-        )
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(help_paragraph, popup);
+    let help_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Help ")
+        .title_style(Style::default().fg(color_consts::TITLE).bold())
+        .title_bottom(Line::from(vec![
+            Span::styled(" Esc ", help_key_style()),
+            Span::styled(" close ", help_desc_style()),
+        ]))
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+    frame.render_widget(help_block, popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let columns = Layout::horizontal([
+        Constraint::Percentage(37),
+        Constraint::Percentage(30),
+        Constraint::Percentage(33),
+    ])
+    .split(inner);
+
+    let column_style = Style::default().bg(color_consts::FOCUS_BG_COLOR);
+    frame.render_widget(
+        Paragraph::new(render_help_column_text(
+            "General",
+            &[
+                (
+                    "Move",
+                    &[
+                        (&["j", "k", "↑", "↓"], "move"),
+                        (&["h", "l", "←", "→"], "open / close / move"),
+                        (&["g", "Home", "G", "End"], "top / bottom"),
+                        (&["Ctrl-U", "PgUp", "Ctrl-D", "PgDn"], "half-page"),
+                    ],
+                ),
+                (
+                    "Panes",
+                    &[
+                        (&["Shift + ←↑↓→"], "focus"),
+                        (&["Ctrl-W", "h/j/k/l"], "vim focus"),
+                        (&["s", "Ctrl-W o"], "toggle sidebar"),
+                    ],
+                ),
+            ],
+        ))
+        .style(column_style)
+        .wrap(Wrap { trim: true }),
+        columns[0],
+    );
+    frame.render_widget(
+        Paragraph::new(render_help_column_text(
+            "Views",
+            &[
+                (
+                    "View",
+                    &[
+                        (&["Tab"], "preview / matrix"),
+                        (&["y"], "copy selected"),
+                        (&["m", "M"], "add / open chart"),
+                    ],
+                ),
+                (
+                    "Selectors",
+                    &[
+                        (&["x", "X"], "preview x-axis"),
+                        (&["r", "R"], "matrix row axis"),
+                        (&["c", "C"], "matrix col axis"),
+                        (&["[", "]"], "selected dim"),
+                        (&["Ctrl-X", "Ctrl-A"], "index - / +"),
+                    ],
+                ),
+            ],
+        ))
+        .style(column_style)
+        .wrap(Wrap { trim: true }),
+        columns[1],
+    );
+    frame.render_widget(
+        Paragraph::new(render_help_column_text(
+            "Modes",
+            &[
+                (
+                    "Search + commands",
+                    &[
+                        (&["/"], "search"),
+                        (&[":"], "command mode"),
+                        (&["."], "repeat command"),
+                        (&[":n"], "go to item n"),
+                        (&[":+n", ":-n"], "move by n"),
+                        (&["Enter", "Esc"], "run / leave"),
+                    ],
+                ),
+                (
+                    "Multi chart",
+                    &[
+                        (&["M", "Esc"], "open / close"),
+                        (&["j", "k"], "select series"),
+                        (&["h", "l", "Shift+←→"], "pan"),
+                        (&["+", "-", "Shift+↑↓"], "zoom"),
+                        (&["d", "Backspace", "Delete"], "remove"),
+                        (&["c"], "reset zoom"),
+                        (&["q", "Ctrl-C"], "quit app"),
+                    ],
+                ),
+                ("Other", &[(&["?"], "help"), (&["q", "Ctrl-C"], "quit")]),
+            ],
+        ))
+        .style(column_style)
+        .wrap(Wrap { trim: true }),
+        columns[2],
+    );
 }
 
 fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
@@ -559,7 +657,8 @@ fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
 fn help_key_style() -> Style {
     Style::default()
         .fg(color_consts::COLOR_WHITE)
-        .bg(color_consts::VARIABLE_BLUE_BUILTIN)
+        .bg(Color::Rgb(60, 90, 120))
+        .underlined()
         .bold()
 }
 
@@ -602,81 +701,25 @@ fn help_section(
     lines
 }
 
-fn render_help_text() -> Text<'static> {
+fn render_help_column_text(
+    title: &'static str,
+    sections: &[(&'static str, &[(&[&'static str], &'static str)])],
+) -> Text<'static> {
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled("h5v", Style::default().fg(color_consts::TITLE).bold()),
-            Span::styled("  keyboard cheatsheet", help_muted_style()),
-        ])
+        Line::from(vec![Span::styled(
+            title.to_string(),
+            Style::default().fg(color_consts::TITLE).bold(),
+        )])
         .centered(),
         Line::raw(""),
     ];
 
-    lines.extend(help_section(
-        "Move",
-        &[
-            (&["j", "k", "↑", "↓"], "move in lists"),
-            (&["h", "l", "←", "→"], "collapse / expand / move"),
-            (&["g", "G"], "top / bottom"),
-            (&["Ctrl-U", "Ctrl-D"], "half-page tree jump"),
-        ],
-    ));
-    lines.push(Line::raw(""));
-
-    lines.extend(help_section(
-        "Panes",
-        &[
-            (&["Shift+←↑↓→"], "move focus"),
-            (&["Ctrl-W", "h/j/k/l"], "vim pane focus"),
-            (&["s", "Ctrl-W o"], "toggle sidebar"),
-        ],
-    ));
-    lines.push(Line::raw(""));
-
-    lines.extend(help_section(
-        "View",
-        &[
-            (&["Tab"], "switch preview / matrix"),
-            (&["y"], "copy selected value"),
-            (&["m", "M"], "add to chart / open chart"),
-        ],
-    ));
-    lines.push(Line::raw(""));
-
-    lines.extend(help_section(
-        "Selectors",
-        &[
-            (&["x", "X"], "preview x-axis"),
-            (&["r", "R"], "matrix row axis"),
-            (&["c", "C"], "matrix col axis"),
-            (&["[", "]"], "selected dimension"),
-            (&["Ctrl-X", "Ctrl-A"], "selected index - / +"),
-        ],
-    ));
-    lines.push(Line::raw(""));
-
-    lines.extend(help_section(
-        "Modes",
-        &[
-            (&["/"], "search"),
-            (&[":"], "command"),
-            (&["."], "repeat command"),
-            (&["?"], "help"),
-            (&["q", "Ctrl-C"], "quit"),
-        ],
-    ));
-    lines.push(Line::raw(""));
-
-    lines.extend(help_section(
-        "Chart",
-        &[
-            (&["j", "k"], "select series"),
-            (&["h", "l", "Shift+←→"], "pan"),
-            (&["+", "-", "Shift+↑↓"], "zoom"),
-            (&["d", "Backspace", "Delete"], "remove series"),
-            (&["c"], "reset zoom"),
-        ],
-    ));
+    for (idx, (section_title, entries)) in sections.iter().enumerate() {
+        lines.extend(help_section(section_title, entries));
+        if idx + 1 != sections.len() {
+            lines.push(Line::raw(""));
+        }
+    }
 
     Text::from(lines)
 }
