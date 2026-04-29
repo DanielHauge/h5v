@@ -16,16 +16,21 @@ h5v path/to/file.h5
 
 ## Controls
 
-- `j`/`k`/`up`/`down`: Navigate through the items
-- `enter`/`space`/`l`/`h`: Open/close items
-- `shift` + navigate: shift focus
+- `j`/`k`/`up`/`down`: Navigate lists and move selections
+- `h`/`l`/`left`/`right`: Collapse/expand tree items and move within content
+- `enter`/`space`: Toggle tree items
+- `shift` + `arrow`: Shift focus between panes
+- `ctrl` + `w`, then `h`/`j`/`k`/`l`: Move focus vim-style between panes
+- `s` or `ctrl` + `w`, then `o`: Toggle the tree/attribute sidebar
 - `q` / `ctrl`+`c`: Quit
 - `y`: Copy highlighted to clipboard
 - `ctrl` + navigate: Scroll through contents (image list or matrix)
 - `PgUp`/`PgDown`: Scroll through contents by half a page (image list or matrix)
-- `ctrl` + `d`/`u`: Navigate by half a page
-- `alt` + `left`/`right`: Change the pivot for incrementing constant indexes in matrix and preview modes.
-- `alt` + `up`/`down`: Increment or decrement index at highlighted index in matrix and preview modes.
+- `ctrl` + `d`/`u`: Navigate the tree by half a page
+- `[` / `]`: Change the selected dimension in preview and matrix modes
+- `ctrl` + `x` / `a`: Decrement or increment the selected index in preview and matrix modes
+- `alt` + `left`/`right`: Alias for changing selected dimension
+- `alt` + `up`/`down`: Alias for incrementing or decrementing selected index
 - `c`/`C`: Shift column axis in matrix mode.
 - `r`/`R`: Shift row axis in matrix mode.
 - `x`/`X`: Shift x-axis selector in preview mode.
@@ -42,8 +47,9 @@ h5v path/to/file.h5
 - `backspace/delete/d`: Remove currently selected source from multichart
 - `M`: Toggle back to normal mode
 - `c`: Clear zoom
-- `shift` + `right`/`left`: Pan right/left
-- `shift` + `up`/`down`: Zoom in/out by 10%
+- `j`/`k`: Move between series
+- `h`/`l` or `shift` + `right`/`left`: Pan right/left
+- `+`/`-` or `shift` + `up`/`down`: Zoom in/out by 10%
 
 ## Edit mode
 
