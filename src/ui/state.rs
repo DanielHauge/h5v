@@ -229,6 +229,13 @@ pub enum AttributeViewSelection {
     Value,
 }
 
+#[derive(Clone)]
+pub struct AttributeEditRequest {
+    pub attr_name: String,
+    pub content: String,
+    pub selection: AttributeViewSelection,
+}
+
 #[derive(Debug, Clone)]
 pub struct AttributeCursor {
     pub attribute_index: usize,
@@ -288,7 +295,7 @@ pub struct AppState<'a> {
     pub readonly: bool,
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
-    pub file: File,
+    pub file: Option<File>,
     pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,

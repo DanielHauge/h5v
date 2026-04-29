@@ -17,14 +17,14 @@ mod utils;
 use git_version::git_version;
 
 use crate::error::AppError;
-const GIR_VERSION: &str =
+pub const GIT_VERSION: &str =
     git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
 
 #[derive(Parser, Debug)]
 #[clap(
     author = "Daniel F. Hauge animcuil@gmail.com",
     about = "HDF5 Terminal Viewer (h5v)",
-    version = GIR_VERSION
+    version = GIT_VERSION
 )]
 struct Args {
     /// Path to the HDF5 file to open

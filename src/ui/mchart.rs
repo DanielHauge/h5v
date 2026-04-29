@@ -435,9 +435,7 @@ impl MultiChartState {
         true
     }
 
-    pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>) {
-        let area = f.area();
-
+    pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
         let header_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(ratatui::style::Color::Green))

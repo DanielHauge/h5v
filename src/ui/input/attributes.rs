@@ -7,7 +7,7 @@ use crate::{
     ui::{
         edit::perform_edit,
         state::{
-            AppState, AppToast,
+            AppState, AppToast, AttributeEditRequest,
             AttributeViewSelection::{Name, Value},
         },
     },
@@ -17,6 +17,151 @@ use super::{
     keymap::{attributes_action, AttributesAction, Direction},
     EventResult,
 };
+
+fn selected_attribute_edit_request(
+    state: &mut AppState<'_>,
+) -> Result<AttributeEditRequest, EventResult> {
+    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+
+    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
+    let attributes = match node.read_attributes() {
+        Ok(attributes) => attributes,
+        Err(error) => {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!("Failed to read attributes: {}", error)),
+                true,
+            ))
+        }
+    };
+    let selected_rendered_attribute = attributes
+        .rendered_attributes
+        .get(node_attributes_view_cursor.attribute_index);
+    let Some(attribute) = selected_rendered_attribute else {
+        return Err(EventResult::Toast(
+            AppToast::Error("No attribute selected".to_string()),
+            true,
+        ));
+    };
+    let attr_name = attribute
+        .0
+        .to_string()
+        .trim_end_matches('=')
+        .trim_end_matches('─')
+        .trim_end()
+        .to_string();
+
+    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+        return Err(EventResult::Toast(
+            AppToast::Error(format!(
+                "Editing metainfo-attribute '{}' is not allowed",
+                attr_name
+            )),
+            true,
+        ));
+    }
+
+    let (_, attr) = match attributes
+        .attributes
+        .iter()
+        .find(|(name, _)| name == &attr_name)
+    {
+        Some(attr) => attr,
+        None => {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!("Attribute '{}' not found", attr_name)),
+                true,
+            ))
+        }
+    };
+
+    if let Err(e) = attr.can_edit() {
+        if let Value = node_attributes_view_cursor.attribute_view_selection {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!(
+                    "Attribute '{}' value cannot be edited: {}",
+                    attr_name, e
+                )),
+                false,
+            ));
+        }
+    }
+
+    let content = match node_attributes_view_cursor.attribute_view_selection {
+        Name => attr_name.clone(),
+        Value => attribute
+            .1
+            .to_string()
+            .trim_start_matches("\"")
+            .trim_end_matches("\"")
+            .to_string(),
+    };
+
+    Ok(AttributeEditRequest {
+        attr_name,
+        content,
+        selection: node_attributes_view_cursor.attribute_view_selection,
+    })
+}
+
+pub fn apply_attribute_edit_request(
+    state: &mut AppState<'_>,
+    request: &AttributeEditRequest,
+) -> Result<EventResult, AppError> {
+    state.editing = true;
+    let new_value = match perform_edit(state, request.content.clone()) {
+        Ok(new_value) => new_value,
+        Err(e) => {
+            state.editing = false;
+            return Ok(EventResult::Toast(
+                AppToast::Error(format!("Failed to edit attribute: {}", e)),
+                true,
+            ));
+        }
+    };
+    state.editing = false;
+
+    let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+    match request.selection {
+        Name => {
+            if let Err(e) = selected_node.update_attribute_name(&request.attr_name, &new_value) {
+                return Ok(EventResult::Toast(AppToast::Error(e.to_string()), true));
+            };
+        }
+        Value => {
+            if let Err(e) = selected_node.update_attribute(&request.attr_name, new_value) {
+                if let AppError::EditWarning(warning) = &e {
+                    return Ok(EventResult::Toast(
+                        AppToast::Warning(warning.to_string()),
+                        true,
+                    ));
+                }
+                return Ok(EventResult::Toast(AppToast::Error(e.to_string()), true));
+            }
+        }
+    }
+    drop(selected_node);
+    state.acknowledge_file_write();
+
+    eprintln!("Attribute '{}' updated successfully", request.attr_name);
+    let selected_node = state.treeview[state.tree_view_cursor].node.borrow();
+    match selected_node.computed_attributes {
+        Some(ref x) => {
+            eprintln!("Computed attributes:");
+            for (ref key, ref value, ref t) in x.rendered_attributes.iter() {
+                eprintln!("  {} = {} ({})", key, value, t);
+            }
+        }
+        None => eprintln!("No computed attributes"),
+    };
+
+    Ok(EventResult::Toast(
+        AppToast::Info(format!(
+            "Attribute '{}' updated successfully",
+            request.attr_name
+        )),
+        true,
+    ))
+}
 
 pub fn handle_normal_attributes(
     state: &mut AppState<'_>,
@@ -78,130 +223,22 @@ pub fn handle_normal_attributes(
                     Ok(EventResult::Redraw)
                 }
                 Some(AttributesAction::Edit) => {
-                    state.editing = true;
-                    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
-
-                    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
-                    let attributes = node.read_attributes()?;
-                    let selected_rendered_attribute = attributes
-                        .rendered_attributes
-                        .get(node_attributes_view_cursor.attribute_index);
-                    let Some(attribute) = selected_rendered_attribute else {
-                        state.editing = false;
-                        return Ok(EventResult::Toast(
-                            AppToast::Error("No attribute selected".to_string()),
-                            true,
-                        ));
+                    let request = match selected_attribute_edit_request(state) {
+                        Ok(request) => request,
+                        Err(event_result) => return Ok(event_result),
                     };
-                    let attr_name = attribute
-                        .0
-                        .to_string()
-                        .trim_end_matches('=')
-                        .trim_end_matches('─')
-                        .trim_end()
-                        .to_string();
 
-                    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
-                        state.editing = false;
+                    if state.readonly {
                         return Ok(EventResult::Toast(
-                            AppToast::Error(format!(
-                                "Editing metainfo-attribute '{}' is not allowed",
-                                attr_name
-                            )),
-                            true,
+                            AppToast::Warning(
+                                "Cannot edit in read-only mode; reopen with -w to modify the file"
+                                    .to_string(),
+                            ),
+                            false,
                         ));
                     }
 
-                    let (_, attr) = attributes
-                        .attributes
-                        .iter()
-                        .find(|(name, _)| name == &attr_name)
-                        .ok_or_else(|| {
-                            AppError::EditError(format!("Attribute '{}' not found", attr_name))
-                        })?;
-
-                    if let Err(e) = attr.can_edit() {
-                        if let Value = node_attributes_view_cursor.attribute_view_selection {
-                            state.editing = false;
-                            return Ok(EventResult::Toast(
-                                AppToast::Error(format!(
-                                    "Attribute '{}' value cannot be edited: {}",
-                                    attr_name, e
-                                )),
-                                false,
-                            ));
-                        }
-                    }
-
-                    let content = match node_attributes_view_cursor.attribute_view_selection {
-                        Name => attr_name.clone(),
-                        Value => attribute
-                            .1
-                            .to_string()
-                            .trim_start_matches("\"")
-                            .trim_end_matches("\"")
-                            .to_string(),
-                    };
-                    drop(node);
-
-                    let new_value = match perform_edit(state, content) {
-                        Ok(new_value) => new_value,
-                        Err(e) => {
-                            state.editing = false;
-                            return Ok(EventResult::Toast(
-                                AppToast::Error(format!("Failed to edit attribute: {}", e)),
-                                true,
-                            ));
-                        }
-                    };
-                    state.editing = false;
-                    let mut selected_node =
-                        state.treeview[state.tree_view_cursor].node.borrow_mut();
-                    match node_attributes_view_cursor.attribute_view_selection {
-                        Name => {
-                            if let Err(e) =
-                                selected_node.update_attribute_name(&attr_name, &new_value)
-                            {
-                                return Ok(EventResult::Toast(
-                                    AppToast::Error(e.to_string()),
-                                    true,
-                                ));
-                            };
-                        }
-                        Value => {
-                            if let Err(e) = selected_node.update_attribute(&attr_name, new_value) {
-                                if let AppError::EditWarning(warning) = &e {
-                                    return Ok(EventResult::Toast(
-                                        AppToast::Warning(warning.to_string()),
-                                        true,
-                                    ));
-                                }
-                                return Ok(EventResult::Toast(
-                                    AppToast::Error(e.to_string()),
-                                    true,
-                                ));
-                            }
-                        }
-                    }
-                    drop(selected_node);
-                    state.acknowledge_file_write();
-
-                    eprintln!("Attribute '{}' updated successfully", attr_name);
-                    let selected_node = state.treeview[state.tree_view_cursor].node.borrow();
-                    match selected_node.computed_attributes {
-                        Some(ref x) => {
-                            eprintln!("Computed attributes:");
-                            for (ref key, ref value, ref t) in x.rendered_attributes.iter() {
-                                eprintln!("  {} = {} ({})", key, value, t);
-                            }
-                        }
-                        None => eprintln!("No computed attributes"),
-                    };
-
-                    Ok(EventResult::Toast(
-                        AppToast::Info(format!("Attribute '{}' updated successfully", attr_name)),
-                        true,
-                    ))
+                    apply_attribute_edit_request(state, &request)
                 }
                 Some(AttributesAction::Copy) => {
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();

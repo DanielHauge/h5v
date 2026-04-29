@@ -29,13 +29,14 @@ use ratatui_image::picker::Picker;
 use crate::{
     color_consts,
     error::{log_error, AppError},
-    h5f::{self, HasPath, Node},
+    h5f::{self, HasPath, Node, NodeType},
     ui::{
         image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
         input::EventResult,
         mchart::MultiChartState,
         state::{AppToast, ChartPreviwState, FileWatchState},
     },
+    GIT_VERSION,
 };
 
 use super::state::{ChartPreviewKey, ImageLoadKey};
@@ -84,6 +85,8 @@ fn use_stacked_tree_layout(area: Rect, mode: &Mode, show_tree_view: bool) -> boo
 type Result<T> = std::result::Result<T, AppError>;
 
 pub struct IntendedMainLoopBreak {}
+
+const HEADER_HEIGHT: u16 = 1;
 
 #[derive(Clone)]
 struct SelectedNodeSnapshot {
@@ -268,25 +271,83 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.chart_preview_state.ds_selection = None;
 }
 
+fn placeholder_root(path: &str) -> Rc<std::cell::RefCell<h5f::H5FNode>> {
+    Rc::new(std::cell::RefCell::new(h5f::H5FNode::new(Node::Broken(
+        NodeType::Group,
+        path.to_string(),
+        String::new(),
+    ))))
+}
+
 fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> {
     let snapshot = snapshot_reload_state(state);
     let file_path = state.file_watch.path.clone();
     let linked = state.file_watch.linked;
-    let reopened = h5f::H5F::open(file_path.clone(), linked, write).map_err(|e| {
-        AppError::Hdf5(hdf5_metno::Error::from(format!(
-            "Failed to reopen HDF5 file '{}': {}",
-            file_path, e
-        )))
-    })?;
+    let previous_write = !state.readonly;
 
-    state.file = reopened.file;
+    clear_preview_state(state, &snapshot);
+    state.treeview.clear();
+    state.searcher = None;
+    let old_root = std::mem::replace(&mut state.root, placeholder_root(&file_path));
+    let old_file = state.file.take();
+    drop(old_root);
+    if let Some(old_file) = old_file {
+        old_file.close().map_err(|e| {
+            AppError::Hdf5(hdf5_metno::Error::from(format!(
+                "Failed to close HDF5 file '{}' before reload: {}",
+                file_path, e
+            )))
+        })?;
+    }
+
+    let reopened = match h5f::H5F::open(file_path.clone(), linked, write) {
+        Ok(reopened) => reopened,
+        Err(target_error) => {
+            let fallback = h5f::H5F::open(file_path.clone(), linked, previous_write).map_err(
+                |fallback_error| {
+                    AppError::Hdf5(hdf5_metno::Error::from(format!(
+                        "Failed to reopen HDF5 file '{}' in {:?} mode after reload error (reload error: {}; fallback error: {})",
+                        file_path,
+                        if previous_write { "write" } else { "read-only" },
+                        target_error,
+                        fallback_error
+                    )))
+                },
+            )?;
+            state.file = Some(fallback.file);
+            state.root = fallback.root;
+            state.readonly = !previous_write;
+            state.focus = snapshot.focus.clone();
+            state.show_tree_view = snapshot.show_tree_view;
+            state.content_mode = snapshot.content_mode;
+            for path in &snapshot.expanded_paths {
+                let relative = normalized_node_path(path);
+                if relative.is_empty() {
+                    continue;
+                }
+                let _ = state.root.borrow_mut().expand_path(relative);
+            }
+            state.compute_tree_view();
+            restore_tree_selection(state, &snapshot);
+            restore_selected_node_state(state, &snapshot);
+            state.compute_tree_view();
+            restore_tree_selection(state, &snapshot);
+            state.sync_file_watch();
+            return Err(AppError::Hdf5(hdf5_metno::Error::from(format!(
+                "Failed to reopen HDF5 file '{}' in {} mode: {}",
+                file_path,
+                if write { "write" } else { "read-only" },
+                target_error
+            ))));
+        }
+    };
+
+    state.file = Some(reopened.file);
     state.root = reopened.root;
     state.readonly = !write;
     state.focus = snapshot.focus.clone();
     state.show_tree_view = snapshot.show_tree_view;
     state.content_mode = snapshot.content_mode;
-
-    clear_preview_state(state, &snapshot);
 
     for path in &snapshot.expanded_paths {
         let relative = normalized_node_path(path);
@@ -456,7 +517,7 @@ fn main_recover_loop(
         readonly: !writable,
         root: root_node,
         editing: false,
-        file: h5f.file,
+        file: Some(h5f.file),
         toast: AppToast::Empty,
         file_watch: FileWatchState {
             path: filename.clone(),
@@ -492,32 +553,35 @@ fn main_recover_loop(
     state.compute_tree_view();
 
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
-        if let Mode::Help = state.mode {
-            return render_help(frame);
-        }
-        if let Mode::MultiChart = state.mode {
-            return state.multi_chart.render(frame);
-        }
-
-        let show_tree_view = state.show_tree_view;
-
         let frame_area = match state.toast {
             AppToast::Empty => frame.area(),
             AppToast::Info(_) | AppToast::Warning(_) | AppToast::Error(_) => {
                 split_render_toast(frame, state)
             }
         };
+        let content_area = render_header(frame, frame_area, state);
+
+        if let Mode::Help = state.mode {
+            render_help(frame, content_area);
+            return;
+        }
+        if let Mode::MultiChart = state.mode {
+            state.multi_chart.render(frame, content_area);
+            return;
+        }
+
+        let show_tree_view = state.show_tree_view;
         state.stacked_tree_layout =
-            use_stacked_tree_layout(frame_area, &state.mode, state.show_tree_view);
+            use_stacked_tree_layout(content_area, &state.mode, state.show_tree_view);
 
         let main_display_area = match show_tree_view {
             true => {
-                let areas = make_panels_rect(frame_area, state.mode.clone());
+                let areas = make_panels_rect(content_area, state.mode.clone());
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
                 render_tree(frame, tree_area, state);
                 main_display_area
             }
-            false => frame_area,
+            false => content_area,
         };
 
         match state.mode {
@@ -725,7 +789,9 @@ fn main_recover_loop(
             }
         }
     }
-    state.file.close()?;
+    if let Some(file) = state.file.take() {
+        file.close()?;
+    }
     Ok(IntendedMainLoopBreak {})
 }
 
@@ -790,6 +856,78 @@ pub enum ChartPreviewLoadedResult {
         key: ChartPreviewKey,
         message: String,
     },
+}
+
+fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rect {
+    if area.height <= HEADER_HEIGHT {
+        return area;
+    }
+
+    let sections =
+        Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0)]).split(area);
+    let header_area = sections[0];
+    let body_area = sections[1];
+
+    let columns = Layout::horizontal([
+        Constraint::Percentage(32),
+        Constraint::Percentage(40),
+        Constraint::Percentage(28),
+    ])
+    .split(header_area);
+
+    frame.render_widget(
+        Paragraph::new(Line::raw("")).style(
+            Style::default()
+                .bg(color_consts::BG_VAL3_COLOR)
+                .fg(color_consts::COLOR_WHITE),
+        ),
+        header_area,
+    );
+
+    let left = Line::from(vec![
+        if state.readonly {
+            Span::styled(" 🔒 read-only ", Style::default().fg(Color::Yellow).bold())
+        } else {
+            Span::styled(" ✏ write ", Style::default().fg(Color::LightGreen).bold())
+        },
+        if state.file_watch.linked {
+            Span::styled(" linked ", Style::default().fg(Color::Cyan))
+        } else {
+            Span::raw("")
+        },
+    ]);
+    frame.render_widget(Paragraph::new(left), columns[0]);
+
+    let center = Line::from(vec![
+        Span::styled(
+            " h5v ",
+            Style::default()
+                .fg(color_consts::TITLE)
+                .bg(color_consts::BREAK_COLOR)
+                .bold(),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            GIT_VERSION,
+            Style::default()
+                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .bold(),
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(center).alignment(Alignment::Center),
+        columns[1],
+    );
+
+    let right = Line::from(vec![Span::styled(
+        "(type ? for help)",
+        Style::default().fg(color_consts::TYPE_DESC_COLOR),
+    )]);
+    frame.render_widget(
+        Paragraph::new(right).alignment(Alignment::Right),
+        columns[2],
+    );
+    body_area
 }
 
 fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
@@ -869,8 +1007,7 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
     frame.render_widget(error_paragraph, frame.area());
 }
 
-fn render_help(frame: &mut Frame<'_>) {
-    let area = frame.area();
+fn render_help(frame: &mut Frame<'_>, area: Rect) {
     let popup = centered_rect(area, 140, 28);
 
     frame.render_widget(

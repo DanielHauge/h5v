@@ -1,6 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{types::VarLenUnicode, Dataset, File, Group, LinkType};
+use hdf5_metno::{
+    plist::file_access::FileCloseDegree, types::VarLenUnicode, Dataset, File, Group, LinkType,
+};
 
 use crate::{
     error::AppError,
@@ -437,10 +439,13 @@ fn build_dataset_meta(
 
 impl H5F {
     pub fn open(file_path: String, linked: bool, write: bool) -> Result<Self, hdf5_metno::Error> {
+        let builder = File::with_options()
+            .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
+            .clone();
         let file = if write {
-            File::open_rw(&file_path)?
+            builder.open_rw(&file_path)?
         } else {
-            File::open(&file_path)?
+            builder.open(&file_path)?
         };
 
         let member_count = file.member_names()?.len();

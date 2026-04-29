@@ -19,7 +19,9 @@ use crate::{
     color_consts,
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::AppError,
-    h5f::{plot_projected, read_projected_scalar, H5FNode, HasPath, Node},
+    h5f::{
+        plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
+    },
     ui::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
@@ -64,7 +66,7 @@ pub fn render_chart_preview(
         match ds_meta.matrixable {
             Some(t) => match t {
                 crate::sprint_typedesc::MatrixRenderType::Float64 => {
-                    let ds = ds.read_scalar::<f64>();
+                    let ds = read_single_value_dataset::<f64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
                         Err(e) => {
@@ -75,7 +77,7 @@ pub fn render_chart_preview(
                     render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Uint64 => {
-                    let ds = ds.read_scalar::<u64>();
+                    let ds = read_single_value_dataset::<u64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
                         Err(e) => {
@@ -86,7 +88,7 @@ pub fn render_chart_preview(
                     render_string(f, area, node, ds, None);
                 }
                 crate::sprint_typedesc::MatrixRenderType::Int64 => {
-                    let ds = ds.read_scalar::<i64>();
+                    let ds = read_single_value_dataset::<i64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
                         Err(e) => {
@@ -114,7 +116,7 @@ pub fn render_chart_preview(
                         unreachable!("MatrixRenderType::Enum should only be set for enum types")
                     };
                     let enum_rendere = EnumRenderer::new(et);
-                    let scalar_value = ds.read_scalar::<u64>()?;
+                    let scalar_value = read_single_value_dataset::<u64>(&ds)?;
                     let string = enum_rendere.render_as_line(&scalar_value);
                     f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
 

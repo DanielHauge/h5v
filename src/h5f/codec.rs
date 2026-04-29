@@ -237,10 +237,14 @@ pub fn read_scalar_string_dataset(
     encoding: &Encoding,
 ) -> Result<String, AppError> {
     match encoding {
-        Encoding::Ascii => Ok(dataset.read_scalar::<VarLenAscii>()?.to_string()),
-        Encoding::UTF8 => Ok(dataset.read_scalar::<VarLenUnicode>()?.to_string()),
-        Encoding::UTF8Fixed => Ok(dataset.read_scalar::<FixedUnicode<32768>>()?.to_string()),
-        Encoding::AsciiFixed => Ok(dataset.read_scalar::<FixedAscii<32768>>()?.to_string()),
+        Encoding::Ascii => Ok(read_single_value_dataset::<VarLenAscii>(dataset)?.to_string()),
+        Encoding::UTF8 => Ok(read_single_value_dataset::<VarLenUnicode>(dataset)?.to_string()),
+        Encoding::UTF8Fixed => {
+            Ok(read_single_value_dataset::<FixedUnicode<32768>>(dataset)?.to_string())
+        }
+        Encoding::AsciiFixed => {
+            Ok(read_single_value_dataset::<FixedAscii<32768>>(dataset)?.to_string())
+        }
         Encoding::LittleEndian => Err(AppError::EditError(
             "LittleEndian not supported for string data".to_string(),
         )),
@@ -248,4 +252,27 @@ pub fn read_scalar_string_dataset(
             "Unknown encoding not supported for string data".to_string(),
         )),
     }
+}
+
+pub fn read_single_value_dataset<T>(dataset: &Dataset) -> Result<T, AppError>
+where
+    T: H5Type + Clone,
+{
+    if dataset.is_scalar() {
+        return dataset.read_scalar::<T>().map_err(AppError::from);
+    }
+
+    if dataset.size() != 1 {
+        return Err(AppError::DrawingError(format!(
+            "Expected dataset with a single value, got shape {:?}",
+            dataset.shape()
+        )));
+    }
+
+    let values = dataset.read::<T, IxDyn>().map_err(AppError::from)?;
+    values
+        .iter()
+        .next()
+        .cloned()
+        .ok_or_else(|| AppError::DrawingError("Expected one dataset value, found none".to_string()))
 }
