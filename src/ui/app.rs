@@ -58,8 +58,8 @@ fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
     } else {
         if area.width < 100 {
             let chunks = Layout::default()
-                .direction(ratatui::layout::Direction::Horizontal)
-                .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
                 .split(area);
             return chunks;
         }
@@ -69,6 +69,10 @@ fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(area)
     }
+}
+
+fn use_stacked_tree_layout(area: Rect, mode: &Mode, show_tree_view: bool) -> bool {
+    show_tree_view && !matches!(mode, Mode::Search) && area.width < 100
 }
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -233,6 +237,7 @@ fn main_recover_loop(
         searcher: None,
         pending_chord: None,
         show_tree_view: true,
+        stacked_tree_layout: false,
         content_mode: ContentShowMode::Preview,
         img_state,
         matrix_view_state,
@@ -257,6 +262,8 @@ fn main_recover_loop(
                 split_render_toast(frame, state)
             }
         };
+        state.stacked_tree_layout =
+            use_stacked_tree_layout(frame_area, &state.mode, state.show_tree_view);
 
         let main_display_area = match show_tree_view {
             true => {

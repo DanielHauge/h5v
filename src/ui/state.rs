@@ -194,6 +194,7 @@ pub struct AppState<'a> {
     pub searcher: Option<Searcher>,
     pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,
+    pub stacked_tree_layout: bool,
     pub content_mode: ContentShowMode,
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
@@ -204,19 +205,39 @@ pub struct AppState<'a> {
 
 type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
+    fn remember_main_focus(&mut self, last_focused: LastFocused) {
+        self.focus = Focus::Tree(last_focused);
+    }
+
     pub fn focus_left(&mut self) {
         if !self.show_tree_view {
             return;
         }
+        if self.stacked_tree_layout {
+            match self.focus {
+                Focus::Attributes => self.remember_main_focus(LastFocused::Attributes),
+                Focus::Content => self.remember_main_focus(LastFocused::Content),
+                Focus::Tree(_) => {}
+            }
+            return;
+        }
         match self.focus {
-            Focus::Attributes => self.focus = Focus::Tree(LastFocused::Attributes),
-            Focus::Content => self.focus = Focus::Tree(LastFocused::Content),
+            Focus::Attributes => self.remember_main_focus(LastFocused::Attributes),
+            Focus::Content => self.remember_main_focus(LastFocused::Content),
             Focus::Tree(_) => {}
         }
     }
 
     pub fn focus_right(&mut self) {
         if !self.show_tree_view {
+            return;
+        }
+        if self.stacked_tree_layout {
+            match self.focus {
+                Focus::Tree(LastFocused::Attributes) => self.focus = Focus::Attributes,
+                Focus::Tree(LastFocused::Content) => self.focus = Focus::Content,
+                Focus::Attributes | Focus::Content => {}
+            }
             return;
         }
         match self.focus {
@@ -230,6 +251,14 @@ impl AppState<'_> {
         if !self.show_tree_view {
             return;
         }
+        if self.stacked_tree_layout {
+            match self.focus {
+                Focus::Content => self.focus = Focus::Attributes,
+                Focus::Attributes => self.remember_main_focus(LastFocused::Attributes),
+                Focus::Tree(_) => {}
+            }
+            return;
+        }
         match self.focus {
             Focus::Content => self.focus = Focus::Attributes,
             Focus::Tree(_) => self.focus = Focus::Attributes,
@@ -239,6 +268,14 @@ impl AppState<'_> {
 
     pub fn focus_down(&mut self) {
         if !self.show_tree_view {
+            return;
+        }
+        if self.stacked_tree_layout {
+            match self.focus {
+                Focus::Tree(_) => self.focus = Focus::Attributes,
+                Focus::Attributes => self.focus = Focus::Content,
+                Focus::Content => {}
+            }
             return;
         }
         match self.focus {
