@@ -203,31 +203,31 @@ impl MultiChartState {
 
     pub fn add_linspace_series(&mut self, dataset: Dataset, selection: Selection) {
         if let Ok(data) = dataset.read_slice_1d::<f64, _>(selection) {
-            let mut points: Vec<Point> = vec![];
-            let mut y_max = f64::MIN;
-            let mut y_min = f64::MAX;
-            for (i, &y) in data.iter().enumerate() {
-                let x = i as f64;
-                points.push((x, y));
-                if y > y_max {
-                    y_max = y;
-                }
-                if y < y_min {
-                    y_min = y;
-                }
-            }
-            let points_len = points.len();
-            let line_serie = LineSerie {
-                points,
-                y_max,
-                y_min,
-                x_min: 0,
-                x_max: points_len,
-            };
-            self.line_series
-                .insert(dataset.name().to_string(), line_serie);
-            self.modified = true;
+            let points = data
+                .iter()
+                .enumerate()
+                .map(|(i, &y)| (i as f64, y))
+                .collect::<Vec<_>>();
+            self.add_points_series(dataset.name().to_string(), points);
         }
+    }
+
+    pub fn add_points_series(&mut self, key: String, points: Vec<Point>) {
+        if points.is_empty() {
+            return;
+        }
+        let y_max = points.iter().map(|(_, y)| *y).fold(f64::MIN, f64::max);
+        let y_min = points.iter().map(|(_, y)| *y).fold(f64::MAX, f64::min);
+        let points_len = points.len();
+        let line_serie = LineSerie {
+            points,
+            y_max,
+            y_min,
+            x_min: 0,
+            x_max: points_len,
+        };
+        self.line_series.insert(key, line_serie);
+        self.modified = true;
     }
 
     // TODO: Generally turn this into Result to prop the errs

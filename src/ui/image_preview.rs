@@ -24,7 +24,7 @@ use crate::{
     h5f::{H5FNode, ImageType, InterlaceMode, Node},
     ui::{
         preview_chart::{render_image_chart, MAX_SEGMENT_SIZE},
-        state::{ChartPreviewLoadRequest, IsFromDs},
+        state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs},
     },
 };
 
@@ -303,17 +303,20 @@ pub fn handle_chartpreview_load(
                 0.0
             };
 
-            let data_preview = match req.ds.plot(&req.selection) {
-                Ok(data_preview) => data_preview,
-                Err(e) => {
-                    #[allow(clippy::expect_used)]
-                    tx_events
-                        .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
-                            format!("Failed to plot data for chart preview: {}", e),
-                        )))
-                        .expect("Failed to send chart preview loaded event");
-                    continue;
-                }
+            let data_preview = match req.source {
+                ChartPreviewSource::Dataset { ds, selection } => match ds.plot(&selection) {
+                    Ok(data_preview) => data_preview,
+                    Err(e) => {
+                        #[allow(clippy::expect_used)]
+                        tx_events
+                            .send(AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(
+                                format!("Failed to plot data for chart preview: {}", e),
+                            )))
+                            .expect("Failed to send chart preview loaded event");
+                        continue;
+                    }
+                },
+                ChartPreviewSource::Precomputed { data_preview } => data_preview,
             };
 
             if data_preview.min.is_nan()

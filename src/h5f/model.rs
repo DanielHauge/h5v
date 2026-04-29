@@ -139,12 +139,22 @@ impl H5FNode {
         if let Node::Broken(_, _, _) = &self.node {
             return "*- ".to_string();
         }
+        if self.is_compound_container() {
+            return "󰆼 ".to_string();
+        }
+        if self.is_compound_leaf() {
+            return "󰈚 ".to_string();
+        }
         match self.is_group() {
             true => {
                 let Node::Group(_, meta) = &self.node else {
                     return "?".to_string();
                 };
-                if meta.is_link { "🔗".to_string() } else { " ".to_string() }
+                if meta.is_link {
+                    "🔗".to_string()
+                } else {
+                    " ".to_string()
+                }
             }
             false => {
                 let Node::Dataset(_, meta) = &self.node else {
@@ -166,6 +176,7 @@ impl H5FNode {
             Node::File(_) => {}
             Node::Broken(_, _, _) => {}
             Node::Group(_, _) => {}
+            Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {}
             Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
                 Some(matrix_renderable) => match matrix_renderable {
                     MatrixRenderType::Float64 => {
@@ -198,9 +209,7 @@ impl H5FNode {
                         }
                         result.push(ContentShowMode::Preview);
                     }
-                    MatrixRenderType::Compound => {
-                        todo!("Compound matrix rendering is not yet supported");
-                    }
+                    MatrixRenderType::Compound => {}
                 },
                 None => result.push(ContentShowMode::Preview),
             },
@@ -210,6 +219,18 @@ impl H5FNode {
 
     pub fn is_group(&self) -> bool {
         matches!(self.node, Node::Group(_, _))
+    }
+
+    pub fn is_compound_container(&self) -> bool {
+        matches!(&self.node, Node::Dataset(_, meta) if meta.is_compound_container())
+    }
+
+    pub fn is_compound_leaf(&self) -> bool {
+        matches!(&self.node, Node::Dataset(_, meta) if meta.is_compound_leaf())
+    }
+
+    pub fn is_expandable(&self) -> bool {
+        self.is_group() || self.is_compound_container()
     }
 }
 

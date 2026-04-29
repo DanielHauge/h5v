@@ -24,6 +24,7 @@ pub trait StringLengths {
     fn string_lengths(&self) -> Vec<usize>;
 }
 
+#[derive(Debug, Clone)]
 pub struct DatasetPlotingData {
     pub data: Vec<(f64, f64)>,
     pub length: usize,

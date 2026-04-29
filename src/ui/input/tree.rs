@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::{error::AppError, ui::state::AppState};
+use crate::{error::AppError, h5f::read_projected_values_1d, ui::state::AppState};
 
 use super::EventResult;
 
@@ -168,10 +168,29 @@ pub fn handle_normal_tree_event(
                     Ok(EventResult::Redraw)
                 }
                 (KeyCode::Char('m'), _) => {
-                    let Some((ds, sel)) = state.get_1d_selection() else {
+                    let Some((ds, meta, sel)) = state.get_1d_selection() else {
                         return Ok(EventResult::Continue);
                     };
-                    state.multi_chart.add_linspace_series(ds, sel);
+                    if meta.is_compound_container() {
+                        return Ok(EventResult::Continue);
+                    }
+                    if meta.is_compound_leaf() {
+                        let Ok(data) = read_projected_values_1d::<f64>(&ds, &meta, sel) else {
+                            return Ok(EventResult::Continue);
+                        };
+                        let points = data
+                            .iter()
+                            .enumerate()
+                            .map(|(i, value)| (i as f64, *value))
+                            .collect();
+                        let key = meta
+                            .virtual_path()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| ds.name());
+                        state.multi_chart.add_points_series(key, points);
+                    } else {
+                        state.multi_chart.add_linspace_series(ds, sel);
+                    }
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }

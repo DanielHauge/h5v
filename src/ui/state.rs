@@ -11,9 +11,10 @@ use image::ImageFormat;
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::{
+    data::DatasetPlotingData,
     data::PreviewSelection,
     error::AppError,
-    h5f::{H5FNode, ImageType, Node},
+    h5f::{H5FNode, HasPath, ImageType, Node},
     search::Searcher,
     ui::mchart::MultiChartState,
 };
@@ -53,11 +54,20 @@ pub enum ContentShowMode {
 }
 
 pub struct ChartPreviewLoadRequest {
-    pub ds: Dataset,
-    pub selection: PreviewSelection,
+    pub source: ChartPreviewSource,
     pub segment_state: SegmentState,
     pub width: u16,
     pub height: u16,
+}
+
+pub enum ChartPreviewSource {
+    Dataset {
+        ds: Dataset,
+        selection: PreviewSelection,
+    },
+    Precomputed {
+        data_preview: DatasetPlotingData,
+    },
 }
 
 pub struct ChartPreviwState {
@@ -93,16 +103,7 @@ impl<T: IsFromDsReq> IsFromDs for T {
             Some(name) => name,
             None => return false,
         };
-        match node {
-            Node::Dataset(ds, _) => {
-                let name = &ds.name();
-                if *name == ds_name {
-                    return true;
-                }
-                false
-            }
-            _ => false,
-        }
+        node.path() == ds_name
     }
 }
 
@@ -253,11 +254,11 @@ impl AppState<'_> {
         }
     }
 
-    pub fn get_1d_selection(&self) -> Option<(Dataset, Selection)> {
+    pub fn get_1d_selection(&self) -> Option<(Dataset, crate::h5f::DatasetMeta, Selection)> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
-        let (ds, shape) = match &node.node {
-            Node::Dataset(ds, dsattr) => (ds.clone(), dsattr.shape.clone()),
+        let (ds, meta, shape) = match &node.node {
+            Node::Dataset(ds, dsattr) => (ds.clone(), dsattr.clone(), dsattr.shape.clone()),
             _ => return None,
         };
         node.sync_selection_rank(shape.len());
@@ -275,7 +276,7 @@ impl AppState<'_> {
             }
         }
         let hyperslap = Hyperslab::from(slice);
-        Some((ds, Selection::Hyperslab(hyperslap)))
+        Some((ds, meta, Selection::Hyperslab(hyperslap)))
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {

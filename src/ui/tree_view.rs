@@ -108,14 +108,21 @@ fn compute_tree_view_rec<'a>(
         let folder_icon_link = c.icon();
         let folder_icon = format!("{}{}", folder_icon_base, folder_icon_link);
 
-        let icon = match c.is_group() {
-            true => folder_icon.to_string(),
-            false => c.icon(),
+        let icon = match (c.is_group(), c.is_compound_container()) {
+            (true, _) => folder_icon.to_string(),
+            (false, true) => c.icon(),
+            (false, false) => c.icon(),
         };
 
-        let icon_color = match child.borrow().is_group() {
-            true => color_consts::GROUP_COLOR,
-            false => color_consts::DATASET_FILE_COLOR,
+        let icon_color = match (
+            child.borrow().is_group(),
+            child.borrow().is_compound_container(),
+            child.borrow().is_compound_leaf(),
+        ) {
+            (true, _, _) => color_consts::GROUP_COLOR,
+            (false, true, _) => color_consts::COMPOUND_COLOR,
+            (false, _, true) => color_consts::DATASET_FILE_COLOR,
+            (false, false, false) => color_consts::DATASET_FILE_COLOR,
         };
 
         let icon_span = Span::styled(icon, Style::default().fg(icon_color));
@@ -131,14 +138,20 @@ fn compute_tree_view_rec<'a>(
         let mut line_vec = prefix.to_vec();
         line_vec.push(connector_span);
         line_vec.push(Span::raw(" "));
-        if child.borrow().is_group() {
+        if child.borrow().is_expandable() {
             line_vec.push(collapse_icon_span);
         }
         line_vec.push(icon_span);
         line_vec.push(Span::raw(" "));
-        let name_color = match child.borrow().is_group() {
-            true => color_consts::VARIABLE_BLUE,
-            false => color_consts::DATASET_COLOR,
+        let name_color = match (
+            child.borrow().is_group(),
+            child.borrow().is_compound_container(),
+            child.borrow().is_compound_leaf(),
+        ) {
+            (true, _, _) => color_consts::VARIABLE_BLUE,
+            (false, true, _) => color_consts::COMPOUND_NAME_COLOR,
+            (false, _, true) => color_consts::DATASET_COLOR,
+            (false, false, false) => color_consts::DATASET_COLOR,
         };
         line_vec.push(Span::styled(
             child.borrow().name(),
@@ -175,7 +188,7 @@ fn compute_tree_view_rec<'a>(
                 .push(Span::raw("│   ").style(Style::default().fg(color_consts::LINES_COLOR)));
         };
 
-        if child.borrow().is_group() {
+        if child.borrow().is_expandable() {
             let children = compute_tree_view_rec(child, prefix_clone, indent, mchart);
             tree_view.extend(children);
         }

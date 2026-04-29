@@ -57,20 +57,40 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
     match type_desc {
         TypeDescriptor::Boolean => copy_to_group::<bool>(attr, group, &type_desc, new_name)?,
         TypeDescriptor::Integer(int_size) => match int_size {
-            hdf5_metno::types::IntSize::U1 => copy_to_group::<i8>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U2 => copy_to_group::<i16>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U4 => copy_to_group::<i32>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U8 => copy_to_group::<i64>(attr, group, &type_desc, new_name)?,
+            hdf5_metno::types::IntSize::U1 => {
+                copy_to_group::<i8>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                copy_to_group::<i16>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                copy_to_group::<i32>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                copy_to_group::<i64>(attr, group, &type_desc, new_name)?
+            }
         },
         TypeDescriptor::Unsigned(int_size) => match int_size {
-            hdf5_metno::types::IntSize::U1 => copy_to_group::<u8>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U2 => copy_to_group::<u16>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U4 => copy_to_group::<u32>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::IntSize::U8 => copy_to_group::<u64>(attr, group, &type_desc, new_name)?,
+            hdf5_metno::types::IntSize::U1 => {
+                copy_to_group::<u8>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                copy_to_group::<u16>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                copy_to_group::<u32>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                copy_to_group::<u64>(attr, group, &type_desc, new_name)?
+            }
         },
         TypeDescriptor::Float(float_size) => match float_size {
-            hdf5_metno::types::FloatSize::U4 => copy_to_group::<f32>(attr, group, &type_desc, new_name)?,
-            hdf5_metno::types::FloatSize::U8 => copy_to_group::<f64>(attr, group, &type_desc, new_name)?,
+            hdf5_metno::types::FloatSize::U4 => {
+                copy_to_group::<f32>(attr, group, &type_desc, new_name)?
+            }
+            hdf5_metno::types::FloatSize::U8 => {
+                copy_to_group::<f64>(attr, group, &type_desc, new_name)?
+            }
         },
         TypeDescriptor::Enum(_) | TypeDescriptor::Compound(_) => {
             let data: Vec<u8> = attr.read_raw()?;
@@ -108,7 +128,9 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
             255..4096 => copy_to_group::<FixedAscii<4096>>(attr, group, &type_desc, new_name)?,
             _ => copy_to_group::<VarLenAscii>(attr, group, &type_desc, new_name)?,
         },
-        TypeDescriptor::VarLenAscii => copy_to_group::<VarLenAscii>(attr, group, &type_desc, new_name)?,
+        TypeDescriptor::VarLenAscii => {
+            copy_to_group::<VarLenAscii>(attr, group, &type_desc, new_name)?
+        }
         TypeDescriptor::VarLenUnicode => {
             copy_to_group::<VarLenUnicode>(attr, group, &type_desc, new_name)?
         }
@@ -124,7 +146,10 @@ fn copy_to_group<T: H5Type>(
 ) -> Result<(), hdf5_metno::Error> {
     if attr.is_scalar() {
         let data: T = attr.read_scalar()?;
-        let new_attr = group.new_attr_builder().empty_as(type_desc).create(new_name)?;
+        let new_attr = group
+            .new_attr_builder()
+            .empty_as(type_desc)
+            .create(new_name)?;
         new_attr.write_scalar(&data)?;
     } else {
         let data = attr.read::<T, IxDyn>()?;
@@ -154,31 +179,32 @@ pub fn write_scalar_attr_from_text(attr: &Attribute, new_value: &str) -> Result<
             let ascii = VarLenAscii::from_ascii(new_value).map_err(|e| {
                 AppError::EditError(format!("Failed to convert to VarLenAscii: {}", e))
             })?;
-            attr.write_scalar(&ascii).map_err(|e| {
-                AppError::EditError(format!("Failed to write attribute: {}", e))
-            })?;
+            attr.write_scalar(&ascii)
+                .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))?;
         }
         Some(ScalarTextCodec::VarLenUnicode) => {
             let unicode = VarLenUnicode::from_str(new_value).map_err(|e| {
                 AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
             })?;
-            attr.write_scalar(&unicode).map_err(|e| {
-                AppError::EditError(format!("Failed to write attribute: {}", e))
-            })?;
+            attr.write_scalar(&unicode)
+                .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))?;
         }
         None => return Err(non_editable_scalar_error(&type_desc)),
     }
     Ok(type_desc.to_string())
 }
 
-fn write_parsed_scalar<T>(attr: &Attribute, new_value: &str, type_name: &str) -> Result<(), AppError>
+fn write_parsed_scalar<T>(
+    attr: &Attribute,
+    new_value: &str,
+    type_name: &str,
+) -> Result<(), AppError>
 where
     T: H5Type + FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    let parsed = T::from_str(new_value).map_err(|e| {
-        AppError::EditError(format!("Failed to convert to {}: {}", type_name, e))
-    })?;
+    let parsed = T::from_str(new_value)
+        .map_err(|e| AppError::EditError(format!("Failed to convert to {}: {}", type_name, e)))?;
     attr.write_scalar(&parsed)
         .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
 }

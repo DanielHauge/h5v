@@ -35,8 +35,10 @@ pub const EQUAL_SIGN_COLOR: Color = Color::Rgb(66, 165, 245);
 pub const SYMBOL_COLOR: Color = Color::Rgb(255, 225, 0);
 pub const FILE_COLOR: Color = Color::Rgb(66, 165, 245);
 pub const GROUP_COLOR: Color = Color::Rgb(255, 204, 0);
+pub const COMPOUND_NAME_COLOR: Color = Color::Rgb(214, 170, 0);
 // grp file color normal variable name blue
 pub const DATASET_COLOR: Color = Color::Rgb(222, 222, 222);
+pub const COMPOUND_COLOR: Color = Color::Rgb(200, 140, 255);
 pub const SEARCH_TEXT_COLOR: Color = Color::Rgb(222, 222, 222);
 pub const SEARCH_COUNT_COLOR: Color = Color::DarkGray;
 pub const DATASET_FILE_COLOR: Color = Color::Rgb(38, 166, 154);

@@ -15,6 +15,19 @@ with h5py.File(file_name, "w") as f:
     data = np.random.random((100, 100))
     f.create_dataset("attributes_ds", data=data)
 
+    # Dedicated targets and probe for object reference attribute rendering.
+    reference_targets = f.create_group("reference_targets")
+    reference_dataset = reference_targets.create_dataset(
+        "dataset_target", data=np.arange(10, dtype=np.int32)
+    )
+    reference_group = reference_targets.create_group("group_target")
+    reference_group.create_dataset("nested_dataset", data=np.arange(5, dtype=np.int16))
+    object_ref_probe = f.create_dataset(
+        "object_ref_attr_probe", data=np.arange(3, dtype=np.uint8)
+    )
+    object_ref_probe.attrs["dataset_ref"] = reference_dataset.ref
+    object_ref_probe.attrs["group_ref"] = reference_group.ref
+
     # Create a group and add a dataset to it
     group = f.create_group("group_1")
     group.create_dataset("dataset_2", data=data)
@@ -43,6 +56,53 @@ with h5py.File(file_name, "w") as f:
     f["attributes_ds"].attrs["float_array"] = np.array([3.14, 2.71, 1.41])
     f["attributes_ds"].attrs["int"] = 42
     f["attributes_ds"].attrs["bool"] = True
+    f["attributes_ds"].attrs["bytes"] = b"hello bytes"
+    f["attributes_ds"].attrs["reference"] = f["group_1/dataset_2"].ref
+    f["attributes_ds"].attrs["object_reference"] = f["group_1"].ref
+    f["attributes_ds"].attrs["render_dataset_ref"] = reference_dataset.ref
+    f["attributes_ds"].attrs["render_group_ref"] = reference_group.ref
+    f["attributes_ds"].attrs["vlen_string"] = np.array(
+        ["hello", "world", "你好"], dtype=h5py.string_dtype(encoding="utf-8")
+    )
+
+    compound_dtype = np.dtype([("field1", np.int32), ("field2", np.float64)])
+    compound_data = np.array([(1, 3.14), (2, 2.71)], dtype=compound_dtype)
+    compound_scalar = np.array((7, 9.81), dtype=compound_dtype)
+    nested_compound_dtype = np.dtype(
+        [("inner", compound_dtype), ("flag", np.bool_), ("label", "S8")]
+    )
+    nested_compound_scalar = np.array(
+        ((11, 0.125), True, b"nested"), dtype=nested_compound_dtype
+    )
+    fixed_array_compound_dtype = np.dtype(
+        [("name", "S8"), ("samples", np.int16, (3,))]
+    )
+    fixed_array_compound_scalar = np.array(
+        (b"triple", [4, 5, 6]), dtype=fixed_array_compound_dtype
+    )
+    vlen_compound_dtype = h5py.vlen_dtype(compound_dtype)
+    f["attributes_ds"].attrs["compound_scalar"] = compound_scalar
+    f["attributes_ds"].attrs["compound"] = compound_data
+    f["attributes_ds"].attrs["compound_nested_scalar"] = nested_compound_scalar
+    f["attributes_ds"].attrs["compound_fixed_array_scalar"] = (
+        fixed_array_compound_scalar
+    )
+    vlen_compound = np.empty((2,), dtype=vlen_compound_dtype)
+    vlen_compound[0] = np.array([(1, 3.14), (2, 2.71)], dtype=compound_dtype)
+    vlen_compound[1] = np.array([(3, 1.41)], dtype=compound_dtype)
+    f["attributes_ds"].attrs.create(
+        "vlen_compound", vlen_compound, dtype=vlen_compound_dtype
+    )
+
+    nested_compound = np.empty((2,), dtype=vlen_compound_dtype)
+    nested_compound[0] = np.array([(4, 1.23)], dtype=compound_dtype)
+    nested_compound[1] = np.array([(5, 4.56), (6, 7.89)], dtype=compound_dtype)
+    f["attributes_ds"].attrs.create(
+        "nested_compound", nested_compound, dtype=vlen_compound_dtype
+    )
+
+    f["compound_dataset"] = compound_data
+    f["compound_dataset_scalar"] = np.array((1, 3.14), dtype=compound_dtype)
 
     # Make a bigger nested groups and random good things
     group_2 = f.create_group("group_1/group_2")

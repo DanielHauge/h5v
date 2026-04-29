@@ -4,7 +4,9 @@ use super::{
     image_preview::render_img,
     preview_chart::render_chart_preview,
     state::AppState,
-    std_comp_render::{render_empty_dataset, render_error, render_string, render_unsupported_rendering},
+    std_comp_render::{
+        render_empty_dataset, render_error, render_string, render_unsupported_rendering,
+    },
 };
 use crate::{
     error::AppError,

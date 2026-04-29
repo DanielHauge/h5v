@@ -1,3 +1,4 @@
+use hdf5_metno::types::{CompoundField, CompoundType, TypeDescriptor};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -32,6 +33,19 @@ pub enum ImageType {
 }
 
 #[derive(Debug, Clone)]
+pub struct CompoundFieldPathSegment {
+    pub name: String,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompoundFieldProjection {
+    pub field_path: Vec<CompoundFieldPathSegment>,
+    pub field_type: TypeDescriptor,
+    pub virtual_path: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct GroupMeta {
     pub is_link: bool,
     pub filename: String,
@@ -44,6 +58,7 @@ pub struct DatasetMeta {
     pub display_name: String,
     pub shape: Vec<usize>,
     pub data_type: String,
+    pub type_descriptor: TypeDescriptor,
     #[allow(dead_code)]
     pub(crate) data_bytesize: usize,
     pub(crate) storage_required: u64,
@@ -56,6 +71,33 @@ pub struct DatasetMeta {
     pub image: Option<ImageType>,
     pub is_link: bool,
     pub filename: String,
+    pub compound_projection: Option<CompoundFieldProjection>,
+}
+
+impl CompoundFieldProjection {
+    pub fn current_compound_type(&self) -> Option<&CompoundType> {
+        match &self.field_type {
+            TypeDescriptor::Compound(compound) => Some(compound),
+            _ => None,
+        }
+    }
+
+    pub fn absolute_offset(&self) -> usize {
+        self.field_path.iter().map(|segment| segment.offset).sum()
+    }
+
+    pub fn child(&self, field: &CompoundField) -> Self {
+        let mut field_path = self.field_path.clone();
+        field_path.push(CompoundFieldPathSegment {
+            name: field.name.clone(),
+            offset: field.offset,
+        });
+        Self {
+            virtual_path: format!("{}/{}", self.virtual_path, field.name),
+            field_path,
+            field_type: field.ty.clone(),
+        }
+    }
 }
 
 impl GroupMeta {
@@ -93,7 +135,8 @@ impl GroupMeta {
                 "─".repeat(extra_name_space - 1),
                 Style::default().fg(color_consts::LINES_COLOR),
             );
-            let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
             let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
@@ -108,6 +151,23 @@ impl GroupMeta {
 pub static SYSTEM_ATTRIBUTES: [&str; 6] = ["type", "size", "shape", "chunk", "link", "path"];
 
 impl DatasetMeta {
+    pub fn virtual_path(&self) -> Option<&str> {
+        self.compound_projection
+            .as_ref()
+            .map(|projection| projection.virtual_path.as_str())
+    }
+
+    pub fn is_compound_container(&self) -> bool {
+        self.compound_projection
+            .as_ref()
+            .and_then(CompoundFieldProjection::current_compound_type)
+            .is_some()
+    }
+
+    pub fn is_compound_leaf(&self) -> bool {
+        self.compound_projection.is_some() && !self.is_compound_container()
+    }
+
     pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
         let min_first_panel = match longest_name {
             0..8 => 8,
@@ -200,6 +260,21 @@ impl DatasetMeta {
             );
             data_set_attrs.push((link_name_span, link_value_span));
         }
+        if let Some(virtual_path) = self.virtual_path() {
+            let field_name = Span::styled(
+                "field",
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
+            let field_value = Span::styled(
+                virtual_path.to_string(),
+                Style::default()
+                    .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                    .bold(),
+            );
+            data_set_attrs.push((field_name, field_value));
+        }
 
         let mut lines: Vec<(Line<'static>, Line<'static>, Line<'static>)> = vec![];
         for (name, value) in data_set_attrs {
@@ -212,7 +287,8 @@ impl DatasetMeta {
                 "─".repeat(extra_name_space - 1),
                 Style::default().fg(color_consts::LINES_COLOR),
             );
-            let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
             let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);

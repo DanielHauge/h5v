@@ -9,7 +9,8 @@ use crate::{
 
 use super::{
     attrs::HasName,
-    meta::{DatasetMeta, GroupMeta},
+    compound::root_compound_projection,
+    meta::{CompoundFieldProjection, DatasetMeta, GroupMeta},
     model::{H5FNode, Node, NodeType, H5F},
 };
 
@@ -120,9 +121,24 @@ impl H5FNode {
             return name.clone();
         }
         match &self.node {
-            Node::File(f) => f.filename().split('/').next_back().unwrap_or("").to_string(),
-            Node::Group(g, _) => g.filename().split('/').next_back().unwrap_or("").to_string(),
-            Node::Dataset(ds, _) => ds.filename().split('/').next_back().unwrap_or("").to_string(),
+            Node::File(f) => f
+                .filename()
+                .split('/')
+                .next_back()
+                .unwrap_or("")
+                .to_string(),
+            Node::Group(g, _) => g
+                .filename()
+                .split('/')
+                .next_back()
+                .unwrap_or("")
+                .to_string(),
+            Node::Dataset(ds, _) => ds
+                .filename()
+                .split('/')
+                .next_back()
+                .unwrap_or("")
+                .to_string(),
             Node::Broken(_, path, _) => path.clone(),
         }
     }
@@ -142,7 +158,7 @@ impl H5FNode {
 
         for child in &self.children {
             let mut child_node = child.borrow_mut();
-            if child_node.is_group() {
+            if child_node.is_expandable() {
                 child_node.read_children()?;
             }
         }
@@ -192,9 +208,17 @@ impl H5FNode {
         if self.read {
             return Ok(());
         }
-        match self.node {
-            Node::Dataset(_, _) | Node::Broken(_, _, _) => return Ok(()),
-            _ => {}
+        if matches!(self.node, Node::Broken(_, _, _)) {
+            return Ok(());
+        }
+
+        if let Node::Dataset(dataset, meta) = &self.node {
+            if !meta.is_compound_container() {
+                return Ok(());
+            }
+            let children = synthetic_compound_children(dataset, meta)?;
+            self.children = children;
+            return Ok(());
         }
 
         let has_children = match &self.node {
@@ -295,42 +319,120 @@ impl H5FNode {
                 shape.push(total_elems);
                 shape.push(1);
             }
-            let data_type = sprint_typedescriptor(&dtype_desc);
-            let numerical = is_type_matrixable(&dtype_desc);
-            let encoding = encoding_from_dtype(&dtype_desc);
-            let total_bytes = data_bytesize * total_elems;
-            let storage_required = d.storage_size();
-            let chunk_shape = d.chunk();
-            let image = is_image(&d);
-            let filename = d.filename().to_string();
-            let hl = d.attr("HIGHLIGHT").ok().map(|a| {
-                a.read_scalar::<VarLenUnicode>()
-                    .map(|v| v.to_string())
-                    .unwrap_or_default()
-            });
-
-            let meta = DatasetMeta {
-                hl,
-                shape,
-                data_type,
-                display_name,
-                data_bytesize,
-                total_bytes,
-                storage_required,
-                total_elems,
-                link_name,
-                chunk_shape,
-                matrixable: numerical,
-                encoding,
-                image,
-                is_link,
-                filename,
+            let compound_projection = match &dtype_desc {
+                hdf5_metno::types::TypeDescriptor::Compound(compound) => {
+                    Some(root_compound_projection(&d.name(), compound.clone()))
+                }
+                _ => None,
             };
+            let meta = build_dataset_meta(
+                &d,
+                display_name,
+                is_link,
+                link_name,
+                dtype_desc,
+                compound_projection,
+                shape,
+                data_bytesize,
+                total_elems,
+            )?;
             children.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(d, meta)))));
         }
         self.children = children;
         Ok(())
     }
+}
+
+fn synthetic_compound_children(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+) -> Result<Vec<Rc<RefCell<H5FNode>>>, hdf5_metno::Error> {
+    let Some(children) = super::compound_children(meta) else {
+        return Ok(vec![]);
+    };
+    let mut out = Vec::with_capacity(children.len());
+    for projection in children {
+        let child_display_name = projection
+            .field_path
+            .last()
+            .map(|segment| segment.name.clone())
+            .unwrap_or_else(|| meta.display_name.clone());
+        let child_meta = build_dataset_meta(
+            dataset,
+            child_display_name,
+            meta.is_link,
+            meta.link_name.clone(),
+            projection.field_type.clone(),
+            Some(projection),
+            meta.shape.clone(),
+            meta.data_bytesize,
+            meta.total_elems,
+        )?;
+        out.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(
+            dataset.clone(),
+            child_meta,
+        )))));
+    }
+    Ok(out)
+}
+
+fn build_dataset_meta(
+    dataset: &Dataset,
+    display_name: String,
+    is_link: bool,
+    link_name: Option<String>,
+    type_descriptor: hdf5_metno::types::TypeDescriptor,
+    compound_projection: Option<CompoundFieldProjection>,
+    shape: Vec<usize>,
+    data_bytesize: usize,
+    total_elems: usize,
+) -> Result<DatasetMeta, hdf5_metno::Error> {
+    let is_compound_container = compound_projection
+        .as_ref()
+        .and_then(|projection| projection.current_compound_type())
+        .is_some();
+    let total_bytes = data_bytesize * total_elems;
+    let storage_required = dataset.storage_size();
+    let chunk_shape = dataset.chunk();
+    let image = if compound_projection.is_some() {
+        None
+    } else {
+        is_image(dataset)
+    };
+    let filename = dataset.filename().to_string();
+    let hl = if compound_projection.is_some() {
+        None
+    } else {
+        dataset.attr("HIGHLIGHT").ok().map(|a| {
+            a.read_scalar::<VarLenUnicode>()
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        })
+    };
+
+    Ok(DatasetMeta {
+        hl,
+        shape,
+        data_type: sprint_typedescriptor(&type_descriptor),
+        type_descriptor: type_descriptor.clone(),
+        display_name,
+        data_bytesize,
+        total_bytes,
+        storage_required,
+        total_elems,
+        link_name,
+        chunk_shape,
+        matrixable: if is_compound_container {
+            None
+        } else {
+            is_type_matrixable(&type_descriptor)
+        },
+        encoding: encoding_from_dtype(&type_descriptor),
+        image,
+        is_link,
+        filename,
+        compound_projection,
+    })
 }
 
 impl H5F {

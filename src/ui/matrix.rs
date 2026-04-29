@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
-use hdf5_metno::{types::EnumType, H5Type};
+use hdf5_metno::{types::EnumType, H5Type, Selection};
+use ndarray::{Array1, Array2};
 use ratatui::{
     layout::{Constraint, Layout, Offset, Rect},
     style::Stylize,
@@ -12,7 +13,7 @@ use crate::{
     color_consts,
     data::{MatrixTable, MatrixValues},
     error::AppError,
-    h5f::{DatasetMeta, H5FNode},
+    h5f::{read_projected_values_1d, read_projected_values_2d, DatasetMeta, H5FNode},
     ui::state::Focus,
 };
 
@@ -37,14 +38,14 @@ pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
     );
 }
 
-pub trait RenderIntercept<T: H5Type + Display> {
+pub trait RenderIntercept<T: Display> {
     fn render_as_line(&self, value: &T) -> Line<'static>;
     fn render_as_span(&self, value: &T) -> Span<'static>;
 }
 
 pub struct DefaultMatrixResultRenderIntercept;
 
-impl<T: H5Type + Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
+impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
         Line::from(format!("{value}"))
     }
@@ -98,6 +99,49 @@ pub fn render_matrix<T: H5Type + Display>(
     attr: &DatasetMeta,
     node: &mut H5FNode,
     state: &mut AppState,
+    result_render: impl RenderIntercept<T>,
+) -> Result<(), AppError> {
+    render_matrix_with_reader(
+        f,
+        area,
+        attr,
+        node,
+        state,
+        |selection| Ok(ds.matrix_values::<T>(selection)?.data),
+        |selection| Ok(ds.matrix_table::<T>(selection)?.data),
+        result_render,
+    )
+}
+
+pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
+    f: &mut Frame,
+    area: &Rect,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+    result_render: impl RenderIntercept<T>,
+) -> Result<(), AppError> {
+    render_matrix_with_reader(
+        f,
+        area,
+        attr,
+        node,
+        state,
+        |selection| read_projected_values_1d::<T>(ds, attr, selection),
+        |selection| read_projected_values_2d::<T>(ds, attr, selection),
+        result_render,
+    )
+}
+
+fn render_matrix_with_reader<T: Display>(
+    f: &mut Frame,
+    area: &Rect,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+    read_values: impl Fn(Selection) -> Result<Array1<T>, AppError>,
+    read_table: impl Fn(Selection) -> Result<Array2<T>, AppError>,
     result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
     let area_inner = area.inner(ratatui::layout::Margin {
@@ -174,12 +218,12 @@ pub fn render_matrix<T: H5Type + Display>(
     let rows_areas = Layout::vertical(rows_area_constraints).split(matrix_area);
 
     if shape_len == 1 {
-        let data = ds.matrix_values::<T>(slice_selection)?;
+        let data = read_values(slice_selection)?;
         let mut i = state
             .matrix_view_state
             .row_offset
             .min(attr.shape[node.selected_row] - state.matrix_view_state.rows_currently_available);
-        for (row_idx, d) in data.data.iter().enumerate() {
+        for (row_idx, d) in data.iter().enumerate() {
             let row_area = rows_areas[row_idx];
             let areas_split =
                 Layout::horizontal(vec![Constraint::Max(15), Constraint::Min(16)]).split(row_area);
@@ -218,7 +262,7 @@ pub fn render_matrix<T: H5Type + Display>(
             i += 1;
         }
     } else {
-        let data = ds.matrix_table::<T>(slice_selection)?;
+        let data = read_table(slice_selection)?;
 
         let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
         col_constraint.push(Constraint::Length(15));
@@ -272,7 +316,7 @@ pub fn render_matrix<T: H5Type + Display>(
                     (i as usize, j as usize)
                 };
 
-                let val = data.data.get(idx);
+                let val = data.get(idx);
                 let val_bg_color = if idx.1 == state.matrix_view_state.cursor_col
                     && idx.0 == state.matrix_view_state.cursor_row
                 {

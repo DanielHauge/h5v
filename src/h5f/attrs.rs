@@ -49,7 +49,10 @@ impl HasPath for Node {
         match self {
             Node::File(file) => file.name(),
             Node::Group(group, _) => group.name(),
-            Node::Dataset(dataset, _) => dataset.name(),
+            Node::Dataset(dataset, meta) => meta
+                .virtual_path()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| dataset.name()),
             Node::Broken(_, n, _) => n.clone(),
         }
         .to_string()
@@ -193,7 +196,8 @@ impl ComputedAttributes {
                 "─".repeat(extra_name_space - 1),
                 Style::default().fg(color_consts::LINES_COLOR),
             );
-            let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+            let equals_sign =
+                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
             let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
 
             let value_line = match sprint_attribute(attr) {
@@ -222,7 +226,11 @@ impl ComputedAttributes {
 }
 
 impl H5FNode {
-    pub fn update_attribute_name(&mut self, attr_name: &str, new_name: &str) -> Result<(), AppError> {
+    pub fn update_attribute_name(
+        &mut self,
+        attr_name: &str,
+        new_name: &str,
+    ) -> Result<(), AppError> {
         let new_name = new_name.trim_matches('=').trim_matches('─').trim();
         if !attr_name.eq(new_name) {
             self.node.update_attr_name(attr_name, new_name)?;
@@ -241,11 +249,7 @@ impl H5FNode {
         let type_desc = write_scalar_attr_from_text(&attr, &new_value)?;
         match &mut self.computed_attributes {
             Some(computed_attributes) => {
-                computed_attributes.update_value_inplace(
-                    attr_name,
-                    new_value,
-                    type_desc,
-                )?;
+                computed_attributes.update_value_inplace(attr_name, new_value, type_desc)?;
             }
             None => {
                 Err(AppError::EditError(

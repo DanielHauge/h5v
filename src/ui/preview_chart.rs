@@ -19,13 +19,13 @@ use crate::{
     color_consts,
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::AppError,
-    h5f::{H5FNode, HasPath, Node},
+    h5f::{plot_projected, read_projected_scalar, H5FNode, HasPath, Node},
     ui::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
         preview::render_string_preview,
         segment_scroll::render_segment_scroll,
-        state::{ChartPreviewLoadRequest, IsFromDs, SegmentType},
+        state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs, SegmentType},
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
     utils::image_capable_terminal,
@@ -45,6 +45,9 @@ pub fn render_chart_preview(
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
     };
+    if ds_meta.is_compound_leaf() {
+        return render_projected_chart_preview(f, area, node, state, ds, ds_meta);
+    }
 
     let shape = ds.shape();
     let total_dims = shape.len();
@@ -225,10 +228,12 @@ pub fn render_chart_preview(
         state.chart_preview_state.error = None;
         state.chart_preview_state.protocol = None;
         let chart_preview_load_request = ChartPreviewLoadRequest {
-            ds,
+            source: ChartPreviewSource::Dataset {
+                ds,
+                selection: data_preview_selection.clone(),
+            },
             width: chart_area.width,
             height: chart_area.height,
-            selection: data_preview_selection.clone(),
             segment_state: state.segment_state.clone(),
         };
         state
@@ -252,62 +257,277 @@ pub fn render_chart_preview(
                 return Ok(());
             }
         };
-        let x_label_count = match chart_area.width {
-            0 => 0,
-            _ => chart_area.width / 8,
-        };
-        let x_labels = (0..=x_label_count)
-            .map(|i| {
-                let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
-                Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
-            })
-            .collect::<Vec<_>>();
-
-        let y_label_count = match chart_area.height {
-            0 => 0,
-            _ => chart_area.height / 4,
-        };
-
-        let y_labels = (0..=y_label_count)
-            .map(|i| {
-                let y = data_preview.min
-                    + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
-                Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
-            })
-            .collect::<Vec<_>>();
-
-        // into a &'a [(f64, f64)]
-        let data: &[(f64, f64)] = &data_preview.data;
-        let ds = Dataset::default()
-            .marker(Marker::Braille)
-            .graph_type(GraphType::Line)
-            .data(data);
-        let bg = match (&state.focus, &state.mode) {
-            (super::state::Focus::Content, super::state::Mode::Normal) => {
-                color_consts::FOCUS_BG_COLOR
-            }
-            _ => color_consts::BG_COLOR,
-        };
-        let chart = Chart::new(vec![ds])
-            .style(Style::default().bg(bg))
-            .x_axis(
-                Axis::default()
-                    .title("X axis")
-                    .style(Style::default().fg(ratatui::style::Color::White))
-                    .labels(x_labels)
-                    .bounds((0.0, data_preview.length as f64).into()),
-            )
-            .y_axis(
-                Axis::default()
-                    .title("Y axis")
-                    .style(Style::default().fg(ratatui::style::Color::White))
-                    .labels(y_labels)
-                    .bounds((data_preview.min, data_preview.max).into()),
-            );
-        f.render_widget(chart, chart_area);
+        render_chart_widget(f, &chart_area, state, data_preview);
     }
 
     Ok(())
+}
+
+fn render_projected_chart_preview(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    state: &mut AppState,
+    ds: hdf5_metno::Dataset,
+    ds_meta: crate::h5f::DatasetMeta,
+) -> Result<(), AppError> {
+    let shape = ds.shape();
+    let total_dims = shape.len();
+    node.sync_selection_rank(total_dims);
+    let selected_node = &node.node;
+    let x_selectable_dims: Vec<usize> = shape
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| **v > 1)
+        .map(|(i, _)| i)
+        .collect();
+
+    if x_selectable_dims.is_empty() {
+        match ds_meta.matrixable {
+            Some(crate::sprint_typedesc::MatrixRenderType::Float64) => {
+                render_string(
+                    f,
+                    area,
+                    node,
+                    read_projected_scalar::<f64>(&ds, &ds_meta)?,
+                    None,
+                );
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Uint64) => {
+                render_string(
+                    f,
+                    area,
+                    node,
+                    read_projected_scalar::<u64>(&ds, &ds_meta)?,
+                    None,
+                );
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Int64) => {
+                render_string(
+                    f,
+                    area,
+                    node,
+                    read_projected_scalar::<i64>(&ds, &ds_meta)?,
+                    None,
+                );
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
+                let hdf5_metno::types::TypeDescriptor::Enum(et) = &ds_meta.type_descriptor else {
+                    unreachable!("Projected enum field should retain enum descriptor");
+                };
+                let enum_renderer = EnumRenderer::new(et.clone());
+                let scalar_value = read_projected_scalar::<u64>(&ds, &ds_meta)?;
+                let string = enum_renderer.render_as_line(&scalar_value);
+                f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
+                match read_projected_scalar::<String>(&ds, &ds_meta) {
+                    Ok(value) => render_string(f, area, node, value, None),
+                    Err(e) => render_error(f, area, format!("Error reading scalar string: {e}")),
+                };
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Compound) => {
+                render_unsupported_rendering(
+                    f,
+                    area,
+                    selected_node,
+                    "Compound field containers are not previewable",
+                )
+            }
+            None => render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Projected field is not previewable",
+            ),
+        }
+        return Ok(());
+    }
+
+    for (i, selected_index) in node.selected_indexes.iter_mut().enumerate() {
+        if !x_selectable_dims.contains(&i) {
+            *selected_index = 0;
+        }
+    }
+
+    if !x_selectable_dims.contains(&node.selected_x) {
+        node.selected_x = x_selectable_dims[0];
+    }
+    if node.selected_dim == node.selected_x {
+        node.selected_dim = x_selectable_dims
+            .iter()
+            .find(|&&x| x != node.selected_x)
+            .cloned()
+            .unwrap_or(0);
+    }
+
+    let chart_area = if x_selectable_dims.len() > 1 {
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
+        render_dim_selector(f, &areas_split[0], node, &shape, false)?;
+        areas_split[1].inner(ratatui::layout::Margin {
+            horizontal: 0,
+            vertical: 1,
+        })
+    } else {
+        area.inner(ratatui::layout::Margin {
+            horizontal: 0,
+            vertical: 1,
+        })
+    };
+
+    let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
+        state.segment_state.segumented = SegmentType::Chart;
+        state.segment_state.segment_count =
+            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+        let areas_split =
+            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
+        render_segment_scroll(f, &areas_split[1], state)?;
+
+        let max_len = shape[node.selected_x];
+        let data_preview_selection = PreviewSelection {
+            x: node.selected_x,
+            index: node.selected_indexes[0..total_dims].to_vec(),
+            slice: SliceSelection::FromTo(
+                MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
+                (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
+            ),
+        };
+        (areas_split[0], data_preview_selection)
+    } else {
+        let data_preview_selection = PreviewSelection {
+            x: node.selected_x,
+            index: node.selected_indexes[0..total_dims].to_vec(),
+            slice: SliceSelection::All,
+        };
+        (chart_area, data_preview_selection)
+    };
+
+    let data_preview = match plot_projected(&ds, &ds_meta, &data_preview_selection) {
+        Ok(data_preview) => data_preview,
+        Err(e) => {
+            render_error(
+                f,
+                &chart_area,
+                format!("Error plotting projected field: {e}"),
+            );
+            return Ok(());
+        }
+    };
+    let image_capable = image_capable_terminal();
+    let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
+    if image_capable
+        && state.chart_preview_state.is_from_ds(&node.node)
+        && loaded_preview_selection == Some(data_preview_selection.clone())
+    {
+        if let Some(ref error) = state.chart_preview_state.error {
+            render_error(
+                f,
+                &chart_area,
+                format!("Error loading chart preview: {}", error),
+            );
+            return Ok(());
+        }
+        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
+        } else {
+            render_string(
+                f,
+                &chart_area,
+                node,
+                "Loading chart preview...".to_string(),
+                None,
+            );
+        }
+        return Ok(());
+    }
+
+    if image_capable {
+        state.chart_preview_state.ds_loaded = Some(node.node.path());
+        state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
+        state.chart_preview_state.error = None;
+        state.chart_preview_state.protocol = None;
+        let chart_preview_load_request = ChartPreviewLoadRequest {
+            source: ChartPreviewSource::Precomputed { data_preview },
+            width: chart_area.width,
+            height: chart_area.height,
+            segment_state: state.segment_state.clone(),
+        };
+        state
+            .chart_preview_state
+            .tx_load_chartpreview
+            .send(chart_preview_load_request)
+            .ok();
+
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
+    } else {
+        render_chart_widget(f, &chart_area, state, data_preview);
+    }
+    Ok(())
+}
+
+fn render_chart_widget(
+    f: &mut Frame,
+    chart_area: &Rect,
+    state: &AppState,
+    data_preview: DatasetPlotingData,
+) {
+    let x_label_count = match chart_area.width {
+        0 => 0,
+        _ => chart_area.width / 8,
+    };
+    let x_labels = (0..=x_label_count)
+        .map(|i| {
+            let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
+            Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
+        })
+        .collect::<Vec<_>>();
+
+    let y_label_count = match chart_area.height {
+        0 => 0,
+        _ => chart_area.height / 4,
+    };
+
+    let y_labels = (0..=y_label_count)
+        .map(|i| {
+            let y = data_preview.min
+                + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
+            Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
+        })
+        .collect::<Vec<_>>();
+
+    let data: &[(f64, f64)] = &data_preview.data;
+    let ds = Dataset::default()
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .data(data);
+    let bg = match (&state.focus, &state.mode) {
+        (super::state::Focus::Content, super::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        _ => color_consts::BG_COLOR,
+    };
+    let chart = Chart::new(vec![ds])
+        .style(Style::default().bg(bg))
+        .x_axis(
+            Axis::default()
+                .title("X axis")
+                .style(Style::default().fg(ratatui::style::Color::White))
+                .labels(x_labels)
+                .bounds((0.0, data_preview.length as f64).into()),
+        )
+        .y_axis(
+            Axis::default()
+                .title("Y axis")
+                .style(Style::default().fg(ratatui::style::Color::White))
+                .labels(y_labels)
+                .bounds((data_preview.min, data_preview.max).into()),
+        );
+    f.render_widget(chart, *chart_area);
 }
 
 pub fn render_image_chart(

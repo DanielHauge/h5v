@@ -1,15 +1,17 @@
 use hdf5_metno::{
     types::{
-        self, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenArray, VarLenAscii,
-        VarLenUnicode,
+        self, CompoundType, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenArray,
+        VarLenAscii, VarLenUnicode,
     },
-    Attribute, Error,
+    Attribute, Error, H5Type, ObjectReference, ObjectReference1, ObjectReference2,
+    ReferencedObject,
 };
 use ratatui::{text::Line, text::Span};
 
 use crate::{
     color_consts,
     h5f::scalar_text_codec,
+    sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
 
@@ -36,11 +38,51 @@ where
     itertools::intersperse(spans, symbol_span(", ")).collect()
 }
 
+fn comma_separated_groups<I>(groups: I) -> Vec<Span<'static>>
+where
+    I: IntoIterator<Item = Vec<Span<'static>>>,
+{
+    let mut out = Vec::new();
+    for group in groups {
+        if !out.is_empty() {
+            out.push(symbol_span(", "));
+        }
+        out.extend(group);
+    }
+    out
+}
+
+fn bracketed_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    std::iter::once(symbol_span("["))
+        .chain(spans)
+        .chain(std::iter::once(symbol_span("]")))
+        .collect()
+}
+
+fn braced_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    std::iter::once(symbol_span("{"))
+        .chain(spans)
+        .chain(std::iter::once(symbol_span("}")))
+        .collect()
+}
+
+fn single_span(span: Span<'static>) -> Vec<Span<'static>> {
+    vec![span]
+}
+
 fn render_values<T>(values: impl IntoIterator<Item = T>) -> Vec<Span<'static>>
 where
     T: Renderable,
 {
     comma_separated(values.into_iter().map(Renderable::render))
+}
+
+fn render_varlen_values<T>(attr: &Attribute) -> Result<Vec<Span<'static>>, Error>
+where
+    T: Renderable + Copy + H5Type,
+{
+    let values = Vec::from(attr.read_scalar::<VarLenArray<T>>()?);
+    Ok(bracketed_spans(render_values(values)))
 }
 
 macro_rules! impl_uint_renderable {
@@ -169,43 +211,370 @@ fn render_fixed_unicode_array(attr: &Attribute, size: usize) -> Result<Vec<Span<
     }
 }
 
-fn sprint_attribute_scalar<'a>(
+fn render_reference_target(
+    kind: &'static str,
+    name: String,
+    color: ratatui::style::Color,
+) -> Vec<Span<'static>> {
+    let name = if name.is_empty() {
+        "<anonymous>".to_string()
+    } else {
+        name
+    };
+    vec![
+        symbol_span("&"),
+        styled_span(kind, color),
+        symbol_span(":"),
+        styled_span(name, color),
+    ]
+}
+
+fn render_referenced_object(object: ReferencedObject) -> Vec<Span<'static>> {
+    match object {
+        ReferencedObject::Group(group) => {
+            render_reference_target("group", group.name(), color_consts::GROUP_COLOR)
+        }
+        ReferencedObject::Dataset(dataset) => {
+            render_reference_target("dataset", dataset.name(), color_consts::DATASET_COLOR)
+        }
+        ReferencedObject::Datatype(datatype) => render_reference_target(
+            "datatype",
+            datatype
+                .as_location()
+                .map(|location| location.name())
+                .unwrap_or_else(|_| datatype.to_string()),
+            color_consts::TYPE_DESC_COLOR,
+        ),
+    }
+}
+
+fn render_reference_scalar<R>(attr: &Attribute) -> Result<Vec<Span<'static>>, Error>
+where
+    R: ObjectReference,
+{
+    let reference = attr.read_scalar::<R>()?;
+    let file = attr.file()?;
+    let object = file.dereference(&reference)?;
+    Ok(render_referenced_object(object))
+}
+
+fn to_array<const N: usize>(bytes: &[u8]) -> Result<[u8; N], Error> {
+    bytes.try_into().map_err(|_| {
+        Error::from(format!(
+            "Failed converting {} bytes to {N}-byte array",
+            bytes.len()
+        ))
+    })
+}
+
+fn slice_bytes<'a>(
+    bytes: &'a [u8],
+    offset: usize,
+    size: usize,
+    context: &str,
+) -> Result<&'a [u8], Error> {
+    let end = offset + size;
+    bytes.get(offset..end).ok_or_else(|| {
+        Error::from(format!(
+            "{context} exceeded byte bounds (offset {offset}, size {size}, len {})",
+            bytes.len()
+        ))
+    })
+}
+
+fn render_field_name(name: &str) -> Span<'static> {
+    styled_span(name, color_consts::VARIABLE_BLUE)
+}
+
+fn render_compound_bytes(
+    bytes: &[u8],
+    compound_type: &CompoundType,
+) -> Result<Vec<Span<'static>>, Error> {
+    let rendered_fields = compound_type
+        .fields
+        .iter()
+        .map(|field| {
+            let field_bytes = slice_bytes(
+                bytes,
+                field.offset,
+                field.ty.size(),
+                &format!("Compound field {}", field.name),
+            )?;
+            let mut spans = vec![render_field_name(&field.name), symbol_span(": ")];
+            spans.extend(render_value_from_bytes(field_bytes, &field.ty)?);
+            Ok(spans)
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(braced_spans(comma_separated_groups(rendered_fields)))
+}
+
+fn render_fixed_array_bytes(
+    bytes: &[u8],
+    inner_type: &TypeDescriptor,
+    size: usize,
+) -> Result<Vec<Span<'static>>, Error> {
+    let inner_size = inner_type.size();
+    let rendered = bytes
+        .chunks_exact(inner_size)
+        .take(size)
+        .map(|chunk| render_value_from_bytes(chunk, inner_type))
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    if bytes.len() != inner_size * size {
+        return Err(Error::from(format!(
+            "Fixed array byte size mismatch: expected {}, got {}",
+            inner_size * size,
+            bytes.len()
+        )));
+    }
+
+    Ok(bracketed_spans(comma_separated_groups(rendered)))
+}
+
+fn render_value_from_bytes(
+    bytes: &[u8],
+    type_desc: &TypeDescriptor,
+) -> Result<Vec<Span<'static>>, Error> {
+    match type_desc {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            types::IntSize::U1 => Ok(single_span(i8::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U2 => Ok(single_span(i16::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U4 => Ok(single_span(i32::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U8 => Ok(single_span(i64::from_le_bytes(to_array(bytes)?).render())),
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            types::IntSize::U1 => Ok(single_span(u8::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U2 => Ok(single_span(u16::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U4 => Ok(single_span(u32::from_le_bytes(to_array(bytes)?).render())),
+            types::IntSize::U8 => Ok(single_span(u64::from_le_bytes(to_array(bytes)?).render())),
+        },
+        TypeDescriptor::Float(float_size) => match float_size {
+            types::FloatSize::U4 => Ok(single_span(f32::from_le_bytes(to_array(bytes)?).render())),
+            types::FloatSize::U8 => Ok(single_span(f64::from_le_bytes(to_array(bytes)?).render())),
+        },
+        TypeDescriptor::Boolean => Ok(single_span(
+            (u8::from_le_bytes(to_array(bytes)?) != 0).render(),
+        )),
+        TypeDescriptor::Enum(enum_type) => {
+            let enum_renderer = EnumRenderer::new(enum_type.clone());
+            let value = match enum_type.base_type() {
+                TypeDescriptor::Integer(types::IntSize::U1) => {
+                    i8::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Integer(types::IntSize::U2) => {
+                    i16::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Integer(types::IntSize::U4) => {
+                    i32::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Integer(types::IntSize::U8) => {
+                    i64::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Unsigned(types::IntSize::U1) => {
+                    u8::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Unsigned(types::IntSize::U2) => {
+                    u16::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Unsigned(types::IntSize::U4) => {
+                    u32::from_le_bytes(to_array(bytes)?) as u64
+                }
+                TypeDescriptor::Unsigned(types::IntSize::U8) => {
+                    u64::from_le_bytes(to_array(bytes)?)
+                }
+                base => {
+                    return Err(Error::from(format!(
+                        "Unsupported enum base type in compound attribute: {base}"
+                    )))
+                }
+            };
+            Ok(single_span(enum_renderer.render_as_span(&value)))
+        }
+        TypeDescriptor::Compound(compound_type) => render_compound_bytes(bytes, compound_type),
+        TypeDescriptor::FixedArray(inner_type, size) => {
+            render_fixed_array_bytes(bytes, inner_type.as_ref(), *size)
+        }
+        TypeDescriptor::FixedAscii(_) | TypeDescriptor::FixedUnicode(_) => {
+            let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+            Ok(single_span(string_span(String::from_utf8_lossy(
+                &bytes[..end],
+            ))))
+        }
+        TypeDescriptor::VarLenArray(inner) => Ok(bracketed_spans(vec![styled_span(
+            format!("varlen {}", sprint_typedescriptor(inner)),
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::VarLenAscii | TypeDescriptor::VarLenUnicode => Ok(vec![styled_span(
+            sprint_typedescriptor(type_desc),
+            color_consts::TYPE_DESC_COLOR,
+        )]),
+        TypeDescriptor::Reference(reference_type) => Ok(vec![styled_span(
+            sprint_typedescriptor(&TypeDescriptor::Reference(*reference_type)),
+            color_consts::TYPE_DESC_COLOR,
+        )]),
+    }
+}
+
+fn render_raw_scalar_value(
+    attr: &Attribute,
+    type_desc: &TypeDescriptor,
+) -> Result<Vec<Span<'static>>, Error> {
+    let bytes: Vec<u8> = attr.read_raw()?;
+    render_value_from_bytes(&bytes, type_desc)
+}
+
+fn render_raw_array_values(
+    attr: &Attribute,
+    element_type: &TypeDescriptor,
+) -> Result<Vec<Span<'static>>, Error> {
+    let bytes: Vec<u8> = attr.read_raw()?;
+    let element_size = element_type.size();
+    if bytes.len() != attr.size() * element_size {
+        return Err(Error::from(format!(
+            "Raw array byte size mismatch: expected {}, got {}",
+            attr.size() * element_size,
+            bytes.len()
+        )));
+    }
+
+    let rendered = bytes
+        .chunks_exact(element_size)
+        .map(|chunk| render_value_from_bytes(chunk, element_type))
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    Ok(comma_separated_groups(rendered))
+}
+
+fn render_scalar_varlen_array(
+    attr: &Attribute,
+    type_desc: &TypeDescriptor,
+) -> Result<Vec<Span<'static>>, Error> {
+    match type_desc {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            types::IntSize::U1 => render_varlen_values::<i8>(attr),
+            types::IntSize::U2 => render_varlen_values::<i16>(attr),
+            types::IntSize::U4 => render_varlen_values::<i32>(attr),
+            types::IntSize::U8 => render_varlen_values::<i64>(attr),
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            types::IntSize::U1 => render_varlen_values::<u8>(attr),
+            types::IntSize::U2 => render_varlen_values::<u16>(attr),
+            types::IntSize::U4 => render_varlen_values::<u32>(attr),
+            types::IntSize::U8 => render_varlen_values::<u64>(attr),
+        },
+        TypeDescriptor::Float(float_size) => match float_size {
+            types::FloatSize::U4 => render_varlen_values::<f32>(attr),
+            types::FloatSize::U8 => render_varlen_values::<f64>(attr),
+        },
+        TypeDescriptor::Boolean => render_varlen_values::<bool>(attr),
+        TypeDescriptor::Enum(enum_type) => {
+            let enum_renderer = EnumRenderer::new(enum_type.clone());
+            let values = attr.read_scalar::<VarLenArray<u64>>()?;
+            Ok(bracketed_spans(comma_separated(
+                values
+                    .iter()
+                    .map(|value| enum_renderer.render_as_span(value)),
+            )))
+        }
+        TypeDescriptor::Reference(Reference::Object) => {
+            let refs = attr.read_scalar::<VarLenArray<ObjectReference1>>()?;
+            let file = attr.file()?;
+            let rendered = refs
+                .iter()
+                .map(|reference| file.dereference(reference).map(render_referenced_object))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(bracketed_spans(comma_separated_groups(rendered)))
+        }
+        TypeDescriptor::FixedArray(inner, size) => Ok(bracketed_spans(vec![
+            styled_span("fixed elements", color_consts::TYPE_DESC_COLOR),
+            symbol_span(": "),
+            styled_span(
+                format!("[{size}]{}", sprint_typedescriptor(inner)),
+                color_consts::TYPE_DESC_COLOR,
+            ),
+        ])),
+        TypeDescriptor::Reference(Reference::Region) => Ok(bracketed_spans(vec![styled_span(
+            "region references",
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::Reference(Reference::Std) => Ok(bracketed_spans(vec![styled_span(
+            "standard references",
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::Compound(_) => Ok(bracketed_spans(vec![styled_span(
+            "compound values",
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::VarLenArray(inner) => Ok(bracketed_spans(vec![styled_span(
+            format!("nested {}", sprint_typedescriptor(inner)),
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::VarLenAscii
+        | TypeDescriptor::VarLenUnicode
+        | TypeDescriptor::FixedAscii(_)
+        | TypeDescriptor::FixedUnicode(_) => Ok(bracketed_spans(vec![styled_span(
+            sprint_typedescriptor(type_desc),
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+    }
+}
+
+fn sprint_attribute_scalar(
     attr: &hdf5_metno::Attribute,
     type_desc: TypeDescriptor,
-) -> Result<Span<'a>, Error> {
+) -> Result<Vec<Span<'static>>, Error> {
     let val = match type_desc {
         types::TypeDescriptor::Integer(int_size) => match int_size {
-            types::IntSize::U1 => attr.read_scalar::<i8>()?.render(),
-            types::IntSize::U2 => attr.read_scalar::<i16>()?.render(),
-            types::IntSize::U4 => attr.read_scalar::<i32>()?.render(),
-            types::IntSize::U8 => attr.read_scalar::<i64>()?.render(),
+            types::IntSize::U1 => single_span(attr.read_scalar::<i8>()?.render()),
+            types::IntSize::U2 => single_span(attr.read_scalar::<i16>()?.render()),
+            types::IntSize::U4 => single_span(attr.read_scalar::<i32>()?.render()),
+            types::IntSize::U8 => single_span(attr.read_scalar::<i64>()?.render()),
         },
         types::TypeDescriptor::Unsigned(int_size) => match int_size {
-            types::IntSize::U1 => attr.read_scalar::<u8>()?.render(),
-            types::IntSize::U2 => attr.read_scalar::<u16>()?.render(),
-            types::IntSize::U4 => attr.read_scalar::<u32>()?.render(),
-            types::IntSize::U8 => attr.read_scalar::<u64>()?.render(),
+            types::IntSize::U1 => single_span(attr.read_scalar::<u8>()?.render()),
+            types::IntSize::U2 => single_span(attr.read_scalar::<u16>()?.render()),
+            types::IntSize::U4 => single_span(attr.read_scalar::<u32>()?.render()),
+            types::IntSize::U8 => single_span(attr.read_scalar::<u64>()?.render()),
         },
         types::TypeDescriptor::Float(float_size) => match float_size {
-            types::FloatSize::U4 => attr.read_scalar::<f32>()?.render(),
-            types::FloatSize::U8 => attr.read_scalar::<f64>()?.render(),
+            types::FloatSize::U4 => single_span(attr.read_scalar::<f32>()?.render()),
+            types::FloatSize::U8 => single_span(attr.read_scalar::<f64>()?.render()),
         },
-        types::TypeDescriptor::Boolean => attr.read_scalar::<bool>()?.render(),
+        types::TypeDescriptor::Boolean => single_span(attr.read_scalar::<bool>()?.render()),
         types::TypeDescriptor::Enum(enum_type) => {
             let enum_renderer = EnumRenderer::new(enum_type);
             let v = attr.read_scalar::<u64>()?;
-            enum_renderer.render_as_span(&v)
+            single_span(enum_renderer.render_as_span(&v))
         }
-        types::TypeDescriptor::FixedAscii(a) => render_fixed_ascii_scalar(attr, a)?,
-        types::TypeDescriptor::FixedUnicode(a) => render_fixed_unicode_scalar(attr, a)?,
-        types::TypeDescriptor::VarLenAscii => attr.read_scalar::<VarLenAscii>()?.render(),
-        types::TypeDescriptor::VarLenUnicode => attr.read_scalar::<VarLenUnicode>()?.render(),
-        types::TypeDescriptor::Reference(Reference::Object) => render_unsupported_type("ref obj"),
-        types::TypeDescriptor::Reference(Reference::Region) => render_unsupported_type("ref reg"),
-        types::TypeDescriptor::Reference(Reference::Std) => render_unsupported_type("ref std"),
-        types::TypeDescriptor::VarLenArray(_) => render_unsupported_type("custom varlen array"),
-        types::TypeDescriptor::Compound(_) => render_unsupported_type("compound"),
-        types::TypeDescriptor::FixedArray(_, _) => render_unsupported_type("custom fixed array"),
+        types::TypeDescriptor::FixedAscii(a) => single_span(render_fixed_ascii_scalar(attr, a)?),
+        types::TypeDescriptor::FixedUnicode(a) => {
+            single_span(render_fixed_unicode_scalar(attr, a)?)
+        }
+        types::TypeDescriptor::VarLenAscii => {
+            single_span(attr.read_scalar::<VarLenAscii>()?.render())
+        }
+        types::TypeDescriptor::VarLenUnicode => {
+            single_span(attr.read_scalar::<VarLenUnicode>()?.render())
+        }
+        types::TypeDescriptor::Reference(Reference::Object) => {
+            render_reference_scalar::<ObjectReference1>(attr)?
+        }
+        types::TypeDescriptor::Reference(Reference::Region) => single_span(styled_span(
+            "region reference",
+            color_consts::TYPE_DESC_COLOR,
+        )),
+        types::TypeDescriptor::Reference(Reference::Std) => {
+            render_reference_scalar::<ObjectReference2>(attr)?
+        }
+        types::TypeDescriptor::VarLenArray(type_desc) => {
+            render_scalar_varlen_array(attr, type_desc.as_ref())?
+        }
+        types::TypeDescriptor::Compound(compound_type) => {
+            render_raw_scalar_value(attr, &TypeDescriptor::Compound(compound_type))?
+        }
+        types::TypeDescriptor::FixedArray(type_desc, size) => {
+            render_raw_scalar_value(attr, &TypeDescriptor::FixedArray(type_desc, size))?
+        }
     };
     Ok(val)
 }
@@ -247,11 +616,11 @@ fn spring_attribute_array(
                     .map(|v| enum_renderer.render_as_span(&v)),
             )
         }
-        TypeDescriptor::Compound(_) => vec![render_unsupported_type("compound array")],
+        TypeDescriptor::Compound(compound_type) => {
+            render_raw_array_values(attr, &TypeDescriptor::Compound(compound_type))?
+        }
         TypeDescriptor::FixedArray(type_descriptor, size) => {
-            vec![render_unsupported_type(format!(
-                "fixed array of {type_descriptor} with size {size}"
-            ))]
+            render_raw_array_values(attr, &TypeDescriptor::FixedArray(type_descriptor, size))?
         }
         TypeDescriptor::FixedUnicode(size) => render_fixed_unicode_array(attr, size)?,
         TypeDescriptor::VarLenArray(type_descriptor) => match type_descriptor.as_ref() {
@@ -315,16 +684,12 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
     if attr.is_valid() {
         if attr.is_scalar() {
             let attr_type = attr.dtype()?.to_descriptor()?;
-            let span = sprint_attribute_scalar(attr, attr_type)?;
-            let line = Line::from(span);
+            let spans = sprint_attribute_scalar(attr, attr_type)?;
+            let line = Line::from(spans);
             Ok(line)
         } else {
             let attr_type = attr.dtype()?.to_descriptor()?;
-            let spans = spring_attribute_array(attr, attr_type)?;
-            let spans = std::iter::once(symbol_span("["))
-                .chain(spans)
-                .chain(std::iter::once(symbol_span("]")))
-                .collect::<Vec<Span<'static>>>();
+            let spans = bracketed_spans(spring_attribute_array(attr, attr_type)?);
             let line = Line::from(spans);
             Ok(line)
         }
@@ -353,5 +718,63 @@ impl AttributeEditable for Attribute {
         } else {
             Err("Invalid attribute".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hdf5_metno::types::{CompoundField, CompoundType, FloatSize, IntSize, TypeDescriptor};
+
+    use super::render_value_from_bytes;
+
+    #[test]
+    fn renders_scalar_compound_attribute() {
+        let compound = CompoundType {
+            fields: vec![
+                CompoundField::new("field1", TypeDescriptor::Integer(IntSize::U4), 0, 0),
+                CompoundField::new("field2", TypeDescriptor::Float(FloatSize::U8), 8, 1),
+            ],
+            size: 16,
+        };
+
+        let mut bytes = vec![0_u8; 16];
+        bytes[0..4].copy_from_slice(&7_i32.to_le_bytes());
+        bytes[8..16].copy_from_slice(&9.81_f64.to_le_bytes());
+
+        let rendered = ratatui::text::Line::from(
+            render_value_from_bytes(&bytes, &TypeDescriptor::Compound(compound))
+                .expect("failed rendering scalar compound bytes"),
+        )
+        .to_string();
+        assert_eq!(rendered, "{field1: 7, field2: 9.81}");
+    }
+
+    #[test]
+    fn renders_compound_attribute_with_fixed_array_field() {
+        let compound = CompoundType {
+            fields: vec![
+                CompoundField::new("name", TypeDescriptor::FixedAscii(8), 0, 0),
+                CompoundField::new(
+                    "samples",
+                    TypeDescriptor::FixedArray(Box::new(TypeDescriptor::Integer(IntSize::U2)), 3),
+                    8,
+                    1,
+                ),
+            ],
+            size: 14,
+        };
+
+        let mut bytes = vec![0_u8; 14];
+        bytes[0..6].copy_from_slice(b"triple");
+        bytes[8..10].copy_from_slice(&4_i16.to_le_bytes());
+        bytes[10..12].copy_from_slice(&5_i16.to_le_bytes());
+        bytes[12..14].copy_from_slice(&6_i16.to_le_bytes());
+
+        let rendered = ratatui::text::Line::from(
+            render_value_from_bytes(&bytes, &TypeDescriptor::Compound(compound))
+                .expect("failed rendering fixed-array compound bytes"),
+        )
+        .to_string();
+        assert_eq!(rendered, "{name: \"triple\", samples: [4, 5, 6]}");
     }
 }
