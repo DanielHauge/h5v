@@ -9,7 +9,6 @@ mod data;
 mod error;
 mod h5f;
 mod linking;
-// mod scripting;
 mod search;
 mod sprint_attributes;
 mod sprint_typedesc;
