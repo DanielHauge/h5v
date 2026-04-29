@@ -219,10 +219,10 @@ fn render_matrix_with_reader<T: Display>(
 
     if shape_len == 1 {
         let data = read_values(slice_selection)?;
-        let mut i = state
-            .matrix_view_state
-            .row_offset
-            .min(attr.shape[node.selected_row] - state.matrix_view_state.rows_currently_available);
+        let mut i = state.matrix_view_state.row_offset.min(
+            attr.shape[node.selected_row]
+                .saturating_sub(state.matrix_view_state.rows_currently_available),
+        );
         for (row_idx, d) in data.iter().enumerate() {
             let row_area = rows_areas[row_idx];
             let areas_split =
@@ -274,7 +274,7 @@ fn render_matrix_with_reader<T: Display>(
             let col_idx = state
                 .matrix_view_state
                 .col_offset
-                .min(attr.shape[node.selected_col] - max_cols as usize)
+                .min(attr.shape[node.selected_col].saturating_sub(max_cols as usize))
                 + col as usize;
             f.render_widget(
                 Line::from(format!("{col_idx}"))
@@ -294,7 +294,8 @@ fn render_matrix_with_reader<T: Display>(
             let idx_area = col_areas[0];
 
             let idx = state.matrix_view_state.row_offset.min(
-                attr.shape[node.selected_row] - state.matrix_view_state.rows_currently_available,
+                attr.shape[node.selected_row]
+                    .saturating_sub(state.matrix_view_state.rows_currently_available),
             ) + i as usize;
             let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);

@@ -611,7 +611,10 @@ impl AppState<'_> {
                 if let Node::Dataset(_, dsattr) = current_node {
                     let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset + inc)
-                        .min(row_selected_shape - self.matrix_view_state.rows_currently_available);
+                        .min(
+                            row_selected_shape
+                                .saturating_sub(self.matrix_view_state.rows_currently_available),
+                        );
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Redraw)
@@ -695,9 +698,11 @@ impl AppState<'_> {
                 let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
                     let col_selected_shape = dsattr.shape[node.selected_col];
-                    self.matrix_view_state.col_offset = (self.matrix_view_state.col_offset
-                        + inc as usize)
-                        .min(col_selected_shape - self.matrix_view_state.cols_currently_available);
+                    self.matrix_view_state.col_offset =
+                        (self.matrix_view_state.col_offset + inc as usize).min(
+                            col_selected_shape
+                                .saturating_sub(self.matrix_view_state.cols_currently_available),
+                        );
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Redraw)

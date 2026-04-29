@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::exit};
+use std::path::PathBuf;
 
 use hdf5_metno::File;
 use uuid::Uuid;
@@ -25,11 +25,15 @@ pub fn link(paths: &[String]) -> Result<String, AppError> {
         };
     }
     if hdf5_files.is_empty() {
-        eprintln!("None of the files given are valid hdf5 files");
-        for path in paths_bufs {
-            eprintln!("- {}", path.to_str().unwrap_or_default())
-        }
-        exit(-1);
+        let tried_paths = paths_bufs
+            .iter()
+            .map(|path| format!("- {}", path.to_str().unwrap_or_default()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(AppError::FileError(format!(
+            "None of the files given are valid hdf5 files\n{}",
+            tried_paths
+        )));
     }
 
     let buf: [u8; 16] = *b"abcdefghijklmnop";

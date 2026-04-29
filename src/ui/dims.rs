@@ -147,7 +147,7 @@ impl HasMatrixSelection for AppState<'_> {
                 start: self
                     .matrix_view_state
                     .row_offset
-                    .min(shape[0] - self.matrix_view_state.rows_currently_available),
+                    .min(shape[0].saturating_sub(self.matrix_view_state.rows_currently_available)),
                 step: 1,
                 end: (self.matrix_view_state.row_offset + matrix_view.rows as usize).min(shape[0]),
                 block: 1,
@@ -157,10 +157,10 @@ impl HasMatrixSelection for AppState<'_> {
             (0..total_dims).for_each(|dim| {
                 if node.selected_col == dim {
                     slice.push(SliceOrIndex::SliceTo {
-                        start: self
-                            .matrix_view_state
-                            .col_offset
-                            .min(shape[dim] - self.matrix_view_state.cols_currently_available),
+                        start: self.matrix_view_state.col_offset.min(
+                            shape[dim]
+                                .saturating_sub(self.matrix_view_state.cols_currently_available),
+                        ),
                         step: 1,
                         end: (self.matrix_view_state.col_offset + matrix_view.cols as usize)
                             .min(shape[dim]),
@@ -168,10 +168,10 @@ impl HasMatrixSelection for AppState<'_> {
                     });
                 } else if node.selected_row == dim {
                     slice.push(SliceOrIndex::SliceTo {
-                        start: self
-                            .matrix_view_state
-                            .row_offset
-                            .min(shape[dim] - self.matrix_view_state.rows_currently_available),
+                        start: self.matrix_view_state.row_offset.min(
+                            shape[dim]
+                                .saturating_sub(self.matrix_view_state.rows_currently_available),
+                        ),
                         step: 1,
                         end: (self.matrix_view_state.row_offset + matrix_view.rows as usize)
                             .min(shape[dim]),
