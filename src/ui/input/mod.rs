@@ -1,6 +1,7 @@
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
-use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
+use keymap::{normal_action, window_action, Direction, NormalAction, WindowAction};
+use ratatui::crossterm::event::{Event, KeyCode};
 use tree::handle_normal_tree_event;
 
 use crate::{
@@ -10,11 +11,12 @@ use crate::{
     ui::state::AppToast,
 };
 
-use super::state::{AppState, Focus, LastFocused, Mode};
+use super::state::{AppState, Mode, PendingChord};
 
 pub mod attributes;
 pub mod command;
 pub mod content;
+pub mod keymap;
 pub mod mchart;
 pub mod search;
 pub mod tree;
@@ -38,119 +40,106 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
         Mode::MultiChart => mchart::handle_mchart_event(state, event),
         Mode::Normal => {
             if let Event::Key(key_event) = event {
-                match (key_event.code, key_event.modifiers) {
-                    (KeyCode::Char(':'), _) => {
-                        state.mode = Mode::Command;
-                        state.command_state.command_buffer.clear();
-                        state.command_state.cursor = 0;
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Char('.'), _) => state.reexecute_command(),
-                    (KeyCode::Char('/'), _) => {
-                        if state.searcher.is_none() {
-                            let Node::File(ref file) = state.root.borrow().node else {
-                                return Ok(EventResult::Error(
-                                    "Search only available for HDF5 files".to_string(),
-                                ));
-                            };
-                            let Ok(file_as_group) = file.as_group() else {
-                                return Ok(EventResult::Error(
-                                    "Search only available for HDF5 files with roots that can polymorp as group.".to_string(),
-                                ));
-                            };
-                            let all_h5_paths = full_traversal(&file_as_group);
-                            state.searcher = Some(Searcher::new(all_h5_paths));
-                        }
-                        let Some(ref mut searcher) = state.searcher else {
-                            return Ok(EventResult::Error("Search not available".to_string()));
+                if state.pending_chord == Some(PendingChord::CtrlW) {
+                    state.pending_chord = None;
+                    if let Some(action) = window_action(&key_event) {
+                        return match action {
+                            WindowAction::Focus(direction) => {
+                                apply_focus_action(state, direction);
+                                Ok(EventResult::Redraw)
+                            }
+                            WindowAction::ToggleTreeView => {
+                                state.toggle_tree_view();
+                                Ok(EventResult::Redraw)
+                            }
                         };
-                        searcher.query.clear();
-                        searcher.line_cursor = 0;
-                        state.mode = Mode::Search;
-                        Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
-                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(EventResult::Quit),
-                    (KeyCode::Tab, _) => {
-                        let available = state.treeview[state.tree_view_cursor]
-                            .node
-                            .borrow_mut()
-                            .content_show_modes();
-                        state.swap_content_show_mode(available);
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Char('?'), _) => {
-                        state.mode = Mode::Help;
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Char('M'), _) => {
-                        state.mode = Mode::MultiChart;
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Right, KeyModifiers::SHIFT) => {
-                        if let Focus::Tree(LastFocused::Attributes) = state.focus {
-                            state.focus = Focus::Attributes;
-                        }
-                        if let Focus::Tree(LastFocused::Content) = state.focus {
-                            state.focus = Focus::Content;
-                        }
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Left, KeyModifiers::SHIFT) => {
-                        if let Focus::Attributes = state.focus {
-                            state.focus = Focus::Tree(LastFocused::Attributes);
-                        }
-                        if let Focus::Content = state.focus {
-                            state.focus = Focus::Tree(LastFocused::Content);
-                        }
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Down, KeyModifiers::SHIFT) => {
-                        if let Focus::Attributes = state.focus {
-                            state.focus = Focus::Content;
-                        }
-                        Ok(EventResult::Redraw)
-                    }
+                    return Ok(EventResult::Continue);
+                }
 
-                    (KeyCode::Up, KeyModifiers::SHIFT) => {
-                        if let Focus::Content = state.focus {
-                            state.focus = Focus::Attributes;
+                if let Some(action) = normal_action(&key_event) {
+                    return match action {
+                        NormalAction::EnterCommand => {
+                            state.mode = Mode::Command;
+                            state.command_state.command_buffer.clear();
+                            state.command_state.cursor = 0;
+                            Ok(EventResult::Redraw)
                         }
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                        state.show_tree_view = !state.show_tree_view;
-                        if state.show_tree_view {
-                            state.focus = Focus::Tree(LastFocused::Content);
-                        } else {
-                            state.focus = Focus::Content;
+                        NormalAction::RepeatCommand => state.reexecute_command(),
+                        NormalAction::EnterSearch => {
+                            if state.searcher.is_none() {
+                                let Node::File(ref file) = state.root.borrow().node else {
+                                    return Ok(EventResult::Error(
+                                        "Search only available for HDF5 files".to_string(),
+                                    ));
+                                };
+                                let Ok(file_as_group) = file.as_group() else {
+                                    return Ok(EventResult::Error(
+                                        "Search only available for HDF5 files with roots that can polymorp as group.".to_string(),
+                                    ));
+                                };
+                                let all_h5_paths = full_traversal(&file_as_group);
+                                state.searcher = Some(Searcher::new(all_h5_paths));
+                            }
+                            let Some(ref mut searcher) = state.searcher else {
+                                return Ok(EventResult::Error("Search not available".to_string()));
+                            };
+                            searcher.query.clear();
+                            searcher.line_cursor = 0;
+                            state.mode = Mode::Search;
+                            Ok(EventResult::Redraw)
                         }
+                        NormalAction::Quit => Ok(EventResult::Quit),
+                        NormalAction::ToggleContentMode => {
+                            let available = state.treeview[state.tree_view_cursor]
+                                .node
+                                .borrow_mut()
+                                .content_show_modes();
+                            state.swap_content_show_mode(available);
+                            Ok(EventResult::Redraw)
+                        }
+                        NormalAction::ShowHelp => {
+                            state.mode = Mode::Help;
+                            Ok(EventResult::Redraw)
+                        }
+                        NormalAction::ToggleMultiChart => {
+                            state.mode = Mode::MultiChart;
+                            Ok(EventResult::Redraw)
+                        }
+                        NormalAction::ToggleTreeView => {
+                            state.toggle_tree_view();
+                            Ok(EventResult::Redraw)
+                        }
+                        NormalAction::Focus(direction) => {
+                            apply_focus_action(state, direction);
+                            Ok(EventResult::Redraw)
+                        }
+                        NormalAction::StartWindowChord => {
+                            state.pending_chord = Some(PendingChord::CtrlW);
+                            Ok(EventResult::Continue)
+                        }
+                        NormalAction::ChangeX(delta) => state.change_x(delta),
+                        NormalAction::ChangeRow(delta) => state.change_row(delta),
+                        NormalAction::ChangeCol(delta) => state.change_col(delta),
+                        NormalAction::ChangeSelectedIndex(delta) => {
+                            state.change_selected_index(delta)
+                        }
+                        NormalAction::ChangeSelectedDimension(delta) => {
+                            state.change_selected_dimension(delta)
+                        }
+                        NormalAction::Scroll(direction, amount) => match direction {
+                            Direction::Left => state.left(amount as isize),
+                            Direction::Right => state.right(amount as isize),
+                            Direction::Up => state.up(amount),
+                            Direction::Down => state.down(amount),
+                        },
+                    };
+                }
 
-                        Ok(EventResult::Redraw)
-                    }
-                    (KeyCode::Char('x'), _) => state.change_x(1),
-                    (KeyCode::Char('X'), _) => state.change_x(-1),
-                    (KeyCode::Char('r'), _) => state.change_row(1),
-                    (KeyCode::Char('R'), _) => state.change_row(-1),
-                    (KeyCode::Char('c'), _) => state.change_col(1),
-                    (KeyCode::Char('C'), _) => state.change_col(-1),
-                    (KeyCode::Up, KeyModifiers::ALT) => state.change_selected_index(-1),
-                    (KeyCode::Down, KeyModifiers::ALT) => state.change_selected_index(1),
-                    (KeyCode::PageUp, KeyModifiers::ALT) => state.change_selected_index(-10),
-                    (KeyCode::PageDown, KeyModifiers::ALT) => state.change_selected_index(10),
-                    (KeyCode::Left, KeyModifiers::ALT) => state.change_selected_dimension(-1),
-                    (KeyCode::Right, KeyModifiers::ALT) => state.change_selected_dimension(1),
-                    (KeyCode::Up, KeyModifiers::CONTROL) => state.up(1),
-                    (KeyCode::Down, KeyModifiers::CONTROL) => state.down(1),
-                    (KeyCode::Right, KeyModifiers::CONTROL) => state.right(1),
-                    (KeyCode::Left, KeyModifiers::CONTROL) => state.left(1),
-                    (KeyCode::PageDown, _) => state.down(20),
-                    (KeyCode::PageUp, _) => state.up(20),
-                    _ => match state.focus {
-                        Focus::Tree(_) => handle_normal_tree_event(state, event),
-                        Focus::Attributes => handle_normal_attributes(state, event),
-                        Focus::Content => handle_normal_content_event(state, event),
-                    },
+                match state.focus {
+                    super::state::Focus::Tree(_) => handle_normal_tree_event(state, event),
+                    super::state::Focus::Attributes => handle_normal_attributes(state, event),
+                    super::state::Focus::Content => handle_normal_content_event(state, event),
                 }
             } else {
                 Ok(EventResult::Continue)
@@ -178,5 +167,14 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
             }
             Ok(EventResult::Continue)
         }
+    }
+}
+
+fn apply_focus_action(state: &mut AppState<'_>, direction: Direction) {
+    match direction {
+        Direction::Left => state.focus_left(),
+        Direction::Right => state.focus_right(),
+        Direction::Up => state.focus_up(),
+        Direction::Down => state.focus_down(),
     }
 }

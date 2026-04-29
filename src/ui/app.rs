@@ -18,8 +18,8 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     prelude::CrosstermBackend,
     style::{Color, Style, Stylize},
-    text::Text,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame, Terminal,
 };
 use ratatui_image::picker::Picker;
@@ -231,6 +231,7 @@ fn main_recover_loop(
         mode: Mode::Normal,
         copying: false,
         searcher: None,
+        pending_chord: None,
         show_tree_view: true,
         content_mode: ContentShowMode::Preview,
         img_state,
@@ -508,17 +509,174 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
 }
 
 fn render_help(frame: &mut Frame<'_>) {
-    let help_text = Text::from("Press 'q' to quit");
-    let help_paragraph = Paragraph::new(help_text)
+    let area = frame.area();
+    let popup = centered_rect(area, 74, 24);
+
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        area,
+    );
+    frame.render_widget(Clear, popup);
+
+    let help_paragraph = Paragraph::new(render_help_text())
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::LightGreen))
+                .border_style(Style::default().fg(color_consts::BREAK_COLOR))
                 .border_type(ratatui::widgets::BorderType::Rounded)
-                .title("Help")
-                .title_style(Style::default().fg(Color::Yellow).bold())
+                .title(" Help ")
+                .title_style(Style::default().fg(color_consts::TITLE).bold())
+                .title_bottom(Line::from(vec![
+                    Span::styled(" Esc ", help_key_style()),
+                    Span::styled(" close ", help_desc_style()),
+                ]))
                 .title_alignment(Alignment::Center),
         )
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR))
         .wrap(Wrap { trim: true });
-    frame.render_widget(help_paragraph, frame.area());
+    frame.render_widget(help_paragraph, popup);
+}
+
+fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
+    let width = area.width.saturating_sub(4).min(max_width).max(20);
+    let height = area.height.saturating_sub(4).min(max_height).max(10);
+
+    let vertical = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(height),
+        Constraint::Fill(1),
+    ])
+    .split(area);
+    let horizontal = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(width),
+        Constraint::Fill(1),
+    ])
+    .split(vertical[1]);
+    horizontal[1]
+}
+
+fn help_key_style() -> Style {
+    Style::default()
+        .fg(color_consts::COLOR_WHITE)
+        .bg(color_consts::VARIABLE_BLUE_BUILTIN)
+        .bold()
+}
+
+fn help_section_style() -> Style {
+    Style::default().fg(color_consts::TITLE).bold().underlined()
+}
+
+fn help_desc_style() -> Style {
+    Style::default().fg(color_consts::BUILT_IN_VALUE_COLOR)
+}
+
+fn help_muted_style() -> Style {
+    Style::default().fg(color_consts::TYPE_DESC_COLOR)
+}
+
+fn help_keys(keys: &[&'static str], desc: &'static str) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, key) in keys.iter().enumerate() {
+        spans.push(Span::styled(format!(" {key} "), help_key_style()));
+        if idx + 1 != keys.len() {
+            spans.push(Span::styled("  ", help_muted_style()));
+        }
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(desc.to_string(), help_desc_style()));
+    Line::from(spans)
+}
+
+fn help_section(
+    title: &'static str,
+    entries: &[(&[&'static str], &'static str)],
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled(
+        title.to_string(),
+        help_section_style(),
+    ))];
+    for (keys, desc) in entries {
+        lines.push(help_keys(keys, desc));
+    }
+    lines
+}
+
+fn render_help_text() -> Text<'static> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("h5v", Style::default().fg(color_consts::TITLE).bold()),
+            Span::styled("  keyboard cheatsheet", help_muted_style()),
+        ])
+        .centered(),
+        Line::raw(""),
+    ];
+
+    lines.extend(help_section(
+        "Move",
+        &[
+            (&["j", "k", "↑", "↓"], "move in lists"),
+            (&["h", "l", "←", "→"], "collapse / expand / move"),
+            (&["g", "G"], "top / bottom"),
+            (&["Ctrl-U", "Ctrl-D"], "half-page tree jump"),
+        ],
+    ));
+    lines.push(Line::raw(""));
+
+    lines.extend(help_section(
+        "Panes",
+        &[
+            (&["Shift+←↑↓→"], "move focus"),
+            (&["Ctrl-W", "h/j/k/l"], "vim pane focus"),
+            (&["s", "Ctrl-W o"], "toggle sidebar"),
+        ],
+    ));
+    lines.push(Line::raw(""));
+
+    lines.extend(help_section(
+        "View",
+        &[
+            (&["Tab"], "switch preview / matrix"),
+            (&["y"], "copy selected value"),
+            (&["m", "M"], "add to chart / open chart"),
+        ],
+    ));
+    lines.push(Line::raw(""));
+
+    lines.extend(help_section(
+        "Selectors",
+        &[
+            (&["x", "X"], "preview x-axis"),
+            (&["r", "R"], "matrix row axis"),
+            (&["c", "C"], "matrix col axis"),
+            (&["[", "]"], "selected dimension"),
+            (&["Ctrl-X", "Ctrl-A"], "selected index - / +"),
+        ],
+    ));
+    lines.push(Line::raw(""));
+
+    lines.extend(help_section(
+        "Modes",
+        &[
+            (&["/"], "search"),
+            (&[":"], "command"),
+            (&["."], "repeat command"),
+            (&["?"], "help"),
+            (&["q", "Ctrl-C"], "quit"),
+        ],
+    ));
+    lines.push(Line::raw(""));
+
+    lines.extend(help_section(
+        "Chart",
+        &[
+            (&["j", "k"], "select series"),
+            (&["h", "l", "Shift+←→"], "pan"),
+            (&["+", "-", "Shift+↑↓"], "zoom"),
+            (&["d", "Backspace", "Delete"], "remove series"),
+            (&["c"], "reset zoom"),
+        ],
+    ));
+
+    Text::from(lines)
 }

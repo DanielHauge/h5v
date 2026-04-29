@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
@@ -13,7 +13,10 @@ use crate::{
     },
 };
 
-use super::EventResult;
+use super::{
+    keymap::{attributes_action, AttributesAction, Direction},
+    EventResult,
+};
 
 pub fn handle_normal_attributes(
     state: &mut AppState<'_>,
@@ -21,8 +24,8 @@ pub fn handle_normal_attributes(
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => match (key_event.code, key_event.modifiers) {
-                (KeyCode::Up, _) => {
+            KeyEventKind::Press => match attributes_action(&key_event) {
+                Some(AttributesAction::Move(Direction::Up)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let attributes_count = node.read_attributes()?.rendered_attributes.len();
@@ -38,7 +41,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                (KeyCode::Down, _) => {
+                Some(AttributesAction::Move(Direction::Down)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let attributes_count = node.read_attributes()?.rendered_attributes.len();
@@ -52,7 +55,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                (KeyCode::Left, _) => {
+                Some(AttributesAction::Move(Direction::Left)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     match node.attributes_view_cursor.attribute_view_selection {
@@ -63,7 +66,7 @@ pub fn handle_normal_attributes(
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Right, _) => {
+                Some(AttributesAction::Move(Direction::Right)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     match node.attributes_view_cursor.attribute_view_selection {
@@ -74,7 +77,7 @@ pub fn handle_normal_attributes(
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => {
+                Some(AttributesAction::Edit) => {
                     state.editing = true;
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
 
@@ -197,7 +200,7 @@ pub fn handle_normal_attributes(
                         true,
                     ))
                 }
-                (KeyCode::Char('y'), _) => {
+                Some(AttributesAction::Copy) => {
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
                     let node_attributes_view_cursor = node.attributes_view_cursor.clone();
                     let attributes = node.read_attributes()?;

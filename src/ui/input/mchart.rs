@@ -1,11 +1,14 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
     ui::state::{AppState, Mode},
 };
 
-use super::EventResult;
+use super::{
+    keymap::{multichart_action, MultiChartAction},
+    EventResult,
+};
 
 pub(crate) fn handle_mchart_event(
     state: &mut AppState<'_>,
@@ -13,53 +16,38 @@ pub(crate) fn handle_mchart_event(
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => match (key_event.code, key_event.modifiers) {
-                (KeyCode::Esc, _) => {
+            KeyEventKind::Press => match multichart_action(&key_event) {
+                Some(MultiChartAction::Exit) => {
                     state.mode = Mode::Normal;
                     Ok(EventResult::Redraw)
                 }
-
-                (KeyCode::Char('q'), _) => Ok(EventResult::Quit),
-
-                (KeyCode::Up, KeyModifiers::SHIFT) => {
+                Some(MultiChartAction::Quit) => Ok(EventResult::Quit),
+                Some(MultiChartAction::ZoomIn) => {
                     state.multi_chart.zoom_in(10.0);
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Down, KeyModifiers::SHIFT) => {
+                Some(MultiChartAction::ZoomOut) => {
                     state.multi_chart.zoom_out(10.0);
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Left, KeyModifiers::SHIFT) => {
+                Some(MultiChartAction::PanLeft) => {
                     state.multi_chart.pan_left(10.0);
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Right, KeyModifiers::SHIFT) => {
+                Some(MultiChartAction::PanRight) => {
                     state.multi_chart.pan_right(10.0);
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Char('c'), _) => {
+                Some(MultiChartAction::ClearZoom) => {
                     state.multi_chart.clear_zoom();
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Delete, _) => {
+                Some(MultiChartAction::DeleteSelected) => {
                     state.multi_chart.clear_selected();
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
-
-                (KeyCode::Backspace, _) => {
-                    state.multi_chart.clear_selected();
-                    state.compute_tree_view();
-                    Ok(EventResult::Redraw)
-                }
-
-                (KeyCode::Char('d'), _) => {
-                    state.multi_chart.clear_selected();
-                    state.compute_tree_view();
-                    Ok(EventResult::Redraw)
-                }
-
-                (KeyCode::Down, _) => {
+                Some(MultiChartAction::MoveDown) => {
                     state.multi_chart.idx = state
                         .multi_chart
                         .idx
@@ -67,12 +55,8 @@ pub(crate) fn handle_mchart_event(
                         .clamp(0, state.multi_chart.line_series.len().saturating_sub(1));
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Up, _) => {
+                Some(MultiChartAction::MoveUp) => {
                     state.multi_chart.idx = state.multi_chart.idx.saturating_sub(1);
-                    Ok(EventResult::Redraw)
-                }
-                (KeyCode::Char('M'), _) => {
-                    state.mode = Mode::Normal;
                     Ok(EventResult::Redraw)
                 }
                 _ => Ok(EventResult::Continue),

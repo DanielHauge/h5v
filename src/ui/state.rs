@@ -47,6 +47,11 @@ pub enum Mode {
     MultiChart,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingChord {
+    CtrlW,
+}
+
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ContentShowMode {
     Preview,
@@ -187,6 +192,7 @@ pub struct AppState<'a> {
     pub multi_chart: MultiChartState,
     pub mode: Mode,
     pub searcher: Option<Searcher>,
+    pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,
     pub content_mode: ContentShowMode,
     pub img_state: ImgState,
@@ -198,6 +204,60 @@ pub struct AppState<'a> {
 
 type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
+    pub fn focus_left(&mut self) {
+        if !self.show_tree_view {
+            return;
+        }
+        match self.focus {
+            Focus::Attributes => self.focus = Focus::Tree(LastFocused::Attributes),
+            Focus::Content => self.focus = Focus::Tree(LastFocused::Content),
+            Focus::Tree(_) => {}
+        }
+    }
+
+    pub fn focus_right(&mut self) {
+        if !self.show_tree_view {
+            return;
+        }
+        match self.focus {
+            Focus::Tree(LastFocused::Attributes) => self.focus = Focus::Attributes,
+            Focus::Tree(LastFocused::Content) => self.focus = Focus::Content,
+            Focus::Attributes | Focus::Content => {}
+        }
+    }
+
+    pub fn focus_up(&mut self) {
+        if !self.show_tree_view {
+            return;
+        }
+        match self.focus {
+            Focus::Content => self.focus = Focus::Attributes,
+            Focus::Tree(_) => self.focus = Focus::Attributes,
+            Focus::Attributes => {}
+        }
+    }
+
+    pub fn focus_down(&mut self) {
+        if !self.show_tree_view {
+            return;
+        }
+        match self.focus {
+            Focus::Attributes => self.focus = Focus::Content,
+            Focus::Tree(_) => self.focus = Focus::Content,
+            Focus::Content => {}
+        }
+    }
+
+    pub fn toggle_tree_view(&mut self) {
+        self.show_tree_view = !self.show_tree_view;
+        self.pending_chord = None;
+        if self.show_tree_view {
+            self.focus = Focus::Tree(LastFocused::Content);
+        } else {
+            self.focus = Focus::Content;
+        }
+    }
+
     pub fn swap_content_show_mode(&mut self, available: Vec<ContentShowMode>) {
         if available.is_empty() {
             return;

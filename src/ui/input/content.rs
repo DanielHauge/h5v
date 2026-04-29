@@ -1,11 +1,14 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::Event;
 
 use crate::{
     error::AppError,
     ui::state::{AppState, ContentShowMode},
 };
 
-use super::EventResult;
+use super::{
+    keymap::{content_action, ContentAction, Direction},
+    EventResult,
+};
 
 pub fn handle_normal_content_event(
     state: &mut AppState<'_>,
@@ -13,9 +16,9 @@ pub fn handle_normal_content_event(
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => {
-                match (key_event.code, key_event.modifiers, state.content_mode) {
-                    (KeyCode::Left, _, ContentShowMode::Matrix) => {
+            ratatui::crossterm::event::KeyEventKind::Press => {
+                match (content_action(&key_event), state.content_mode) {
+                    (Some(ContentAction::Move(Direction::Left)), ContentShowMode::Matrix) => {
                         // Get the current tree item and its attributes
                         let max = state
                             .matrix_view_state
@@ -36,7 +39,7 @@ pub fn handle_normal_content_event(
 
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Right, _, ContentShowMode::Matrix) => {
+                    (Some(ContentAction::Move(Direction::Right)), ContentShowMode::Matrix) => {
                         let max = state
                             .matrix_view_state
                             .cols_currently_available
@@ -53,7 +56,7 @@ pub fn handle_normal_content_event(
                         state.matrix_view_state.cursor_col = new_cursor;
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Up, _, ContentShowMode::Matrix) => {
+                    (Some(ContentAction::Move(Direction::Up)), ContentShowMode::Matrix) => {
                         // Get the current tree item and its attributes
                         let max = state
                             .matrix_view_state
@@ -73,7 +76,7 @@ pub fn handle_normal_content_event(
                         state.matrix_view_state.cursor_row = new_cursor;
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Down, _, ContentShowMode::Matrix) => {
+                    (Some(ContentAction::Move(Direction::Down)), ContentShowMode::Matrix) => {
                         let max = state
                             .matrix_view_state
                             .rows_currently_available
@@ -90,16 +93,26 @@ pub fn handle_normal_content_event(
 
                         Ok(EventResult::Redraw)
                     }
-                    (KeyCode::Down, _, ContentShowMode::Preview) => state.down(1),
-                    (KeyCode::Up, _, ContentShowMode::Preview) => state.up(1),
-                    (KeyCode::Right, _, ContentShowMode::Preview) => state.right(1),
-                    (KeyCode::Left, _, ContentShowMode::Preview) => state.left(1),
-                    (KeyCode::Char('y'), _, ContentShowMode::Matrix) => Ok(EventResult::Copying),
+                    (Some(ContentAction::Move(Direction::Down)), ContentShowMode::Preview) => {
+                        state.down(1)
+                    }
+                    (Some(ContentAction::Move(Direction::Up)), ContentShowMode::Preview) => {
+                        state.up(1)
+                    }
+                    (Some(ContentAction::Move(Direction::Right)), ContentShowMode::Preview) => {
+                        state.right(1)
+                    }
+                    (Some(ContentAction::Move(Direction::Left)), ContentShowMode::Preview) => {
+                        state.left(1)
+                    }
+                    (Some(ContentAction::Copy), ContentShowMode::Matrix) => {
+                        Ok(EventResult::Copying)
+                    }
                     _ => Ok(EventResult::Continue),
                 }
             }
-            KeyEventKind::Repeat => Ok(EventResult::Continue),
-            KeyEventKind::Release => Ok(EventResult::Continue),
+            ratatui::crossterm::event::KeyEventKind::Repeat => Ok(EventResult::Continue),
+            ratatui::crossterm::event::KeyEventKind::Release => Ok(EventResult::Continue),
         },
         Event::Resize(_, _) => Ok(EventResult::Redraw),
         _ => Ok(EventResult::Continue),

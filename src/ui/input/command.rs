@@ -1,9 +1,12 @@
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::ui::state::Mode;
 use crate::{error::AppError, ui::state::AppState};
 
-use super::EventResult;
+use super::{
+    keymap::{command_action, CommandAction},
+    EventResult,
+};
 
 pub fn handle_command_event(
     state: &mut AppState<'_>,
@@ -11,15 +14,15 @@ pub fn handle_command_event(
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => match (key_event.code, key_event.modifiers) {
-                (KeyCode::Enter, _) => {
+            KeyEventKind::Press => match command_action(&key_event) {
+                Some(CommandAction::Submit) => {
                     state.mode = Mode::Normal;
                     match state.command_state.parse_command() {
                         Ok(cmd) => state.execute_command(&cmd),
                         Err(_) => Ok(EventResult::Redraw),
                     }
                 }
-                (KeyCode::Char('+'), _) => {
+                Some(CommandAction::PrefixPlus) => {
                     if state.command_state.cursor != 0 {
                         return Ok(EventResult::Continue);
                     }
@@ -37,33 +40,24 @@ pub fn handle_command_event(
                         Ok(EventResult::Continue)
                     }
                 }
-                (KeyCode::Char('q'), _) => {
+                Some(CommandAction::Cancel) => {
                     state.mode = Mode::Normal;
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Esc, _) => {
-                    state.mode = Mode::Normal;
-                    Ok(EventResult::Redraw)
-                }
-                (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
+                Some(CommandAction::ClearWord) | Some(CommandAction::Clear) => {
                     state.command_state.command_buffer.clear();
                     state.command_state.cursor = 0;
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                Some(CommandAction::MoveToStart) => {
                     state.command_state.cursor = 0;
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
+                Some(CommandAction::MoveToEnd) => {
                     state.command_state.cursor = state.command_state.command_buffer.len();
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                    state.command_state.command_buffer.clear();
-                    state.command_state.cursor = 0;
-                    Ok(EventResult::Redraw)
-                }
-                (KeyCode::Char('-'), _) => {
+                Some(CommandAction::PrefixMinus) => {
                     if state.command_state.cursor != 0 {
                         return Ok(EventResult::Continue);
                     }
@@ -81,7 +75,7 @@ pub fn handle_command_event(
                         Ok(EventResult::Continue)
                     }
                 }
-                (KeyCode::Backspace, _) => {
+                Some(CommandAction::Backspace) => {
                     if state.command_state.cursor > 0 {
                         state.command_state.cursor -= 1;
                         state
@@ -91,7 +85,7 @@ pub fn handle_command_event(
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Delete, _) => {
+                Some(CommandAction::Delete) => {
                     if state.command_state.cursor < state.command_state.command_buffer.len() {
                         state
                             .command_state
@@ -100,19 +94,19 @@ pub fn handle_command_event(
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Left, _) => {
+                Some(CommandAction::MoveLeft) => {
                     if state.command_state.cursor > 0 {
                         state.command_state.cursor -= 1;
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Right, _) => {
+                Some(CommandAction::MoveRight) => {
                     if state.command_state.cursor < state.command_state.command_buffer.len() {
                         state.command_state.cursor += 1;
                     }
                     Ok(EventResult::Redraw)
                 }
-                (KeyCode::Char(c), _) if c.is_ascii_digit() => {
+                Some(CommandAction::InsertDigit(c)) => {
                     state
                         .command_state
                         .command_buffer
