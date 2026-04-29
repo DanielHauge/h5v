@@ -25,6 +25,7 @@ pub enum EventResult {
     Quit,
     Redraw,
     Copying,
+    ReloadFile { write: bool },
     Continue,
     Error(String),
     Toast(AppToast, bool),
@@ -110,6 +111,9 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             state.toggle_tree_view();
                             Ok(EventResult::Redraw)
                         }
+                        NormalAction::ReloadFile => Ok(EventResult::ReloadFile {
+                            write: !state.readonly,
+                        }),
                         NormalAction::Focus(direction) => {
                             apply_focus_action(state, direction);
                             Ok(EventResult::Redraw)

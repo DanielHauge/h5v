@@ -183,8 +183,11 @@ pub fn handle_normal_attributes(
                             }
                         }
                     }
+                    drop(selected_node);
+                    state.acknowledge_file_write();
 
                     eprintln!("Attribute '{}' updated successfully", attr_name);
+                    let selected_node = state.treeview[state.tree_view_cursor].node.borrow();
                     match selected_node.computed_attributes {
                         Some(ref x) => {
                             eprintln!("Computed attributes:");

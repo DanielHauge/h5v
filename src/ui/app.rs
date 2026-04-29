@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::stdout,
     rc::Rc,
     sync::{
@@ -28,12 +29,12 @@ use ratatui_image::picker::Picker;
 use crate::{
     color_consts,
     error::{log_error, AppError},
-    h5f,
+    h5f::{self, HasPath, Node},
     ui::{
         image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
         input::EventResult,
         mchart::MultiChartState,
-        state::{AppToast, ChartPreviwState},
+        state::{AppToast, ChartPreviwState, FileWatchState},
     },
 };
 
@@ -47,7 +48,10 @@ use super::{
     },
     input::handle_input_event,
     main_display::render_main_display,
-    state::{self, AppState, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState, Mode},
+    state::{
+        self, AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused,
+        MatrixViewState, Mode,
+    },
     tree_view::render_tree,
 };
 
@@ -80,6 +84,231 @@ fn use_stacked_tree_layout(area: Rect, mode: &Mode, show_tree_view: bool) -> boo
 type Result<T> = std::result::Result<T, AppError>;
 
 pub struct IntendedMainLoopBreak {}
+
+#[derive(Clone)]
+struct SelectedNodeSnapshot {
+    path: String,
+    selected_dim: usize,
+    selected_x: usize,
+    selected_row: usize,
+    selected_col: usize,
+    line_offset: usize,
+    col_offset: isize,
+    selected_indexes: Vec<usize>,
+    attributes_view_cursor: AttributeCursor,
+}
+
+#[derive(Clone)]
+struct ReloadSnapshot {
+    root_selected: bool,
+    selected_path: Option<String>,
+    expanded_paths: Vec<String>,
+    selected_node: Option<SelectedNodeSnapshot>,
+    focus: Focus,
+    show_tree_view: bool,
+    content_mode: ContentShowMode,
+    segment_state: state::SegmentState,
+    matrix_view_state: MatrixViewState,
+    img_idx_to_load: i32,
+}
+
+fn normalized_node_path(path: &str) -> &str {
+    path.trim_start_matches('/')
+}
+
+fn same_node_path(lhs: &str, rhs: &str) -> bool {
+    normalized_node_path(lhs) == normalized_node_path(rhs)
+}
+
+fn collect_expanded_paths(node: &Rc<std::cell::RefCell<h5f::H5FNode>>, out: &mut Vec<String>) {
+    let node_ref = node.borrow();
+    for child in &node_ref.children {
+        let child_ref = child.borrow();
+        if child_ref.is_expandable() && child_ref.expanded {
+            out.push(child_ref.node.path());
+        }
+        drop(child_ref);
+        collect_expanded_paths(child, out);
+    }
+}
+
+fn snapshot_selected_node(state: &AppState<'_>) -> Option<SelectedNodeSnapshot> {
+    let tree_item = state.treeview.get(state.tree_view_cursor)?;
+    let node = tree_item.node.borrow();
+    Some(SelectedNodeSnapshot {
+        path: node.node.path(),
+        selected_dim: node.selected_dim,
+        selected_x: node.selected_x,
+        selected_row: node.selected_row,
+        selected_col: node.selected_col,
+        line_offset: node.line_offset,
+        col_offset: node.col_offset,
+        selected_indexes: node.selected_indexes.clone(),
+        attributes_view_cursor: node.attributes_view_cursor.clone(),
+    })
+}
+
+fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
+    let mut expanded_paths = Vec::new();
+    collect_expanded_paths(&state.root, &mut expanded_paths);
+    expanded_paths.sort_by_key(|path| normalized_node_path(path).matches('/').count());
+
+    ReloadSnapshot {
+        root_selected: state.tree_view_cursor == 0,
+        selected_path: state.selected_tree_path(),
+        expanded_paths,
+        selected_node: snapshot_selected_node(state),
+        focus: state.focus.clone(),
+        show_tree_view: state.show_tree_view,
+        content_mode: state.content_mode,
+        segment_state: state.segment_state.clone(),
+        matrix_view_state: state.matrix_view_state.clone(),
+        img_idx_to_load: state.img_state.idx_to_load,
+    }
+}
+
+fn restore_tree_selection(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
+    if snapshot.root_selected {
+        state.tree_view_cursor = 0;
+        return;
+    }
+
+    let Some(selected_path) = snapshot.selected_path.as_deref() else {
+        state.tree_view_cursor = 0;
+        return;
+    };
+
+    if let Some((idx, _)) = state
+        .treeview
+        .iter()
+        .enumerate()
+        .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), selected_path))
+    {
+        state.tree_view_cursor = idx;
+        return;
+    }
+
+    let mut fallback = selected_path.to_string();
+    while let Some((prefix, _)) = normalized_node_path(&fallback).rsplit_once('/') {
+        if prefix.is_empty() {
+            break;
+        }
+        fallback = prefix.to_string();
+        if let Some((idx, _)) = state
+            .treeview
+            .iter()
+            .enumerate()
+            .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), &fallback))
+        {
+            state.tree_view_cursor = idx;
+            return;
+        }
+    }
+
+    state.tree_view_cursor = 0;
+}
+
+fn restore_selected_node_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
+    let Some(selected_snapshot) = snapshot.selected_node.as_ref() else {
+        return;
+    };
+    let Some(tree_item) = state.treeview.get(state.tree_view_cursor) else {
+        return;
+    };
+    if !same_node_path(
+        &tree_item.node.borrow().node.path(),
+        &selected_snapshot.path,
+    ) {
+        return;
+    }
+
+    let mut node = tree_item.node.borrow_mut();
+    let shape = match &node.node {
+        Node::Dataset(_, meta) => meta.shape.clone(),
+        _ => Vec::new(),
+    };
+    let rank = shape.len();
+    node.sync_selection_rank(rank);
+    for ((dst, src), dim_len) in node
+        .selected_indexes
+        .iter_mut()
+        .zip(selected_snapshot.selected_indexes.iter().copied())
+        .zip(shape.iter().copied())
+    {
+        *dst = src.min(dim_len.saturating_sub(1));
+    }
+    node.selected_dim = node.selected_dim.min(rank.saturating_sub(1));
+    node.selected_x = selected_snapshot.selected_x.min(rank.saturating_sub(1));
+    node.selected_row = selected_snapshot.selected_row.min(rank.saturating_sub(1));
+    node.selected_col = if rank > 1 {
+        selected_snapshot.selected_col.min(rank.saturating_sub(1))
+    } else {
+        0
+    };
+    node.selected_dim = selected_snapshot.selected_dim.min(rank.saturating_sub(1));
+    node.line_offset = selected_snapshot.line_offset;
+    node.col_offset = selected_snapshot.col_offset.max(0);
+    node.attributes_view_cursor = selected_snapshot.attributes_view_cursor.clone();
+}
+
+fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
+    state.clear_preview_debounce();
+    state.segment_state = snapshot.segment_state.clone();
+    state.matrix_view_state = snapshot.matrix_view_state.clone();
+    state.img_state.protocol = None;
+    state.img_state.ds = None;
+    state.img_state.current_key = None;
+    state.img_state.window = None;
+    state.img_state.idx_loaded = -1;
+    state.img_state.idx_to_load = snapshot.img_idx_to_load;
+    state.img_state.error = None;
+    state.chart_preview_state.ds_loaded = None;
+    state.chart_preview_state.protocol = None;
+    state.chart_preview_state.error = None;
+    state.chart_preview_state.ds_selection = None;
+}
+
+fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> {
+    let snapshot = snapshot_reload_state(state);
+    let file_path = state.file_watch.path.clone();
+    let linked = state.file_watch.linked;
+    let reopened = h5f::H5F::open(file_path.clone(), linked, write).map_err(|e| {
+        AppError::Hdf5(hdf5_metno::Error::from(format!(
+            "Failed to reopen HDF5 file '{}': {}",
+            file_path, e
+        )))
+    })?;
+
+    state.file = reopened.file;
+    state.root = reopened.root;
+    state.readonly = !write;
+    state.focus = snapshot.focus.clone();
+    state.show_tree_view = snapshot.show_tree_view;
+    state.content_mode = snapshot.content_mode;
+
+    clear_preview_state(state, &snapshot);
+
+    for path in &snapshot.expanded_paths {
+        let relative = normalized_node_path(path);
+        if relative.is_empty() {
+            continue;
+        }
+        let _ = state.root.borrow_mut().expand_path(relative);
+    }
+
+    state.compute_tree_view();
+    restore_tree_selection(state, &snapshot);
+    restore_selected_node_state(state, &snapshot);
+    state.compute_tree_view();
+    restore_tree_selection(state, &snapshot);
+    state.sync_file_watch();
+
+    Ok(if write {
+        "Reloaded file in write mode".to_string()
+    } else {
+        "Reloaded file".to_string()
+    })
+}
 
 pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
@@ -156,7 +385,7 @@ fn main_recover_loop(
     link: bool,
     writable: bool,
 ) -> Result<IntendedMainLoopBreak> {
-    let h5f = h5f::H5F::open(filename, link, writable).map_err(|e| {
+    let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",
             e
@@ -229,6 +458,12 @@ fn main_recover_loop(
         editing: false,
         file: h5f.file,
         toast: AppToast::Empty,
+        file_watch: FileWatchState {
+            path: filename.clone(),
+            linked: link,
+            last_known_modified: None,
+            pending_external_change: false,
+        },
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         edit_pause: edit_pause.clone(),
@@ -253,6 +488,7 @@ fn main_recover_loop(
         chart_preview_state,
     };
 
+    state.sync_file_watch();
     state.compute_tree_view();
 
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
@@ -303,6 +539,7 @@ fn main_recover_loop(
     terminal.draw(|f| draw_closure(f, &mut state))?;
 
     handle_term_events(tx_events.clone(), edit_pause);
+    handle_file_watch_events(tx_events.clone(), state.file_watch.path.clone());
 
     loop {
         let event = rx_events.recv();
@@ -351,6 +588,21 @@ fn main_recover_loop(
                         })?;
                         state.copying = false;
                         thread::sleep(std::time::Duration::from_millis(100));
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                    EventResult::ReloadFile { write } => {
+                        match reload_current_file(&mut state, write) {
+                            Ok(message) => {
+                                terminal.clear()?;
+                                terminal.flush()?;
+                                state.toast = AppToast::Info(message);
+                            }
+                            Err(error) => {
+                                state.toast = AppToast::Error(error.to_string());
+                            }
+                        }
                         terminal.draw(|f| {
                             draw_closure(f, &mut state);
                         })?;
@@ -463,6 +715,14 @@ fn main_recover_loop(
                     })?;
                 }
             }
+            AppEvent::FileChanged => {
+                if let Some(toast) = state.register_file_watch_change() {
+                    state.toast = toast;
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+            }
         }
     }
     state.file.close()?;
@@ -477,12 +737,34 @@ pub enum AppEvent {
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
     PreviewDebounceExpired(u64),
+    FileChanged,
 }
 
 fn schedule_preview_debounce(tx_events: Sender<AppEvent>, generation: u64) {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(95));
         let _ = tx_events.send(AppEvent::PreviewDebounceExpired(generation));
+    });
+}
+
+fn handle_file_watch_events(tx_events: Sender<AppEvent>, path: String) {
+    thread::spawn(move || {
+        let mut last_modified = fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            let current_modified = fs::metadata(&path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok());
+            if current_modified == last_modified {
+                continue;
+            }
+            last_modified = current_modified;
+            if tx_events.send(AppEvent::FileChanged).is_err() {
+                return;
+            }
+        }
     });
 }
 
@@ -693,6 +975,7 @@ fn render_help(frame: &mut Frame<'_>) {
                         (&["Enter", "Esc"], "run / leave"),
                     ],
                 ),
+                ("File", &[(&["Ctrl-R"], "reload file")]),
                 (
                     "Multi chart",
                     &[

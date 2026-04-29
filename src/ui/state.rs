@@ -1,9 +1,10 @@
 use std::{
     cell::RefCell,
+    fs,
     io::BufReader,
     rc::Rc,
     sync::{mpsc::Sender, Arc, RwLock},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use arboard::Clipboard;
@@ -245,6 +246,7 @@ impl Default for AttributeCursor {
     }
 }
 
+#[derive(Clone)]
 pub struct MatrixViewState {
     pub col_offset: usize,
     pub row_offset: usize,
@@ -275,6 +277,13 @@ pub enum AppToast {
     Error(String),
 }
 
+pub struct FileWatchState {
+    pub path: String,
+    pub linked: bool,
+    pub last_known_modified: Option<SystemTime>,
+    pub pending_external_change: bool,
+}
+
 pub struct AppState<'a> {
     pub readonly: bool,
     pub root: Rc<RefCell<H5FNode>>,
@@ -286,6 +295,7 @@ pub struct AppState<'a> {
     pub clipboard: Clipboard,
     pub copying: bool,
     pub toast: AppToast,
+    pub file_watch: FileWatchState,
     pub focus: Focus,
     pub multi_chart: MultiChartState,
     pub mode: Mode,
@@ -308,6 +318,40 @@ pub struct AppState<'a> {
 type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
     const PREVIEW_DEBOUNCE_DELAY: Duration = Duration::from_millis(90);
+
+    fn current_file_modified(&self) -> Option<SystemTime> {
+        fs::metadata(&self.file_watch.path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+    }
+
+    pub fn sync_file_watch(&mut self) {
+        self.file_watch.last_known_modified = self.current_file_modified();
+        self.file_watch.pending_external_change = false;
+    }
+
+    pub fn acknowledge_file_write(&mut self) {
+        self.sync_file_watch();
+    }
+
+    pub fn register_file_watch_change(&mut self) -> Option<AppToast> {
+        if self.file_watch.pending_external_change {
+            return None;
+        }
+
+        let current_modified = self.current_file_modified();
+        if current_modified == self.file_watch.last_known_modified {
+            return None;
+        }
+
+        self.file_watch.pending_external_change = true;
+        Some(match current_modified {
+            Some(_) => AppToast::Info("File changed on disk - press Ctrl-R to reload".to_string()),
+            None => AppToast::Warning(
+                "File changed or is unavailable on disk - press Ctrl-R to retry reload".to_string(),
+            ),
+        })
+    }
 
     pub fn selected_tree_path(&self) -> Option<String> {
         self.treeview
