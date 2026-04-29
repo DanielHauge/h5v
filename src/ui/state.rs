@@ -3,6 +3,7 @@ use std::{
     io::BufReader,
     rc::Rc,
     sync::{mpsc::Sender, Arc, RwLock},
+    time::{Duration, Instant},
 };
 
 use arboard::Clipboard;
@@ -59,8 +60,10 @@ pub enum ContentShowMode {
 }
 
 pub struct ChartPreviewLoadRequest {
+    pub ds_path: String,
     pub source: ChartPreviewSource,
     pub segment_state: SegmentState,
+    pub selection: PreviewSelection,
     pub width: u16,
     pub height: u16,
 }
@@ -83,11 +86,41 @@ pub struct ChartPreviwState {
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageLoadKey {
+    pub ds_path: String,
+    pub idx: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartPreviewKey {
+    pub ds_path: String,
+    pub selection: PreviewSelection,
+}
+
+pub struct RawImageLoadRequest {
+    pub key: ImageLoadKey,
+    pub reader: BufReader<ByteReader>,
+    pub format: ImageFormat,
+}
+
+pub struct VarLenImageLoadRequest {
+    pub key: ImageLoadKey,
+    pub dataset: Dataset,
+    pub format: ImageFormat,
+}
+
+pub struct DatasetImageLoadRequest {
+    pub key: ImageLoadKey,
+    pub dataset: Dataset,
+    pub image_type: ImageType,
+}
+
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
-    pub tx_load_imgfs: Sender<(BufReader<ByteReader>, ImageFormat)>,
-    pub tx_load_imgfsvlen: Sender<(Dataset, i32, ImageFormat)>,
-    pub tx_load_img: Sender<(Dataset, i32, ImageType)>,
+    pub tx_load_imgfs: Sender<RawImageLoadRequest>,
+    pub tx_load_imgfsvlen: Sender<VarLenImageLoadRequest>,
+    pub tx_load_img: Sender<DatasetImageLoadRequest>,
     pub ds: Option<String>,
     pub error: Option<String>,
     pub idx_to_load: i32,
@@ -121,6 +154,24 @@ impl IsFromDsReq for ChartPreviwState {
 impl IsFromDsReq for ImgState {
     fn get_ds_name(&self) -> Option<String> {
         self.ds.clone()
+    }
+}
+
+impl ImgState {
+    pub fn current_request_key(&self) -> Option<ImageLoadKey> {
+        Some(ImageLoadKey {
+            ds_path: self.ds.clone()?,
+            idx: self.idx_loaded,
+        })
+    }
+}
+
+impl ChartPreviwState {
+    pub fn current_request_key(&self) -> Option<ChartPreviewKey> {
+        Some(ChartPreviewKey {
+            ds_path: self.ds_loaded.clone()?,
+            selection: self.ds_selection.clone()?,
+        })
     }
 }
 
@@ -195,6 +246,9 @@ pub struct AppState<'a> {
     pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,
     pub stacked_tree_layout: bool,
+    pub preview_debounce_generation: u64,
+    pub preview_debounce_until: Option<Instant>,
+    pub preview_debounce_path: Option<String>,
     pub content_mode: ContentShowMode,
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
@@ -205,6 +259,53 @@ pub struct AppState<'a> {
 
 type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
+    const PREVIEW_DEBOUNCE_DELAY: Duration = Duration::from_millis(90);
+
+    pub fn selected_tree_path(&self) -> Option<String> {
+        self.treeview
+            .get(self.tree_view_cursor)
+            .map(|item| item.node.borrow().node.path())
+    }
+
+    pub fn begin_preview_debounce(&mut self, path: String) -> u64 {
+        self.preview_debounce_generation = self.preview_debounce_generation.wrapping_add(1);
+        self.preview_debounce_until = Some(Instant::now() + Self::PREVIEW_DEBOUNCE_DELAY);
+        self.preview_debounce_path = Some(path);
+        self.preview_debounce_generation
+    }
+
+    pub fn clear_preview_debounce(&mut self) {
+        self.preview_debounce_until = None;
+        self.preview_debounce_path = None;
+    }
+
+    pub fn resolve_preview_debounce(&mut self, generation: u64) -> bool {
+        if self.preview_debounce_generation != generation {
+            return false;
+        }
+        let Some(until) = self.preview_debounce_until else {
+            return false;
+        };
+        if Instant::now() < until {
+            return false;
+        }
+        self.clear_preview_debounce();
+        true
+    }
+
+    pub fn should_debounce_preview(&self, node: &Node) -> bool {
+        if !matches!(self.mode, Mode::Normal) || !matches!(self.focus, Focus::Tree(_)) {
+            return false;
+        }
+        let Some(until) = self.preview_debounce_until else {
+            return false;
+        };
+        if Instant::now() >= until {
+            return false;
+        }
+        self.preview_debounce_path.as_deref() == Some(node.path().as_str())
+    }
+
     fn remember_main_focus(&mut self, last_focused: LastFocused) {
         self.focus = Focus::Tree(last_focused);
     }

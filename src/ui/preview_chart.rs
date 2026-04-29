@@ -196,6 +196,17 @@ pub fn render_chart_preview(
     let image_capable = image_capable_terminal();
     let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
 
+    if image_capable && state.should_debounce_preview(&node.node) {
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
+        return Ok(());
+    }
+
     if image_capable
         && state.chart_preview_state.is_from_ds(&node.node)
         && loaded_preview_selection == Some(data_preview_selection.clone())
@@ -228,10 +239,12 @@ pub fn render_chart_preview(
         state.chart_preview_state.error = None;
         state.chart_preview_state.protocol = None;
         let chart_preview_load_request = ChartPreviewLoadRequest {
+            ds_path: node.node.path(),
             source: ChartPreviewSource::Dataset {
                 ds,
                 selection: data_preview_selection.clone(),
             },
+            selection: data_preview_selection.clone(),
             width: chart_area.width,
             height: chart_area.height,
             segment_state: state.segment_state.clone(),
@@ -416,6 +429,16 @@ fn render_projected_chart_preview(
     };
     let image_capable = image_capable_terminal();
     let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
+    if image_capable && state.should_debounce_preview(&node.node) {
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
+        return Ok(());
+    }
     if image_capable
         && state.chart_preview_state.is_from_ds(&node.node)
         && loaded_preview_selection == Some(data_preview_selection.clone())
@@ -448,7 +471,9 @@ fn render_projected_chart_preview(
         state.chart_preview_state.error = None;
         state.chart_preview_state.protocol = None;
         let chart_preview_load_request = ChartPreviewLoadRequest {
+            ds_path: node.node.path(),
             source: ChartPreviewSource::Precomputed { data_preview },
+            selection: data_preview_selection.clone(),
             width: chart_area.width,
             height: chart_area.height,
             segment_state: state.segment_state.clone(),

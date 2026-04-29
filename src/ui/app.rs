@@ -6,6 +6,7 @@ use std::{
         Arc, RwLock,
     },
     thread,
+    time::Duration,
 };
 
 use arboard::Clipboard;
@@ -36,12 +37,13 @@ use crate::{
     },
 };
 
+use super::state::{ChartPreviewKey, ImageLoadKey};
 use super::{
     command::{Command, CommandState},
     command_view::render_command_dialog,
     image_preview::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
-        ImageLoadedResult, ImageResizeResult,
+        ImageResizeResult,
     },
     input::handle_input_event,
     main_display::render_main_display,
@@ -238,6 +240,9 @@ fn main_recover_loop(
         pending_chord: None,
         show_tree_view: true,
         stacked_tree_layout: false,
+        preview_debounce_generation: 0,
+        preview_debounce_until: None,
+        preview_debounce_path: None,
         content_mode: ContentShowMode::Preview,
         img_state,
         matrix_view_state,
@@ -293,7 +298,7 @@ fn main_recover_loop(
     // First time draw nice state
     terminal.draw(|f| draw_closure(f, &mut state))?;
 
-    handle_term_events(tx_events, edit_pause);
+    handle_term_events(tx_events.clone(), edit_pause);
 
     loop {
         let event = rx_events.recv();
@@ -312,50 +317,62 @@ fn main_recover_loop(
         }
 
         match event {
-            AppEvent::TermEvent(event) => match handle_input_event(&mut state, event)
-                .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false))
-            {
-                EventResult::Quit => break,
-                EventResult::Continue => {}
-                EventResult::Redraw => {
-                    state.toast = AppToast::Empty;
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
-                }
-                EventResult::Copying => {
-                    state.toast = AppToast::Empty;
-                    state.copying = true;
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
-                    state.copying = false;
-                    thread::sleep(std::time::Duration::from_millis(100));
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
-                }
-                EventResult::Error(e) => {
-                    terminal.draw(|f| {
-                        render_error(f, &e);
-                    })?;
-                    thread::sleep(std::time::Duration::from_secs(2));
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
-                }
-                EventResult::Toast(toast, full_redraw) => {
-                    if full_redraw {
-                        state.compute_tree_view();
-                        terminal.clear()?;
-                        terminal.flush()?;
+            AppEvent::TermEvent(event) => {
+                let selected_before = state.selected_tree_path();
+                let event_result = handle_input_event(&mut state, event)
+                    .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false));
+                let selected_after = state.selected_tree_path();
+                if selected_before != selected_after {
+                    if let Some(path) = selected_after {
+                        let generation = state.begin_preview_debounce(path);
+                        schedule_preview_debounce(tx_events.clone(), generation);
+                    } else {
+                        state.clear_preview_debounce();
                     }
-                    state.toast = toast;
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
                 }
-            },
+                match event_result {
+                    EventResult::Quit => break,
+                    EventResult::Continue => {}
+                    EventResult::Redraw => {
+                        state.toast = AppToast::Empty;
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                    EventResult::Copying => {
+                        state.toast = AppToast::Empty;
+                        state.copying = true;
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                        state.copying = false;
+                        thread::sleep(std::time::Duration::from_millis(100));
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                    EventResult::Error(e) => {
+                        terminal.draw(|f| {
+                            render_error(f, &e);
+                        })?;
+                        thread::sleep(std::time::Duration::from_secs(2));
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                    EventResult::Toast(toast, full_redraw) => {
+                        if full_redraw {
+                            state.compute_tree_view();
+                            terminal.clear()?;
+                            terminal.flush()?;
+                        }
+                        state.toast = toast;
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                }
+            }
             AppEvent::ImageResized(resize_response) => match resize_response {
                 ImageResizeResult::Success(resize_response) => {
                     if let Some(ref mut img_thread_protocol) = state.img_state.protocol {
@@ -373,16 +390,22 @@ fn main_recover_loop(
                 }
             },
             AppEvent::ImageLoad(img_load) => match img_load {
-                ImageLoadedResult::Success(thread_protocol) => {
-                    state.img_state.protocol = Some(thread_protocol);
+                ImageLoadedResult::Success { key, protocol } => {
+                    if state.img_state.current_request_key() != Some(key) {
+                        continue;
+                    }
+                    state.img_state.protocol = Some(protocol);
                     state.img_state.error = None;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
                 }
-                ImageLoadedResult::Failure(f) => {
+                ImageLoadedResult::Failure { key, message } => {
+                    if state.img_state.current_request_key() != Some(key) {
+                        continue;
+                    }
                     state.img_state.protocol = None;
-                    state.img_state.error = Some(f);
+                    state.img_state.error = Some(message);
 
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
@@ -390,16 +413,22 @@ fn main_recover_loop(
                 }
             },
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
-                ImageLoadedResult::Success(thread_protocol) => {
-                    state.chart_preview_state.protocol = Some(thread_protocol);
+                ChartPreviewLoadedResult::Success { key, protocol } => {
+                    if state.chart_preview_state.current_request_key() != Some(key) {
+                        continue;
+                    }
+                    state.chart_preview_state.protocol = Some(protocol);
                     state.chart_preview_state.error = None;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
                 }
-                ImageLoadedResult::Failure(f) => {
+                ChartPreviewLoadedResult::Failure { key, message } => {
+                    if state.chart_preview_state.current_request_key() != Some(key) {
+                        continue;
+                    }
                     state.chart_preview_state.protocol = None;
-                    state.chart_preview_state.error = Some(f);
+                    state.chart_preview_state.error = Some(message);
 
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
@@ -423,6 +452,13 @@ fn main_recover_loop(
                     })?;
                 }
             },
+            AppEvent::PreviewDebounceExpired(generation) => {
+                if state.resolve_preview_debounce(generation) {
+                    terminal.draw(|f| {
+                        draw_closure(f, &mut state);
+                    })?;
+                }
+            }
         }
     }
     state.file.close()?;
@@ -434,8 +470,40 @@ pub enum AppEvent {
     TermEvent(event::Event),
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
-    PreviewChartLoad(ImageLoadedResult),
+    PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
+    PreviewDebounceExpired(u64),
+}
+
+fn schedule_preview_debounce(tx_events: Sender<AppEvent>, generation: u64) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(95));
+        let _ = tx_events.send(AppEvent::PreviewDebounceExpired(generation));
+    });
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum ImageLoadedResult {
+    Success {
+        key: ImageLoadKey,
+        protocol: ratatui_image::thread::ThreadProtocol,
+    },
+    Failure {
+        key: ImageLoadKey,
+        message: String,
+    },
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum ChartPreviewLoadedResult {
+    Success {
+        key: ChartPreviewKey,
+        protocol: ratatui_image::thread::ThreadProtocol,
+    },
+    Failure {
+        key: ChartPreviewKey,
+        message: String,
+    },
 }
 
 fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {

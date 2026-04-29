@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use hdf5_metno::{types::IntSize, ByteReader, Dataset, Selection};
+use hdf5_metno::{types::IntSize, Dataset, Selection};
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use ndarray::{s, Array2, Array3};
 use ratatui::{
@@ -28,41 +28,59 @@ use crate::{
     },
 };
 
+use super::app::{ChartPreviewLoadedResult, ImageLoadedResult};
 use super::{
     app::AppEvent,
     segment_scroll::render_segment_scroll,
-    state::{AppState, SegmentType},
+    state::{
+        AppState, ChartPreviewKey, DatasetImageLoadRequest, ImageLoadKey, RawImageLoadRequest,
+        SegmentType, VarLenImageLoadRequest,
+    },
 };
 
 fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
     let _ = tx_events.send(event);
 }
 
-fn send_image_failure(tx_events: &Sender<AppEvent>, message: impl Into<String>) {
+fn send_image_failure(tx_events: &Sender<AppEvent>, key: ImageLoadKey, message: impl Into<String>) {
     send_event(
         tx_events,
-        AppEvent::ImageLoad(ImageLoadedResult::Failure(message.into())),
+        AppEvent::ImageLoad(ImageLoadedResult::Failure {
+            key,
+            message: message.into(),
+        }),
     );
 }
 
-fn send_image_success(tx_events: &Sender<AppEvent>, protocol: ThreadProtocol) {
+fn send_image_success(tx_events: &Sender<AppEvent>, key: ImageLoadKey, protocol: ThreadProtocol) {
     send_event(
         tx_events,
-        AppEvent::ImageLoad(ImageLoadedResult::Success(protocol)),
+        AppEvent::ImageLoad(ImageLoadedResult::Success { key, protocol }),
     );
 }
 
-fn send_chart_failure(tx_events: &Sender<AppEvent>, message: impl Into<String>) {
+fn send_chart_failure(
+    tx_events: &Sender<AppEvent>,
+    key: ChartPreviewKey,
+    message: impl Into<String>,
+) {
     send_event(
         tx_events,
-        AppEvent::PreviewChartLoad(ImageLoadedResult::Failure(message.into())),
+        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Failure {
+            key,
+            message: message.into(),
+        }),
     );
 }
 
-fn send_chart_success(tx_events: &Sender<AppEvent>, protocol: ThreadProtocol) {
+fn send_chart_success(
+    tx_events: &Sender<AppEvent>,
+    key: ChartPreviewKey,
+    protocol: ThreadProtocol,
+) {
     send_event(
         tx_events,
-        AppEvent::PreviewChartLoad(ImageLoadedResult::Success(protocol)),
+        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Success { key, protocol }),
     );
 }
 
@@ -142,6 +160,10 @@ fn render_ds_img(
         horizontal: 2,
         vertical: 1,
     });
+    if state.should_debounce_preview(selected_node) {
+        f.render_widget("Loading image preview...", inner_area);
+        return Ok(());
+    }
     let image_loaded = state.img_state.is_from_ds(selected_node)
         && (!matches!(state.segment_state.segumented, SegmentType::Image)
             || state.img_state.idx_loaded == state.img_state.idx_to_load);
@@ -170,10 +192,14 @@ fn render_ds_img(
             let i = state.img_state.idx_to_load;
             state.img_state.idx_loaded = i;
             state.segment_state.idx = i;
-            state
-                .img_state
-                .tx_load_img
-                .send((ds_clone, state.segment_state.idx, img_type))?;
+            state.img_state.tx_load_img.send(DatasetImageLoadRequest {
+                key: ImageLoadKey {
+                    ds_path: ds.name(),
+                    idx: state.segment_state.idx,
+                },
+                dataset: ds_clone,
+                image_type: img_type,
+            })?;
         }
     }
 
@@ -196,6 +222,10 @@ fn render_raw_img(
         horizontal: 2,
         vertical: 1,
     });
+    if state.should_debounce_preview(selected_node) {
+        f.render_widget("Loading image preview...", inner_area);
+        return Ok(());
+    }
 
     let image_loaded = state.img_state.is_from_ds(selected_node)
         && (!matches!(state.segment_state.segumented, SegmentType::Image)
@@ -225,10 +255,14 @@ fn render_raw_img(
                     state.segment_state.segumented = SegmentType::NoSegment;
                     state.img_state.idx_loaded = state.img_state.idx_to_load;
                     let ds_buffered = BufReader::new(ds_reader);
-                    state
-                        .img_state
-                        .tx_load_imgfs
-                        .send((ds_buffered, img_format))?;
+                    state.img_state.tx_load_imgfs.send(RawImageLoadRequest {
+                        key: ImageLoadKey {
+                            ds_path: ds.name(),
+                            idx: state.img_state.idx_loaded,
+                        },
+                        reader: ds_buffered,
+                        format: img_format,
+                    })?;
                 }
                 hdf5_metno::types::TypeDescriptor::VarLenArray(arr_type) => {
                     if matches!(
@@ -243,7 +277,14 @@ fn render_raw_img(
                         state
                             .img_state
                             .tx_load_imgfsvlen
-                            .send((ds.clone(), i, img_format))?;
+                            .send(VarLenImageLoadRequest {
+                                key: ImageLoadKey {
+                                    ds_path: ds.name(),
+                                    idx: i,
+                                },
+                                dataset: ds.clone(),
+                                format: img_format,
+                            })?;
                     }
                 }
                 _ => {
@@ -341,6 +382,10 @@ pub fn handle_chartpreview_load(
                     Err(e) => {
                         send_chart_failure(
                             &tx_events,
+                            ChartPreviewKey {
+                                ds_path: req.ds_path.clone(),
+                                selection: req.selection.clone(),
+                            },
                             format!("Failed to plot data for chart preview: {}", e),
                         );
                         continue;
@@ -355,13 +400,24 @@ pub fn handle_chartpreview_load(
             {
                 send_chart_failure(
                     &tx_events,
+                    ChartPreviewKey {
+                        ds_path: req.ds_path.clone(),
+                        selection: req.selection.clone(),
+                    },
                     "Data not valid, could not establish min and max bounds for chart\nIt seems the data only contains NaN or infinite values.",
                 );
                 continue;
             }
 
             if let Err(e) = render_image_chart(&mut buffer, width, height, x_min, data_preview) {
-                send_chart_failure(&tx_events, format!("Failed to render chart preview: {}", e));
+                send_chart_failure(
+                    &tx_events,
+                    ChartPreviewKey {
+                        ds_path: req.ds_path.clone(),
+                        selection: req.selection.clone(),
+                    },
+                    format!("Failed to render chart preview: {}", e),
+                );
                 continue;
             }
 
@@ -370,6 +426,10 @@ pub fn handle_chartpreview_load(
             let Some(image) = image else {
                 send_chart_failure(
                     &tx_events,
+                    ChartPreviewKey {
+                        ds_path: req.ds_path.clone(),
+                        selection: req.selection.clone(),
+                    },
                     "Failed to create image buffer for chart preview",
                 );
                 continue;
@@ -379,7 +439,14 @@ pub fn handle_chartpreview_load(
 
             let stateful_protocol = picker.new_resize_protocol(dyn_img);
             let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-            send_chart_success(&tx_events, thread_protocol);
+            send_chart_success(
+                &tx_events,
+                ChartPreviewKey {
+                    ds_path: req.ds_path,
+                    selection: req.selection,
+                },
+                thread_protocol,
+            );
         }
     });
     tx_load
@@ -389,24 +456,25 @@ pub fn handle_imagefs_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
     picker: Picker,
-) -> Sender<(BufReader<ByteReader>, ImageFormat)> {
-    let (tx_load, rx_load) = channel::<(BufReader<ByteReader>, ImageFormat)>();
+) -> Sender<RawImageLoadRequest> {
+    let (tx_load, rx_load) = channel::<RawImageLoadRequest>();
 
     thread::spawn(move || loop {
-        if let Ok((mut ds_reader, mut img_format)) = rx_load.recv() {
+        if let Ok(mut req) = rx_load.recv() {
             // We drain to the latest
             while let Ok(queued) = rx_load.try_recv() {
-                ds_reader = queued.0;
-                img_format = queued.1;
+                req = queued;
             }
-            match image::load(ds_reader, img_format) {
+            match image::load(req.reader, req.format) {
                 Ok(dyn_img) => {
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, thread_protocol);
+                    send_image_success(&tx_events, req.key, thread_protocol);
                 }
-                Err(e) => send_image_failure(&tx_events, format!("Failed to decode image: {e}")),
+                Err(e) => {
+                    send_image_failure(&tx_events, req.key, format!("Failed to decode image: {e}"))
+                }
             }
         }
     });
@@ -417,38 +485,40 @@ pub fn handle_imagefsvlen_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
     picker: Picker,
-) -> Sender<(Dataset, i32, ImageFormat)> {
-    let (tx_load, rx_load) = channel::<(Dataset, i32, ImageFormat)>();
+) -> Sender<VarLenImageLoadRequest> {
+    let (tx_load, rx_load) = channel::<VarLenImageLoadRequest>();
 
     thread::spawn(move || loop {
-        if let Ok((mut ds, mut idx, mut img_format)) = rx_load.recv() {
+        if let Ok(mut req) = rx_load.recv() {
             // We drain to the latest
             while let Ok(queued) = rx_load.try_recv() {
-                ds = queued.0;
-                idx = queued.1;
-                img_format = queued.2;
+                req = queued;
             }
-            let data =
-                match ds.read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All) {
-                    Ok(d) => d[idx as usize].as_slice().to_vec(),
-                    Err(e) => {
-                        send_image_failure(&tx_events, e.to_string());
-                        continue;
-                    }
-                };
+            let data = match req
+                .dataset
+                .read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All)
+            {
+                Ok(d) => d[req.key.idx as usize].as_slice().to_vec(),
+                Err(e) => {
+                    send_image_failure(&tx_events, req.key, e.to_string());
+                    continue;
+                }
+            };
 
             let cursor = std::io::Cursor::new(data);
             let data = BufReader::new(cursor);
-            match image::load(data, img_format) {
+            match image::load(data, req.format) {
                 Ok(dyn_img) => {
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, thread_protocol);
+                    send_image_success(&tx_events, req.key, thread_protocol);
                 }
-                Err(e) => {
-                    send_image_failure(&tx_events, format!("Failed to decode varlen image: {e}"))
-                }
+                Err(e) => send_image_failure(
+                    &tx_events,
+                    req.key,
+                    format!("Failed to decode varlen image: {e}"),
+                ),
             }
         }
     });
@@ -459,12 +529,6 @@ pub fn handle_imagefsvlen_load(
 pub enum ImageResizeResult {
     Success(ResizeResponse),
     Error(String),
-}
-
-#[allow(clippy::large_enum_variant)]
-pub enum ImageLoadedResult {
-    Success(ThreadProtocol),
-    Failure(String),
 }
 
 enum BitDepth {
@@ -497,49 +561,61 @@ pub fn handle_image_load(
     tx_events: Sender<AppEvent>,
     tx_worker: Sender<ResizeRequest>,
     picker: Picker,
-) -> Sender<(Dataset, i32, ImageType)> {
-    let (tx_load, rx_load) = channel::<(Dataset, i32, ImageType)>();
+) -> Sender<DatasetImageLoadRequest> {
+    let (tx_load, rx_load) = channel::<DatasetImageLoadRequest>();
     thread::spawn(move || loop {
-        if let Ok((mut ds_reader, mut idx, mut img_format)) = rx_load.recv() {
+        if let Ok(mut req) = rx_load.recv() {
             while let Ok(queued) = rx_load.try_recv() {
                 // We drain to the latest
-                ds_reader = queued.0;
-                idx = queued.1;
-                img_format = queued.2;
+                req = queued;
             }
-            match img_format {
+            let key = req.key.clone();
+            match req.image_type {
                 ImageType::Grayscale => {
-                    let shape = ds_reader.shape();
-                    // panic!("idx: {idx}, shape: {shape:?}");
-                    let bit_depth = ds_reader.bit_depth();
+                    let shape = req.dataset.shape();
+                    let bit_depth = req.dataset.bit_depth();
 
                     let dyn_img = match bit_depth {
                         BitDepth::Bit8 => {
                             let data: Array2<u8> = match shape.len() {
-                                2 => match ds_reader.read_slice::<u8, _, _>(s![.., ..]) {
+                                2 => match req.dataset.read_slice::<u8, _, _>(s![.., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                3 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., ..]) {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
-                                        continue;
+                                3 => {
+                                    match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., ..]) {
+                                        Ok(d) => d,
+                                        Err(e) => {
+                                            send_image_failure(
+                                                &tx_events,
+                                                key.clone(),
+                                                e.to_string(),
+                                            );
+                                            continue;
+                                        }
                                     }
-                                },
-                                4 => match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., 0]) {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
-                                        continue;
+                                }
+                                4 => {
+                                    match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., 0])
+                                    {
+                                        Ok(d) => d,
+                                        Err(e) => {
+                                            send_image_failure(
+                                                &tx_events,
+                                                key.clone(),
+                                                e.to_string(),
+                                            );
+                                            continue;
+                                        }
                                     }
-                                },
+                                }
                                 _ => {
                                     send_image_failure(
                                         &tx_events,
+                                        key.clone(),
                                         "Invalid shape for Grayscale image",
                                     );
                                     continue;
@@ -558,36 +634,43 @@ pub fn handle_image_load(
                         }
                         BitDepth::Bit12 => {
                             let data: Array2<u16> = match shape.len() {
-                                2 => match ds_reader.read_slice::<u16, _, _>(s![.., ..]) {
+                                2 => match req.dataset.read_slice::<u16, _, _>(s![.., ..]) {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                3 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., ..]) {
+                                3 => match req.dataset.read_slice::<u16, _, _>(s![key.idx, .., ..])
+                                {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                4 => match ds_reader.read_slice::<u16, _, _>(s![idx, .., .., 0]) {
+                                4 => match req.dataset.read_slice::<u16, _, _>(s![
+                                    key.idx,
+                                    ..,
+                                    ..,
+                                    0
+                                ]) {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
                                 _ => {
                                     send_image_failure(
                                         &tx_events,
+                                        key.clone(),
                                         "Invalid shape for Grayscale image",
                                     );
                                     continue;
                                 }
                             };
-                            let data = data.mapv(|x| if x > 4095 { 4095 } else { x });
+                            let data = data.mapv(|x| x.min(4095));
                             let data = data.mapv(|x| ((x as f32 / 4095.0) * 255.0) as u8);
                             let shape = data.shape();
                             let mut image_buffer =
@@ -603,6 +686,7 @@ pub fn handle_image_load(
                         BitDepth::Unknown => {
                             send_image_failure(
                                 &tx_events,
+                                key.clone(),
                                 "Unsupported grayscale bit depth for image rendering",
                             );
                             continue;
@@ -612,14 +696,15 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol);
                 }
                 ImageType::Bitmap => {
-                    let shape = ds_reader.shape();
-                    let data: Array2<bool> = match ds_reader.read_slice::<bool, _, _>(s![.., ..]) {
+                    let shape = req.dataset.shape();
+                    let data: Array2<bool> = match req.dataset.read_slice::<bool, _, _>(s![.., ..])
+                    {
                         Ok(d) => d,
                         Err(e) => {
-                            send_image_failure(&tx_events, e.to_string());
+                            send_image_failure(&tx_events, key.clone(), e.to_string());
                             continue;
                         }
                     };
@@ -638,42 +723,36 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol);
                 }
                 ImageType::Truecolor(interlace) => {
-                    let shape = ds_reader.shape();
-                    let data = match shape.len() {
-                        3 => {
-                            let data: Array3<u8> =
-                                match ds_reader.read_slice::<u8, _, _>(s![.., .., ..]) {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
-                                        continue;
-                                    }
-                                };
-                            data
-                        }
-                        4 => {
-                            let data: Array3<u8> =
-                                match ds_reader.read_slice::<u8, _, _>(s![idx, .., .., ..]) {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        send_image_failure(&tx_events, e.to_string());
-                                        continue;
-                                    }
-                                };
-                            data
-                        }
+                    let shape = req.dataset.shape();
+                    let data: Array3<u8> = match shape.len() {
+                        3 => match req.dataset.read_slice::<u8, _, _>(s![.., .., ..]) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                send_image_failure(&tx_events, key.clone(), e.to_string());
+                                continue;
+                            }
+                        },
+                        4 => match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..]) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                send_image_failure(&tx_events, key.clone(), e.to_string());
+                                continue;
+                            }
+                        },
                         _ => {
-                            send_image_failure(&tx_events, "Invalid shape for Truecolor image");
-
+                            send_image_failure(
+                                &tx_events,
+                                key.clone(),
+                                "Invalid shape for Truecolor image",
+                            );
                             continue;
                         }
                     };
 
                     let shape = data.shape();
-
                     let mut image_buffer = image::RgbaImage::new(shape[1] as u32, shape[0] as u32);
                     match interlace {
                         InterlaceMode::Pixel => {
@@ -707,15 +786,13 @@ pub fn handle_image_load(
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol);
                 }
                 ImageType::Indexed(_interlace) => {
-                    send_image_failure(&tx_events, "Unsupported image format");
-                    continue;
+                    send_image_failure(&tx_events, key, "Unsupported image format");
                 }
                 _ => {
-                    send_image_failure(&tx_events, "Unsupported image format");
-                    continue;
+                    send_image_failure(&tx_events, key, "Unsupported image format");
                 }
             }
         }
