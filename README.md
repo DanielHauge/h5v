@@ -38,6 +38,7 @@ h5v path/to/file.h5
 - `G`/`End`: Go to the bottom
 - `m`: Add currently selected preview to multichart
 - `M`: Toggle multichart mode
+- `ctrl` + `r`: Reload the file from disk
 - `:` Enter command mode
 - `.` repeat last command
 - `?`: Show help
@@ -73,10 +74,7 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Fix issue related to segmentation errors (last segment fetched too many)
-- [ ] Prebuilt binaries for common platforms (distribution)
 - [ ] Edit file on readonly -> ask to open in write mode.
 - [ ] Add edit value for dataset values (scalar and single values)
 - [ ] Adding/Updating/Deletion of attributes/matrix values
-- [ ] Add support for compounds (treeview repr of fields recursively + select fields and if field is regular then preview as usual)
 - [ ] Add more command support: All actions could be cmd'able -> delete attribute, remove dataset from multi-chart, go up 50, etc. Anything that could change the state basically.
