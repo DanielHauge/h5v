@@ -4,7 +4,7 @@ use super::{
     image_preview::render_img,
     preview_chart::render_chart_preview,
     state::AppState,
-    std_comp_render::{render_error, render_string, render_unsupported_rendering},
+    std_comp_render::{render_empty_dataset, render_error, render_string, render_unsupported_rendering},
 };
 use crate::{
     error::AppError,
@@ -24,6 +24,10 @@ pub fn render_preview(
     let node = selected_node.node.clone();
 
     if let Node::Dataset(_, attr) = node {
+        if attr.is_empty() {
+            render_empty_dataset(f, &area_inner);
+            return;
+        }
         match &attr.image {
             Some(image_type) => {
                 match render_img(image_type, f, &area_inner, selected_node, state) {

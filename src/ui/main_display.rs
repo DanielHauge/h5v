@@ -24,6 +24,7 @@ use super::{
     attributes::render_info_attributes,
     matrix::{render_matrix, render_not_yet_implemented},
     preview::render_preview,
+    std_comp_render::render_empty_dataset,
     state::{AppState, ContentShowMode},
 };
 
@@ -127,6 +128,10 @@ pub fn render_main_display(
                     unreachable!("Should not render matrix for anything other than dataset")
                 }
             };
+            if attr.is_empty() {
+                render_empty_dataset(f, &content_area);
+                return Ok(());
+            }
             match attr.matrixable {
                 None => {
                     return Ok(());

@@ -254,6 +254,10 @@ impl DatasetMeta {
         self.data_type.clone()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.total_elems == 0
+    }
+
     pub fn size_string(&self) -> String {
         let size = self.total_bytes;
         let total_storage = self.storage_required;

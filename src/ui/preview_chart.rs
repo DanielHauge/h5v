@@ -41,15 +41,15 @@ pub fn render_chart_preview(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    let selected_node = &node.node;
-    let (ds, ds_meta) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+    let (ds, ds_meta) = match &node.node {
+        Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
     };
-    let ds = ds.clone();
 
     let shape = ds.shape();
     let total_dims = shape.len();
+    node.sync_selection_rank(total_dims);
+    let selected_node = &node.node;
     let x_selectable_dims: Vec<usize> = shape
         .iter()
         .enumerate()
@@ -130,10 +130,9 @@ pub fn render_chart_preview(
         return Ok(());
     }
 
-    let selected_indexe_length = node.selected_indexes.len();
-    for i in 0..selected_indexe_length {
+    for (i, selected_index) in node.selected_indexes.iter_mut().enumerate() {
         if !x_selectable_dims.contains(&i) {
-            node.selected_indexes[i] = 0;
+            *selected_index = 0;
         }
     }
 

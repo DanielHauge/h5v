@@ -255,13 +255,15 @@ impl AppState<'_> {
 
     pub fn get_1d_selection(&self) -> Option<(Dataset, Selection)> {
         let current_node = &self.treeview[self.tree_view_cursor];
-        let node = current_node.node.borrow();
-        let Node::Dataset(ds, dsattr) = &node.node else {
-            return None;
+        let mut node = current_node.node.borrow_mut();
+        let (ds, shape) = match &node.node {
+            Node::Dataset(ds, dsattr) => (ds.clone(), dsattr.shape.clone()),
+            _ => return None,
         };
+        node.sync_selection_rank(shape.len());
         let selected_dim = node.selected_x;
         let mut slice: Vec<SliceOrIndex> = Vec::new();
-        for (dim, _) in dsattr.shape.iter().enumerate() {
+        for (dim, _) in shape.iter().enumerate() {
             if dim == selected_dim {
                 slice.push(SliceOrIndex::Unlimited {
                     start: 0,
@@ -273,16 +275,18 @@ impl AppState<'_> {
             }
         }
         let hyperslap = Hyperslab::from(slice);
-        Some((ds.clone(), Selection::Hyperslab(hyperslap)))
+        Some((ds, Selection::Hyperslab(hyperslap)))
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
-        let Node::Dataset(_, dsattr) = &node.node else {
-            return Ok(EventResult::Continue);
+        let shape_len = match &node.node {
+            Node::Dataset(_, dsattr) => dsattr.shape.len(),
+            _ => return Ok(EventResult::Continue),
         };
-        let current_shape_len = dsattr.shape.len() as isize;
+        node.sync_selection_rank(shape_len);
+        let current_shape_len = shape_len as isize;
         let next = node.selected_dim as isize + delta;
         let new_selected_dim = if next < 0 {
             (current_shape_len - 1) as usize
@@ -342,10 +346,12 @@ impl AppState<'_> {
     pub fn change_selected_index(&mut self, delta: isize) -> Result<EventResult> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
-        let Node::Dataset(_, dsattr) = &node.node else {
-            return Ok(EventResult::Continue);
+        let shape = match &node.node {
+            Node::Dataset(_, dsattr) => dsattr.shape.clone(),
+            _ => return Ok(EventResult::Continue),
         };
-        let x_shape = dsattr.shape[node.selected_dim];
+        node.sync_selection_rank(shape.len());
+        let x_shape = shape[node.selected_dim];
         let current_selected_dim = node.selected_indexes[node.selected_dim] as isize;
         let new_current_x_index =
             (current_selected_dim + delta).clamp(0, x_shape as isize - 1) as usize;

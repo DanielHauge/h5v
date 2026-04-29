@@ -18,11 +18,12 @@ pub fn render_dim_selector(
     shape: &[usize],
     row_columns: bool,
 ) -> Result<(), Error> {
+    node.sync_selection_rank(shape.len());
     let x_selection = node.selected_x;
     let row_selection = node.selected_row;
     let col_selection = node.selected_col;
     let selected_dim = node.selected_dim;
-    let index_selection = node.selected_indexes;
+    let index_selection = &node.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
         .borders(Borders::ALL)
@@ -97,7 +98,7 @@ pub fn render_dim_selector(
             let x_line = Line::from(x_span).alignment(Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == selected_dim {
-            let selected_index = index_selection[i];
+            let selected_index = index_selection.get(i).copied().unwrap_or_default();
             let span = Span::from(format!("{}", selected_index)).style(
                 Style::default()
                     .bold()
@@ -107,7 +108,7 @@ pub fn render_dim_selector(
             let selected_line = Line::from(span).alignment(Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else {
-            let selected_index = index_selection[i];
+            let selected_index = index_selection.get(i).copied().unwrap_or_default();
             let selected_line =
                 Line::from(format!("{}", selected_index)).alignment(Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
@@ -138,6 +139,7 @@ impl HasMatrixSelection for AppState<'_> {
         matrix_view: MatrixSelection,
         shape: &[usize],
     ) -> Selection {
+        node.sync_selection_rank(shape.len());
         let mut slice: Vec<SliceOrIndex> = Vec::new();
         let total_dims = shape.len();
         if total_dims == 1 {
@@ -151,7 +153,7 @@ impl HasMatrixSelection for AppState<'_> {
                 block: 1,
             });
         } else {
-            let selections = node.selected_indexes;
+            let selections = &node.selected_indexes;
             (0..total_dims).for_each(|dim| {
                 if node.selected_col == dim {
                     slice.push(SliceOrIndex::SliceTo {

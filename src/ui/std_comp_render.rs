@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     text::{Line, Span, Text},
-    widgets::{Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 use syntect::{
@@ -178,6 +178,27 @@ pub fn render_error<T: ToString>(f: &mut Frame, area: &Rect, error: T) {
             .style(ratatui::style::Style::default().fg(color_consts::ERROR_COLOR)),
         *area,
     );
+}
+
+pub fn render_empty_dataset(f: &mut Frame, area: &Rect) {
+    let text = Text::from(vec![
+        Line::from("This dataset is gloriously empty."),
+        Line::from(""),
+        Line::from("No rows. No values. Just pure potential."),
+        Line::from(""),
+        Line::from("   (a tiny void is vibing here)"),
+    ]);
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(ratatui::style::Style::default().fg(color_consts::BREAK_COLOR))
+                .title(" Empty dataset ")
+                .title_alignment(Alignment::Center),
+        );
+    f.render_widget(paragraph, *area);
 }
 
 pub fn render_unsupported_rendering(f: &mut Frame, area: &Rect, selected_node: &Node, desc: &str) {

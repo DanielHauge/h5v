@@ -105,6 +105,7 @@ pub fn render_matrix<T: H5Type + Display>(
         vertical: 1,
     });
     let shape_len = attr.shape.len();
+    node.sync_selection_rank(shape_len);
 
     let matrix_area = if shape_len > 1 {
         let x_selectable_dims: Vec<usize> = attr
@@ -115,10 +116,9 @@ pub fn render_matrix<T: H5Type + Display>(
             .map(|(i, _)| i)
             .collect();
 
-        let selected_indexe_length = node.selected_indexes.len();
-        for i in 0..selected_indexe_length {
+        for (i, selected_index) in node.selected_indexes.iter_mut().enumerate() {
             if !x_selectable_dims.contains(&i) {
-                node.selected_indexes[i] = 0;
+                *selected_index = 0;
             }
         }
 

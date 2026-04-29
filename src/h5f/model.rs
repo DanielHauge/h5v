@@ -80,11 +80,16 @@ pub struct H5FNode {
     pub selected_col: usize,
     pub line_offset: usize,
     pub col_offset: isize,
-    pub selected_indexes: [usize; 15], // WARN: Will we ever need more than 15 dimensions?
+    pub selected_indexes: Vec<usize>,
 }
 
 impl H5FNode {
     pub fn new(node_type: Node) -> Self {
+        let selected_indexes = match &node_type {
+            Node::Dataset(_, meta) => vec![0; meta.shape.len()],
+            _ => vec![],
+        };
+        let selected_col = if selected_indexes.len() > 1 { 1 } else { 0 };
         Self {
             display_name: None,
             expanded: false,
@@ -97,10 +102,36 @@ impl H5FNode {
             selected_dim: 0,
             selected_x: 0,
             selected_row: 0,
-            selected_col: 1,
+            selected_col,
             line_offset: 0,
             col_offset: 0,
-            selected_indexes: [0; 15], // WARN: Will we ever need more than 15 dimensions?
+            selected_indexes,
+        }
+    }
+
+    pub fn sync_selection_rank(&mut self, rank: usize) {
+        self.selected_indexes.resize(rank, 0);
+
+        if rank == 0 {
+            self.selected_dim = 0;
+            self.selected_x = 0;
+            self.selected_row = 0;
+            self.selected_col = 0;
+            return;
+        }
+
+        let last = rank - 1;
+        self.selected_dim = self.selected_dim.min(last);
+        self.selected_x = self.selected_x.min(last);
+        self.selected_row = self.selected_row.min(last);
+
+        if rank == 1 {
+            self.selected_col = 0;
+        } else {
+            self.selected_col = self.selected_col.min(last);
+            if self.selected_col == self.selected_row {
+                self.selected_col = (self.selected_row + 1).min(last);
+            }
         }
     }
 
