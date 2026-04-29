@@ -5,7 +5,7 @@ use std::{
 };
 
 use hdf5_metno::{types::IntSize, Dataset, Selection};
-use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+use image::{imageops::FilterType, DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use ndarray::{s, Array2, Array3};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -15,7 +15,7 @@ use ratatui::{
 use ratatui_image::{
     picker::Picker,
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
-    StatefulImage,
+    Resize, StatefulImage,
 };
 
 use crate::{
@@ -24,17 +24,17 @@ use crate::{
     h5f::{H5FNode, ImageType, InterlaceMode, Node},
     ui::{
         preview_chart::{render_image_chart, MAX_SEGMENT_SIZE},
-        state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs},
+        state::{ChartPreviewLoadRequest, ChartPreviewSource},
     },
 };
 
 use super::app::{ChartPreviewLoadedResult, ImageLoadedResult};
 use super::{
     app::AppEvent,
-    segment_scroll::render_segment_scroll,
+    segment_scroll::render_position_scroll,
     state::{
-        AppState, ChartPreviewKey, DatasetImageLoadRequest, ImageLoadKey, RawImageLoadRequest,
-        SegmentType, VarLenImageLoadRequest,
+        AppState, ChartPreviewKey, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
+        ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
     },
 };
 
@@ -84,6 +84,136 @@ fn send_chart_success(
     );
 }
 
+fn dataset_image_dims(image_type: &ImageType, ds: &Dataset) -> Option<(usize, usize, usize)> {
+    let shape = ds.shape();
+    match image_type {
+        ImageType::Grayscale => match shape.len() {
+            2 => Some((1, shape[0], shape[1])),
+            3 => Some((shape[0], shape[1], shape[2])),
+            4 => Some((shape[0], shape[1], shape[2])),
+            _ => None,
+        },
+        ImageType::Bitmap => match shape.len() {
+            2 => Some((1, shape[0], shape[1])),
+            _ => None,
+        },
+        ImageType::Truecolor(InterlaceMode::Pixel) => match shape.len() {
+            3 => Some((1, shape[0], shape[1])),
+            4 => Some((shape[0], shape[1], shape[2])),
+            _ => None,
+        },
+        ImageType::Truecolor(InterlaceMode::Plane) => match shape.len() {
+            3 => Some((1, shape[1], shape[2])),
+            4 => Some((shape[0], shape[2], shape[3])),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn compute_image_window(
+    ds_path: &str,
+    image_type: &ImageType,
+    ds: &Dataset,
+    area: &Rect,
+    image_cell_size: (u16, u16),
+    has_chrome: bool,
+    current: Option<&ImageWindowState>,
+) -> Option<ImageWindowState> {
+    let (_, height, width) = dataset_image_dims(image_type, ds)?;
+    let chrome_width_loss = if has_chrome { 2 } else { 0 };
+    let chrome_height_loss = if has_chrome { 1 } else { 0 };
+    let viewport_width = area.width.saturating_sub(chrome_width_loss).max(1) as f32
+        * image_cell_size.0.max(1) as f32;
+    let viewport_height = area.height.saturating_sub(chrome_height_loss).max(1) as f32
+        * image_cell_size.1.max(1) as f32;
+    let viewport_aspect = viewport_width / viewport_height;
+
+    let candidate = if (width as f32 / height as f32) > viewport_aspect {
+        let len = ((height as f32 * viewport_aspect).floor() as usize).clamp(1, width);
+        (len < width).then_some((ImageWindowAxis::Cols, width, len))
+    } else {
+        let len = ((width as f32 / viewport_aspect).floor() as usize).clamp(1, height);
+        (len < height).then_some((ImageWindowAxis::Rows, height, len))
+    }?;
+
+    let (axis, total, len) = candidate;
+    let start = match current {
+        Some(existing)
+            if existing.ds_path == ds_path && existing.axis == axis && existing.total == total =>
+        {
+            let center = existing.start + existing.len / 2;
+            ImageWindowState::centered_start(total, len, center)
+        }
+        _ => 0,
+    };
+
+    Some(ImageWindowState {
+        ds_path: ds_path.to_string(),
+        axis,
+        start,
+        len,
+        total,
+    })
+}
+
+fn window_bounds(window: Option<&ImageWindowState>) -> Option<(usize, usize)> {
+    window.map(|window| (window.start, window.end()))
+}
+
+fn render_image_chrome(
+    f: &mut Frame,
+    area: &Rect,
+    stack: Option<(i32, i32)>,
+    window: Option<&ImageWindowState>,
+) -> Result<Rect, AppError> {
+    if stack.is_none() && window.is_none() {
+        return Ok(*area);
+    }
+
+    let areas_split =
+        Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
+    let content_areas =
+        Layout::vertical(vec![Constraint::Length(1), Constraint::Min(2)]).split(areas_split[0]);
+
+    let title = match (stack, window) {
+        (Some((idx, count)), Some(window)) => format!(
+            " Image {}/{} | {} {}..{} / {} ",
+            idx + 1,
+            count,
+            window.label(),
+            window.start,
+            window.end().saturating_sub(1),
+            window.total.saturating_sub(1)
+        ),
+        (Some((idx, count)), None) => format!(" Image {}/{} ", idx + 1, count),
+        (None, Some(window)) => format!(
+            " Image | {} {}..{} / {} ",
+            window.label(),
+            window.start,
+            window.end().saturating_sub(1),
+            window.total.saturating_sub(1)
+        ),
+        (None, None) => " Image ".to_string(),
+    };
+
+    if let Some(window) = window {
+        render_position_scroll(f, &areas_split[1], window.total, window.start, window.len)?;
+    } else if let Some((idx, count)) = stack {
+        render_position_scroll(f, &areas_split[1], count as usize, idx as usize, 1)?;
+    }
+
+    let block = ratatui::widgets::Block::default()
+        .title(title)
+        .title_alignment(ratatui::layout::Alignment::Center)
+        .borders(ratatui::widgets::Borders::TOP)
+        .border_type(ratatui::widgets::BorderType::Plain)
+        .style(Style::default().fg(ratatui::style::Color::DarkGray));
+
+    f.render_widget(block, content_areas[0]);
+    Ok(content_areas[1])
+}
+
 pub fn render_img(
     image_type: &ImageType,
     f: &mut Frame,
@@ -93,34 +223,40 @@ pub fn render_img(
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let node = &selected_node_refc.node;
-    let area = if let SegmentType::Image = state.segment_state.segumented {
-        let areas_split =
-            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
-        render_segment_scroll(f, &areas_split[1], state)?;
-        let areas_split =
-            Layout::vertical(vec![Constraint::Length(1), Constraint::Min(2)]).split(areas_split[0]);
-        // center styles
-        let idx = state.segment_state.idx + 1;
-        let segment_count = state.segment_state.segment_count;
-        let block = ratatui::widgets::Block::default()
-            .title(format!(" Image {}/{} ", idx, segment_count))
-            .title_alignment(ratatui::layout::Alignment::Center)
-            .borders(ratatui::widgets::Borders::TOP)
-            .border_type(ratatui::widgets::BorderType::Plain)
-            .style(Style::default().fg(ratatui::style::Color::DarkGray));
-
-        f.render_widget(block, areas_split[0]);
-        areas_split[1]
-    } else {
-        *area
-    };
     match image_type {
-        ImageType::Jpeg => render_raw_img(f, &area, node, state, ImageFormat::Jpeg),
-        ImageType::Png => render_raw_img(f, &area, node, state, ImageFormat::Png),
-        ImageType::Truecolor(m) => {
-            render_ds_img(f, &area, node, state, ImageType::Truecolor(m.clone()))
+        ImageType::Jpeg => {
+            state.img_state.window = None;
+            let render_area = if let SegmentType::Image = state.segment_state.segumented {
+                render_image_chrome(
+                    f,
+                    area,
+                    Some((state.segment_state.idx, state.segment_state.segment_count)),
+                    None,
+                )?
+            } else {
+                *area
+            };
+            render_raw_img(f, &render_area, node, state, ImageFormat::Jpeg)
         }
-        ImageType::Grayscale => render_ds_img(f, &area, node, state, ImageType::Grayscale),
+        ImageType::Png => {
+            state.img_state.window = None;
+            let render_area = if let SegmentType::Image = state.segment_state.segumented {
+                render_image_chrome(
+                    f,
+                    area,
+                    Some((state.segment_state.idx, state.segment_state.segment_count)),
+                    None,
+                )?
+            } else {
+                *area
+            };
+            render_raw_img(f, &render_area, node, state, ImageFormat::Png)
+        }
+        ImageType::Truecolor(m) => {
+            render_ds_img(f, area, node, state, ImageType::Truecolor(m.clone()))
+        }
+        ImageType::Grayscale => render_ds_img(f, area, node, state, ImageType::Grayscale),
+        ImageType::Bitmap => render_ds_img(f, area, node, state, ImageType::Bitmap),
         _ => render_unsupported_image_format(f, &area, node),
     }
 }
@@ -155,50 +291,83 @@ fn render_ds_img(
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
     };
+    let ds_path = ds.name();
+    let frame_count = dataset_image_dims(&img_type, ds)
+        .map(|(frames, _, _)| frames)
+        .unwrap_or(1);
+    if frame_count > 1 {
+        state.segment_state.segumented = SegmentType::Image;
+        state.segment_state.segment_count = frame_count as i32;
+        state.segment_state.idx = state.img_state.idx_to_load;
+    } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
+        state.img_state.idx_to_load = 0;
+    }
+    let preliminary_window = compute_image_window(
+        &ds_path,
+        &img_type,
+        ds,
+        area,
+        state.image_cell_size,
+        false,
+        state.img_state.window.as_ref(),
+    );
+    let desired_window = compute_image_window(
+        &ds_path,
+        &img_type,
+        ds,
+        area,
+        state.image_cell_size,
+        frame_count > 1 || preliminary_window.is_some(),
+        state.img_state.window.as_ref(),
+    )
+    .or(preliminary_window);
+    state.img_state.window = desired_window.clone();
 
-    let inner_area = area.inner(ratatui::layout::Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
+    let render_area = render_image_chrome(
+        f,
+        area,
+        (frame_count > 1).then_some((state.segment_state.idx, state.segment_state.segment_count)),
+        desired_window.as_ref(),
+    )?;
     if state.should_debounce_preview(selected_node) {
-        f.render_widget("Loading image preview...", inner_area);
+        f.render_widget("Loading image preview...", render_area);
         return Ok(());
     }
-    let image_loaded = state.img_state.is_from_ds(selected_node)
-        && (!matches!(state.segment_state.segumented, SegmentType::Image)
-            || state.img_state.idx_loaded == state.img_state.idx_to_load);
+
+    let desired_key = ImageLoadKey {
+        ds_path: ds_path.clone(),
+        idx: state.img_state.idx_to_load,
+        window_axis: desired_window.as_ref().map(|window| window.axis),
+        window_start: desired_window.as_ref().map_or(0, |window| window.start),
+        window_len: desired_window.as_ref().map_or(0, |window| window.len),
+    };
+    let image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
 
     match image_loaded {
         true => {
             if let Some(e) = &state.img_state.error {
                 let error_msg = format!("Error loading image: {}", e);
-                f.render_widget(error_msg, inner_area);
+                f.render_widget(error_msg, render_area);
             } else if let Some(ref mut protocol) = state.img_state.protocol {
-                let image_widget = StatefulImage::default();
-                f.render_stateful_widget(image_widget, inner_area, protocol);
+                let image_widget =
+                    StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+                f.render_stateful_widget(image_widget, render_area, protocol);
             }
         }
         false => {
             state.img_state.protocol = None;
             state.img_state.error = None;
-            state.img_state.ds = Some(ds.name());
-            if ds.shape().len() == 4 {
-                state.segment_state.segumented = SegmentType::Image;
-            }
-            if let SegmentType::Image = state.segment_state.segumented {
-                state.segment_state.segment_count = ds.shape()[0] as i32
-            };
-            let ds_clone = ds.clone();
-            let i = state.img_state.idx_to_load;
-            state.img_state.idx_loaded = i;
-            state.segment_state.idx = i;
+            state.img_state.ds = Some(ds_path);
+            state.img_state.idx_loaded = state.img_state.idx_to_load;
+            state.img_state.current_key = Some(desired_key.clone());
             state.img_state.tx_load_img.send(DatasetImageLoadRequest {
-                key: ImageLoadKey {
-                    ds_path: ds.name(),
-                    idx: state.segment_state.idx,
-                },
-                dataset: ds_clone,
+                key: desired_key,
+                dataset: ds.clone(),
                 image_type: img_type,
+                window: desired_window,
             })?;
         }
     }
@@ -218,29 +387,31 @@ fn render_raw_img(
         _ => return Ok(()),
     };
 
-    let inner_area = area.inner(ratatui::layout::Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
     if state.should_debounce_preview(selected_node) {
-        f.render_widget("Loading image preview...", inner_area);
+        f.render_widget("Loading image preview...", *area);
         return Ok(());
     }
 
-    let image_loaded = state.img_state.is_from_ds(selected_node)
-        && (!matches!(state.segment_state.segumented, SegmentType::Image)
-            || state.img_state.idx_loaded == state.img_state.idx_to_load);
+    let desired_key = ImageLoadKey {
+        ds_path: ds.name(),
+        idx: state.img_state.idx_to_load,
+        window_axis: None,
+        window_start: 0,
+        window_len: 0,
+    };
+    let image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
 
     match image_loaded {
         true => match state.img_state.error {
             Some(ref e) => {
                 let error_msg = format!("Error loading image - {}", e);
-                f.render_widget(error_msg, inner_area);
+                f.render_widget(error_msg, *area);
             }
             None => {
                 if let Some(ref mut protocol) = state.img_state.protocol {
-                    let image_widget = StatefulImage::new();
-                    f.render_stateful_widget(image_widget, inner_area, protocol);
+                    let image_widget =
+                        StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
+                    f.render_stateful_widget(image_widget, *area, protocol);
                 }
             }
         },
@@ -254,12 +425,10 @@ fn render_raw_img(
                     let ds_reader = ds.as_byte_reader()?;
                     state.segment_state.segumented = SegmentType::NoSegment;
                     state.img_state.idx_loaded = state.img_state.idx_to_load;
+                    state.img_state.current_key = Some(desired_key.clone());
                     let ds_buffered = BufReader::new(ds_reader);
                     state.img_state.tx_load_imgfs.send(RawImageLoadRequest {
-                        key: ImageLoadKey {
-                            ds_path: ds.name(),
-                            idx: state.img_state.idx_loaded,
-                        },
+                        key: desired_key,
                         reader: ds_buffered,
                         format: img_format,
                     })?;
@@ -274,14 +443,12 @@ fn render_raw_img(
                         state.segment_state.segumented = SegmentType::Image;
                         state.segment_state.segment_count = ds.shape()[0] as i32;
                         state.segment_state.idx = i;
+                        state.img_state.current_key = Some(desired_key.clone());
                         state
                             .img_state
                             .tx_load_imgfsvlen
                             .send(VarLenImageLoadRequest {
-                                key: ImageLoadKey {
-                                    ds_path: ds.name(),
-                                    idx: i,
-                                },
+                                key: desired_key,
                                 dataset: ds.clone(),
                                 format: img_format,
                             })?;
@@ -290,7 +457,7 @@ fn render_raw_img(
                 _ => {
                     state.img_state.error = Some("Unsupported image format".to_string());
                     let error_msg = format!("Unsupported image format for dataset: {}", ds.name());
-                    f.render_widget(error_msg, inner_area);
+                    f.render_widget(error_msg, *area);
                     return Ok(());
                 }
             }
@@ -570,6 +737,7 @@ pub fn handle_image_load(
                 req = queued;
             }
             let key = req.key.clone();
+            let window = req.window.as_ref();
             match req.image_type {
                 ImageType::Grayscale => {
                     let shape = req.dataset.shape();
@@ -578,40 +746,69 @@ pub fn handle_image_load(
                     let dyn_img = match bit_depth {
                         BitDepth::Bit8 => {
                             let data: Array2<u8> = match shape.len() {
-                                2 => match req.dataset.read_slice::<u8, _, _>(s![.., ..]) {
+                                2 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => {
+                                            req.dataset.read_slice::<u8, _, _>(s![.., start..end])
+                                        }
+                                        Some(ImageWindowAxis::Rows) => {
+                                            req.dataset.read_slice::<u8, _, _>(s![start..end, ..])
+                                        }
+                                        None => req.dataset.read_slice::<u8, _, _>(s![.., ..]),
+                                    },
+                                    None => req.dataset.read_slice::<u8, _, _>(s![.., ..]),
+                                } {
                                     Ok(d) => d,
                                     Err(e) => {
                                         send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                3 => {
-                                    match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., ..]) {
-                                        Ok(d) => d,
-                                        Err(e) => {
-                                            send_image_failure(
-                                                &tx_events,
-                                                key.clone(),
-                                                e.to_string(),
-                                            );
-                                            continue;
+                                3 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => req
+                                            .dataset
+                                            .read_slice::<u8, _, _>(s![key.idx, .., start..end]),
+                                        Some(ImageWindowAxis::Rows) => req
+                                            .dataset
+                                            .read_slice::<u8, _, _>(s![key.idx, start..end, ..]),
+                                        None => {
+                                            req.dataset.read_slice::<u8, _, _>(s![key.idx, .., ..])
                                         }
+                                    },
+                                    None => req.dataset.read_slice::<u8, _, _>(s![key.idx, .., ..]),
+                                } {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
+                                        continue;
                                     }
-                                }
-                                4 => {
-                                    match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., 0])
-                                    {
-                                        Ok(d) => d,
-                                        Err(e) => {
-                                            send_image_failure(
-                                                &tx_events,
-                                                key.clone(),
-                                                e.to_string(),
-                                            );
-                                            continue;
-                                        }
+                                },
+                                4 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => req
+                                            .dataset
+                                            .read_slice::<u8, _, _>(s![key.idx, .., start..end, 0]),
+                                        Some(ImageWindowAxis::Rows) => req
+                                            .dataset
+                                            .read_slice::<u8, _, _>(s![key.idx, start..end, .., 0]),
+                                        None => req.dataset.read_slice::<u8, _, _>(s![
+                                            key.idx,
+                                            ..,
+                                            ..,
+                                            0
+                                        ]),
+                                    },
+                                    None => {
+                                        req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., 0])
                                     }
-                                }
+                                } {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        send_image_failure(&tx_events, key.clone(), e.to_string());
+                                        continue;
+                                    }
+                                },
                                 _ => {
                                     send_image_failure(
                                         &tx_events,
@@ -634,27 +831,75 @@ pub fn handle_image_load(
                         }
                         BitDepth::Bit12 => {
                             let data: Array2<u16> = match shape.len() {
-                                2 => match req.dataset.read_slice::<u16, _, _>(s![.., ..]) {
+                                2 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => {
+                                            req.dataset.read_slice::<u16, _, _>(s![.., start..end])
+                                        }
+                                        Some(ImageWindowAxis::Rows) => {
+                                            req.dataset.read_slice::<u16, _, _>(s![start..end, ..])
+                                        }
+                                        None => req.dataset.read_slice::<u16, _, _>(s![.., ..]),
+                                    },
+                                    None => req.dataset.read_slice::<u16, _, _>(s![.., ..]),
+                                } {
                                     Ok(d) => d,
                                     Err(e) => {
                                         send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                3 => match req.dataset.read_slice::<u16, _, _>(s![key.idx, .., ..])
-                                {
+                                3 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => req
+                                            .dataset
+                                            .read_slice::<u16, _, _>(s![key.idx, .., start..end]),
+                                        Some(ImageWindowAxis::Rows) => req
+                                            .dataset
+                                            .read_slice::<u16, _, _>(s![key.idx, start..end, ..]),
+                                        None => {
+                                            req.dataset.read_slice::<u16, _, _>(s![key.idx, .., ..])
+                                        }
+                                    },
+                                    None => {
+                                        req.dataset.read_slice::<u16, _, _>(s![key.idx, .., ..])
+                                    }
+                                } {
                                     Ok(d) => d,
                                     Err(e) => {
                                         send_image_failure(&tx_events, key.clone(), e.to_string());
                                         continue;
                                     }
                                 },
-                                4 => match req.dataset.read_slice::<u16, _, _>(s![
-                                    key.idx,
-                                    ..,
-                                    ..,
-                                    0
-                                ]) {
+                                4 => match match window_bounds(window) {
+                                    Some((start, end)) => match window.map(|w| w.axis) {
+                                        Some(ImageWindowAxis::Cols) => {
+                                            req.dataset.read_slice::<u16, _, _>(s![
+                                                key.idx,
+                                                ..,
+                                                start..end,
+                                                0
+                                            ])
+                                        }
+                                        Some(ImageWindowAxis::Rows) => {
+                                            req.dataset.read_slice::<u16, _, _>(s![
+                                                key.idx,
+                                                start..end,
+                                                ..,
+                                                0
+                                            ])
+                                        }
+                                        None => req.dataset.read_slice::<u16, _, _>(s![
+                                            key.idx,
+                                            ..,
+                                            ..,
+                                            0
+                                        ]),
+                                    },
+                                    None => {
+                                        req.dataset.read_slice::<u16, _, _>(s![key.idx, .., .., 0])
+                                    }
+                                } {
                                     Ok(d) => d,
                                     Err(e) => {
                                         send_image_failure(&tx_events, key.clone(), e.to_string());
@@ -699,16 +944,26 @@ pub fn handle_image_load(
                     send_image_success(&tx_events, key, thread_protocol);
                 }
                 ImageType::Bitmap => {
-                    let shape = req.dataset.shape();
-                    let data: Array2<bool> = match req.dataset.read_slice::<bool, _, _>(s![.., ..])
-                    {
+                    let data: Array2<bool> = match match window_bounds(window) {
+                        Some((start, end)) => match window.map(|w| w.axis) {
+                            Some(ImageWindowAxis::Cols) => {
+                                req.dataset.read_slice::<bool, _, _>(s![.., start..end])
+                            }
+                            Some(ImageWindowAxis::Rows) => {
+                                req.dataset.read_slice::<bool, _, _>(s![start..end, ..])
+                            }
+                            None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
+                        },
+                        None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
+                    } {
                         Ok(d) => d,
                         Err(e) => {
                             send_image_failure(&tx_events, key.clone(), e.to_string());
                             continue;
                         }
                     };
-                    let mut image_buffer = image::GrayImage::new(shape[0] as u32, shape[1] as u32);
+                    let shape = data.shape();
+                    let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
                     for i in 0..shape[1] {
                         for j in 0..shape[0] {
                             let pixel = if data[[i, j]] {
@@ -728,14 +983,68 @@ pub fn handle_image_load(
                 ImageType::Truecolor(interlace) => {
                     let shape = req.dataset.shape();
                     let data: Array3<u8> = match shape.len() {
-                        3 => match req.dataset.read_slice::<u8, _, _>(s![.., .., ..]) {
+                        3 => match match interlace {
+                            InterlaceMode::Pixel => match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![.., start..end, ..])
+                                    }
+                                    Some(ImageWindowAxis::Rows) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![start..end, .., ..])
+                                    }
+                                    None => req.dataset.read_slice::<u8, _, _>(s![.., .., ..]),
+                                },
+                                None => req.dataset.read_slice::<u8, _, _>(s![.., .., ..]),
+                            },
+                            InterlaceMode::Plane => match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![.., .., start..end])
+                                    }
+                                    Some(ImageWindowAxis::Rows) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![.., start..end, ..])
+                                    }
+                                    None => req.dataset.read_slice::<u8, _, _>(s![.., .., ..]),
+                                },
+                                None => req.dataset.read_slice::<u8, _, _>(s![.., .., ..]),
+                            },
+                        } {
                             Ok(d) => d,
                             Err(e) => {
                                 send_image_failure(&tx_events, key.clone(), e.to_string());
                                 continue;
                             }
                         },
-                        4 => match req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..]) {
+                        4 => match match interlace {
+                            InterlaceMode::Pixel => match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => req
+                                        .dataset
+                                        .read_slice::<u8, _, _>(s![key.idx, .., start..end, ..]),
+                                    Some(ImageWindowAxis::Rows) => req
+                                        .dataset
+                                        .read_slice::<u8, _, _>(s![key.idx, start..end, .., ..]),
+                                    None => {
+                                        req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..])
+                                    }
+                                },
+                                None => req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..]),
+                            },
+                            InterlaceMode::Plane => match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => req
+                                        .dataset
+                                        .read_slice::<u8, _, _>(s![key.idx, .., .., start..end]),
+                                    Some(ImageWindowAxis::Rows) => req
+                                        .dataset
+                                        .read_slice::<u8, _, _>(s![key.idx, .., start..end, ..]),
+                                    None => {
+                                        req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..])
+                                    }
+                                },
+                                None => req.dataset.read_slice::<u8, _, _>(s![key.idx, .., .., ..]),
+                            },
+                        } {
                             Ok(d) => d,
                             Err(e) => {
                                 send_image_failure(&tx_events, key.clone(), e.to_string());

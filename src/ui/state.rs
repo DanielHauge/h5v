@@ -90,6 +90,53 @@ pub struct ChartPreviwState {
 pub struct ImageLoadKey {
     pub ds_path: String,
     pub idx: i32,
+    pub window_axis: Option<ImageWindowAxis>,
+    pub window_start: usize,
+    pub window_len: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageWindowAxis {
+    Rows,
+    Cols,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageWindowState {
+    pub ds_path: String,
+    pub axis: ImageWindowAxis,
+    pub start: usize,
+    pub len: usize,
+    pub total: usize,
+}
+
+impl ImageWindowState {
+    pub fn end(&self) -> usize {
+        self.start + self.len
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self.axis {
+            ImageWindowAxis::Rows => "rows",
+            ImageWindowAxis::Cols => "cols",
+        }
+    }
+
+    pub fn centered_start(total: usize, len: usize, target: usize) -> usize {
+        let max_start = total.saturating_sub(len);
+        target.saturating_sub(len / 2).min(max_start)
+    }
+
+    pub fn shift_by(&mut self, delta: isize) {
+        let max_start = self.total.saturating_sub(self.len);
+        let next = self.start as isize + delta;
+        self.start = next.clamp(0, max_start as isize) as usize;
+    }
+
+    pub fn center_on(&mut self, idx: usize) {
+        self.start =
+            Self::centered_start(self.total, self.len, idx.min(self.total.saturating_sub(1)));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,6 +161,7 @@ pub struct DatasetImageLoadRequest {
     pub key: ImageLoadKey,
     pub dataset: Dataset,
     pub image_type: ImageType,
+    pub window: Option<ImageWindowState>,
 }
 
 pub struct ImgState {
@@ -122,6 +170,8 @@ pub struct ImgState {
     pub tx_load_imgfsvlen: Sender<VarLenImageLoadRequest>,
     pub tx_load_img: Sender<DatasetImageLoadRequest>,
     pub ds: Option<String>,
+    pub current_key: Option<ImageLoadKey>,
+    pub window: Option<ImageWindowState>,
     pub error: Option<String>,
     pub idx_to_load: i32,
     pub idx_loaded: i32,
@@ -159,10 +209,7 @@ impl IsFromDsReq for ImgState {
 
 impl ImgState {
     pub fn current_request_key(&self) -> Option<ImageLoadKey> {
-        Some(ImageLoadKey {
-            ds_path: self.ds.clone()?,
-            idx: self.idx_loaded,
-        })
+        self.current_key.clone()
     }
 }
 
@@ -246,6 +293,7 @@ pub struct AppState<'a> {
     pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,
     pub stacked_tree_layout: bool,
+    pub image_cell_size: (u16, u16),
     pub preview_debounce_generation: u64,
     pub preview_debounce_until: Option<Instant>,
     pub preview_debounce_path: Option<String>,
@@ -304,6 +352,12 @@ impl AppState<'_> {
             return false;
         }
         self.preview_debounce_path.as_deref() == Some(node.path().as_str())
+    }
+
+    pub fn active_image_window_mut(&mut self) -> Option<&mut ImageWindowState> {
+        let selected_path = self.selected_tree_path()?;
+        let window = self.img_state.window.as_mut()?;
+        (window.ds_path == selected_path).then_some(window)
     }
 
     fn remember_main_focus(&mut self, last_focused: LastFocused) {
@@ -637,6 +691,11 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
                 SegmentType::NoSegment => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) * dec.max(1)) as isize;
+                        window.shift_by(-step);
+                        return Ok(EventResult::Redraw);
+                    }
                     self.img_state.idx_to_load = self.segment_state.idx;
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
@@ -696,6 +755,11 @@ impl AppState<'_> {
                     Ok(EventResult::Redraw)
                 }
                 SegmentType::NoSegment => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) * inc.max(1)) as isize;
+                        window.shift_by(step);
+                        return Ok(EventResult::Redraw);
+                    }
                     self.img_state.idx_to_load = self.segment_state.idx;
 
                     self.img_state.idx_to_load = self.segment_state.idx;
@@ -728,6 +792,10 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        window.center_on(idx);
+                        return Ok(EventResult::Redraw);
+                    }
                     if idx < self.segment_state.segment_count as usize {
                         self.img_state.idx_to_load = idx as i32;
                         Ok(EventResult::Redraw)
@@ -746,6 +814,10 @@ impl AppState<'_> {
                     }
                 }
                 SegmentType::NoSegment => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        window.center_on(idx);
+                        return Ok(EventResult::Redraw);
+                    }
                     self.img_state.idx_to_load = idx as i32;
                     Ok(EventResult::Redraw)
                 }
@@ -784,9 +856,22 @@ impl AppState<'_> {
     pub fn right(&mut self, inc: isize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => self.down(1),
+                SegmentType::Image => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) as isize) * inc.max(1);
+                        window.shift_by(step);
+                        Ok(EventResult::Redraw)
+                    } else {
+                        self.down(1)
+                    }
+                }
                 SegmentType::Chart => Ok(EventResult::Continue),
                 SegmentType::NoSegment => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) as isize) * inc.max(1);
+                        window.shift_by(step);
+                        return Ok(EventResult::Redraw);
+                    }
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
                     let new_col_offset = node.col_offset.saturating_add(inc).max(0);
@@ -815,9 +900,22 @@ impl AppState<'_> {
     pub fn left(&mut self, inc: isize) -> Result<EventResult> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => self.up(1),
+                SegmentType::Image => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) as isize) * inc.max(1);
+                        window.shift_by(-step);
+                        Ok(EventResult::Redraw)
+                    } else {
+                        self.up(1)
+                    }
+                }
                 SegmentType::Chart => Ok(EventResult::Continue),
                 SegmentType::NoSegment => {
+                    if let Some(window) = self.active_image_window_mut() {
+                        let step = ((window.len / 4).max(1) as isize) * inc.max(1);
+                        window.shift_by(-step);
+                        return Ok(EventResult::Redraw);
+                    }
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
                     let new_col_offset = node.col_offset.saturating_sub(inc).max(0);

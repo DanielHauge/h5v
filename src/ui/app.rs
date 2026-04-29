@@ -166,6 +166,7 @@ fn main_recover_loop(
     let (tx_events, rx_events) = channel();
     #[allow(deprecated)]
     let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
+    let image_cell_size = picker.font_size();
     let tx_events_2 = tx_events.clone();
     let tx_load_img = handle_image_resize(tx_events_2);
     let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
@@ -182,6 +183,8 @@ fn main_recover_loop(
         tx_load_imgfsvlen,
         tx_load_img,
         ds: None,
+        current_key: None,
+        window: None,
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
@@ -240,6 +243,7 @@ fn main_recover_loop(
         pending_chord: None,
         show_tree_view: true,
         stacked_tree_layout: false,
+        image_cell_size,
         preview_debounce_generation: 0,
         preview_debounce_until: None,
         preview_debounce_path: None,
