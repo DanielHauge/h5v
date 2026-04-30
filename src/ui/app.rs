@@ -13,7 +13,7 @@ use std::{
 use arboard::Clipboard;
 use ratatui::{
     crossterm::{
-        event::{self},
+        event::{self, DisableMouseCapture, EnableMouseCapture},
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
@@ -373,6 +373,7 @@ fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> 
 
 pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableMouseCapture)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
@@ -436,6 +437,7 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
         }
     }
 
+    stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     if let Some(message) = last_message {
@@ -552,6 +554,7 @@ fn main_recover_loop(
         img_state,
         matrix_view_state,
         chart_preview_state,
+        ui_layout: state::UiLayoutState::default(),
     };
 
     state.sync_file_watch();
@@ -565,6 +568,7 @@ fn main_recover_loop(
             }
         };
         let content_area = render_header(frame, frame_area, state);
+        state.ui_layout = state::UiLayoutState::default();
 
         if let Mode::Help = state.mode {
             render_help(frame, content_area);

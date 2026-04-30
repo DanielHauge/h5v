@@ -13,7 +13,7 @@ use crate::{
     h5f::H5FNode,
 };
 
-use super::state::{AppState, AttributeViewSelection, Focus, Mode};
+use super::state::{AppState, AttributeViewSelection, AttributesHitbox, Focus, Mode};
 
 fn make_panels_rect(area: Rect, min_first_panel: u16) -> Rc<[Rect]> {
     Layout::default()
@@ -50,6 +50,7 @@ pub fn render_info_attributes(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), hdf5_metno::Error> {
+    let outer_area = *area;
     let bg = match (&state.focus, &state.mode) {
         (
             Focus::Attributes,
@@ -66,9 +67,9 @@ pub fn render_info_attributes(
         .bg(bg)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
-    f.render_widget(attr_header_block, *area);
+    f.render_widget(attr_header_block, outer_area);
 
-    let area_inner = area.inner(Margin {
+    let area_inner = outer_area.inner(Margin {
         horizontal: 2,
         vertical: 1,
     });
@@ -143,6 +144,20 @@ pub fn render_info_attributes(
     } else {
         node_attributes_view_cursor.attribute_offset
     };
+    state.ui_layout.attributes = Some(AttributesHitbox {
+        outer: outer_area,
+        inner: area_inner,
+        name_area: *name_area,
+        value_area: *value_area,
+        row_offset: new_attr_offset,
+        visible_rows: heightu.min(
+            attributes
+                .rendered_attributes
+                .len()
+                .saturating_sub(new_attr_offset),
+        ),
+        total_rows: attributes.rendered_attributes.len(),
+    });
     let mut attributes_to_skip = new_attr_offset;
 
     #[allow(clippy::explicit_counter_loop)]

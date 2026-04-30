@@ -15,7 +15,7 @@ use crate::{
     ui::{mchart::MultiChartState, std_comp_render::render_error},
 };
 
-use super::state::{AppState, Focus, Mode};
+use super::state::{AppState, Focus, Mode, TreeHitbox};
 
 #[derive(Debug)]
 pub struct TreeItem<'a> {
@@ -203,6 +203,7 @@ fn compute_tree_view_rec<'a>(
 }
 
 pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
+    let outer_area = area;
     let bg = match (&state.focus, &state.mode) {
         (
             Focus::Tree(_),
@@ -218,9 +219,9 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
         .bg(bg)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
-    f.render_widget(header_block, area);
+    f.render_widget(header_block, outer_area);
 
-    let inner_area = area.inner(Margin {
+    let inner_area = outer_area.inner(Margin {
         horizontal: 2,
         vertical: 1,
     });
@@ -239,6 +240,19 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 tree_view_skip_offset = state.tree_view_cursor as u16 - half;
                 highlight_index = half as usize;
             }
+
+            state.ui_layout.tree = Some(TreeHitbox {
+                outer: outer_area,
+                inner: inner_area,
+                row_offset: tree_view_skip_offset as usize,
+                visible_rows: usize::min(
+                    area.height as usize,
+                    state
+                        .treeview
+                        .len()
+                        .saturating_sub(tree_view_skip_offset as usize),
+                ),
+            });
 
             let treeview = &state.treeview;
 

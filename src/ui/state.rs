@@ -10,6 +10,7 @@ use std::{
 use arboard::Clipboard;
 use hdf5_metno::{ByteReader, Dataset, File, Hyperslab, Selection, SliceOrIndex};
 use image::ImageFormat;
+use ratatui::layout::Rect;
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::{
@@ -60,6 +61,32 @@ pub enum PendingChord {
 pub enum ContentShowMode {
     Preview,
     Matrix,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TreeHitbox {
+    pub outer: Rect,
+    pub inner: Rect,
+    pub row_offset: usize,
+    pub visible_rows: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttributesHitbox {
+    pub outer: Rect,
+    pub inner: Rect,
+    pub name_area: Rect,
+    pub value_area: Rect,
+    pub row_offset: usize,
+    pub visible_rows: usize,
+    pub total_rows: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UiLayoutState {
+    pub tree: Option<TreeHitbox>,
+    pub attributes: Option<AttributesHitbox>,
+    pub content: Option<Rect>,
 }
 
 pub struct ChartPreviewLoadRequest {
@@ -339,6 +366,7 @@ pub struct AppState<'a> {
     pub segment_state: SegmentState,
     pub command_state: CommandState,
     pub fixed_string_overflow_dialog: Option<FixedStringOverflowDialogState>,
+    pub ui_layout: UiLayoutState,
 }
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -518,6 +546,15 @@ impl AppState<'_> {
     }
 
     fn remember_main_focus(&mut self, last_focused: LastFocused) {
+        self.focus = Focus::Tree(last_focused);
+    }
+
+    pub fn focus_tree_from_current(&mut self) {
+        let last_focused = match &self.focus {
+            Focus::Tree(last_focused) => last_focused.clone(),
+            Focus::Attributes => LastFocused::Attributes,
+            Focus::Content => LastFocused::Content,
+        };
         self.focus = Focus::Tree(last_focused);
     }
 

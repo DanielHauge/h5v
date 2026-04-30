@@ -1,7 +1,7 @@
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
 use keymap::{normal_action, window_action, Direction, NormalAction, WindowAction};
-use ratatui::crossterm::event::{Event, KeyCode};
+use ratatui::crossterm::event::{Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use tree::handle_normal_tree_event;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
     ui::state::{AppToast, FixedStringOverflowChoice},
 };
 
-use super::state::{AppState, Mode, PendingChord};
+use super::state::{AppState, AttributeViewSelection, Focus, Mode, PendingChord};
 
 pub mod attributes;
 pub mod command;
@@ -41,8 +41,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
         Mode::MultiChart => mchart::handle_mchart_event(state, event),
         Mode::FixedStringOverflowDialog => handle_fixed_string_overflow_dialog(state, event),
         Mode::FixedStringResizeDialog => handle_fixed_string_resize_dialog(state, event),
-        Mode::Normal => {
-            if let Event::Key(key_event) = event {
+        Mode::Normal => match event {
+            Event::Key(key_event) => {
                 if state.pending_chord == Some(PendingChord::CtrlW) {
                     state.pending_chord = None;
                     if let Some(action) = window_action(&key_event) {
@@ -143,14 +143,14 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 }
 
                 match state.focus {
-                    super::state::Focus::Tree(_) => handle_normal_tree_event(state, event),
-                    super::state::Focus::Attributes => handle_normal_attributes(state, event),
-                    super::state::Focus::Content => handle_normal_content_event(state, event),
+                    Focus::Tree(_) => handle_normal_tree_event(state, Event::Key(key_event)),
+                    Focus::Attributes => handle_normal_attributes(state, Event::Key(key_event)),
+                    Focus::Content => handle_normal_content_event(state, Event::Key(key_event)),
                 }
-            } else {
-                Ok(EventResult::Continue)
             }
-        }
+            Event::Mouse(mouse_event) => handle_normal_mouse_event(state, mouse_event),
+            _ => Ok(EventResult::Continue),
+        },
         Mode::Search => {
             if let Event::Key(key_event) = event {
                 match key_event.code {
@@ -174,6 +174,81 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
             Ok(EventResult::Continue)
         }
     }
+}
+
+fn handle_normal_mouse_event(
+    state: &mut AppState<'_>,
+    mouse_event: MouseEvent,
+) -> Result<EventResult, AppError> {
+    state.pending_chord = None;
+
+    match mouse_event.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            handle_left_click(state, mouse_event.column, mouse_event.row)
+        }
+        _ => Ok(EventResult::Continue),
+    }
+}
+
+fn handle_left_click(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+) -> Result<EventResult, AppError> {
+    if let Some(tree) = state.ui_layout.tree {
+        if point_in_rect(tree.outer, column, row) {
+            state.focus_tree_from_current();
+            if point_in_rect(tree.inner, column, row) {
+                let clicked_row = row.saturating_sub(tree.inner.y) as usize;
+                let clicked_index = tree.row_offset.saturating_add(clicked_row);
+                if clicked_row < tree.visible_rows && clicked_index < state.treeview.len() {
+                    state.tree_view_cursor = clicked_index;
+                }
+            }
+            return Ok(EventResult::Redraw);
+        }
+    }
+
+    if let Some(attributes) = state.ui_layout.attributes {
+        if point_in_rect(attributes.outer, column, row) {
+            state.focus = Focus::Attributes;
+            if point_in_rect(attributes.inner, column, row) {
+                let clicked_row = row.saturating_sub(attributes.inner.y) as usize;
+                let clicked_index = attributes.row_offset.saturating_add(clicked_row);
+                if clicked_row < attributes.visible_rows && clicked_index < attributes.total_rows {
+                    let selection = if point_in_rect(attributes.name_area, column, row) {
+                        AttributeViewSelection::Name
+                    } else if point_in_rect(attributes.value_area, column, row) {
+                        AttributeViewSelection::Value
+                    } else {
+                        AttributeViewSelection::Value
+                    };
+                    if let Some(tree_item) = state.treeview.get(state.tree_view_cursor) {
+                        let mut node = tree_item.node.borrow_mut();
+                        node.attributes_view_cursor.attribute_index = clicked_index;
+                        node.attributes_view_cursor.attribute_view_selection = selection;
+                    }
+                }
+            }
+            return Ok(EventResult::Redraw);
+        }
+    }
+
+    if let Some(content) = state.ui_layout.content {
+        if point_in_rect(content, column, row) {
+            state.focus = Focus::Content;
+            return Ok(EventResult::Redraw);
+        }
+    }
+
+    Ok(EventResult::Continue)
+}
+
+fn point_in_rect(rect: ratatui::layout::Rect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
 }
 
 fn handle_fixed_string_overflow_dialog(

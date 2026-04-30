@@ -55,6 +55,7 @@ pub fn render_main_display(
     } else {
         *area
     };
+    state.ui_layout.content = Some(content_area);
 
     let current_display_mode = &state.content_mode;
     let supported_display_modes = node.content_show_modes();
