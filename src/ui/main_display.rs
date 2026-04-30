@@ -56,6 +56,9 @@ pub fn render_main_display(
         *area
     };
     state.ui_layout.content = Some(content_area);
+    state.ui_layout.content_tabs.clear();
+    state.ui_layout.matrix_rows.clear();
+    state.ui_layout.matrix_cells.clear();
 
     let current_display_mode = &state.content_mode;
     let supported_display_modes = node.content_show_modes();
@@ -90,11 +93,13 @@ pub fn render_main_display(
     // Do tab titles:
 
     let mut tab_titles = vec![];
+    let mut tab_layout = Vec::new();
     for (i, x) in supported_display_modes.iter().enumerate() {
         let title = match x {
             ContentShowMode::Preview => "Preview📈",
             ContentShowMode::Matrix => "Matrix",
         };
+        tab_layout.push((*x, title, Line::from(title).width() as u16));
 
         if i == display_index {
             tab_titles.push(Span::styled(title, color_consts::TITLE).bold().underlined());
@@ -107,6 +112,30 @@ pub fn render_main_display(
     }
 
     let title = Line::from(tab_titles);
+    let title_width = title.width() as u16;
+    let title_start_x = content_area
+        .x
+        .saturating_add(content_area.width.saturating_sub(title_width) / 2);
+    let mut current_x = title_start_x;
+    let separator_width = Line::from(" | ").width() as u16;
+    for (i, (mode, _, width)) in tab_layout.iter().enumerate() {
+        state
+            .ui_layout
+            .content_tabs
+            .push(super::state::ContentTabHitbox {
+                area: Rect {
+                    x: current_x,
+                    y: content_area.y,
+                    width: *width,
+                    height: 1,
+                },
+                mode: *mode,
+            });
+        current_x = current_x.saturating_add(*width);
+        if i != supported_modes_count - 1 {
+            current_x = current_x.saturating_add(separator_width);
+        }
+    }
 
     let bg_color = match (&state.focus, &state.mode) {
         (

@@ -19,7 +19,7 @@ use crate::{
 
 use super::{
     dims::{render_dim_selector, HasMatrixSelection, MatrixSelection},
-    state::AppState,
+    state::{AppState, MatrixCellHitbox, MatrixRowHitbox},
 };
 pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
     let inner_area = area.inner(ratatui::layout::Margin {
@@ -229,6 +229,15 @@ fn render_matrix_with_reader<T: Display>(
                 Layout::horizontal(vec![Constraint::Max(15), Constraint::Min(16)]).split(row_area);
             let idx_area = areas_split[0];
             let value_area = areas_split[1];
+            state.ui_layout.matrix_rows.push(MatrixRowHitbox {
+                area: idx_area,
+                row: row_idx,
+            });
+            state.ui_layout.matrix_cells.push(MatrixCellHitbox {
+                area: value_area,
+                row: row_idx,
+                col: 0,
+            });
             let val_bg_color = match (row_idx % 2) == 0 {
                 true => match state.matrix_view_state.row_offset.is_multiple_of(2) {
                     true => color_consts::BG_VAL3_COLOR,
@@ -292,6 +301,10 @@ fn render_matrix_with_reader<T: Display>(
             let row_area = rows_areas[i as usize];
             let col_areas = Layout::horizontal(col_constraint).split(row_area);
             let idx_area = col_areas[0];
+            state.ui_layout.matrix_rows.push(MatrixRowHitbox {
+                area: idx_area,
+                row: i as usize,
+            });
 
             let idx = state.matrix_view_state.row_offset.min(
                 attr.shape[node.selected_row]
@@ -301,6 +314,11 @@ fn render_matrix_with_reader<T: Display>(
             f.render_widget(idx_line, idx_area);
             for j in 0..max_cols {
                 let val_area = col_areas[(j + 1) as usize];
+                state.ui_layout.matrix_cells.push(MatrixCellHitbox {
+                    area: val_area,
+                    row: i as usize,
+                    col: j as usize,
+                });
 
                 let val_bg_color = match (
                     (i as usize + state.matrix_view_state.row_offset).is_multiple_of(2),

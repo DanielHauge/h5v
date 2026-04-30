@@ -195,6 +195,43 @@ fn handle_left_click(
     column: u16,
     row: u16,
 ) -> Result<EventResult, AppError> {
+    if let Some(tab_hitbox) = state
+        .ui_layout
+        .content_tabs
+        .iter()
+        .find(|tab| point_in_rect(tab.area, column, row))
+        .copied()
+    {
+        state.content_mode = tab_hitbox.mode;
+        state.focus = Focus::Content;
+        return Ok(EventResult::Redraw);
+    }
+
+    if let Some(matrix_cell) = state
+        .ui_layout
+        .matrix_cells
+        .iter()
+        .find(|cell| point_in_rect(cell.area, column, row))
+        .copied()
+    {
+        state.focus = Focus::Content;
+        state.matrix_view_state.cursor_row = matrix_cell.row;
+        state.matrix_view_state.cursor_col = matrix_cell.col;
+        return Ok(EventResult::Redraw);
+    }
+
+    if let Some(matrix_row) = state
+        .ui_layout
+        .matrix_rows
+        .iter()
+        .find(|row_hitbox| point_in_rect(row_hitbox.area, column, row))
+        .copied()
+    {
+        state.focus = Focus::Content;
+        state.matrix_view_state.cursor_row = matrix_row.row;
+        return Ok(EventResult::Redraw);
+    }
+
     if let Some(tree) = state.ui_layout.tree {
         if point_in_rect(tree.outer, column, row) {
             state.focus_tree_from_current();

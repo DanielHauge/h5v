@@ -82,11 +82,33 @@ pub struct AttributesHitbox {
     pub total_rows: usize,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
+pub struct ContentTabHitbox {
+    pub area: Rect,
+    pub mode: ContentShowMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatrixRowHitbox {
+    pub area: Rect,
+    pub row: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatrixCellHitbox {
+    pub area: Rect,
+    pub row: usize,
+    pub col: usize,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
     pub tree: Option<TreeHitbox>,
     pub attributes: Option<AttributesHitbox>,
     pub content: Option<Rect>,
+    pub content_tabs: Vec<ContentTabHitbox>,
+    pub matrix_rows: Vec<MatrixRowHitbox>,
+    pub matrix_cells: Vec<MatrixCellHitbox>,
 }
 
 pub struct ChartPreviewLoadRequest {

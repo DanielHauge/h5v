@@ -38,6 +38,8 @@ use super::{
     },
 };
 
+const SMART_IMAGE_WINDOW_MIN_CLIPPED_FRACTION: f32 = 0.5;
+
 fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
     let _ = tx_events.send(event);
 }
@@ -136,6 +138,12 @@ fn compute_image_window(
         let len = ((width as f32 / viewport_aspect).floor() as usize).clamp(1, height);
         (len < height).then_some((ImageWindowAxis::Rows, height, len))
     }?;
+
+    let (_, total, len) = candidate;
+    let clipped_fraction = 1.0 - (len as f32 / total as f32);
+    if clipped_fraction < SMART_IMAGE_WINDOW_MIN_CLIPPED_FRACTION {
+        return None;
+    }
 
     let (axis, total, len) = candidate;
     let start = match current {
@@ -966,7 +974,7 @@ pub fn handle_image_load(
                     let mut image_buffer = image::GrayImage::new(shape[1] as u32, shape[0] as u32);
                     for i in 0..shape[1] {
                         for j in 0..shape[0] {
-                            let pixel = if data[[i, j]] {
+                            let pixel = if data[[j, i]] {
                                 image::Luma([255])
                             } else {
                                 image::Luma([0])
