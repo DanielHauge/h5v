@@ -1,12 +1,27 @@
+use std::borrow::Cow;
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
+
+use arboard::ImageData;
+#[cfg(target_os = "linux")]
+use arboard::SetExtLinux;
+use hdf5_metno::types::{EnumType, TypeDescriptor};
 use hdf5_metno::{Dataset, Hyperslab, Selection, SliceOrIndex};
+use image::{DynamicImage, ImageBuffer, Rgb};
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
+    data::{PreviewSelection, Previewable, SliceSelection},
     error::AppError,
-    h5f::{format_dataset_value_for_edit, write_dataset_value_from_text, DatasetMeta, Node},
+    h5f::{
+        format_dataset_value_for_edit, plot_projected, read_projected_scalar,
+        read_scalar_string_dataset, read_single_value_dataset, write_dataset_value_from_text,
+        DatasetMeta, H5FNode, Node,
+    },
     ui::{
         edit::perform_edit,
-        state::{AppState, AppToast, ContentShowMode},
+        preview_chart::render_image_chart,
+        state::{preview_selection_for_node, AppState, AppToast, ContentShowMode},
     },
 };
 
@@ -31,6 +46,252 @@ fn exact_element_selection(indices: &[usize]) -> Selection {
         .map(SliceOrIndex::Index)
         .collect::<Vec<_>>();
     Selection::Hyperslab(Hyperslab::from(slice))
+}
+
+fn copy_text_to_clipboard(
+    state: &mut AppState<'_>,
+    text: String,
+    success_message: &str,
+) -> Result<EventResult, AppError> {
+    state
+        .clipboard
+        .set_text(text)
+        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview text: {e}")))?;
+    Ok(EventResult::Toast(
+        AppToast::Info(success_message.to_string()),
+        false,
+    ))
+}
+
+fn copy_image_to_clipboard(
+    state: &mut AppState<'_>,
+    width: usize,
+    height: usize,
+    bytes: Vec<u8>,
+    success_message: &str,
+) -> Result<EventResult, AppError> {
+    let image = ImageData {
+        width,
+        height,
+        bytes: Cow::Owned(bytes),
+    };
+    #[cfg(target_os = "linux")]
+    state
+        .clipboard
+        .set()
+        .wait_until(Instant::now() + Duration::from_millis(300))
+        .image(image)
+        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview image: {e}")))?;
+    #[cfg(not(target_os = "linux"))]
+    state
+        .clipboard
+        .set_image(image)
+        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview image: {e}")))?;
+    Ok(EventResult::Toast(
+        AppToast::Info(success_message.to_string()),
+        false,
+    ))
+}
+
+fn enum_value_to_string(enum_type: &EnumType, value: u64) -> String {
+    enum_type
+        .members
+        .iter()
+        .find(|member| member.value == value)
+        .map(|member| member.name.clone())
+        .unwrap_or_else(|| format!("Unknown enum value: {value}"))
+}
+
+fn chart_preview_selection(
+    node: &mut H5FNode,
+    shape: &[usize],
+    segment_idx: i32,
+) -> Option<PreviewSelection> {
+    preview_selection_for_node(node, shape, segment_idx)
+}
+
+fn preview_text_value(
+    node: &mut H5FNode,
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+) -> Result<Option<String>, AppError> {
+    if meta.image.is_some() {
+        return Ok(None);
+    }
+
+    if meta.matrixable.is_none() {
+        return Ok(Some(read_scalar_string_dataset(dataset, &meta.encoding)?));
+    }
+
+    let Some(_) = chart_preview_selection(node, &dataset.shape(), 0) else {
+        return match meta.matrixable {
+            Some(crate::sprint_typedesc::MatrixRenderType::Float64) => {
+                if meta.is_compound_leaf() {
+                    Ok(Some(
+                        read_projected_scalar::<f64>(dataset, meta)?.to_string(),
+                    ))
+                } else {
+                    Ok(Some(read_single_value_dataset::<f64>(dataset)?.to_string()))
+                }
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Uint64) => {
+                if meta.is_compound_leaf() {
+                    Ok(Some(
+                        read_projected_scalar::<u64>(dataset, meta)?.to_string(),
+                    ))
+                } else {
+                    Ok(Some(read_single_value_dataset::<u64>(dataset)?.to_string()))
+                }
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Int64) => {
+                if meta.is_compound_leaf() {
+                    Ok(Some(
+                        read_projected_scalar::<i64>(dataset, meta)?.to_string(),
+                    ))
+                } else {
+                    Ok(Some(read_single_value_dataset::<i64>(dataset)?.to_string()))
+                }
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
+                if meta.is_compound_leaf() {
+                    Ok(Some(read_projected_scalar::<String>(dataset, meta)?))
+                } else {
+                    Ok(Some(read_scalar_string_dataset(dataset, &meta.encoding)?))
+                }
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
+                let TypeDescriptor::Enum(enum_type) = &meta.type_descriptor else {
+                    return Err(AppError::EditError(
+                        "Enum preview lost its enum type descriptor".to_string(),
+                    ));
+                };
+                let rendered = if meta.is_compound_leaf() {
+                    enum_value_to_string(enum_type, read_projected_scalar::<u64>(dataset, meta)?)
+                } else {
+                    enum_value_to_string(enum_type, read_single_value_dataset::<u64>(dataset)?)
+                };
+                Ok(Some(rendered))
+            }
+            _ => Ok(None),
+        };
+    };
+
+    Ok(None)
+}
+
+fn copy_chart_preview(
+    state: &mut AppState<'_>,
+    ds_path: &str,
+    selection: PreviewSelection,
+    data_preview: crate::data::DatasetPlotingData,
+) -> Result<EventResult, AppError> {
+    if state.chart_preview_state.current_request_key()
+        == Some(crate::ui::state::ChartPreviewKey {
+            ds_path: ds_path.to_string(),
+            selection: selection.clone(),
+        })
+    {
+        if let Some(image) = &state.chart_preview_state.clipboard_image {
+            return copy_image_to_clipboard(
+                state,
+                image.width,
+                image.height,
+                image.bytes.clone(),
+                "Copied chart preview image to clipboard",
+            );
+        }
+    }
+
+    let width = state
+        .ui_layout
+        .content
+        .map(|area| u32::from(area.width.max(20)) * u32::from(state.image_cell_size.0.max(1)))
+        .unwrap_or(800);
+    let height = state
+        .ui_layout
+        .content
+        .map(|area| u32::from(area.height.max(12)) * u32::from(state.image_cell_size.1.max(1)))
+        .unwrap_or(600);
+    let mut buffer = vec![0; (width * height * 3) as usize];
+    let x_min = match selection.slice {
+        SliceSelection::All => 0.0,
+        SliceSelection::FromTo(start, _) => start as f64,
+    };
+    render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
+    let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer).ok_or_else(|| {
+        AppError::DrawingError("Failed to build chart preview image for clipboard".to_string())
+    })?;
+    let rgba = DynamicImage::ImageRgb8(image).to_rgba8();
+    copy_image_to_clipboard(
+        state,
+        rgba.width() as usize,
+        rgba.height() as usize,
+        rgba.into_raw(),
+        "Copied chart preview image to clipboard",
+    )
+}
+
+fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppError> {
+    let tree_item = state.treeview[state.tree_view_cursor].node.clone();
+    let mut node = tree_item.borrow_mut();
+    let (dataset, meta) = match &node.node {
+        Node::Dataset(dataset, meta) => (dataset.clone(), meta.clone()),
+        _ => {
+            return Ok(EventResult::Toast(
+                AppToast::Warning("Only datasets can be copied from content view".to_string()),
+                false,
+            ))
+        }
+    };
+    let ds_path = meta.virtual_path().unwrap_or(&dataset.name()).to_string();
+
+    if meta.image.is_some() {
+        if let Some(message) = &state.img_state.error {
+            return Ok(EventResult::Toast(
+                AppToast::Warning(message.clone()),
+                false,
+            ));
+        }
+        if state.img_state.ds.as_deref() != Some(ds_path.as_str()) {
+            return Ok(EventResult::Toast(
+                AppToast::Warning("Image preview is still loading".to_string()),
+                false,
+            ));
+        }
+        let Some(image) = &state.img_state.clipboard_image else {
+            return Ok(EventResult::Toast(
+                AppToast::Warning("Image preview is still loading".to_string()),
+                false,
+            ));
+        };
+        return copy_image_to_clipboard(
+            state,
+            image.width,
+            image.height,
+            image.bytes.clone(),
+            "Copied preview image to clipboard",
+        );
+    }
+
+    if let Some(text) = preview_text_value(&mut node, &dataset, &meta)? {
+        return copy_text_to_clipboard(state, text, "Copied preview value to clipboard");
+    }
+
+    let shape = dataset.shape();
+    let Some(selection) = chart_preview_selection(&mut node, &shape, state.segment_state.idx)
+    else {
+        return Ok(EventResult::Toast(
+            AppToast::Warning("Current preview cannot be copied".to_string()),
+            false,
+        ));
+    };
+
+    let data_preview = if meta.is_compound_leaf() {
+        plot_projected(&dataset, &meta, &selection)?
+    } else {
+        dataset.plot(&selection)?
+    };
+    copy_chart_preview(state, &ds_path, selection, data_preview)
 }
 
 fn selected_content_edit_request(
@@ -185,10 +446,12 @@ fn apply_content_edit_request(
     state.chart_preview_state.ds_loaded = None;
     state.chart_preview_state.ds_selection = None;
     state.chart_preview_state.protocol = None;
+    state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.img_state.ds = None;
     state.img_state.current_key = None;
     state.img_state.protocol = None;
+    state.img_state.clipboard_image = None;
     state.img_state.error = None;
     state.acknowledge_file_write();
 
@@ -304,6 +567,9 @@ pub fn handle_normal_content_event(
                         Err(event_result) => return Ok(event_result),
                     };
                     apply_content_edit_request(state, &request)
+                }
+                (Some(ContentAction::Copy), ContentShowMode::Preview) => {
+                    copy_preview_content(state)
                 }
                 (Some(ContentAction::Copy), ContentShowMode::Matrix) => Ok(EventResult::Copying),
                 _ => Ok(EventResult::Continue),

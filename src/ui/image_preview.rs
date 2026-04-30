@@ -33,8 +33,9 @@ use super::{
     app::AppEvent,
     segment_scroll::render_position_scroll,
     state::{
-        AppState, ChartPreviewKey, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
-        ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
+        AppState, ChartPreviewKey, ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey,
+        ImageWindowAxis, ImageWindowState, RawImageLoadRequest, SegmentType,
+        VarLenImageLoadRequest,
     },
 };
 
@@ -54,10 +55,28 @@ fn send_image_failure(tx_events: &Sender<AppEvent>, key: ImageLoadKey, message: 
     );
 }
 
-fn send_image_success(tx_events: &Sender<AppEvent>, key: ImageLoadKey, protocol: ThreadProtocol) {
+fn clipboard_image_from_dynamic(dyn_img: &DynamicImage) -> ClipboardImageData {
+    let rgba = dyn_img.to_rgba8();
+    ClipboardImageData {
+        width: rgba.width() as usize,
+        height: rgba.height() as usize,
+        bytes: rgba.into_raw(),
+    }
+}
+
+fn send_image_success(
+    tx_events: &Sender<AppEvent>,
+    key: ImageLoadKey,
+    protocol: ThreadProtocol,
+    clipboard_image: ClipboardImageData,
+) {
     send_event(
         tx_events,
-        AppEvent::ImageLoad(ImageLoadedResult::Success { key, protocol }),
+        AppEvent::ImageLoad(ImageLoadedResult::Success {
+            key,
+            protocol,
+            clipboard_image,
+        }),
     );
 }
 
@@ -79,10 +98,15 @@ fn send_chart_success(
     tx_events: &Sender<AppEvent>,
     key: ChartPreviewKey,
     protocol: ThreadProtocol,
+    clipboard_image: ClipboardImageData,
 ) {
     send_event(
         tx_events,
-        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Success { key, protocol }),
+        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Success {
+            key,
+            protocol,
+            clipboard_image,
+        }),
     );
 }
 
@@ -367,6 +391,7 @@ fn render_ds_img(
         }
         false => {
             state.img_state.protocol = None;
+            state.img_state.clipboard_image = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds_path);
             state.img_state.idx_loaded = state.img_state.idx_to_load;
@@ -425,6 +450,7 @@ fn render_raw_img(
         },
         false => {
             state.img_state.protocol = None;
+            state.img_state.clipboard_image = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
             let typedesc = ds.dtype()?.to_descriptor()?;
@@ -611,7 +637,7 @@ pub fn handle_chartpreview_load(
             };
 
             let dyn_img = DynamicImage::ImageRgb8(image);
-
+            let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
             let stateful_protocol = picker.new_resize_protocol(dyn_img);
             let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
             send_chart_success(
@@ -621,6 +647,7 @@ pub fn handle_chartpreview_load(
                     selection: req.selection,
                 },
                 thread_protocol,
+                clipboard_image,
             );
         }
     });
@@ -642,10 +669,11 @@ pub fn handle_imagefs_load(
             }
             match image::load(req.reader, req.format) {
                 Ok(dyn_img) => {
+                    let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, req.key, thread_protocol);
+                    send_image_success(&tx_events, req.key, thread_protocol, clipboard_image);
                 }
                 Err(e) => {
                     send_image_failure(&tx_events, req.key, format!("Failed to decode image: {e}"))
@@ -684,10 +712,11 @@ pub fn handle_imagefsvlen_load(
             let data = BufReader::new(cursor);
             match image::load(data, req.format) {
                 Ok(dyn_img) => {
+                    let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, req.key, thread_protocol);
+                    send_image_success(&tx_events, req.key, thread_protocol, clipboard_image);
                 }
                 Err(e) => send_image_failure(
                     &tx_events,
@@ -946,10 +975,11 @@ pub fn handle_image_load(
                         }
                     };
 
+                    let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, key, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol, clipboard_image);
                 }
                 ImageType::Bitmap => {
                     let data: Array2<bool> = match match window_bounds(window) {
@@ -983,10 +1013,11 @@ pub fn handle_image_load(
                         }
                     }
                     let dyn_img = image::DynamicImage::ImageLuma8(image_buffer);
+                    let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, key, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol, clipboard_image);
                 }
                 ImageType::Truecolor(interlace) => {
                     let shape = req.dataset.shape();
@@ -1100,10 +1131,11 @@ pub fn handle_image_load(
                         }
                     }
                     let dyn_img = image::DynamicImage::ImageRgba8(image_buffer);
+                    let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
                     let stateful_protocol = picker.new_resize_protocol(dyn_img);
                     let thread_protocol =
                         ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
-                    send_image_success(&tx_events, key, thread_protocol);
+                    send_image_success(&tx_events, key, thread_protocol, clipboard_image);
                 }
                 ImageType::Indexed(_interlace) => {
                     send_image_failure(&tx_events, key, "Unsupported image format");

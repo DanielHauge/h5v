@@ -260,6 +260,7 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.segment_state = snapshot.segment_state.clone();
     state.matrix_view_state = snapshot.matrix_view_state.clone();
     state.img_state.protocol = None;
+    state.img_state.clipboard_image = None;
     state.img_state.ds = None;
     state.img_state.current_key = None;
     state.img_state.window = None;
@@ -268,6 +269,7 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.img_state.error = None;
     state.chart_preview_state.ds_loaded = None;
     state.chart_preview_state.protocol = None;
+    state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
 }
@@ -493,6 +495,7 @@ fn main_recover_loop(
         tx_load_img,
         ds: None,
         current_key: None,
+        clipboard_image: None,
         window: None,
         idx_to_load: 0,
         idx_loaded: -1,
@@ -502,6 +505,7 @@ fn main_recover_loop(
     let chart_preview_state = ChartPreviwState {
         ds_loaded: None,
         protocol: None,
+        clipboard_image: None,
         error: None,
         ds_selection: None,
         tx_load_chartpreview,
@@ -757,11 +761,16 @@ fn main_recover_loop(
                 }
             },
             AppEvent::ImageLoad(img_load) => match img_load {
-                ImageLoadedResult::Success { key, protocol } => {
+                ImageLoadedResult::Success {
+                    key,
+                    protocol,
+                    clipboard_image,
+                } => {
                     if state.img_state.current_request_key() != Some(key) {
                         continue;
                     }
                     state.img_state.protocol = Some(protocol);
+                    state.img_state.clipboard_image = Some(clipboard_image);
                     state.img_state.error = None;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
@@ -772,6 +781,7 @@ fn main_recover_loop(
                         continue;
                     }
                     state.img_state.protocol = None;
+                    state.img_state.clipboard_image = None;
                     state.img_state.error = Some(message);
 
                     terminal.draw(|f| {
@@ -780,11 +790,16 @@ fn main_recover_loop(
                 }
             },
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
-                ChartPreviewLoadedResult::Success { key, protocol } => {
+                ChartPreviewLoadedResult::Success {
+                    key,
+                    protocol,
+                    clipboard_image,
+                } => {
                     if state.chart_preview_state.current_request_key() != Some(key) {
                         continue;
                     }
                     state.chart_preview_state.protocol = Some(protocol);
+                    state.chart_preview_state.clipboard_image = Some(clipboard_image);
                     state.chart_preview_state.error = None;
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
@@ -795,6 +810,7 @@ fn main_recover_loop(
                         continue;
                     }
                     state.chart_preview_state.protocol = None;
+                    state.chart_preview_state.clipboard_image = None;
                     state.chart_preview_state.error = Some(message);
 
                     terminal.draw(|f| {
@@ -930,6 +946,7 @@ pub enum ImageLoadedResult {
     Success {
         key: ImageLoadKey,
         protocol: ratatui_image::thread::ThreadProtocol,
+        clipboard_image: state::ClipboardImageData,
     },
     Failure {
         key: ImageLoadKey,
@@ -942,6 +959,7 @@ pub enum ChartPreviewLoadedResult {
     Success {
         key: ChartPreviewKey,
         protocol: ratatui_image::thread::ThreadProtocol,
+        clipboard_image: state::ClipboardImageData,
     },
     Failure {
         key: ChartPreviewKey,
@@ -1331,9 +1349,17 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                     &[
                         (&["M", "Esc"], "open / close"),
                         (&["j", "k"], "select series"),
+                        (&["m"], "add current previewable selection from tree"),
+                        (&["Space"], "mark / unmark base series"),
+                        (
+                            &["D", "S", "R", "P", "X"],
+                            "base op selected => diff / sum / ratio / product / x-y",
+                        ),
+                        (&["v"], "hide / show selected series"),
                         (&["h", "l", "Shift+←→"], "pan"),
                         (&["+", "-", "Shift+↑↓"], "zoom"),
                         (&["d", "Backspace", "Delete"], "remove"),
+                        (&["C"], "clear all"),
                         (&["c"], "reset zoom"),
                         (&["q", "Ctrl-C"], "quit app"),
                     ],

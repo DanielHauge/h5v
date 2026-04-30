@@ -1,6 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-use plotters::style::{Color as _, Palette};
 use ratatui::{
     layout::{Alignment, Margin, Offset, Rect},
     style::{Color, Style, Stylize},
@@ -162,14 +161,29 @@ fn compute_tree_view_rec<'a>(
             child.borrow().name(),
             Style::default().fg(name_color),
         ));
-        for (i, (key, _)) in mchart.line_series.iter().enumerate() {
-            if key == &child.borrow().node.path() {
-                let color = plotters::prelude::Palette99::pick(i);
-                let rgb = color.to_rgba();
-                line_vec.push(Span::raw(" "));
+        let path = child.borrow().node.path();
+        let memberships = mchart
+            .chart_items()
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.matches_path(&path))
+            .collect::<Vec<_>>();
+        if !memberships.is_empty() {
+            line_vec.push(Span::raw(" "));
+            for (dot_idx, (_, item)) in memberships.iter().take(3).enumerate() {
+                if dot_idx > 0 {
+                    line_vec.push(Span::raw(""));
+                }
+                let rgb = item.rgb_color();
                 line_vec.push(Span::styled(
                     "●",
                     Style::default().fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2)),
+                ));
+            }
+            if memberships.len() > 3 {
+                line_vec.push(Span::styled(
+                    format!("+{}", memberships.len() - 3),
+                    Style::default().fg(color_consts::TITLE),
                 ));
             }
         }

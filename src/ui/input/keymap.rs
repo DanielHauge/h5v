@@ -1,5 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::ui::mchart::BuiltinDerivedOp;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Left,
@@ -81,6 +83,10 @@ pub enum MultiChartAction {
     PanRight,
     ClearZoom,
     DeleteSelected,
+    ClearAll,
+    ToggleSelectedVisible,
+    ToggleMarkedBase,
+    CreateDerived(BuiltinDerivedOp),
     MoveUp,
     MoveDown,
 }
@@ -273,6 +279,16 @@ pub fn multichart_action(key: &KeyEvent) -> Option<MultiChartAction> {
             Some(MultiChartAction::PanRight)
         }
         (KeyCode::Char('c'), _) => Some(MultiChartAction::ClearZoom),
+        (KeyCode::Char('C'), _) => Some(MultiChartAction::ClearAll),
+        (KeyCode::Char('v'), _) => Some(MultiChartAction::ToggleSelectedVisible),
+        (KeyCode::Char(' '), _) => Some(MultiChartAction::ToggleMarkedBase),
+        (KeyCode::Char('D'), _) => Some(MultiChartAction::CreateDerived(
+            BuiltinDerivedOp::Difference,
+        )),
+        (KeyCode::Char('S'), _) => Some(MultiChartAction::CreateDerived(BuiltinDerivedOp::Sum)),
+        (KeyCode::Char('R'), _) => Some(MultiChartAction::CreateDerived(BuiltinDerivedOp::Ratio)),
+        (KeyCode::Char('P'), _) => Some(MultiChartAction::CreateDerived(BuiltinDerivedOp::Product)),
+        (KeyCode::Char('X'), _) => Some(MultiChartAction::CreateDerived(BuiltinDerivedOp::Xy)),
         (KeyCode::Delete, _) | (KeyCode::Backspace, _) | (KeyCode::Char('d'), _) => {
             Some(MultiChartAction::DeleteSelected)
         }

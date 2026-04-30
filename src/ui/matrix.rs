@@ -4,7 +4,7 @@ use hdf5_metno::{types::EnumType, H5Type, Selection};
 use ndarray::{Array1, Array2};
 use ratatui::{
     layout::{Constraint, Layout, Offset, Rect},
-    style::Stylize,
+    style::{Color, Style, Stylize},
     text::{Line, Span},
     Frame,
 };
@@ -57,38 +57,76 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnumRenderer {
-    pub enum_mapping: Vec<(u64, String)>,
+    pub enum_mapping: Vec<EnumRenderMember>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumRenderMember {
+    pub value: u64,
+    pub name: String,
+    pub color: Color,
+    pub symbol: &'static str,
 }
 
 impl EnumRenderer {
     pub fn new(enum_mapping: EnumType) -> Self {
+        const ENUM_COLORS: [Color; 8] = [
+            Color::Rgb(255, 204, 0),
+            Color::Rgb(38, 166, 154),
+            Color::Rgb(66, 165, 245),
+            Color::Rgb(200, 140, 255),
+            Color::Rgb(255, 112, 67),
+            Color::Rgb(181, 206, 168),
+            Color::Rgb(240, 98, 146),
+            Color::Rgb(129, 199, 132),
+        ];
+        const ENUM_SYMBOLS: [&str; 8] = ["●", "■", "▲", "◆", "✦", "✚", "⬢", "◉"];
         let enum_mapping = enum_mapping
             .members
             .into_iter()
-            .map(|v| (v.value, v.name))
+            .enumerate()
+            .map(|(idx, member)| EnumRenderMember {
+                value: member.value,
+                name: member.name,
+                color: ENUM_COLORS[idx % ENUM_COLORS.len()],
+                symbol: ENUM_SYMBOLS[idx % ENUM_SYMBOLS.len()],
+            })
             .collect();
         Self { enum_mapping }
+    }
+
+    fn member(&self, value: &u64) -> Option<&EnumRenderMember> {
+        self.enum_mapping
+            .iter()
+            .find(|member| &member.value == value)
     }
 }
 
 impl RenderIntercept<u64> for EnumRenderer {
     fn render_as_line(&self, value: &u64) -> Line<'static> {
-        let mapped = self
-            .enum_mapping
-            .iter()
-            .find(|(v, _)| v == value)
-            .map(|(_, s)| s.clone())
-            .unwrap_or_else(|| format!("Unknown enum value: {value}"));
-        Line::from(mapped).fg(color_consts::NUMBER_COLOR)
+        match self.member(value) {
+            Some(member) => Line::from(vec![
+                Span::styled(
+                    format!("{} ", member.symbol),
+                    Style::default().fg(member.color).bold(),
+                ),
+                Span::styled(member.name.clone(), Style::default().fg(member.color)),
+            ]),
+            None => {
+                Line::from(format!("Unknown enum value: {value}")).fg(color_consts::ERROR_COLOR)
+            }
+        }
     }
     fn render_as_span(&self, value: &u64) -> Span<'static> {
-        let mapped = self
-            .enum_mapping
-            .iter()
-            .find(|(v, _)| v == value)
-            .map(|(_, s)| s.clone())
-            .unwrap_or_else(|| format!("Unknown enum value: {value}"));
-        Span::from(mapped).fg(color_consts::NUMBER_COLOR)
+        match self.member(value) {
+            Some(member) => Span::styled(
+                format!("{} {}", member.symbol, member.name),
+                Style::default().fg(member.color).bold(),
+            ),
+            None => {
+                Span::from(format!("Unknown enum value: {value}")).fg(color_consts::ERROR_COLOR)
+            }
+        }
     }
 }
 
@@ -368,4 +406,50 @@ fn render_matrix_with_reader<T: Display>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hdf5_metno::types::{EnumMember, EnumType, IntSize};
+
+    fn sample_enum() -> EnumType {
+        EnumType {
+            size: IntSize::U1,
+            signed: false,
+            members: vec![
+                EnumMember {
+                    name: "Red".to_string(),
+                    value: 1,
+                },
+                EnumMember {
+                    name: "Green".to_string(),
+                    value: 2,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn enum_renderer_includes_symbol_and_name() {
+        let renderer = EnumRenderer::new(sample_enum());
+        assert_eq!(renderer.render_as_line(&1).to_string(), "● Red");
+        assert_eq!(renderer.render_as_span(&2).content, "■ Green");
+    }
+
+    #[test]
+    fn enum_renderer_falls_back_for_unknown_values() {
+        let renderer = EnumRenderer::new(EnumType {
+            size: IntSize::U1,
+            signed: false,
+            members: vec![EnumMember {
+                name: "Blue".to_string(),
+                value: 7,
+            }],
+        });
+        assert_eq!(
+            renderer.render_as_line(&99).to_string(),
+            "Unknown enum value: 99"
+        );
+    }
 }

@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
-use crate::{error::AppError, h5f::read_projected_values_1d, ui::state::AppState};
+use crate::{error::AppError, ui::state::AppState};
 
 use super::{
     keymap::{tree_action, TreeAction},
@@ -72,29 +72,10 @@ pub fn handle_normal_tree_event(
                     Ok(EventResult::Redraw)
                 }
                 Some(TreeAction::AddToMultiChart) => {
-                    let Some((ds, meta, sel)) = state.get_1d_selection() else {
+                    let Some((source, points)) = state.capture_multichart_item()? else {
                         return Ok(EventResult::Continue);
                     };
-                    if meta.is_compound_container() {
-                        return Ok(EventResult::Continue);
-                    }
-                    if meta.is_compound_leaf() {
-                        let Ok(data) = read_projected_values_1d::<f64>(&ds, &meta, sel) else {
-                            return Ok(EventResult::Continue);
-                        };
-                        let points = data
-                            .iter()
-                            .enumerate()
-                            .map(|(i, value)| (i as f64, *value))
-                            .collect();
-                        let key = meta
-                            .virtual_path()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| ds.name());
-                        state.multi_chart.add_points_series(key, points);
-                    } else {
-                        state.multi_chart.add_linspace_series(ds, sel);
-                    }
+                    state.multi_chart.add_chart_item(source, points);
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }

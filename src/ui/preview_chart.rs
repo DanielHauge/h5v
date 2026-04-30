@@ -240,6 +240,7 @@ pub fn render_chart_preview(
         state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
         state.chart_preview_state.error = None;
         state.chart_preview_state.protocol = None;
+        state.chart_preview_state.clipboard_image = None;
         let chart_preview_load_request = ChartPreviewLoadRequest {
             ds_path: node.node.path(),
             source: ChartPreviewSource::Dataset {
@@ -472,6 +473,7 @@ fn render_projected_chart_preview(
         state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
         state.chart_preview_state.error = None;
         state.chart_preview_state.protocol = None;
+        state.chart_preview_state.clipboard_image = None;
         let chart_preview_load_request = ChartPreviewLoadRequest {
             ds_path: node.node.path(),
             source: ChartPreviewSource::Precomputed { data_preview },

@@ -8,23 +8,23 @@ use std::{
 };
 
 use arboard::Clipboard;
-use hdf5_metno::{ByteReader, Dataset, File, Hyperslab, Selection, SliceOrIndex};
+use hdf5_metno::{ByteReader, Dataset, File};
 use image::ImageFormat;
 use ratatui::layout::Rect;
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::{
-    data::DatasetPlotingData,
-    data::PreviewSelection,
+    data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::{AppError, FixedStringOverflow},
-    h5f::{H5FNode, HasPath, ImageType, Node},
+    h5f::{plot_projected, H5FNode, HasPath, ImageType, Node},
     search::Searcher,
-    ui::mchart::MultiChartState,
+    ui::mchart::{ChartSource, DatasetChartKind, DatasetChartSource, MultiChartState, Point},
 };
 
 use super::{
     command::{execute_command, CommandState},
     input::EventResult,
+    preview_chart::MAX_SEGMENT_SIZE,
     tree_view::TreeItem,
 };
 
@@ -143,9 +143,17 @@ pub enum ChartPreviewSource {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipboardImageData {
+    pub width: usize,
+    pub height: usize,
+    pub bytes: Vec<u8>,
+}
+
 pub struct ChartPreviwState {
     pub ds_loaded: Option<String>,
     pub protocol: Option<ThreadProtocol>,
+    pub clipboard_image: Option<ClipboardImageData>,
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
@@ -236,6 +244,7 @@ pub struct ImgState {
     pub tx_load_img: Sender<DatasetImageLoadRequest>,
     pub ds: Option<String>,
     pub current_key: Option<ImageLoadKey>,
+    pub clipboard_image: Option<ClipboardImageData>,
     pub window: Option<ImageWindowState>,
     pub error: Option<String>,
     pub idx_to_load: i32,
@@ -403,6 +412,56 @@ pub struct AppState<'a> {
     pub command_state: CommandState,
     pub fixed_string_overflow_dialog: Option<FixedStringOverflowDialogState>,
     pub ui_layout: UiLayoutState,
+}
+
+pub(crate) fn preview_selection_for_node(
+    node: &mut H5FNode,
+    shape: &[usize],
+    segment_idx: i32,
+) -> Option<PreviewSelection> {
+    let total_dims = shape.len();
+    node.sync_selection_rank(total_dims);
+    let x_selectable_dims: Vec<usize> = shape
+        .iter()
+        .enumerate()
+        .filter(|(_, len)| **len > 1)
+        .map(|(idx, _)| idx)
+        .collect();
+
+    if x_selectable_dims.is_empty() {
+        return None;
+    }
+
+    for (idx, selected_index) in node.selected_indexes.iter_mut().enumerate() {
+        if !x_selectable_dims.contains(&idx) {
+            *selected_index = 0;
+        }
+    }
+
+    if !x_selectable_dims.contains(&node.selected_x) {
+        node.selected_x = x_selectable_dims[0];
+    }
+    if node.selected_dim == node.selected_x {
+        node.selected_dim = x_selectable_dims
+            .iter()
+            .find(|&&x| x != node.selected_x)
+            .copied()
+            .unwrap_or(0);
+    }
+
+    let slice = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
+        let start = MAX_SEGMENT_SIZE * segment_idx.max(0) as usize;
+        let end = (start + MAX_SEGMENT_SIZE).min(shape[node.selected_x]);
+        SliceSelection::FromTo(start, end)
+    } else {
+        SliceSelection::All
+    };
+
+    Some(PreviewSelection {
+        x: node.selected_x,
+        index: node.selected_indexes[..total_dims].to_vec(),
+        slice,
+    })
 }
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -733,29 +792,37 @@ impl AppState<'_> {
         }
     }
 
-    pub fn get_1d_selection(&self) -> Option<(Dataset, crate::h5f::DatasetMeta, Selection)> {
+    pub fn capture_multichart_item(&self) -> Result<Option<(ChartSource, Vec<Point>)>> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
         let (ds, meta, shape) = match &node.node {
             Node::Dataset(ds, dsattr) => (ds.clone(), dsattr.clone(), dsattr.shape.clone()),
-            _ => return None,
+            _ => return Ok(None),
         };
-        node.sync_selection_rank(shape.len());
-        let selected_dim = node.selected_x;
-        let mut slice: Vec<SliceOrIndex> = Vec::new();
-        for (dim, _) in shape.iter().enumerate() {
-            if dim == selected_dim {
-                slice.push(SliceOrIndex::Unlimited {
-                    start: 0,
-                    step: 1,
-                    block: 1,
-                });
-            } else {
-                slice.push(SliceOrIndex::Index(node.selected_indexes[dim]));
-            }
+        if meta.is_compound_container() {
+            return Ok(None);
         }
-        let hyperslap = Hyperslab::from(slice);
-        Some((ds, meta, Selection::Hyperslab(hyperslap)))
+        let Some(selection) = preview_selection_for_node(&mut node, &shape, self.segment_state.idx)
+        else {
+            return Ok(None);
+        };
+        let data = if meta.is_compound_leaf() {
+            plot_projected(&ds, &meta, &selection)?.data
+        } else {
+            ds.plot(&selection)?.data
+        };
+        let source = ChartSource::DatasetSelection(DatasetChartSource {
+            dataset_path: ds.name(),
+            display_path: meta.virtual_path().unwrap_or(&ds.name()).to_string(),
+            selection,
+            shape,
+            kind: if meta.is_compound_leaf() {
+                DatasetChartKind::CompoundLeaf
+            } else {
+                DatasetChartKind::Dataset
+            },
+        });
+        Ok(Some((source, data)))
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {

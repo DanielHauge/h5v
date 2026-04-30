@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
-    ui::state::{AppState, Mode},
+    ui::state::{AppState, AppToast, Mode},
 };
 
 use super::{
@@ -47,19 +47,36 @@ pub(crate) fn handle_mchart_event(
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
+                Some(MultiChartAction::ClearAll) => {
+                    state.multi_chart.clear_all();
+                    state.compute_tree_view();
+                    Ok(EventResult::Redraw)
+                }
+                Some(MultiChartAction::ToggleSelectedVisible) => {
+                    state.multi_chart.toggle_selected_visible();
+                    Ok(EventResult::Redraw)
+                }
+                Some(MultiChartAction::ToggleMarkedBase) => {
+                    match state.multi_chart.toggle_marked_base() {
+                        Ok(_) => Ok(EventResult::Redraw),
+                        Err(message) => Ok(EventResult::Toast(AppToast::Warning(message), false)),
+                    }
+                }
+                Some(MultiChartAction::CreateDerived(operation)) => {
+                    match state.multi_chart.create_builtin_derived(operation) {
+                        Ok(_) => Ok(EventResult::Redraw),
+                        Err(message) => Ok(EventResult::Toast(AppToast::Warning(message), false)),
+                    }
+                }
                 Some(MultiChartAction::MoveDown) => {
-                    state.multi_chart.idx = state
-                        .multi_chart
-                        .idx
-                        .saturating_add(1)
-                        .clamp(0, state.multi_chart.line_series.len().saturating_sub(1));
+                    state.multi_chart.move_down();
                     Ok(EventResult::Redraw)
                 }
                 Some(MultiChartAction::MoveUp) => {
-                    state.multi_chart.idx = state.multi_chart.idx.saturating_sub(1);
+                    state.multi_chart.move_up();
                     Ok(EventResult::Redraw)
                 }
-                _ => Ok(EventResult::Continue),
+                None => Ok(EventResult::Continue),
             },
             KeyEventKind::Repeat => Ok(EventResult::Continue),
             KeyEventKind::Release => Ok(EventResult::Continue),
