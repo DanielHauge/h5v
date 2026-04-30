@@ -726,7 +726,7 @@ fn write_enum_array<T>(attr: &Attribute, values: Vec<T>) -> Result<(), AppError>
     write_enum_memory(attr, &values)
 }
 
-fn read_attr_memory_bytes(attr: &Attribute) -> Result<Vec<u8>, AppError> {
+pub fn read_attr_memory_bytes(attr: &Attribute) -> Result<Vec<u8>, AppError> {
     let dtype = attr.dtype()?;
     let total_size = dtype.size() * attr.size();
     let mut bytes = vec![0_u8; total_size];

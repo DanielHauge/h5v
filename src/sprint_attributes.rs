@@ -10,7 +10,7 @@ use ratatui::{text::Line, text::Span};
 
 use crate::{
     color_consts,
-    h5f::ensure_attr_editable,
+    h5f::{ensure_attr_editable, read_attr_memory_bytes},
     sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
@@ -419,7 +419,7 @@ fn render_raw_scalar_value(
     attr: &Attribute,
     type_desc: &TypeDescriptor,
 ) -> Result<Vec<Span<'static>>, Error> {
-    let bytes: Vec<u8> = attr.read_raw()?;
+    let bytes = read_attr_memory_bytes(attr).map_err(|e| Error::from(e.to_string()))?;
     render_value_from_bytes(&bytes, type_desc)
 }
 
@@ -427,7 +427,7 @@ fn render_raw_array_values(
     attr: &Attribute,
     element_type: &TypeDescriptor,
 ) -> Result<Vec<Span<'static>>, Error> {
-    let bytes: Vec<u8> = attr.read_raw()?;
+    let bytes = read_attr_memory_bytes(attr).map_err(|e| Error::from(e.to_string()))?;
     let element_size = element_type.size();
     if bytes.len() != attr.size() * element_size {
         return Err(Error::from(format!(
@@ -711,9 +711,14 @@ impl AttributeEditable for Attribute {
 
 #[cfg(test)]
 mod tests {
-    use hdf5_metno::types::{CompoundField, CompoundType, FloatSize, IntSize, TypeDescriptor};
+    use hdf5_metno::{
+        h5check,
+        types::{CompoundField, CompoundType, FloatSize, IntSize, TypeDescriptor},
+        File,
+    };
+    use hdf5_metno_sys::h5a::H5Awrite;
 
-    use super::render_value_from_bytes;
+    use super::{render_value_from_bytes, sprint_attribute};
 
     #[test]
     fn renders_scalar_compound_attribute() {
@@ -764,5 +769,44 @@ mod tests {
         )
         .to_string();
         assert_eq!(rendered, "{name: \"triple\", samples: [4, 5, 6]}");
+    }
+
+    #[test]
+    fn renders_real_scalar_compound_attribute() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("h5v-compound-attr-{unique}.h5"));
+        let compound = CompoundType {
+            fields: vec![
+                CompoundField::new("field1", TypeDescriptor::Integer(IntSize::U4), 0, 0),
+                CompoundField::new("field2", TypeDescriptor::Float(FloatSize::U8), 8, 1),
+            ],
+            size: 16,
+        };
+
+        let mut bytes = vec![0_u8; 16];
+        bytes[0..4].copy_from_slice(&7_i32.to_le_bytes());
+        bytes[8..16].copy_from_slice(&9.81_f64.to_le_bytes());
+
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let attr = file
+            .new_attr_builder()
+            .empty_as(&TypeDescriptor::Compound(compound))
+            .create("compound")
+            .expect("failed creating compound attr");
+        let dtype = attr.dtype().expect("failed getting attr dtype");
+        h5check(unsafe { H5Awrite(attr.id(), dtype.id(), bytes.as_ptr().cast()) })
+            .expect("failed writing compound attr bytes");
+
+        let rendered = sprint_attribute(&attr)
+            .expect("failed rendering compound attr")
+            .to_string();
+        assert_eq!(rendered, "{field1: 7, field2: 9.81}");
+
+        drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
+        std::fs::remove_file(path).expect("failed removing temp hdf5 file");
     }
 }
