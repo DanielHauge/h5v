@@ -27,6 +27,17 @@ pub fn render_string<T: ToString>(
     }
 }
 
+fn split_display_lines(string: &str) -> Vec<&str> {
+    string.split('\n').collect()
+}
+
+fn clamp_line_offset(node: &mut H5FNode, total_lines: usize, viewport_height: usize) -> usize {
+    let max_offset = total_lines.saturating_sub(viewport_height.max(1));
+    let clamped = node.line_offset.min(max_offset);
+    node.line_offset = clamped;
+    clamped
+}
+
 fn syntect_to_ratatui_style(style: syntect::highlighting::Style) -> ratatui::style::Style {
     // let bg = style.background;
     let fg = style.foreground;
@@ -98,9 +109,11 @@ pub fn render_hl_string<T: ToString>(
     } else {
         string
     };
+    let total_lines = split_display_lines(&string).len().max(1);
+    let line_offset = clamp_line_offset(node, total_lines, area.height as usize);
     let mut escaped_lines = Vec::new();
 
-    let mut skips = node.line_offset;
+    let mut skips = line_offset;
     for line in LinesWithEndings::from(&string) {
         let ranges: Vec<(syntect::highlighting::Style, &str)> = h
             .highlight_line(line, &ps)
@@ -116,11 +129,15 @@ pub fn render_hl_string<T: ToString>(
             skips -= 1;
         } else {
             escaped_lines.push(Line::from(spans));
+            if escaped_lines.len() >= area.height as usize {
+                break;
+            }
         }
     }
-    let line_num = (node.line_offset + area.height as usize).to_string().len() as u16;
+    let visible_line_count = escaped_lines.len().max(1);
+    let line_num = (line_offset + visible_line_count).to_string().len() as u16;
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
-    render_linenums(f, &line_num_area, node);
+    render_linenums(f, &line_num_area, line_offset, visible_line_count);
     let string = Text::from(escaped_lines);
     f.render_widget(string, text_area);
 }
@@ -134,9 +151,9 @@ fn split_string_linenumber(area: Rect, max: u16) -> (Rect, Rect) {
     (chunks[0], chunks[1])
 }
 
-fn render_linenums(f: &mut Frame, area: &Rect, node: &mut H5FNode) {
-    let first_line_num = node.line_offset + 1;
-    let line_nums: Vec<String> = (first_line_num..first_line_num + area.height as usize)
+fn render_linenums(f: &mut Frame, area: &Rect, line_offset: usize, visible_lines: usize) {
+    let first_line_num = line_offset + 1;
+    let line_nums: Vec<String> = (first_line_num..first_line_num + visible_lines)
         .map(|n| n.to_string())
         .collect();
     let lines = Text::from(line_nums.join("\n"));
@@ -150,24 +167,27 @@ fn render_linenums(f: &mut Frame, area: &Rect, node: &mut H5FNode) {
 }
 
 fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode, string: T) {
-    let line_num = (node.line_offset + area.height as usize).to_string().len() as u16;
-    let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
-    render_linenums(f, &line_num_area, node);
-    let col_offset = node.col_offset;
-    let string = string
-        .to_string()
-        .lines()
-        .skip(node.line_offset)
+    let string = string.to_string();
+    let lines = split_display_lines(&string);
+    let line_offset = clamp_line_offset(node, lines.len().max(1), area.height as usize);
+    let visible_lines = lines
+        .iter()
+        .skip(line_offset)
+        .take(area.height as usize)
         .map(|line| {
-            if line.len() > col_offset as usize {
-                line[col_offset as usize..].to_string()
+            if line.len() > node.col_offset as usize {
+                line[node.col_offset as usize..].to_string()
             } else {
                 "".to_string()
             }
         })
         .map(Line::from)
         .collect_vec();
-    let string = Text::from(string);
+    let visible_line_count = visible_lines.len().max(1);
+    let line_num = (line_offset + visible_line_count).to_string().len() as u16;
+    let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
+    render_linenums(f, &line_num_area, line_offset, visible_line_count);
+    let string = Text::from(visible_lines);
 
     f.render_widget(string, text_area);
 }

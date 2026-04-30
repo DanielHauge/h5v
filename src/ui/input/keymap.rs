@@ -50,6 +50,7 @@ pub enum TreeAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentAction {
     Move(Direction, usize),
+    Edit,
     Copy,
 }
 
@@ -202,6 +203,7 @@ pub fn content_action(key: &KeyEvent) -> Option<ContentAction> {
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             Some(ContentAction::Move(Direction::Down, 10))
         }
+        (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => Some(ContentAction::Edit),
         (KeyCode::Char('y'), _) => Some(ContentAction::Copy),
         _ => None,
     }

@@ -3,14 +3,20 @@ use std::str::FromStr;
 use hdf5_metno::h5check;
 use hdf5_metno::{
     types::{EnumType, FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
-    Attribute, Dataset, Group, H5Type, ObjectReference2,
+    Attribute, Dataset, Group, H5Type, ObjectReference2, Selection,
 };
 use hdf5_metno_sys::h5a::{H5Aread, H5Awrite};
-use ndarray::{Array1, IxDyn};
+use ndarray::{arr0, Array1, IxDyn};
 
 use crate::error::{AppError, FixedStringKind, FixedStringOverflow};
 
-use super::meta::Encoding;
+use super::{
+    compound::{
+        read_projected_selection_bytes, read_selected_element_bytes,
+        write_projected_selection_bytes, write_selected_element_bytes,
+    },
+    meta::{DatasetMeta, Encoding},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarTextCodec {
@@ -1042,6 +1048,455 @@ pub fn non_editable_scalar_error(type_desc: &TypeDescriptor) -> AppError {
             type_desc
         )),
     }
+}
+
+pub fn format_dataset_value_for_edit(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+    selection: Option<&Selection>,
+) -> Result<String, AppError> {
+    let type_desc = dataset_value_type_descriptor(meta);
+    validate_dataset_value_edit_support(&type_desc)?;
+
+    if meta.compound_projection.is_some() {
+        let bytes = read_projected_selection_bytes(dataset, meta, selection)?;
+        return format_scalar_memory_for_edit(&type_desc, &bytes);
+    }
+
+    match &type_desc {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                Ok(read_selected_dataset_scalar::<i8>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                Ok(read_selected_dataset_scalar::<i16>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                Ok(read_selected_dataset_scalar::<i32>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                Ok(read_selected_dataset_scalar::<i64>(dataset, selection)?.to_string())
+            }
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                Ok(read_selected_dataset_scalar::<u8>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                Ok(read_selected_dataset_scalar::<u16>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                Ok(read_selected_dataset_scalar::<u32>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                Ok(read_selected_dataset_scalar::<u64>(dataset, selection)?.to_string())
+            }
+        },
+        TypeDescriptor::Float(float_size) => match float_size {
+            hdf5_metno::types::FloatSize::U4 => {
+                Ok(read_selected_dataset_scalar::<f32>(dataset, selection)?.to_string())
+            }
+            hdf5_metno::types::FloatSize::U8 => {
+                Ok(read_selected_dataset_scalar::<f64>(dataset, selection)?.to_string())
+            }
+        },
+        TypeDescriptor::Boolean => {
+            Ok(read_selected_dataset_scalar::<bool>(dataset, selection)?.to_string())
+        }
+        TypeDescriptor::VarLenAscii => {
+            Ok(read_selected_dataset_scalar::<VarLenAscii>(dataset, selection)?.to_string())
+        }
+        TypeDescriptor::VarLenUnicode => {
+            Ok(read_selected_dataset_scalar::<VarLenUnicode>(dataset, selection)?.to_string())
+        }
+        TypeDescriptor::FixedAscii(_)
+        | TypeDescriptor::FixedUnicode(_)
+        | TypeDescriptor::Enum(_) => {
+            let bytes = read_selected_element_bytes(dataset, selection)?;
+            format_scalar_memory_for_edit(&type_desc, &bytes)
+        }
+        _ => Err(non_editable_dataset_error(&type_desc)),
+    }
+}
+
+pub fn write_dataset_value_from_text(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+    selection: Option<&Selection>,
+    new_value: &str,
+) -> Result<String, AppError> {
+    let type_desc = dataset_value_type_descriptor(meta);
+    validate_dataset_value_edit_support(&type_desc)?;
+
+    if meta.compound_projection.is_some() {
+        let bytes = encode_scalar_memory_from_text(&type_desc, new_value)?;
+        write_projected_selection_bytes(dataset, meta, selection, &bytes)?;
+        dataset.file()?.flush()?;
+        return Ok(type_desc.to_string());
+    }
+
+    match &type_desc {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_selected_dataset_scalar::<i8>(
+                dataset,
+                selection,
+                parse_scalar::<i8>(new_value, "i8")?,
+            )?,
+            hdf5_metno::types::IntSize::U2 => write_selected_dataset_scalar::<i16>(
+                dataset,
+                selection,
+                parse_scalar::<i16>(new_value, "i16")?,
+            )?,
+            hdf5_metno::types::IntSize::U4 => write_selected_dataset_scalar::<i32>(
+                dataset,
+                selection,
+                parse_scalar::<i32>(new_value, "i32")?,
+            )?,
+            hdf5_metno::types::IntSize::U8 => write_selected_dataset_scalar::<i64>(
+                dataset,
+                selection,
+                parse_scalar::<i64>(new_value, "i64")?,
+            )?,
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_selected_dataset_scalar::<u8>(
+                dataset,
+                selection,
+                parse_scalar::<u8>(new_value, "u8")?,
+            )?,
+            hdf5_metno::types::IntSize::U2 => write_selected_dataset_scalar::<u16>(
+                dataset,
+                selection,
+                parse_scalar::<u16>(new_value, "u16")?,
+            )?,
+            hdf5_metno::types::IntSize::U4 => write_selected_dataset_scalar::<u32>(
+                dataset,
+                selection,
+                parse_scalar::<u32>(new_value, "u32")?,
+            )?,
+            hdf5_metno::types::IntSize::U8 => write_selected_dataset_scalar::<u64>(
+                dataset,
+                selection,
+                parse_scalar::<u64>(new_value, "u64")?,
+            )?,
+        },
+        TypeDescriptor::Float(float_size) => match float_size {
+            hdf5_metno::types::FloatSize::U4 => write_selected_dataset_scalar::<f32>(
+                dataset,
+                selection,
+                parse_scalar::<f32>(new_value, "f32")?,
+            )?,
+            hdf5_metno::types::FloatSize::U8 => write_selected_dataset_scalar::<f64>(
+                dataset,
+                selection,
+                parse_scalar::<f64>(new_value, "f64")?,
+            )?,
+        },
+        TypeDescriptor::Boolean => write_selected_dataset_scalar::<bool>(
+            dataset,
+            selection,
+            parse_scalar::<bool>(new_value, "bool")?,
+        )?,
+        TypeDescriptor::VarLenAscii => write_selected_dataset_scalar::<VarLenAscii>(
+            dataset,
+            selection,
+            VarLenAscii::from_ascii(new_value).map_err(|e| {
+                AppError::EditError(format!("Failed to convert to VarLenAscii: {}", e))
+            })?,
+        )?,
+        TypeDescriptor::VarLenUnicode => write_selected_dataset_scalar::<VarLenUnicode>(
+            dataset,
+            selection,
+            VarLenUnicode::from_str(new_value).map_err(|e| {
+                AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
+            })?,
+        )?,
+        TypeDescriptor::FixedAscii(_)
+        | TypeDescriptor::FixedUnicode(_)
+        | TypeDescriptor::Enum(_) => {
+            let bytes = encode_scalar_memory_from_text(&type_desc, new_value)?;
+            write_selected_element_bytes(dataset, selection, &bytes)?
+        }
+        _ => return Err(non_editable_dataset_error(&type_desc)),
+    }
+
+    dataset.file()?.flush()?;
+    Ok(type_desc.to_string())
+}
+
+fn dataset_value_type_descriptor(meta: &DatasetMeta) -> TypeDescriptor {
+    meta.compound_projection
+        .as_ref()
+        .map(|projection| projection.field_type.clone())
+        .unwrap_or_else(|| meta.type_descriptor.clone())
+}
+
+fn validate_dataset_value_edit_support(type_desc: &TypeDescriptor) -> Result<(), AppError> {
+    if scalar_text_codec(type_desc).is_some()
+        || matches!(
+            type_desc,
+            TypeDescriptor::Enum(_)
+                | TypeDescriptor::FixedAscii(_)
+                | TypeDescriptor::FixedUnicode(_)
+        )
+    {
+        return Ok(());
+    }
+
+    Err(non_editable_dataset_error(type_desc))
+}
+
+fn non_editable_dataset_error(type_desc: &TypeDescriptor) -> AppError {
+    match type_desc {
+        TypeDescriptor::Compound(_) => AppError::EditError(
+            "Editing whole compound dataset values is not supported".to_string(),
+        ),
+        TypeDescriptor::FixedArray(_, _) | TypeDescriptor::VarLenArray(_) => {
+            AppError::EditError("Editing nested array dataset values is not supported".to_string())
+        }
+        TypeDescriptor::Reference(_) => {
+            AppError::EditError("Editing reference dataset values is not supported".to_string())
+        }
+        _ => AppError::EditError(format!(
+            "{} dataset type is not supported for editing",
+            type_desc
+        )),
+    }
+}
+
+fn read_selected_dataset_scalar<T>(
+    dataset: &Dataset,
+    selection: Option<&Selection>,
+) -> Result<T, AppError>
+where
+    T: H5Type + Clone,
+{
+    if let Some(selection) = selection {
+        let values = dataset.read_slice::<T, _, IxDyn>(selection.clone())?;
+        if values.len() != 1 {
+            return Err(AppError::EditError(format!(
+                "Expected a single selected dataset value, got {}",
+                values.len()
+            )));
+        }
+        values
+            .iter()
+            .next()
+            .cloned()
+            .ok_or_else(|| AppError::EditError("Selected dataset value was empty".to_string()))
+    } else {
+        dataset.read_scalar::<T>().map_err(AppError::from)
+    }
+}
+
+fn write_selected_dataset_scalar<T>(
+    dataset: &Dataset,
+    selection: Option<&Selection>,
+    value: T,
+) -> Result<(), AppError>
+where
+    T: H5Type,
+{
+    if let Some(selection) = selection {
+        dataset
+            .write_slice(arr0(value).view(), selection.clone())
+            .map_err(|e| AppError::EditError(format!("Failed to write dataset value: {}", e)))
+    } else {
+        dataset
+            .write_scalar(&value)
+            .map_err(|e| AppError::EditError(format!("Failed to write dataset value: {}", e)))
+    }
+}
+
+fn parse_scalar<T>(new_value: &str, type_name: &str) -> Result<T, AppError>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    T::from_str(new_value.trim())
+        .map_err(|e| AppError::EditError(format!("Failed to convert to {}: {}", type_name, e)))
+}
+
+fn format_scalar_memory_for_edit(
+    type_desc: &TypeDescriptor,
+    bytes: &[u8],
+) -> Result<String, AppError> {
+    match type_desc {
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U1) => {
+            Ok(i8::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U2) => {
+            Ok(i16::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U4) => {
+            Ok(i32::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U8) => {
+            Ok(i64::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1) => {
+            Ok(u8::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U2) => {
+            Ok(u16::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U4) => {
+            Ok(u32::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U8) => {
+            Ok(u64::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Float(hdf5_metno::types::FloatSize::U4) => {
+            Ok(f32::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8) => {
+            Ok(f64::from_le_bytes(to_array(bytes)?).to_string())
+        }
+        TypeDescriptor::Boolean => Ok((u8::from_le_bytes(to_array(bytes)?) != 0).to_string()),
+        TypeDescriptor::FixedAscii(size) => decode_fixed_string_value(bytes, *size, true),
+        TypeDescriptor::FixedUnicode(size) => decode_fixed_string_value(bytes, *size, false),
+        TypeDescriptor::Enum(enum_type) => Ok(format_enum_value_for_edit(
+            decode_enum_value_from_bytes(bytes, enum_type)?,
+            enum_type,
+        )),
+        _ => Err(non_editable_dataset_error(type_desc)),
+    }
+}
+
+fn encode_scalar_memory_from_text(
+    type_desc: &TypeDescriptor,
+    new_value: &str,
+) -> Result<Vec<u8>, AppError> {
+    match type_desc {
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U1) => {
+            Ok(parse_scalar::<i8>(new_value, "i8")?.to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U2) => {
+            Ok(parse_scalar::<i16>(new_value, "i16")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U4) => {
+            Ok(parse_scalar::<i32>(new_value, "i32")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U8) => {
+            Ok(parse_scalar::<i64>(new_value, "i64")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1) => {
+            Ok(parse_scalar::<u8>(new_value, "u8")?.to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U2) => {
+            Ok(parse_scalar::<u16>(new_value, "u16")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U4) => {
+            Ok(parse_scalar::<u32>(new_value, "u32")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U8) => {
+            Ok(parse_scalar::<u64>(new_value, "u64")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Float(hdf5_metno::types::FloatSize::U4) => {
+            Ok(parse_scalar::<f32>(new_value, "f32")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8) => {
+            Ok(parse_scalar::<f64>(new_value, "f64")?
+                .to_le_bytes()
+                .to_vec())
+        }
+        TypeDescriptor::Boolean => Ok(vec![u8::from(parse_scalar::<bool>(new_value, "bool")?)]),
+        TypeDescriptor::FixedAscii(size) => encode_fixed_string_value(new_value, *size, true),
+        TypeDescriptor::FixedUnicode(size) => encode_fixed_string_value(new_value, *size, false),
+        TypeDescriptor::Enum(enum_type) => encode_enum_value_bytes(new_value, enum_type),
+        _ => Err(non_editable_dataset_error(type_desc)),
+    }
+}
+
+fn encode_enum_value_bytes(new_value: &str, enum_type: &EnumType) -> Result<Vec<u8>, AppError> {
+    let value = parse_enum_member_value(new_value, enum_type)?;
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U1) => {
+            Ok((value as i8).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U2) => {
+            Ok((value as i16).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U4) => {
+            Ok((value as i32).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U8) => {
+            Ok((value as i64).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1) => {
+            Ok((value as u8).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U2) => {
+            Ok((value as u16).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U4) => {
+            Ok((value as u32).to_le_bytes().to_vec())
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U8) => {
+            Ok(value.to_le_bytes().to_vec())
+        }
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn decode_enum_value_from_bytes(bytes: &[u8], enum_type: &EnumType) -> Result<u64, AppError> {
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U1) => {
+            Ok(i8::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U2) => {
+            Ok(i16::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U4) => {
+            Ok(i32::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Integer(hdf5_metno::types::IntSize::U8) => {
+            Ok(i64::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1) => {
+            Ok(u8::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U2) => {
+            Ok(u16::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U4) => {
+            Ok(u32::from_le_bytes(to_array(bytes)?) as u64)
+        }
+        TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U8) => {
+            Ok(u64::from_le_bytes(to_array(bytes)?))
+        }
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn to_array<const N: usize>(bytes: &[u8]) -> Result<[u8; N], AppError> {
+    bytes.try_into().map_err(|_| {
+        AppError::EditError(format!(
+            "Failed converting {} bytes into fixed array of {} bytes",
+            bytes.len(),
+            N
+        ))
+    })
 }
 
 pub fn read_scalar_string_dataset(

@@ -83,6 +83,36 @@ fn selected_attribute(
     ))
 }
 
+fn selected_attribute_name_and_selection(
+    state: &mut AppState<'_>,
+) -> Result<(String, crate::ui::state::AttributeViewSelection), EventResult> {
+    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
+    let attributes = match node.read_attributes() {
+        Ok(attributes) => attributes,
+        Err(error) => {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!("Failed to read attributes: {}", error)),
+                true,
+            ))
+        }
+    };
+    let Some(rendered_attribute) = attributes
+        .rendered_attributes
+        .get(node_attributes_view_cursor.attribute_index)
+    else {
+        return Err(EventResult::Toast(
+            AppToast::Error("No attribute selected".to_string()),
+            true,
+        ));
+    };
+
+    Ok((
+        rendered_attr_name(&rendered_attribute.0),
+        node_attributes_view_cursor.attribute_view_selection,
+    ))
+}
+
 fn read_hdf5_name(
     reader: impl Fn(*mut c_char, usize) -> isize,
     context: &str,
@@ -152,10 +182,11 @@ fn resolve_std_reference_target(attr: &Attribute) -> Result<ReferenceNavigationT
 fn navigate_reference_attribute_value(
     state: &mut AppState<'_>,
 ) -> Result<Option<EventResult>, EventResult> {
-    let (attr_name, attr, selection) = selected_attribute(state)?;
-    if !matches!(selection, Value) {
+    let (attr_name, selection) = selected_attribute_name_and_selection(state)?;
+    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) || !matches!(selection, Value) {
         return Ok(None);
     }
+    let (_, attr, _) = selected_attribute(state)?;
 
     let type_desc = attribute_type_descriptor(&attr)
         .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
@@ -230,17 +261,19 @@ fn navigate_reference_attribute_value(
 fn selected_attribute_edit_request(
     state: &mut AppState<'_>,
 ) -> Result<AttributeEditRequest, EventResult> {
-    let (attr_name, attr, selection) = selected_attribute(state)?;
+    let (attr_name, selection) = selected_attribute_name_and_selection(state)?;
 
     if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
         return Err(EventResult::Toast(
-            AppToast::Error(format!(
-                "Editing metainfo-attribute '{}' is not allowed",
+            AppToast::Warning(format!(
+                "'{}' is a built-in h5v metadata field and cannot be edited",
                 attr_name
             )),
-            true,
+            false,
         ));
     }
+
+    let (_, attr, _) = selected_attribute(state)?;
 
     if let Err(e) = attr.can_edit() {
         if let Value = selection {

@@ -20,6 +20,14 @@ unsafe extern "C" {
         plist_id: i64,
         buf: *mut std::ffi::c_void,
     ) -> i32;
+    fn H5Dwrite(
+        dset_id: i64,
+        mem_type_id: i64,
+        mem_space_id: i64,
+        file_space_id: i64,
+        plist_id: i64,
+        buf: *const std::ffi::c_void,
+    ) -> i32;
 }
 
 const H5_DEFAULT_ID: i64 = 0;
@@ -42,6 +50,14 @@ fn selection_to_shape(selection: &Selection, dataset: &Dataset) -> Result<Vec<us
     Ok(resolved.out_shape(dataset.shape())?)
 }
 
+fn selection_mem_shape(shape: &[usize]) -> Vec<usize> {
+    if shape.is_empty() {
+        vec![1]
+    } else {
+        shape.to_vec()
+    }
+}
+
 fn read_projected_bytes(
     dataset: &Dataset,
     projection: &CompoundFieldProjection,
@@ -57,7 +73,7 @@ fn read_projected_bytes(
     unsafe {
         raw_selection.apply_to_dataspace(file_space.id())?;
     }
-    let mem_space = Dataspace::try_new(out_shape.clone())?;
+    let mem_space = Dataspace::try_new(selection_mem_shape(&out_shape))?;
 
     let mut buffer = vec![0_u8; total_elems * item_size];
     let status = unsafe {
@@ -123,6 +139,168 @@ fn read_projected_scalar_bytes(
         ));
     }
     Ok(buffer[start..end].to_vec())
+}
+
+pub fn read_selected_element_bytes(
+    dataset: &Dataset,
+    selection: Option<&Selection>,
+) -> Result<Vec<u8>, AppError> {
+    let dtype = dataset.dtype()?;
+    let item_size = dtype.size();
+    let mut buffer = vec![0_u8; item_size];
+
+    let (mem_space, file_space, mem_space_id, file_space_id) = if let Some(selection) = selection {
+        let selected_file_space = dataset.space()?.copy();
+        let raw_selection = selection.clone().into_raw(dataset.shape())?;
+        unsafe {
+            raw_selection.apply_to_dataspace(selected_file_space.id())?;
+        }
+        let mem_shape = selection_to_shape(selection, dataset)?;
+        let selected_mem_space = Dataspace::try_new(selection_mem_shape(&mem_shape))?;
+        let mem_space_id = selected_mem_space.id();
+        let file_space_id = selected_file_space.id();
+        (
+            Some(selected_mem_space),
+            Some(selected_file_space),
+            mem_space_id,
+            file_space_id,
+        )
+    } else {
+        (None, None, H5_DEFAULT_ID, H5_DEFAULT_ID)
+    };
+    let _keep_alive = (mem_space.as_ref(), file_space.as_ref());
+
+    let status = unsafe {
+        H5Dread(
+            dataset.id(),
+            dtype.id(),
+            mem_space_id,
+            file_space_id,
+            H5_DEFAULT_ID,
+            buffer.as_mut_ptr().cast(),
+        )
+    };
+    if status < 0 {
+        return Err(AppError::DrawingError(
+            "Failed reading selected dataset element".to_string(),
+        ));
+    }
+
+    Ok(buffer)
+}
+
+pub fn write_selected_element_bytes(
+    dataset: &Dataset,
+    selection: Option<&Selection>,
+    bytes: &[u8],
+) -> Result<(), AppError> {
+    let dtype = dataset.dtype()?;
+    if bytes.len() != dtype.size() {
+        return Err(AppError::EditError(format!(
+            "Selected dataset element write size mismatch: expected {} bytes, got {}",
+            dtype.size(),
+            bytes.len()
+        )));
+    }
+
+    let (mem_space, file_space, mem_space_id, file_space_id) = if let Some(selection) = selection {
+        let selected_file_space = dataset.space()?.copy();
+        let raw_selection = selection.clone().into_raw(dataset.shape())?;
+        unsafe {
+            raw_selection.apply_to_dataspace(selected_file_space.id())?;
+        }
+        let mem_shape = selection_to_shape(selection, dataset)?;
+        let selected_mem_space = Dataspace::try_new(selection_mem_shape(&mem_shape))?;
+        let mem_space_id = selected_mem_space.id();
+        let file_space_id = selected_file_space.id();
+        (
+            Some(selected_mem_space),
+            Some(selected_file_space),
+            mem_space_id,
+            file_space_id,
+        )
+    } else {
+        (None, None, H5_DEFAULT_ID, H5_DEFAULT_ID)
+    };
+    let _keep_alive = (mem_space.as_ref(), file_space.as_ref());
+
+    let status = unsafe {
+        H5Dwrite(
+            dataset.id(),
+            dtype.id(),
+            mem_space_id,
+            file_space_id,
+            H5_DEFAULT_ID,
+            bytes.as_ptr().cast(),
+        )
+    };
+    if status < 0 {
+        return Err(AppError::EditError(
+            "Failed writing selected dataset element".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn read_projected_selection_bytes(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+    selection: Option<&Selection>,
+) -> Result<Vec<u8>, AppError> {
+    let projection = meta.compound_projection.as_ref().ok_or_else(|| {
+        AppError::DrawingError("Projected bytes requested for non-compound dataset".to_string())
+    })?;
+    if selection.is_none() && dataset.is_scalar() {
+        return read_projected_scalar_bytes(dataset, projection);
+    }
+
+    let selection = selection.ok_or_else(|| {
+        AppError::DrawingError("Missing selection for projected dataset element".to_string())
+    })?;
+    let (bytes, out_shape) = read_projected_bytes(dataset, projection, selection.clone())?;
+    let selected_elems = if out_shape.is_empty() {
+        1
+    } else {
+        out_shape.iter().product()
+    };
+    if selected_elems != 1 {
+        return Err(AppError::DrawingError(format!(
+            "Expected scalar projected selection, got shape {:?}",
+            out_shape
+        )));
+    }
+    Ok(bytes)
+}
+
+pub fn write_projected_selection_bytes(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+    selection: Option<&Selection>,
+    field_bytes: &[u8],
+) -> Result<(), AppError> {
+    let projection = meta.compound_projection.as_ref().ok_or_else(|| {
+        AppError::EditError("Projected write requested for non-compound dataset".to_string())
+    })?;
+    let field_size = projection.field_type.size();
+    if field_bytes.len() != field_size {
+        return Err(AppError::EditError(format!(
+            "Projected field write size mismatch: expected {} bytes, got {}",
+            field_size,
+            field_bytes.len()
+        )));
+    }
+
+    let mut element_bytes = read_selected_element_bytes(dataset, selection)?;
+    let start = projection.absolute_offset();
+    let end = start + field_size;
+    if end > element_bytes.len() {
+        return Err(AppError::EditError(
+            "Projected field write exceeded element bounds".to_string(),
+        ));
+    }
+    element_bytes[start..end].copy_from_slice(field_bytes);
+    write_selected_element_bytes(dataset, selection, &element_bytes)
 }
 
 pub trait ProjectionDecode: Sized {
