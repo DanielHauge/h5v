@@ -92,6 +92,14 @@ fn create_tmp_file(name_hint: Option<&str>) -> Result<NamedTempFile, AppError> {
     builder.tempfile().map_err(AppError::from)
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn editor_command_line(editor: &str, path: &Path) -> String {
+    format!("{editor} {}", shell_quote(&path.to_string_lossy()))
+}
+
 pub fn perform_edit(
     state: &mut AppState<'_>,
     content: String,
@@ -114,10 +122,19 @@ pub fn perform_edit(
         let editor = env::var("VISUAL")
             .or_else(|_| env::var("EDITOR"))
             .unwrap_or_else(|_| "vi".to_string());
-        Command::new(editor)
-            .arg(&path)
-            .spawn()?
-            .wait_with_output()?;
+        let status = Command::new("sh")
+            .arg("-lc")
+            .arg(editor_command_line(&editor, &path))
+            .status()?;
+        if !status.success() {
+            let status_label = status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string());
+            return Err(AppError::EditError(format!(
+                "Editor exited unsuccessfully with status {status_label}"
+            )));
+        }
         let mut new_content = String::new();
         File::open(&path)?.read_to_string(&mut new_content)?;
         Ok(normalize_edited_content(new_content))
@@ -135,4 +152,27 @@ fn normalize_edited_content(mut content: String) -> String {
         }
     }
     content
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{editor_command_line, normalize_edited_content, shell_quote};
+    use std::path::Path;
+
+    #[test]
+    fn shell_quotes_single_quotes() {
+        assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
+    }
+
+    #[test]
+    fn builds_editor_command_line_with_arguments() {
+        let command = editor_command_line("code --wait", Path::new("/tmp/test file.yml"));
+        assert_eq!(command, "code --wait '/tmp/test file.yml'");
+    }
+
+    #[test]
+    fn normalizes_single_trailing_newline_only() {
+        assert_eq!(normalize_edited_content("value\n".to_string()), "value");
+        assert_eq!(normalize_edited_content("value\n\n".to_string()), "value\n");
+    }
 }
