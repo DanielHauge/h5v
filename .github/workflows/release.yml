@@ -18,7 +18,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update || true
           sudo apt-get install -y --no-install-recommends \
             cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
 
