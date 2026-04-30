@@ -1,3 +1,7 @@
+use hdf5_metno::{
+    types::{FloatSize, IntSize, TypeDescriptor},
+    Attribute, File,
+};
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     prelude::{BitMapBackend, IntoDrawingArea, WHITE},
@@ -18,6 +22,23 @@ use crate::{
 };
 
 pub type Point = (f64, f64);
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExpressionPromptState {
+    buffer: String,
+    cursor: usize,
+    error: Option<String>,
+}
+
+impl ExpressionPromptState {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            cursor: 0,
+            error: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartXAxisPolicy {
@@ -50,6 +71,89 @@ pub enum BuiltinDerivedOp {
     Ratio,
     Product,
     Xy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExprBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ExpressionAst {
+    Number(f64),
+    ItemRef(ChartItemId),
+    AttributeRef(ExpressionAttributeRef),
+    UnaryMinus(Box<ExpressionAst>),
+    Binary {
+        op: ExprBinaryOp,
+        lhs: Box<ExpressionAst>,
+        rhs: Box<ExpressionAst>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ExpressionToken {
+    ItemRef(ChartItemId),
+    AttributeRef(ExpressionAttributeRef),
+    Number(f64),
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Comma,
+    LParen,
+    RParen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DerivedExpressionKind {
+    YSeries,
+    XySeries,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ParsedExpression {
+    YSeries(ExpressionAst),
+    XySeries(ExpressionAst, ExpressionAst),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ExpressionAttributeRef {
+    SelectedDataset {
+        attr_name: String,
+    },
+    ObjectPath {
+        path: String,
+        attr_name: String,
+        absolute: bool,
+    },
+}
+
+impl ExpressionAttributeRef {
+    fn render(&self) -> String {
+        match self {
+            ExpressionAttributeRef::SelectedDataset { attr_name } => format!("#{attr_name}"),
+            ExpressionAttributeRef::ObjectPath {
+                path,
+                attr_name,
+                absolute: _,
+            } => format!("#{path}:{attr_name}"),
+        }
+    }
+
+    fn needs_selected_dataset_context(&self) -> bool {
+        matches!(
+            self,
+            ExpressionAttributeRef::SelectedDataset { .. }
+                | ExpressionAttributeRef::ObjectPath {
+                    absolute: false,
+                    ..
+                }
+        )
+    }
 }
 
 impl BuiltinDerivedOp {
@@ -200,6 +304,8 @@ pub enum ChartSource {
     DerivedExpression {
         expression: String,
         input_ids: Vec<ChartItemId>,
+        len: usize,
+        kind: DerivedExpressionKind,
     },
 }
 
@@ -224,7 +330,17 @@ impl ChartSource {
         match self {
             ChartSource::DatasetSelection(source) => source.kind_label(),
             ChartSource::BuiltinDerived(source) => source.operation.label(),
-            ChartSource::DerivedExpression { .. } => "derived expression (phase two)",
+            ChartSource::DerivedExpression { kind, .. } => match kind {
+                DerivedExpressionKind::YSeries => "expression",
+                DerivedExpressionKind::XySeries => "expression x/y",
+            },
+        }
+    }
+
+    fn dataset_source(&self) -> Option<&DatasetChartSource> {
+        match self {
+            ChartSource::DatasetSelection(source) => Some(source),
+            ChartSource::BuiltinDerived(_) | ChartSource::DerivedExpression { .. } => None,
         }
     }
 }
@@ -280,6 +396,10 @@ impl ChartItem {
         (rgb.0, rgb.1, rgb.2)
     }
 
+    pub fn reference_label(&self) -> String {
+        format!("${} {}", self.id.0, self.list_label())
+    }
+
     pub fn list_label(&self) -> String {
         match &self.source {
             ChartSource::DatasetSelection(source) => {
@@ -317,6 +437,7 @@ pub struct MultiChartState {
     next_color_slot: usize,
     x_axis_policy: ChartXAxisPolicy,
     marked_base_item: Option<ChartItemId>,
+    expression_prompt: Option<ExpressionPromptState>,
 }
 
 impl MultiChartState {
@@ -336,6 +457,7 @@ impl MultiChartState {
             next_color_slot: 0,
             x_axis_policy: ChartXAxisPolicy::SampleIndex,
             marked_base_item: None,
+            expression_prompt: None,
         }
     }
 
@@ -359,12 +481,196 @@ impl MultiChartState {
         self.items.get(self.idx)
     }
 
+    pub fn is_expression_prompt_active(&self) -> bool {
+        self.expression_prompt.is_some()
+    }
+
     fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
         self.items.iter().find(|item| item.id == id)
     }
 
     fn marked_base_item_ref(&self) -> Option<&ChartItem> {
         self.marked_base_item.and_then(|id| self.item_by_id(id))
+    }
+
+    pub fn open_expression_prompt(&mut self) {
+        self.expression_prompt = Some(ExpressionPromptState::new());
+        self.modified = true;
+    }
+
+    pub fn close_expression_prompt(&mut self) {
+        self.expression_prompt = None;
+        self.modified = true;
+    }
+
+    pub fn expression_insert_char(&mut self, ch: char) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.buffer.insert(prompt.cursor, ch);
+            prompt.cursor += 1;
+            prompt.error = None;
+        }
+    }
+
+    pub fn expression_backspace(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor > 0 {
+                prompt.cursor -= 1;
+                prompt.buffer.remove(prompt.cursor);
+                prompt.error = None;
+            }
+        }
+    }
+
+    pub fn expression_delete(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor < prompt.buffer.len() {
+                prompt.buffer.remove(prompt.cursor);
+                prompt.error = None;
+            }
+        }
+    }
+
+    pub fn expression_move_left(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor > 0 {
+                prompt.cursor -= 1;
+            }
+        }
+    }
+
+    pub fn expression_move_right(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor < prompt.buffer.len() {
+                prompt.cursor += 1;
+            }
+        }
+    }
+
+    pub fn expression_move_to_start(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.cursor = 0;
+        }
+    }
+
+    pub fn expression_move_to_end(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.cursor = prompt.buffer.len();
+        }
+    }
+
+    pub fn expression_clear(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.buffer.clear();
+            prompt.cursor = 0;
+            prompt.error = None;
+        }
+    }
+
+    pub fn submit_expression_prompt(&mut self, file: Option<&File>) -> Result<(), String> {
+        let expression = self
+            .expression_prompt
+            .as_ref()
+            .map(|prompt| prompt.buffer.trim().to_string())
+            .ok_or_else(|| "Expression prompt is not active".to_string())?;
+        if expression.is_empty() {
+            self.set_expression_error("Enter an expression before submitting".to_string());
+            return Ok(());
+        }
+
+        match self.create_expression_derived_with_file(expression.clone(), file) {
+            Ok(_) => {
+                self.close_expression_prompt();
+                Ok(())
+            }
+            Err(error) => {
+                self.set_expression_error(error);
+                Ok(())
+            }
+        }
+    }
+
+    fn set_expression_error(&mut self, error: String) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.error = Some(error);
+        }
+    }
+
+    #[cfg(test)]
+    fn create_expression_derived(&mut self, expression: String) -> Result<ChartItemId, String> {
+        self.create_expression_derived_with_file(expression, None)
+    }
+
+    fn create_expression_derived_with_file(
+        &mut self,
+        expression: String,
+        file: Option<&File>,
+    ) -> Result<ChartItemId, String> {
+        let tokens = tokenize_expression(&expression)?;
+        let parsed = parse_derived_expression(&tokens)?;
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        refs.item_ids.sort_by_key(|id| id.0);
+        refs.item_ids.dedup();
+        refs.attribute_refs
+            .sort_by_key(|attr_ref| attr_ref.render());
+        refs.attribute_refs.dedup();
+        if refs.item_ids.is_empty() {
+            return Err("Expression must reference at least one chart item like $3".to_string());
+        }
+
+        let referenced = refs
+            .item_ids
+            .iter()
+            .map(|id| {
+                self.item_by_id(*id)
+                    .cloned()
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let first = referenced
+            .first()
+            .ok_or_else(|| "Expression must reference at least one chart item".to_string())?;
+        let expected_len = first.series.len();
+        if expected_len == 0 {
+            return Err("Cannot build an expression from empty series".to_string());
+        }
+        let require_matching_x = matches!(parsed, ParsedExpression::YSeries(_));
+        validate_expression_series_compatibility(&referenced, expected_len, require_matching_x)?;
+
+        let attribute_values = resolve_expression_attribute_values(
+            file,
+            self.selected_item()
+                .and_then(|item| item.source.dataset_source()),
+            &refs.attribute_refs,
+        )?;
+
+        let mut points = Vec::with_capacity(expected_len);
+        let kind = match &parsed {
+            ParsedExpression::YSeries(ast) => {
+                for idx in 0..expected_len {
+                    let y = eval_expression_at(ast, idx, self, &attribute_values)?;
+                    points.push((first.series.points[idx].0, y));
+                }
+                DerivedExpressionKind::YSeries
+            }
+            ParsedExpression::XySeries(x_ast, y_ast) => {
+                for idx in 0..expected_len {
+                    let x = eval_expression_at(x_ast, idx, self, &attribute_values)?;
+                    let y = eval_expression_at(y_ast, idx, self, &attribute_values)?;
+                    points.push((x, y));
+                }
+                DerivedExpressionKind::XySeries
+            }
+        };
+        let source = ChartSource::DerivedExpression {
+            expression,
+            input_ids: refs.item_ids,
+            len: expected_len,
+            kind,
+        };
+        self.add_chart_item(source, points)
+            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
     }
 
     pub fn add_chart_item(
@@ -814,22 +1120,34 @@ impl MultiChartState {
             horizontal: 1,
             vertical: 1,
         });
+        let (workspace_area, prompt_area) = if self.expression_prompt.is_some() {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(6)])
+                .split(inner_area);
+            (split[0], Some(split[1]))
+        } else {
+            (inner_area, None)
+        };
 
         if self.items.is_empty() {
-            self.render_empty(f, inner_area);
+            self.render_empty(f, workspace_area);
+            if let Some(prompt_area) = prompt_area {
+                self.render_expression_prompt(f, prompt_area);
+            }
             return;
         }
 
-        let panes = if inner_area.width < 110 {
+        let panes = if workspace_area.width < 110 {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(11), Constraint::Min(12)])
-                .split(inner_area)
+                .split(workspace_area)
         } else {
             Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(42), Constraint::Min(20)])
-                .split(inner_area)
+                .split(workspace_area)
         };
 
         let (sidebar_area, chart_area) = (panes[0], panes[1]);
@@ -840,6 +1158,9 @@ impl MultiChartState {
         self.render_item_list(f, sidebar_chunks[0]);
         self.render_selected_details(f, sidebar_chunks[1]);
         self.render_chart_panel(f, chart_area);
+        if let Some(prompt_area) = prompt_area {
+            self.render_expression_prompt(f, prompt_area);
+        }
     }
 
     fn render_empty(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
@@ -888,27 +1209,44 @@ impl MultiChartState {
                 let color = plotters::prelude::Palette99::pick(item.color_slot).to_rgba();
                 let marker = if item.visible { "●" } else { "○" };
                 let prefix = if absolute_idx == self.idx { "> " } else { "  " };
-                let hidden = if item.visible { "" } else { " hidden" };
-                let base_marker = if self.marked_base_item == Some(item.id) {
-                    " [base]"
+                let is_selected = absolute_idx == self.idx;
+                let is_base = self.marked_base_item == Some(item.id);
+                let id_style = if is_selected {
+                    Style::default()
+                        .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                        .bold()
                 } else {
-                    ""
+                    Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                };
+                let label_style = match (is_selected, item.visible) {
+                    (true, true) => Style::default().fg(color_consts::TITLE).bold(),
+                    (true, false) => Style::default().fg(color_consts::TITLE).bold().dim(),
+                    (false, true) => Style::default().fg(color_consts::BUILT_IN_VALUE_COLOR),
+                    (false, false) => Style::default().fg(color_consts::TYPE_DESC_COLOR).dim(),
+                };
+                let label_style = if is_base {
+                    label_style.underlined()
+                } else {
+                    label_style
                 };
                 Line::from(vec![
-                    Span::raw(prefix),
                     Span::styled(
-                        marker,
-                        Style::default().fg(Color::Rgb(color.0, color.1, color.2)),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("{}{}{}", item.list_label(), base_marker, hidden),
-                        if absolute_idx == self.idx {
+                        prefix,
+                        if is_selected {
                             Style::default().fg(color_consts::TITLE).bold()
                         } else {
-                            Style::default().fg(color_consts::COLOR_WHITE)
+                            Style::default().fg(color_consts::BREAK_COLOR)
                         },
                     ),
+                    Span::styled(
+                        marker,
+                        Style::default()
+                            .fg(Color::Rgb(color.0, color.1, color.2))
+                            .bold(),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(format!("(${}) ", item.id.0), id_style),
+                    Span::styled(item.list_label(), label_style),
                 ])
             })
             .collect::<Vec<_>>();
@@ -940,7 +1278,7 @@ impl MultiChartState {
         };
         let base_line = self
             .marked_base_item_ref()
-            .map(|item| item.list_label())
+            .map(|item| item.reference_label())
             .unwrap_or_else(|| "none".to_string());
 
         let lines = match &item.source {
@@ -1045,6 +1383,13 @@ impl MultiChartState {
                 ]),
                 Line::from(vec![
                     Span::styled(
+                        "base ",
+                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                    ),
+                    Span::raw(base_line),
+                ]),
+                Line::from(vec![
+                    Span::styled(
                         "type ",
                         Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
                     ),
@@ -1141,11 +1486,700 @@ impl MultiChartState {
             }
         }
     }
+
+    fn render_expression_prompt(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
+        let Some(prompt) = self.expression_prompt.as_ref() else {
+            return;
+        };
+        let title = match &prompt.error {
+            Some(_) => "Expression prompt [invalid]",
+            None => "Expression prompt",
+        };
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+            .title_style(Style::default().fg(color_consts::TITLE).bold());
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled("= ", Style::default().fg(color_consts::TITLE).bold()),
+                Span::raw(prompt.buffer.clone()),
+            ]),
+            Line::from(vec![
+                Span::styled("Syntax ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
+                Span::raw("$1 * #SCALE   or   ($1 * #/:DIST_TICKS_PER_DIST, $2 + #OFFSET * #SCALE)"),
+            ]),
+            Line::from(vec![
+                Span::styled("Rules ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
+                Span::raw("single expr => y-series; (x,y) => x/y series. $id uses sample alignment; #... attrs resolve from the selected dataset item unless absolute"),
+            ]),
+        ];
+        if let Some(error) = &prompt.error {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Error ",
+                    Style::default().fg(color_consts::ERROR_COLOR).bold(),
+                ),
+                Span::raw(error.clone()),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Keys ",
+                    Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                ),
+                Span::raw("Enter create  Esc cancel"),
+            ]));
+        }
+
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
+            inner,
+        );
+        let cursor = ratatui::layout::Position::new(
+            inner.x.saturating_add(2 + prompt.cursor as u16),
+            inner.y,
+        );
+        f.set_cursor_position(cursor);
+    }
+}
+
+fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
+    let mut chars = input.chars().peekable();
+    let mut tokens = Vec::new();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' => {
+                chars.next();
+            }
+            '$' => {
+                chars.next();
+                let mut digits = String::new();
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        digits.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if digits.is_empty() {
+                    return Err("Expected digits after '$' item reference".to_string());
+                }
+                let id = digits
+                    .parse::<u64>()
+                    .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
+                tokens.push(ExpressionToken::ItemRef(ChartItemId(id)));
+            }
+            '#' => {
+                chars.next();
+                tokens.push(ExpressionToken::AttributeRef(
+                    parse_expression_attribute_ref(&mut chars)?,
+                ));
+            }
+            '0'..='9' | '.' => {
+                let mut number = String::new();
+                let mut seen_dot = false;
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        number.push(*next);
+                        chars.next();
+                    } else if *next == '.' && !seen_dot {
+                        seen_dot = true;
+                        number.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let value = number
+                    .parse::<f64>()
+                    .map_err(|_| format!("Invalid numeric literal '{number}'"))?;
+                tokens.push(ExpressionToken::Number(value));
+            }
+            '+' => {
+                chars.next();
+                tokens.push(ExpressionToken::Plus);
+            }
+            '-' => {
+                chars.next();
+                tokens.push(ExpressionToken::Minus);
+            }
+            '*' => {
+                chars.next();
+                tokens.push(ExpressionToken::Star);
+            }
+            '/' => {
+                chars.next();
+                tokens.push(ExpressionToken::Slash);
+            }
+            ',' => {
+                chars.next();
+                tokens.push(ExpressionToken::Comma);
+            }
+            '(' => {
+                chars.next();
+                tokens.push(ExpressionToken::LParen);
+            }
+            ')' => {
+                chars.next();
+                tokens.push(ExpressionToken::RParen);
+            }
+            other => {
+                return Err(format!(
+                    "Unsupported character '{}' in expression. Use $id item references, #attribute references, numbers, + - * /, commas, and parentheses",
+                    other
+                ));
+            }
+        }
+    }
+
+    Ok(tokens)
+}
+
+fn parse_expression_attribute_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionAttributeRef, String> {
+    let Some(&first) = chars.peek() else {
+        return Err("Expected an attribute reference after '#'".to_string());
+    };
+
+    if first == '/' || first == '.' {
+        let mut path = String::new();
+        while let Some(&next) = chars.peek() {
+            if next == ':' {
+                break;
+            }
+            if next.is_whitespace() || matches!(next, '+' | '*' | '(' | ')') {
+                return Err(format!(
+                    "Attribute path reference '#{path}' must include ':ATTR_NAME'"
+                ));
+            }
+            path.push(next);
+            chars.next();
+        }
+        if path.is_empty() {
+            return Err("Expected a path after '#' for scalar attribute lookup".to_string());
+        }
+        if chars.next() != Some(':') {
+            return Err(format!(
+                "Attribute path reference '#{path}' must include ':ATTR_NAME'"
+            ));
+        }
+        let attr_name = parse_expression_attribute_name(chars);
+        if attr_name.is_empty() {
+            return Err(format!(
+                "Expected an attribute name after '#{path}:' in expression"
+            ));
+        }
+        Ok(ExpressionAttributeRef::ObjectPath {
+            absolute: first == '/',
+            path,
+            attr_name,
+        })
+    } else {
+        let attr_name = parse_expression_attribute_name(chars);
+        if attr_name.is_empty() {
+            return Err("Expected an attribute name after '#'".to_string());
+        }
+        Ok(ExpressionAttributeRef::SelectedDataset { attr_name })
+    }
+}
+
+fn parse_expression_attribute_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut attr_name = String::new();
+    while let Some(&next) = chars.peek() {
+        if next.is_whitespace() || matches!(next, '+' | '-' | '*' | '/' | '(' | ')') {
+            break;
+        }
+        attr_name.push(next);
+        chars.next();
+    }
+    attr_name
+}
+
+fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String> {
+    fn parse_expr(tokens: &[ExpressionToken], pos: &mut usize) -> Result<ExpressionAst, String> {
+        let mut expr = parse_term(tokens, pos)?;
+        while *pos < tokens.len() {
+            let op = match tokens[*pos] {
+                ExpressionToken::Plus => ExprBinaryOp::Add,
+                ExpressionToken::Minus => ExprBinaryOp::Sub,
+                _ => break,
+            };
+            *pos += 1;
+            let rhs = parse_term(tokens, pos)?;
+            expr = ExpressionAst::Binary {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_term(tokens: &[ExpressionToken], pos: &mut usize) -> Result<ExpressionAst, String> {
+        let mut expr = parse_factor(tokens, pos)?;
+        while *pos < tokens.len() {
+            let op = match tokens[*pos] {
+                ExpressionToken::Star => ExprBinaryOp::Mul,
+                ExpressionToken::Slash => ExprBinaryOp::Div,
+                _ => break,
+            };
+            *pos += 1;
+            let rhs = parse_factor(tokens, pos)?;
+            expr = ExpressionAst::Binary {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_factor(tokens: &[ExpressionToken], pos: &mut usize) -> Result<ExpressionAst, String> {
+        if *pos >= tokens.len() {
+            return Err("Unexpected end of expression".to_string());
+        }
+        match &tokens[*pos] {
+            ExpressionToken::Number(value) => {
+                *pos += 1;
+                Ok(ExpressionAst::Number(*value))
+            }
+            ExpressionToken::ItemRef(id) => {
+                *pos += 1;
+                Ok(ExpressionAst::ItemRef(*id))
+            }
+            ExpressionToken::AttributeRef(attr_ref) => {
+                *pos += 1;
+                Ok(ExpressionAst::AttributeRef(attr_ref.clone()))
+            }
+            ExpressionToken::Minus => {
+                *pos += 1;
+                Ok(ExpressionAst::UnaryMinus(Box::new(parse_factor(
+                    tokens, pos,
+                )?)))
+            }
+            ExpressionToken::LParen => {
+                *pos += 1;
+                let expr = parse_expr(tokens, pos)?;
+                if *pos >= tokens.len() || !matches!(tokens[*pos], ExpressionToken::RParen) {
+                    return Err("Missing closing ')' in expression".to_string());
+                }
+                *pos += 1;
+                Ok(expr)
+            }
+            other => Err(format!("Unexpected token '{other:?}' in expression")),
+        }
+    }
+
+    let mut pos = 0;
+    let expr = parse_expr(tokens, &mut pos)?;
+    if pos != tokens.len() {
+        return Err("Unexpected trailing tokens in expression".to_string());
+    }
+    Ok(expr)
+}
+
+fn parse_derived_expression(tokens: &[ExpressionToken]) -> Result<ParsedExpression, String> {
+    if let Some((x_tokens, y_tokens)) = split_top_level_tuple(tokens) {
+        let x_expr = parse_expression(x_tokens)?;
+        let y_expr = parse_expression(y_tokens)?;
+        return Ok(ParsedExpression::XySeries(x_expr, y_expr));
+    }
+    Ok(ParsedExpression::YSeries(parse_expression(tokens)?))
+}
+
+fn split_top_level_tuple(
+    tokens: &[ExpressionToken],
+) -> Option<(&[ExpressionToken], &[ExpressionToken])> {
+    if tokens.len() < 5
+        || !matches!(tokens.first(), Some(ExpressionToken::LParen))
+        || !matches!(tokens.last(), Some(ExpressionToken::RParen))
+    {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut comma_index = None;
+    for (idx, token) in tokens.iter().enumerate() {
+        match token {
+            ExpressionToken::LParen => depth += 1,
+            ExpressionToken::RParen => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && idx != tokens.len() - 1 {
+                    return None;
+                }
+            }
+            ExpressionToken::Comma if depth == 1 => {
+                if comma_index.replace(idx).is_some() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let comma_index = comma_index?;
+    let x_tokens = &tokens[1..comma_index];
+    let y_tokens = &tokens[comma_index + 1..tokens.len() - 1];
+    if x_tokens.is_empty() || y_tokens.is_empty() {
+        return None;
+    }
+    Some((x_tokens, y_tokens))
+}
+
+#[derive(Debug, Default)]
+struct ExpressionRefs {
+    item_ids: Vec<ChartItemId>,
+    attribute_refs: Vec<ExpressionAttributeRef>,
+}
+
+fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
+    match expr {
+        ExpressionAst::Number(_) => {}
+        ExpressionAst::ItemRef(id) => out.item_ids.push(*id),
+        ExpressionAst::AttributeRef(attr_ref) => out.attribute_refs.push(attr_ref.clone()),
+        ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
+        ExpressionAst::Binary { lhs, rhs, .. } => {
+            collect_expression_refs(lhs, out);
+            collect_expression_refs(rhs, out);
+        }
+    }
+}
+
+fn collect_parsed_expression_refs(expr: &ParsedExpression, out: &mut ExpressionRefs) {
+    match expr {
+        ParsedExpression::YSeries(ast) => collect_expression_refs(ast, out),
+        ParsedExpression::XySeries(x_ast, y_ast) => {
+            collect_expression_refs(x_ast, out);
+            collect_expression_refs(y_ast, out);
+        }
+    }
+}
+
+fn validate_expression_series_compatibility(
+    referenced: &[ChartItem],
+    expected_len: usize,
+    require_matching_x: bool,
+) -> Result<(), String> {
+    let Some(first) = referenced.first() else {
+        return Err("Expression must reference at least one chart item".to_string());
+    };
+    for item in &referenced[1..] {
+        if item.series.len() != expected_len {
+            return Err(format!(
+                "Expression series lengths must match exactly: ${} has len {}, but ${} has len {}",
+                first.id.0,
+                expected_len,
+                item.id.0,
+                item.series.len()
+            ));
+        }
+        if require_matching_x {
+            for idx in 0..expected_len {
+                if item.series.points[idx].0 != first.series.points[idx].0 {
+                    return Err(format!(
+                        "Expression x-values must match exactly across referenced items; mismatch at sample index {}",
+                        idx
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn eval_expression_at(
+    expr: &ExpressionAst,
+    idx: usize,
+    state: &MultiChartState,
+    attribute_values: &std::collections::HashMap<ExpressionAttributeRef, f64>,
+) -> Result<f64, String> {
+    match expr {
+        ExpressionAst::Number(value) => Ok(*value),
+        ExpressionAst::ItemRef(id) => state
+            .item_by_id(*id)
+            .and_then(|item| item.series.points.get(idx).map(|(_, y)| *y))
+            .ok_or_else(|| {
+                format!(
+                    "Chart item ${} is unavailable at sample index {}",
+                    id.0, idx
+                )
+            }),
+        ExpressionAst::AttributeRef(attr_ref) => attribute_values
+            .get(attr_ref)
+            .copied()
+            .ok_or_else(|| format!("Attribute reference {} was not resolved", attr_ref.render())),
+        ExpressionAst::UnaryMinus(inner) => {
+            Ok(-eval_expression_at(inner, idx, state, attribute_values)?)
+        }
+        ExpressionAst::Binary { op, lhs, rhs } => {
+            let lhs = eval_expression_at(lhs, idx, state, attribute_values)?;
+            let rhs = eval_expression_at(rhs, idx, state, attribute_values)?;
+            match op {
+                ExprBinaryOp::Add => Ok(lhs + rhs),
+                ExprBinaryOp::Sub => Ok(lhs - rhs),
+                ExprBinaryOp::Mul => Ok(lhs * rhs),
+                ExprBinaryOp::Div => {
+                    if rhs == 0.0 {
+                        Err(format!(
+                            "Cannot divide by zero in expression at sample index {}",
+                            idx
+                        ))
+                    } else {
+                        Ok(lhs / rhs)
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn resolve_expression_attribute_values(
+    file: Option<&File>,
+    selected_dataset: Option<&DatasetChartSource>,
+    refs: &[ExpressionAttributeRef],
+) -> Result<std::collections::HashMap<ExpressionAttributeRef, f64>, String> {
+    if refs.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let file = file.ok_or_else(|| {
+        "Scalar attribute references require an open file handle, but no file is loaded".to_string()
+    })?;
+
+    let selected_dataset_path = selected_dataset.map(|source| source.dataset_path.as_str());
+    if refs
+        .iter()
+        .any(ExpressionAttributeRef::needs_selected_dataset_context)
+        && selected_dataset_path.is_none()
+    {
+        return Err(
+            "Relative scalar attribute references require the selected multichart item to be dataset-backed"
+                .to_string(),
+        );
+    }
+
+    let mut values = std::collections::HashMap::with_capacity(refs.len());
+    for attr_ref in refs {
+        let value = resolve_expression_attribute_value(file, selected_dataset_path, attr_ref)?;
+        values.insert(attr_ref.clone(), value);
+    }
+    Ok(values)
+}
+
+fn resolve_expression_attribute_value(
+    file: &File,
+    selected_dataset_path: Option<&str>,
+    attr_ref: &ExpressionAttributeRef,
+) -> Result<f64, String> {
+    let (object_path, attr_name) = match attr_ref {
+        ExpressionAttributeRef::SelectedDataset { attr_name } => (
+            selected_dataset_path
+                .ok_or_else(|| {
+                    format!(
+                        "Attribute reference {} requires a selected dataset-backed chart item",
+                        attr_ref.render()
+                    )
+                })?
+                .to_string(),
+            attr_name.as_str(),
+        ),
+        ExpressionAttributeRef::ObjectPath {
+            path,
+            attr_name,
+            absolute,
+        } => {
+            let resolved_path = if *absolute {
+                normalize_absolute_attribute_path(path)?
+            } else {
+                resolve_relative_attribute_path(
+                    selected_dataset_path.ok_or_else(|| {
+                        format!(
+                            "Attribute reference {} requires a selected dataset-backed chart item",
+                            attr_ref.render()
+                        )
+                    })?,
+                    path,
+                )?
+            };
+            (resolved_path, attr_name.as_str())
+        }
+    };
+    let attr = open_expression_attribute(file, &object_path, attr_name)?;
+    read_expression_numeric_scalar_attr(&attr, &attr_ref.render())
+}
+
+fn normalize_absolute_attribute_path(path: &str) -> Result<String, String> {
+    if !path.starts_with('/') {
+        return Err(format!(
+            "Absolute attribute path '{path}' must start with '/'"
+        ));
+    }
+    let mut components = Vec::new();
+    for segment in path.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        match segment {
+            "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err(format!(
+                        "Absolute attribute path '{path}' escapes above root"
+                    ));
+                }
+            }
+            other => components.push(other),
+        }
+    }
+    if components.is_empty() {
+        Ok("/".to_string())
+    } else {
+        Ok(format!("/{}", components.join("/")))
+    }
+}
+
+fn resolve_relative_attribute_path(
+    base_object_path: &str,
+    relative_path: &str,
+) -> Result<String, String> {
+    let mut components = base_object_path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for segment in relative_path.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." {
+            if components.pop().is_none() {
+                return Err(format!(
+                    "Relative attribute path '{relative_path}' escapes above the file root"
+                ));
+            }
+            continue;
+        }
+        components.push(segment.to_string());
+    }
+    if components.is_empty() {
+        Ok("/".to_string())
+    } else {
+        Ok(format!("/{}", components.join("/")))
+    }
+}
+
+fn open_expression_attribute(
+    file: &File,
+    object_path: &str,
+    attr_name: &str,
+) -> Result<Attribute, String> {
+    if object_path == "/" {
+        return file.attr(attr_name).map_err(|error| {
+            format!(
+                "Failed to read scalar attribute '#/:{}': {}",
+                attr_name, error
+            )
+        });
+    }
+
+    if let Ok(group) = file.group(object_path) {
+        return group.attr(attr_name).map_err(|error| {
+            format!(
+                "Failed to read scalar attribute '#{}:{}': {}",
+                object_path, attr_name, error
+            )
+        });
+    }
+
+    if let Ok(dataset) = file.dataset(object_path) {
+        return dataset.attr(attr_name).map_err(|error| {
+            format!(
+                "Failed to read scalar attribute '#{}:{}': {}",
+                object_path, attr_name, error
+            )
+        });
+    }
+
+    Err(format!(
+        "Attribute path '{}' does not resolve to a dataset or group in the file",
+        object_path
+    ))
+}
+
+fn read_expression_numeric_scalar_attr(attr: &Attribute, reference: &str) -> Result<f64, String> {
+    if !attr.is_scalar() {
+        return Err(format!(
+            "Attribute reference {reference} must resolve to a scalar numeric attribute"
+        ));
+    }
+    let dtype = attr.dtype().map_err(|error| {
+        format!("Failed to inspect scalar attribute type for {reference}: {error}")
+    })?;
+    let type_desc = dtype.to_descriptor().map_err(|error| {
+        format!("Failed to inspect scalar attribute type for {reference}: {error}")
+    })?;
+    match type_desc {
+        TypeDescriptor::Integer(IntSize::U1) => attr
+            .read_scalar::<i8>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U2) => attr
+            .read_scalar::<i16>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U4) => attr
+            .read_scalar::<i32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U8) => attr
+            .read_scalar::<i64>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U1) => attr
+            .read_scalar::<u8>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U2) => attr
+            .read_scalar::<u16>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U4) => attr
+            .read_scalar::<u32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U8) => attr
+            .read_scalar::<u64>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Float(FloatSize::U4) => attr
+            .read_scalar::<f32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Float(FloatSize::U8) => attr
+            .read_scalar::<f64>()
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        other => Err(format!(
+            "Attribute reference {reference} must be numeric; got {other}"
+        )),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use hdf5_metno::File;
 
     #[allow(deprecated)]
     fn make_state() -> MultiChartState {
@@ -1160,6 +2194,77 @@ mod tests {
             shape: vec![4, 8],
             kind: DatasetChartKind::Dataset,
         })
+    }
+
+    fn temp_hdf5_path(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("h5v-{name}-{unique}.h5"))
+    }
+
+    fn make_attribute_test_file() -> (File, std::path::PathBuf) {
+        let path = temp_hdf5_path("mchart-attr");
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let parent = file
+            .create_group("parent")
+            .expect("failed creating parent group");
+        let offset_attr = parent
+            .new_attr_builder()
+            .empty::<f64>()
+            .create("OFFSET")
+            .expect("failed creating parent attr");
+        offset_attr
+            .write_scalar(&3.0_f64)
+            .expect("failed writing parent attr");
+        let child = parent
+            .create_group("child")
+            .expect("failed creating child group");
+        let child_offset_attr = child
+            .new_attr_builder()
+            .empty::<f64>()
+            .create("CHILD_OFFSET")
+            .expect("failed creating child attr");
+        child_offset_attr
+            .write_scalar(&3.0_f64)
+            .expect("failed writing child attr");
+        let dataset = child
+            .new_dataset_builder()
+            .with_data(&[1.0_f64, 2.0_f64])
+            .create("ds")
+            .expect("failed creating dataset");
+        let scale_attr = dataset
+            .new_attr_builder()
+            .empty::<f64>()
+            .create("SCALE")
+            .expect("failed creating dataset attr");
+        scale_attr
+            .write_scalar(&2.0_f64)
+            .expect("failed writing dataset attr");
+        let flag_attr = dataset
+            .new_attr_builder()
+            .empty::<bool>()
+            .create("FLAG")
+            .expect("failed creating non numeric attr");
+        flag_attr
+            .write_scalar(&true)
+            .expect("failed writing non numeric attr");
+        let other = parent
+            .new_dataset_builder()
+            .with_data(&[0.0_f64])
+            .create("otherds")
+            .expect("failed creating other dataset");
+        let bias_attr = other
+            .new_attr_builder()
+            .empty::<f64>()
+            .create("BIAS")
+            .expect("failed creating other dataset attr");
+        bias_attr
+            .write_scalar(&5.0_f64)
+            .expect("failed writing other dataset attr");
+        file.flush().expect("failed flushing temp hdf5 file");
+        (file, path)
     }
 
     #[test]
@@ -1339,5 +2444,295 @@ mod tests {
             .create_builtin_derived(BuiltinDerivedOp::Xy)
             .unwrap_err();
         assert!(err.contains("does not match"));
+    }
+
+    #[test]
+    fn expression_derived_supports_item_refs_literals_and_precedence() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0, 0],
+            x: 1,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 2.0), (1.0, 4.0)],
+        );
+        state.add_chart_item(source("/group/b", selection), vec![(0.0, 3.0), (1.0, 5.0)]);
+
+        state
+            .create_expression_derived("$1 + $2 * 2".to_string())
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(derived.series.points, vec![(0.0, 8.0), (1.0, 14.0)]);
+        match &derived.source {
+            ChartSource::DerivedExpression { input_ids, len, .. } => {
+                assert_eq!(input_ids, &vec![ChartItemId(1), ChartItemId(2)]);
+                assert_eq!(*len, 2);
+            }
+            other => panic!("expected expression-derived source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expression_derived_rejects_mismatched_x_values() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0, 0],
+            x: 1,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 2.0), (1.0, 4.0)],
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            vec![(10.0, 3.0), (20.0, 5.0)],
+        );
+
+        let err = state
+            .create_expression_derived("$1 + $2".to_string())
+            .unwrap_err();
+        assert!(err.contains("x-values must match"));
+    }
+
+    #[test]
+    fn tokenizes_scalar_attribute_references() {
+        let tokens = tokenize_expression(
+            "$1 * #SCALE + #../:CHILD_OFFSET + #../../otherds:BIAS + #/parent/otherds:BIAS",
+        )
+        .unwrap();
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::AttributeRef(ExpressionAttributeRef::SelectedDataset { attr_name })
+                if attr_name == "SCALE"
+        )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::AttributeRef(ExpressionAttributeRef::ObjectPath {
+                path,
+                attr_name,
+                absolute: false,
+            }) if path == "../" && attr_name == "CHILD_OFFSET"
+        )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::AttributeRef(ExpressionAttributeRef::ObjectPath {
+                path,
+                attr_name,
+                absolute: true,
+            }) if path == "/parent/otherds" && attr_name == "BIAS"
+        )));
+    }
+
+    #[test]
+    fn parses_top_level_xy_expression_tuple() {
+        let tokens = tokenize_expression("($1 * 2, $2 + #SCALE)").unwrap();
+        let parsed = parse_derived_expression(&tokens).unwrap();
+        match parsed {
+            ParsedExpression::XySeries(_, _) => {}
+            other => panic!("expected xy parsed expression, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolves_relative_scalar_attribute_paths_from_selected_dataset() {
+        assert_eq!(
+            resolve_relative_attribute_path("/parent/child/ds", "../").unwrap(),
+            "/parent/child"
+        );
+        assert_eq!(
+            resolve_relative_attribute_path("/parent/child/ds", "../../otherds").unwrap(),
+            "/parent/otherds"
+        );
+        assert_eq!(
+            normalize_absolute_attribute_path("/parent/otherds").unwrap(),
+            "/parent/otherds"
+        );
+        assert!(resolve_relative_attribute_path("/parent/child/ds", "../../../../").is_err());
+    }
+
+    #[test]
+    fn expression_prompt_edits_do_not_invalidate_chart_render() {
+        let mut state = make_state();
+        state.modified = false;
+        state.open_expression_prompt();
+        assert!(state.modified);
+
+        state.modified = false;
+        state.expression_insert_char('x');
+        assert!(!state.modified);
+
+        state.expression_move_left();
+        assert!(!state.modified);
+
+        state.expression_backspace();
+        assert!(!state.modified);
+    }
+
+    #[test]
+    fn expression_derived_xy_tuple_creates_xy_series() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0, 0],
+            x: 1,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(10.0, 2.0), (20.0, 4.0)],
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            vec![(100.0, 3.0), (200.0, 5.0)],
+        );
+
+        state
+            .create_expression_derived("($1 * 10, $2 + 1)".to_string())
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(derived.series.points, vec![(20.0, 4.0), (40.0, 6.0)]);
+        match &derived.source {
+            ChartSource::DerivedExpression {
+                input_ids,
+                len,
+                kind,
+                ..
+            } => {
+                assert_eq!(input_ids, &vec![ChartItemId(1), ChartItemId(2)]);
+                assert_eq!(*len, 2);
+                assert_eq!(*kind, DerivedExpressionKind::XySeries);
+            }
+            other => panic!("expected expression-derived source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expression_derived_xy_tuple_requires_matching_lengths() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0, 0],
+            x: 1,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 2.0), (1.0, 4.0), (2.0, 6.0)],
+        );
+        state.add_chart_item(source("/group/b", selection), vec![(0.0, 3.0), (1.0, 5.0)]);
+
+        let err = state
+            .create_expression_derived("($1, $2 + 1)".to_string())
+            .unwrap_err();
+        assert!(err.contains("lengths must match"));
+    }
+
+    #[test]
+    #[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
+    fn expression_derived_supports_scalar_attributes_from_dataset_and_paths() {
+        let (file, path) = make_attribute_test_file();
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            ChartSource::DatasetSelection(DatasetChartSource {
+                dataset_path: "/parent/child/ds".to_string(),
+                display_path: "/parent/child/ds".to_string(),
+                selection,
+                shape: vec![2],
+                kind: DatasetChartKind::Dataset,
+            }),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+
+        state
+            .create_expression_derived_with_file(
+                "$1 * #SCALE + #../:CHILD_OFFSET + #../../otherds:BIAS + #/parent/otherds:BIAS"
+                    .to_string(),
+                Some(&file),
+            )
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(derived.series.points, vec![(0.0, 15.0), (1.0, 17.0)]);
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    #[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
+    fn expression_derived_rejects_non_numeric_scalar_attribute() {
+        let (file, path) = make_attribute_test_file();
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            ChartSource::DatasetSelection(DatasetChartSource {
+                dataset_path: "/parent/child/ds".to_string(),
+                display_path: "/parent/child/ds".to_string(),
+                selection,
+                shape: vec![2],
+                kind: DatasetChartKind::Dataset,
+            }),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+
+        let err = state
+            .create_expression_derived_with_file("$1 + #FLAG".to_string(), Some(&file))
+            .unwrap_err();
+        assert!(err.contains("must be numeric"));
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    #[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
+    fn expression_derived_rejects_invalid_relative_attribute_paths() {
+        let (file, path) = make_attribute_test_file();
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+
+        state.add_chart_item(
+            ChartSource::DatasetSelection(DatasetChartSource {
+                dataset_path: "/parent/child/ds".to_string(),
+                display_path: "/parent/child/ds".to_string(),
+                selection,
+                shape: vec![2],
+                kind: DatasetChartKind::Dataset,
+            }),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+
+        let err = state
+            .create_expression_derived_with_file(
+                "$1 + #../../../../:OFFSET".to_string(),
+                Some(&file),
+            )
+            .unwrap_err();
+        assert!(err.contains("escapes above"));
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
     }
 }

@@ -86,6 +86,7 @@ pub enum MultiChartAction {
     ClearAll,
     ToggleSelectedVisible,
     ToggleMarkedBase,
+    OpenExpressionPrompt,
     CreateDerived(BuiltinDerivedOp),
     MoveUp,
     MoveDown,
@@ -280,7 +281,10 @@ pub fn multichart_action(key: &KeyEvent) -> Option<MultiChartAction> {
         }
         (KeyCode::Char('c'), _) => Some(MultiChartAction::ClearZoom),
         (KeyCode::Char('C'), _) => Some(MultiChartAction::ClearAll),
-        (KeyCode::Char('v'), _) => Some(MultiChartAction::ToggleSelectedVisible),
+        (KeyCode::Char('e'), _) => Some(MultiChartAction::OpenExpressionPrompt),
+        (KeyCode::Enter, _) | (KeyCode::Char('v'), _) => {
+            Some(MultiChartAction::ToggleSelectedVisible)
+        }
         (KeyCode::Char(' '), _) => Some(MultiChartAction::ToggleMarkedBase),
         (KeyCode::Char('D'), _) => Some(MultiChartAction::CreateDerived(
             BuiltinDerivedOp::Difference,
@@ -325,5 +329,19 @@ pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
             Some(CommandAction::InsertChar(c))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multichart_enter_toggles_selected_visibility() {
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key),
+            Some(MultiChartAction::ToggleSelectedVisible)
+        );
     }
 }
