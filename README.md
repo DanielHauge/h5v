@@ -58,13 +58,56 @@ Shift focus to an attribute name or value or preview value and press `enter` or 
 
 ## Commands
 
-- `:n` Go the nth item
-- `:+n` Go down n items
-- `:-n` Go up n items
+Use `:` to open the bottom command minibuffer, type a command, and press `enter` to run it.
 
-For example, `:5` will go to the 5th item, `:+3` will go down 3 items, and `:-2` will go up 2 items.
-Use `:` to enter command mode, type the command, and press `enter` to execute it.
-Use `.` to repeat the last command.
+Current command features:
+
+- `Tab` / `Shift+Tab`: cycle and apply command completion
+- `Up` / `Down`: move through command suggestions
+- `Ctrl+P` / `Ctrl+N`: browse command history
+- `.` or `repeat`: repeat the last successful command
+- `help` or `help <command>`: open help or show help for a specific command
+
+Examples:
+
+- `goto /group/dataset`
+- `seek 5`
+- `down 3`
+- `focus content`
+- `mode matrix`
+- `toggle-tree`
+- `reload`
+- `x next`
+- `row prev`
+- `index next 10`
+
+Legacy numeric aliases are still supported:
+
+- `:5` -> `seek 5`
+- `:+3` -> `down 3`
+- `:-2` -> `up 2`
+
+## Startup automation
+
+Startup commands use the same parser and command catalog as the interactive minibuffer.
+
+- `-c`, `--command <COMMAND>`: run a command at startup, repeatable
+- `--script <PATH>`: load startup commands from a file
+- `--script -`: read startup commands from stdin and warn if EOF arrives without any commands
+- piped stdin is also consumed implicitly without `--script -`
+- `--script-test` or `-ct`: validate startup commands and print a formatted dry-run summary
+
+Scripts and inline command strings can separate commands with either newlines or `;`.
+Blank lines and lines starting with `#` are ignored in script input.
+
+Examples:
+
+```bash
+h5v file.h5 -c "focus content" -c "mode matrix"
+h5v file.h5 --script setup.h5v
+printf 'toggle-tree; mode preview\nreload\n' | h5v file.h5
+h5v file.h5 --script-test --script setup.h5v
+```
 
 ## Installation
 
@@ -74,5 +117,8 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Adding/Updating/Deletion of attributes/matrix values
-- [ ] Add more command support: All actions could be cmd'able -> delete attribute, remove dataset from multi-chart, go up 50, etc. Anything that could change the state basically.
+- [ ] Adding/Deletion of attributes/matrix values
+- [ ] Adding/Deletion of datasets and groups
+- [ ] Broaden command coverage further so more edit, multichart, and navigation actions are scriptable.
+- [ ] yank images / previews to clipboard - Also multichart
+- [ ] Improvements to multichart mode: better visuals and support for controls and commands

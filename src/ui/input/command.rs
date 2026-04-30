@@ -1,9 +1,10 @@
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
-use crate::ui::state::Mode;
+use crate::ui::state::{AppToast, Mode};
 use crate::{error::AppError, ui::state::AppState};
 
 use super::{
+    super::command::execute_command,
     keymap::{command_action, CommandAction},
     EventResult,
 };
@@ -18,23 +19,46 @@ pub fn handle_command_event(
                 Some(CommandAction::Submit) => {
                     state.mode = Mode::Normal;
                     match state.command_state.parse_command() {
-                        Ok(cmd) => state.execute_command(&cmd),
-                        Err(_) => Ok(EventResult::Redraw),
+                        Ok(cmd) => match execute_command(state, &cmd) {
+                            Ok(result) => {
+                                state.command_state.record_successful_command(&cmd);
+                                Ok(result)
+                            }
+                            Err(error) => Ok(EventResult::Toast(
+                                AppToast::Error(error.to_string()),
+                                false,
+                            )),
+                        },
+                        Err(error) => Ok(EventResult::Toast(
+                            AppToast::Error(error.to_string()),
+                            false,
+                        )),
                     }
                 }
-                Some(CommandAction::PrefixPlus) => {
-                    if state.command_state.cursor != 0 {
-                        return Ok(EventResult::Continue);
+                Some(CommandAction::Complete) => {
+                    if state.command_state.apply_selected_completion() {
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
                     }
-                    if state.command_state.command_buffer.is_empty()
-                        || (!state.command_state.command_buffer.starts_with('+')
-                            && !state.command_state.command_buffer.starts_with('-'))
-                    {
-                        state
-                            .command_state
-                            .command_buffer
-                            .insert(state.command_state.cursor, '+');
-                        state.command_state.cursor += 1;
+                }
+                Some(CommandAction::SelectPrevSuggestion) => {
+                    state.command_state.select_previous_suggestion();
+                    Ok(EventResult::Redraw)
+                }
+                Some(CommandAction::SelectNextSuggestion) => {
+                    state.command_state.select_next_suggestion();
+                    Ok(EventResult::Redraw)
+                }
+                Some(CommandAction::SelectPrevHistory) => {
+                    if state.command_state.select_previous_history() {
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
+                    }
+                }
+                Some(CommandAction::SelectNextHistory) => {
+                    if state.command_state.select_next_history() {
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
@@ -45,8 +69,7 @@ pub fn handle_command_event(
                     Ok(EventResult::Redraw)
                 }
                 Some(CommandAction::ClearWord) | Some(CommandAction::Clear) => {
-                    state.command_state.command_buffer.clear();
-                    state.command_state.cursor = 0;
+                    state.command_state.begin_new_entry();
                     Ok(EventResult::Redraw)
                 }
                 Some(CommandAction::MoveToStart) => {
@@ -57,24 +80,6 @@ pub fn handle_command_event(
                     state.command_state.cursor = state.command_state.command_buffer.len();
                     Ok(EventResult::Redraw)
                 }
-                Some(CommandAction::PrefixMinus) => {
-                    if state.command_state.cursor != 0 {
-                        return Ok(EventResult::Continue);
-                    }
-                    if state.command_state.command_buffer.is_empty()
-                        || (!state.command_state.command_buffer.starts_with('+')
-                            && !state.command_state.command_buffer.starts_with('-'))
-                    {
-                        state
-                            .command_state
-                            .command_buffer
-                            .insert(state.command_state.cursor, '-');
-                        state.command_state.cursor += 1;
-                        Ok(EventResult::Redraw)
-                    } else {
-                        Ok(EventResult::Continue)
-                    }
-                }
                 Some(CommandAction::Backspace) => {
                     if state.command_state.cursor > 0 {
                         state.command_state.cursor -= 1;
@@ -82,6 +87,7 @@ pub fn handle_command_event(
                             .command_state
                             .command_buffer
                             .remove(state.command_state.cursor);
+                        state.command_state.note_buffer_edited();
                     }
                     Ok(EventResult::Redraw)
                 }
@@ -91,6 +97,7 @@ pub fn handle_command_event(
                             .command_state
                             .command_buffer
                             .remove(state.command_state.cursor);
+                        state.command_state.note_buffer_edited();
                     }
                     Ok(EventResult::Redraw)
                 }
@@ -106,12 +113,13 @@ pub fn handle_command_event(
                     }
                     Ok(EventResult::Redraw)
                 }
-                Some(CommandAction::InsertDigit(c)) => {
+                Some(CommandAction::InsertChar(c)) => {
                     state
                         .command_state
                         .command_buffer
                         .insert(state.command_state.cursor, c);
                     state.command_state.cursor += 1;
+                    state.command_state.note_buffer_edited();
                     Ok(EventResult::Redraw)
                 }
                 _ => Ok(EventResult::Continue),

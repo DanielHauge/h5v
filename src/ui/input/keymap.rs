@@ -89,17 +89,20 @@ pub enum MultiChartAction {
 pub enum CommandAction {
     Submit,
     Cancel,
+    Complete,
+    SelectPrevSuggestion,
+    SelectNextSuggestion,
+    SelectPrevHistory,
+    SelectNextHistory,
     ClearWord,
     MoveToStart,
     MoveToEnd,
     Clear,
-    PrefixPlus,
-    PrefixMinus,
     Backspace,
     Delete,
     MoveLeft,
     MoveRight,
-    InsertDigit(char),
+    InsertChar(char),
 }
 
 pub fn normal_action(key: &KeyEvent) -> Option<NormalAction> {
@@ -282,18 +285,29 @@ pub fn multichart_action(key: &KeyEvent) -> Option<MultiChartAction> {
 pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
     match (key.code, key.modifiers) {
         (KeyCode::Enter, _) => Some(CommandAction::Submit),
-        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => Some(CommandAction::Cancel),
+        (KeyCode::Esc, _) => Some(CommandAction::Cancel),
+        (KeyCode::Tab, _) => Some(CommandAction::Complete),
+        (KeyCode::BackTab, _) | (KeyCode::Up, _) => Some(CommandAction::SelectPrevSuggestion),
+        (KeyCode::Down, _) => Some(CommandAction::SelectNextSuggestion),
+        (KeyCode::Char('p'), KeyModifiers::CONTROL) => Some(CommandAction::SelectPrevHistory),
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => Some(CommandAction::SelectNextHistory),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => Some(CommandAction::ClearWord),
         (KeyCode::Char('a'), KeyModifiers::CONTROL) => Some(CommandAction::MoveToStart),
         (KeyCode::Char('e'), KeyModifiers::CONTROL) => Some(CommandAction::MoveToEnd),
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(CommandAction::Clear),
-        (KeyCode::Char('+'), _) => Some(CommandAction::PrefixPlus),
-        (KeyCode::Char('-'), _) => Some(CommandAction::PrefixMinus),
+        (KeyCode::Home, _) => Some(CommandAction::MoveToStart),
+        (KeyCode::End, _) => Some(CommandAction::MoveToEnd),
         (KeyCode::Backspace, _) => Some(CommandAction::Backspace),
         (KeyCode::Delete, _) => Some(CommandAction::Delete),
-        (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Some(CommandAction::MoveLeft),
-        (KeyCode::Right, _) | (KeyCode::Char('l'), _) => Some(CommandAction::MoveRight),
-        (KeyCode::Char(c), _) if c.is_ascii_digit() => Some(CommandAction::InsertDigit(c)),
+        (KeyCode::Left, _) => Some(CommandAction::MoveLeft),
+        (KeyCode::Right, _) => Some(CommandAction::MoveRight),
+        (KeyCode::Char(c), modifiers)
+            if (modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT)
+                && c.is_ascii()
+                && !c.is_ascii_control() =>
+        {
+            Some(CommandAction::InsertChar(c))
+        }
         _ => None,
     }
 }

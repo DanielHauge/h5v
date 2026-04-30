@@ -41,7 +41,7 @@ use crate::{
 
 use super::state::{ChartPreviewKey, ImageLoadKey};
 use super::{
-    command::{Command, CommandState},
+    command::{execute_command, parse_command_text, CommandState, StartupCommand},
     command_view::render_command_dialog,
     image_preview::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
@@ -87,6 +87,7 @@ type Result<T> = std::result::Result<T, AppError>;
 pub struct IntendedMainLoopBreak {}
 
 const HEADER_HEIGHT: u16 = 1;
+const COMMAND_BAR_HEIGHT: u16 = 6;
 
 #[derive(Clone)]
 struct SelectedNodeSnapshot {
@@ -371,7 +372,12 @@ fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> 
     })
 }
 
-pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
+pub fn init(
+    filename: String,
+    link: bool,
+    writable: bool,
+    startup_commands: &[StartupCommand],
+) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     stdout().execute(EnableMouseCapture)?;
     enable_raw_mode()?;
@@ -381,7 +387,13 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
     let mut last_message = None;
 
     loop {
-        match main_recover_loop(&mut terminal, filename.clone(), link, writable) {
+        match main_recover_loop(
+            &mut terminal,
+            filename.clone(),
+            link,
+            writable,
+            startup_commands,
+        ) {
             Ok(_) => break,
             Err(e) => match e {
                 AppError::FileError(_) => {
@@ -451,6 +463,7 @@ fn main_recover_loop(
     filename: String,
     link: bool,
     writable: bool,
+    startup_commands: &[StartupCommand],
 ) -> Result<IntendedMainLoopBreak> {
     let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
@@ -513,8 +526,12 @@ fn main_recover_loop(
 
     let command_state = CommandState {
         command_buffer: String::new(),
-        last_command: Command::Noop,
+        last_command: None,
         cursor: 0,
+        selected_suggestion: 0,
+        history: Default::default(),
+        history_cursor: None,
+        history_draft: None,
     };
     let edit_pause = Arc::new(RwLock::new(()));
 
@@ -560,6 +577,10 @@ fn main_recover_loop(
     state.sync_file_watch();
     state.compute_tree_view();
 
+    if run_startup_commands(&mut state, startup_commands)? {
+        return Ok(IntendedMainLoopBreak {});
+    }
+
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
         let frame_area = match state.toast {
             AppToast::Empty => frame.area(),
@@ -568,6 +589,10 @@ fn main_recover_loop(
             }
         };
         let content_area = render_header(frame, frame_area, state);
+        let (content_area, command_area) = match state.mode {
+            Mode::Command => split_command_bar(content_area),
+            _ => (content_area, Rect::new(0, 0, 0, 0)),
+        };
         state.ui_layout = state::UiLayoutState::default();
 
         if let Mode::Help = state.mode {
@@ -595,8 +620,10 @@ fn main_recover_loop(
 
         match state.mode {
             Mode::Search => {}
-            Mode::Command => render_command_dialog(frame, state),
-            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog => {
+            Mode::Command
+            | Mode::Normal
+            | Mode::FixedStringOverflowDialog
+            | Mode::FixedStringResizeDialog => {
                 let selected_node = state.treeview[state.tree_view_cursor].node.clone();
                 match render_main_display(frame, &main_display_area, &selected_node, state) {
                     Ok(()) => {}
@@ -608,6 +635,7 @@ fn main_recover_loop(
         }
 
         match state.mode {
+            Mode::Command => render_command_dialog(frame, command_area, state),
             Mode::FixedStringOverflowDialog => {
                 render_fixed_string_overflow_dialog(frame, content_area, state)
             }
@@ -814,6 +842,50 @@ fn main_recover_loop(
     Ok(IntendedMainLoopBreak {})
 }
 
+fn apply_startup_event_result(state: &mut AppState<'_>, event_result: EventResult) -> Result<bool> {
+    match event_result {
+        EventResult::Quit => Ok(true),
+        EventResult::Continue | EventResult::Redraw | EventResult::Copying => Ok(false),
+        EventResult::ReloadFile { write } => {
+            match reload_current_file(state, write) {
+                Ok(message) => state.toast = AppToast::Info(message),
+                Err(error) => state.toast = AppToast::Error(error.to_string()),
+            }
+            Ok(false)
+        }
+        EventResult::Error(error) => {
+            state.toast = AppToast::Error(error);
+            Ok(false)
+        }
+        EventResult::Toast(toast, full_redraw) => {
+            if full_redraw {
+                state.compute_tree_view();
+            }
+            state.toast = toast;
+            Ok(false)
+        }
+    }
+}
+
+fn run_startup_commands(
+    state: &mut AppState<'_>,
+    startup_commands: &[StartupCommand],
+) -> Result<bool> {
+    for startup_command in startup_commands {
+        let invocation = parse_command_text(&startup_command.command_text).map_err(|error| {
+            AppError::InvalidCommand(format!("{}: {}", startup_command.origin, error))
+        })?;
+        let event_result = execute_command(state, &invocation).map_err(|error| {
+            AppError::InvalidCommand(format!("{}: {}", startup_command.origin, error))
+        })?;
+        state.command_state.record_successful_command(&invocation);
+        if apply_startup_event_result(state, event_result)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum AppEvent {
     TermEvent(event::Event),
@@ -947,6 +1019,17 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
         columns[2],
     );
     body_area
+}
+
+fn split_command_bar(area: Rect) -> (Rect, Rect) {
+    if area.height <= COMMAND_BAR_HEIGHT {
+        (area, area)
+    } else {
+        let sections =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(COMMAND_BAR_HEIGHT)])
+                .split(area);
+        (sections[0], sections[1])
+    }
 }
 
 fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
@@ -1134,7 +1217,7 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
 }
 
 fn render_help(frame: &mut Frame<'_>, area: Rect) {
-    let popup = centered_rect(area, 140, 28);
+    let popup = centered_rect(area, 140, 31);
 
     frame.render_widget(
         Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
@@ -1233,9 +1316,13 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                         (&["/"], "search"),
                         (&[":"], "command mode"),
                         (&["."], "repeat command"),
-                        (&[":n"], "go to item n"),
-                        (&[":+n", ":-n"], "move by n"),
-                        (&["Enter", "Esc"], "run / leave"),
+                        (&["help", "help reload"], "help overlay / command help"),
+                        (&["goto /group/dataset"], "jump to an HDF5 path"),
+                        (&["Tab", "Shift-Tab"], "complete next / prev"),
+                        (&["↑", "↓"], "suggestion select"),
+                        (&["Ctrl-P", "Ctrl-N"], "history prev / next"),
+                        (&["42", "+7", "-3"], "legacy seek / down / up"),
+                        (&["Enter", "Esc"], "run / cancel"),
                     ],
                 ),
                 ("File", &[(&["Ctrl-R"], "reload file")]),

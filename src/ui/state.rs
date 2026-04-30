@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::{
-    command::{Command, CommandState},
+    command::{execute_command, CommandState},
     input::EventResult,
     tree_view::TreeItem,
 };
@@ -1056,18 +1056,14 @@ impl AppState<'_> {
         }
     }
 
-    pub fn execute_command(&mut self, command: &Command) -> Result<EventResult> {
-        match command {
-            super::command::Command::Increment(increment) => self.down(*increment),
-            super::command::Command::Decrement(decrement) => self.up(*decrement),
-            super::command::Command::Seek(seek) => self.set(*seek),
-            super::command::Command::Noop => Ok(EventResult::Redraw),
-        }
-    }
-
     pub fn reexecute_command(&mut self) -> Result<EventResult> {
-        let last_command = &self.command_state.last_command.clone();
-        self.execute_command(last_command)
+        let Some(last_command) = self.command_state.last_command.clone() else {
+            return Ok(EventResult::Toast(
+                AppToast::Info("No previous command to repeat".to_string()),
+                false,
+            ));
+        };
+        execute_command(self, &last_command)
     }
 
     pub fn right(&mut self, inc: isize) -> Result<EventResult> {

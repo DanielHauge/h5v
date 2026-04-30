@@ -64,8 +64,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     return match action {
                         NormalAction::EnterCommand => {
                             state.mode = Mode::Command;
-                            state.command_state.command_buffer.clear();
-                            state.command_state.cursor = 0;
+                            state.command_state.begin_new_entry();
                             Ok(EventResult::Redraw)
                         }
                         NormalAction::RepeatCommand => state.reexecute_command(),
