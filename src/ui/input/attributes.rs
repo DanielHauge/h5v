@@ -9,6 +9,7 @@ use crate::{
         state::{
             AppState, AppToast, AttributeEditRequest,
             AttributeViewSelection::{Name, Value},
+            FixedStringOverflowChoice, FixedStringOverflowDialogState, Mode,
         },
     },
 };
@@ -124,7 +125,19 @@ pub fn apply_attribute_edit_request(
             };
         }
         Value => {
-            if let Err(e) = selected_node.update_attribute(&request.attr_name, new_value) {
+            if let Err(e) = selected_node.update_attribute(&request.attr_name, new_value.clone()) {
+                if let AppError::FixedStringOverflow(overflow) = &e {
+                    drop(selected_node);
+                    state.fixed_string_overflow_dialog = Some(FixedStringOverflowDialogState {
+                        request: request.clone(),
+                        new_value,
+                        overflow: overflow.clone(),
+                        selected_choice: FixedStringOverflowChoice::Cancel,
+                        size_input: overflow.required_size.to_string(),
+                    });
+                    state.mode = Mode::FixedStringOverflowDialog;
+                    return Ok(EventResult::Toast(AppToast::Empty, true));
+                }
                 if let AppError::EditWarning(warning) = &e {
                     return Ok(EventResult::Toast(
                         AppToast::Warning(warning.to_string()),

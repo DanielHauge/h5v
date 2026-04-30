@@ -3,6 +3,38 @@ use std::io::Write;
 use std::sync::mpsc::SendError;
 use std::sync::PoisonError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedStringKind {
+    Ascii,
+    Unicode,
+}
+
+impl Display for FixedStringKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FixedStringKind::Ascii => write!(f, "FixedAscii"),
+            FixedStringKind::Unicode => write!(f, "FixedUnicode"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedStringOverflow {
+    pub kind: FixedStringKind,
+    pub current_size: usize,
+    pub required_size: usize,
+}
+
+impl Display for FixedStringOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} value requires {} bytes but current fixed size is {}",
+            self.kind, self.required_size, self.current_size
+        )
+    }
+}
+
 #[derive(Debug)]
 pub enum AppError {
     FileError(String),
@@ -13,6 +45,7 @@ pub enum AppError {
     InvalidCommand(String),
     EditError(String),
     EditWarning(String),
+    FixedStringOverflow(FixedStringOverflow),
     ChildNotFound(String),
     PoisionedLockError(String),
     DrawingError(String),
@@ -31,6 +64,7 @@ impl Display for AppError {
             AppError::ChildNotFound(x) => write!(f, "Child not found: {x}"),
             AppError::PoisionedLockError(x) => write!(f, "Poisioned lock error: {x}"),
             AppError::EditWarning(x) => write!(f, "Edit warning: {x}"),
+            AppError::FixedStringOverflow(x) => write!(f, "Edit error: {x}"),
             AppError::DrawingError(x) => write!(f, "Drawing error: {x}"),
         }
     }

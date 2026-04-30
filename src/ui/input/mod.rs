@@ -6,9 +6,9 @@ use tree::handle_normal_tree_event;
 
 use crate::{
     error::AppError,
-    h5f::Node,
+    h5f::{FixedStringRewrite, Node},
     search::{full_traversal, Searcher},
-    ui::state::AppToast,
+    ui::state::{AppToast, FixedStringOverflowChoice},
 };
 
 use super::state::{AppState, Mode, PendingChord};
@@ -39,6 +39,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
     match state.mode {
         Mode::Command => command::handle_command_event(state, event),
         Mode::MultiChart => mchart::handle_mchart_event(state, event),
+        Mode::FixedStringOverflowDialog => handle_fixed_string_overflow_dialog(state, event),
+        Mode::FixedStringResizeDialog => handle_fixed_string_resize_dialog(state, event),
         Mode::Normal => {
             if let Event::Key(key_event) = event {
                 if state.pending_chord == Some(PendingChord::CtrlW) {
@@ -171,6 +173,145 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
             }
             Ok(EventResult::Continue)
         }
+    }
+}
+
+fn handle_fixed_string_overflow_dialog(
+    state: &mut AppState<'_>,
+    event: Event,
+) -> Result<EventResult, AppError> {
+    let Event::Key(key_event) = event else {
+        return Ok(EventResult::Continue);
+    };
+    let Some(dialog) = state.fixed_string_overflow_dialog.as_mut() else {
+        state.mode = Mode::Normal;
+        return Ok(EventResult::Redraw);
+    };
+
+    match key_event.code {
+        KeyCode::Esc => {
+            state.fixed_string_overflow_dialog = None;
+            state.mode = Mode::Normal;
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+            dialog.selected_choice = match dialog.selected_choice {
+                FixedStringOverflowChoice::Cancel => FixedStringOverflowChoice::ChangeSize,
+                FixedStringOverflowChoice::ChangeToVarLen => FixedStringOverflowChoice::Cancel,
+                FixedStringOverflowChoice::ChangeSize => FixedStringOverflowChoice::ChangeToVarLen,
+            };
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Right | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('l') | KeyCode::Tab => {
+            dialog.selected_choice = match dialog.selected_choice {
+                FixedStringOverflowChoice::Cancel => FixedStringOverflowChoice::ChangeToVarLen,
+                FixedStringOverflowChoice::ChangeToVarLen => FixedStringOverflowChoice::ChangeSize,
+                FixedStringOverflowChoice::ChangeSize => FixedStringOverflowChoice::Cancel,
+            };
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Enter => match dialog.selected_choice {
+            FixedStringOverflowChoice::Cancel => {
+                state.fixed_string_overflow_dialog = None;
+                state.mode = Mode::Normal;
+                Ok(EventResult::Redraw)
+            }
+            FixedStringOverflowChoice::ChangeSize => {
+                state.mode = Mode::FixedStringResizeDialog;
+                Ok(EventResult::Redraw)
+            }
+            FixedStringOverflowChoice::ChangeToVarLen => {
+                let (attr_name, new_value) =
+                    (dialog.request.attr_name.clone(), dialog.new_value.clone());
+                let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+                match selected_node.rewrite_fixed_string_attribute(
+                    &attr_name,
+                    &new_value,
+                    FixedStringRewrite::ToVarLen,
+                ) {
+                    Ok(()) => {
+                        drop(selected_node);
+                        state.fixed_string_overflow_dialog = None;
+                        state.mode = Mode::Normal;
+                        state.acknowledge_file_write();
+                        Ok(EventResult::ReloadFile {
+                            write: !state.readonly,
+                        })
+                    }
+                    Err(err) => Ok(EventResult::Toast(AppToast::Error(err.to_string()), false)),
+                }
+            }
+        },
+        _ => Ok(EventResult::Continue),
+    }
+}
+
+fn handle_fixed_string_resize_dialog(
+    state: &mut AppState<'_>,
+    event: Event,
+) -> Result<EventResult, AppError> {
+    let Event::Key(key_event) = event else {
+        return Ok(EventResult::Continue);
+    };
+    let Some(dialog) = state.fixed_string_overflow_dialog.as_mut() else {
+        state.mode = Mode::Normal;
+        return Ok(EventResult::Redraw);
+    };
+
+    match key_event.code {
+        KeyCode::Esc => {
+            state.mode = Mode::FixedStringOverflowDialog;
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Backspace => {
+            dialog.size_input.pop();
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            dialog.size_input.push(c);
+            Ok(EventResult::Redraw)
+        }
+        KeyCode::Enter => {
+            let new_size: usize = match dialog.size_input.parse() {
+                Ok(size) => size,
+                Err(_) => {
+                    return Ok(EventResult::Toast(
+                        AppToast::Error("Invalid fixed string size".to_string()),
+                        false,
+                    ))
+                }
+            };
+            if new_size < dialog.overflow.required_size {
+                return Ok(EventResult::Toast(
+                    AppToast::Error(format!(
+                        "New size must be at least {} bytes",
+                        dialog.overflow.required_size
+                    )),
+                    false,
+                ));
+            }
+
+            let (attr_name, new_value) =
+                (dialog.request.attr_name.clone(), dialog.new_value.clone());
+            let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+            match selected_node.rewrite_fixed_string_attribute(
+                &attr_name,
+                &new_value,
+                FixedStringRewrite::Resize(new_size),
+            ) {
+                Ok(()) => {
+                    drop(selected_node);
+                    state.fixed_string_overflow_dialog = None;
+                    state.mode = Mode::Normal;
+                    state.acknowledge_file_write();
+                    Ok(EventResult::ReloadFile {
+                        write: !state.readonly,
+                    })
+                }
+                Err(err) => Ok(EventResult::Toast(AppToast::Error(err.to_string()), false)),
+            }
+        }
+        _ => Ok(EventResult::Continue),
     }
 }
 

@@ -5,10 +5,10 @@ use hdf5_metno::{
     types::{EnumType, FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
     Attribute, Dataset, Group, H5Type, ObjectReference2,
 };
-use hdf5_metno_sys::h5a::H5Awrite;
+use hdf5_metno_sys::h5a::{H5Aread, H5Awrite};
 use ndarray::{Array1, IxDyn};
 
-use crate::error::AppError;
+use crate::error::{AppError, FixedStringKind, FixedStringOverflow};
 
 use super::meta::Encoding;
 
@@ -27,6 +27,12 @@ pub enum ScalarTextCodec {
     Bool,
     VarLenAscii,
     VarLenUnicode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedStringRewrite {
+    ToVarLen,
+    Resize(usize),
 }
 
 pub fn scalar_text_codec(type_desc: &TypeDescriptor) -> Option<ScalarTextCodec> {
@@ -115,11 +121,9 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
                 .create(new_name)?;
             new_attr.write_scalar(&data)?;
         }
-        TypeDescriptor::FixedUnicode(size) => match size {
-            0..255 => copy_to_group::<FixedUnicode<255>>(attr, group, &type_desc, new_name)?,
-            255..4096 => copy_to_group::<FixedUnicode<4096>>(attr, group, &type_desc, new_name)?,
-            _ => copy_to_group::<VarLenUnicode>(attr, group, &type_desc, new_name)?,
-        },
+        TypeDescriptor::FixedUnicode(_) | TypeDescriptor::FixedAscii(_) => {
+            copy_fixed_string_to_group(attr, group, &type_desc, new_name)?
+        }
         TypeDescriptor::VarLenArray(_) => {
             return Err(AppError::EditError(
                 "Edit of VarLenArray types are unsupported".to_string(),
@@ -130,11 +134,6 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
                 "Edit of FixedArray types are unsupported".to_string(),
             ))
         }
-        TypeDescriptor::FixedAscii(size) => match size {
-            0..255 => copy_to_group::<FixedAscii<255>>(attr, group, &type_desc, new_name)?,
-            255..4096 => copy_to_group::<FixedAscii<4096>>(attr, group, &type_desc, new_name)?,
-            _ => copy_to_group::<VarLenAscii>(attr, group, &type_desc, new_name)?,
-        },
         TypeDescriptor::VarLenAscii => {
             copy_to_group::<VarLenAscii>(attr, group, &type_desc, new_name)?
         }
@@ -143,6 +142,97 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
         }
     }
     Ok(())
+}
+
+fn copy_fixed_string_to_group(
+    attr: &Attribute,
+    group: &Group,
+    type_desc: &TypeDescriptor,
+    new_name: &str,
+) -> Result<(), AppError> {
+    let data = read_attr_memory_bytes(attr)?;
+    let builder = group.new_attr_builder().empty_as(type_desc);
+    let new_attr = if attr.is_scalar() {
+        builder.create(new_name)?
+    } else {
+        builder.shape(attr.shape()).create(new_name)?
+    };
+    write_fixed_string_memory(&new_attr, &data)
+}
+
+pub fn rewrite_fixed_string_attr(
+    group: &Group,
+    attr: &Attribute,
+    attr_name: &str,
+    new_value: &str,
+    rewrite: FixedStringRewrite,
+) -> Result<(), AppError> {
+    let old_type_desc = attr.dtype()?.to_descriptor()?;
+    let new_type_desc = replacement_fixed_string_type(&old_type_desc, rewrite)?;
+    let temp_name = unique_temp_attr_name(group, attr_name)?;
+    let builder = group.new_attr_builder().empty_as(&new_type_desc);
+    {
+        let temp_attr = if attr.is_scalar() {
+            builder.create(temp_name.as_str())?
+        } else {
+            builder.shape(attr.shape()).create(temp_name.as_str())?
+        };
+
+        if let Err(err) = write_attr_from_text(&temp_attr, new_value) {
+            let _ = group.delete_attr(temp_name.as_str());
+            return Err(err);
+        }
+
+        if let Err(err) = group.delete_attr(attr_name) {
+            let _ = group.delete_attr(temp_name.as_str());
+            return Err(err.into());
+        }
+
+        if let Err(err) = copy_attr_to_group(&temp_attr, group, attr_name) {
+            let _ = group.delete_attr(temp_name.as_str());
+            return Err(err);
+        }
+    }
+
+    group.delete_attr(temp_name.as_str())?;
+    group.file()?.flush()?;
+    Ok(())
+}
+
+fn replacement_fixed_string_type(
+    old_type_desc: &TypeDescriptor,
+    rewrite: FixedStringRewrite,
+) -> Result<TypeDescriptor, AppError> {
+    match (old_type_desc, rewrite) {
+        (TypeDescriptor::FixedAscii(_), FixedStringRewrite::ToVarLen) => {
+            Ok(TypeDescriptor::VarLenAscii)
+        }
+        (TypeDescriptor::FixedUnicode(_), FixedStringRewrite::ToVarLen) => {
+            Ok(TypeDescriptor::VarLenUnicode)
+        }
+        (TypeDescriptor::FixedAscii(_), FixedStringRewrite::Resize(size)) => {
+            Ok(TypeDescriptor::FixedAscii(size))
+        }
+        (TypeDescriptor::FixedUnicode(_), FixedStringRewrite::Resize(size)) => {
+            Ok(TypeDescriptor::FixedUnicode(size))
+        }
+        _ => Err(AppError::EditError(format!(
+            "Cannot rewrite non-fixed string attribute type {}",
+            old_type_desc
+        ))),
+    }
+}
+
+fn unique_temp_attr_name(group: &Group, attr_name: &str) -> Result<String, AppError> {
+    let existing = group.attr_names()?;
+    let mut index = 0usize;
+    loop {
+        let candidate = format!("__h5v_tmp_{attr_name}_{index}");
+        if !existing.iter().any(|name| name == &candidate) {
+            return Ok(candidate);
+        }
+        index += 1;
+    }
 }
 
 fn copy_enum_to_group(
@@ -234,22 +324,27 @@ fn validate_attr_edit_support(type_desc: &TypeDescriptor, ndim: usize) -> Result
         )));
     }
 
-    if scalar_text_codec(type_desc).is_some() || matches!(type_desc, TypeDescriptor::Enum(_)) {
+    if scalar_text_codec(type_desc).is_some()
+        || matches!(
+            type_desc,
+            TypeDescriptor::Enum(_)
+                | TypeDescriptor::FixedAscii(_)
+                | TypeDescriptor::FixedUnicode(_)
+        )
+    {
         return Ok(());
     }
 
     Err(match type_desc {
-        TypeDescriptor::Compound(_) => AppError::EditError(
-            "Editing compound attributes is not supported".to_string(),
-        ),
-        TypeDescriptor::FixedArray(_, _) | TypeDescriptor::VarLenArray(_) => AppError::EditError(
-            "Editing nested array attributes is not supported".to_string(),
-        ),
-        TypeDescriptor::FixedAscii(_) => AppError::EditWarning("Editing FixedAscii attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()),
-        TypeDescriptor::FixedUnicode(_) => AppError::EditWarning("Editing FixedUnicode attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()),
-        TypeDescriptor::Reference(_) => AppError::EditError(
-            "Editing reference attributes is not supported".to_string(),
-        ),
+        TypeDescriptor::Compound(_) => {
+            AppError::EditError("Editing compound attributes is not supported".to_string())
+        }
+        TypeDescriptor::FixedArray(_, _) | TypeDescriptor::VarLenArray(_) => {
+            AppError::EditError("Editing nested array attributes is not supported".to_string())
+        }
+        TypeDescriptor::Reference(_) => {
+            AppError::EditError("Editing reference attributes is not supported".to_string())
+        }
         _ => AppError::EditError(format!(
             "{} attribute type is not supported for editing",
             type_desc
@@ -297,6 +392,8 @@ fn format_scalar_attr_for_edit(
             hdf5_metno::types::FloatSize::U8 => attr.read_scalar::<f64>()?.to_string(),
         }),
         TypeDescriptor::Boolean => Ok(attr.read_scalar::<bool>()?.to_string()),
+        TypeDescriptor::FixedAscii(size) => format_fixed_string_scalar(attr, *size, true),
+        TypeDescriptor::FixedUnicode(size) => format_fixed_string_scalar(attr, *size, false),
         TypeDescriptor::VarLenAscii => Ok(attr.read_scalar::<VarLenAscii>()?.to_string()),
         TypeDescriptor::VarLenUnicode => Ok(attr.read_scalar::<VarLenUnicode>()?.to_string()),
         TypeDescriptor::Enum(enum_type) => Ok(format_enum_value_for_edit(
@@ -329,6 +426,8 @@ fn format_1d_attr_for_edit(
             hdf5_metno::types::FloatSize::U8 => join_display_lines(attr.read_1d::<f64>()?.iter()),
         }),
         TypeDescriptor::Boolean => Ok(join_display_lines(attr.read_1d::<bool>()?.iter())),
+        TypeDescriptor::FixedAscii(size) => format_fixed_string_1d(attr, *size, true),
+        TypeDescriptor::FixedUnicode(size) => format_fixed_string_1d(attr, *size, false),
         TypeDescriptor::VarLenAscii => {
             Ok(join_display_lines(attr.read_1d::<VarLenAscii>()?.iter()))
         }
@@ -378,6 +477,14 @@ pub fn write_scalar_attr_from_text(attr: &Attribute, new_value: &str) -> Result<
     let type_desc = attr.dtype()?.to_descriptor()?;
     if let TypeDescriptor::Enum(enum_type) = &type_desc {
         write_enum_scalar_attr_from_text(attr, new_value, enum_type)?;
+        return Ok(type_desc.to_string());
+    }
+    if let TypeDescriptor::FixedAscii(size) = &type_desc {
+        write_fixed_string_scalar_attr_from_text(attr, new_value, *size, true)?;
+        return Ok(type_desc.to_string());
+    }
+    if let TypeDescriptor::FixedUnicode(size) = &type_desc {
+        write_fixed_string_scalar_attr_from_text(attr, new_value, *size, false)?;
         return Ok(type_desc.to_string());
     }
 
@@ -439,6 +546,12 @@ fn write_1d_attr_from_text(
             }
         },
         TypeDescriptor::Boolean => write_parsed_1d_array::<bool>(attr, new_value, "bool"),
+        TypeDescriptor::FixedAscii(size) => {
+            write_fixed_string_1d_attr_from_text(attr, new_value, *size, true)
+        }
+        TypeDescriptor::FixedUnicode(size) => {
+            write_fixed_string_1d_attr_from_text(attr, new_value, *size, false)
+        }
         TypeDescriptor::VarLenAscii => write_ascii_1d_array(attr, new_value),
         TypeDescriptor::VarLenUnicode => write_unicode_1d_array(attr, new_value),
         TypeDescriptor::Enum(enum_type) => write_enum_1d_attr_from_text(attr, new_value, enum_type),
@@ -509,6 +622,30 @@ fn write_unicode_1d_array(attr: &Attribute, new_value: &str) -> Result<(), AppEr
 
     attr.write(Array1::from(parsed).view())
         .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
+}
+
+fn write_fixed_string_scalar_attr_from_text(
+    attr: &Attribute,
+    new_value: &str,
+    size: usize,
+    is_ascii: bool,
+) -> Result<(), AppError> {
+    let bytes = encode_fixed_string_value(new_value, size, is_ascii)?;
+    write_fixed_string_memory(attr, &bytes)
+}
+
+fn write_fixed_string_1d_attr_from_text(
+    attr: &Attribute,
+    new_value: &str,
+    size: usize,
+    is_ascii: bool,
+) -> Result<(), AppError> {
+    let lines = parse_1d_lines(new_value, expected_1d_len(attr))?;
+    let mut bytes = Vec::with_capacity(lines.len() * size);
+    for line in lines {
+        bytes.extend(encode_fixed_string_value(line, size, is_ascii)?);
+    }
+    write_fixed_string_memory(attr, &bytes)
 }
 
 fn write_enum_scalar_attr_from_text(
@@ -589,6 +726,15 @@ fn write_enum_array<T>(attr: &Attribute, values: Vec<T>) -> Result<(), AppError>
     write_enum_memory(attr, &values)
 }
 
+fn read_attr_memory_bytes(attr: &Attribute) -> Result<Vec<u8>, AppError> {
+    let dtype = attr.dtype()?;
+    let total_size = dtype.size() * attr.size();
+    let mut bytes = vec![0_u8; total_size];
+    h5check(unsafe { H5Aread(attr.id(), dtype.id(), bytes.as_mut_ptr().cast()) })
+        .map_err(|e| AppError::EditError(format!("Failed to read attribute: {}", e)))?;
+    Ok(bytes)
+}
+
 fn write_enum_memory<T>(attr: &Attribute, values: &[T]) -> Result<(), AppError> {
     let dtype = attr.dtype()?;
     h5check(unsafe { H5Awrite(attr.id(), dtype.id(), values.as_ptr().cast()) })
@@ -615,7 +761,7 @@ fn parse_1d_lines<'a>(new_value: &'a str, expected_len: usize) -> Result<Vec<&'a
         };
     }
 
-    let lines = new_value.lines().collect::<Vec<_>>();
+    let lines = new_value.split('\n').collect::<Vec<_>>();
     if lines.len() != expected_len {
         return Err(AppError::EditError(format!(
             "Expected {expected_len} values, got {}",
@@ -628,6 +774,112 @@ fn parse_1d_lines<'a>(new_value: &'a str, expected_len: usize) -> Result<Vec<&'a
 
 fn expected_1d_len(attr: &Attribute) -> usize {
     attr.shape().first().copied().unwrap_or(0)
+}
+
+fn format_fixed_string_scalar(
+    attr: &Attribute,
+    size: usize,
+    is_ascii: bool,
+) -> Result<String, AppError> {
+    let data = read_attr_memory_bytes(attr)?;
+    decode_fixed_string_value(&data, size, is_ascii)
+}
+
+fn format_fixed_string_1d(
+    attr: &Attribute,
+    size: usize,
+    is_ascii: bool,
+) -> Result<String, AppError> {
+    let data = read_attr_memory_bytes(attr)?;
+    let len = expected_1d_len(attr);
+    if size == 0 {
+        return Ok(std::iter::repeat_n(String::new(), len)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    if data.len() != len * size {
+        return Err(AppError::EditError(format!(
+            "Fixed string array byte size mismatch: expected {}, got {}",
+            len * size,
+            data.len()
+        )));
+    }
+
+    data.chunks_exact(size)
+        .map(|chunk| decode_fixed_string_value(chunk, size, is_ascii))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|values| values.join("\n"))
+}
+
+fn decode_fixed_string_value(
+    bytes: &[u8],
+    size: usize,
+    is_ascii: bool,
+) -> Result<String, AppError> {
+    if size == 0 {
+        return Ok(String::new());
+    }
+
+    let used_len = bytes
+        .iter()
+        .rposition(|byte| *byte != 0)
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let content = &bytes[..used_len];
+
+    if is_ascii && !content.is_ascii() {
+        return Err(AppError::EditError(
+            "Failed to decode FixedAscii attribute: value contains non-ASCII bytes".to_string(),
+        ));
+    }
+
+    std::str::from_utf8(content)
+        .map(|value| value.to_string())
+        .map_err(|e| {
+            let kind = if is_ascii {
+                "FixedAscii"
+            } else {
+                "FixedUnicode"
+            };
+            AppError::EditError(format!("Failed to decode {kind} attribute: {}", e))
+        })
+}
+
+fn encode_fixed_string_value(
+    value: &str,
+    size: usize,
+    is_ascii: bool,
+) -> Result<Vec<u8>, AppError> {
+    let bytes = value.as_bytes();
+    let kind = if is_ascii {
+        FixedStringKind::Ascii
+    } else {
+        FixedStringKind::Unicode
+    };
+
+    if is_ascii && !bytes.is_ascii() {
+        return Err(AppError::EditError(format!(
+            "Invalid {kind} value: only ASCII characters are allowed"
+        )));
+    }
+    if bytes.len() > size {
+        return Err(AppError::FixedStringOverflow(FixedStringOverflow {
+            kind,
+            current_size: size,
+            required_size: bytes.len(),
+        }));
+    }
+
+    let mut out = vec![0_u8; size];
+    out[..bytes.len()].copy_from_slice(bytes);
+    Ok(out)
+}
+
+fn write_fixed_string_memory(attr: &Attribute, bytes: &[u8]) -> Result<(), AppError> {
+    let dtype = attr.dtype()?;
+    h5check(unsafe { H5Awrite(attr.id(), dtype.id(), bytes.as_ptr().cast()) })
+        .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))?;
+    Ok(())
 }
 
 fn read_scalar_enum_value(attr: &Attribute, enum_type: &EnumType) -> Result<u64, AppError> {
@@ -841,7 +1093,10 @@ where
 mod tests {
     use hdf5_metno::types::{EnumMember, EnumType, IntSize, TypeDescriptor};
 
-    use super::{parse_enum_member_value, validate_attr_edit_support};
+    use super::{
+        decode_fixed_string_value, encode_fixed_string_value, parse_1d_lines,
+        parse_enum_member_value, validate_attr_edit_support,
+    };
 
     fn color_enum() -> EnumType {
         EnumType {
@@ -901,5 +1156,32 @@ mod tests {
         assert!(validate_attr_edit_support(&enum_desc, 0).is_ok());
         assert!(validate_attr_edit_support(&TypeDescriptor::Boolean, 1).is_ok());
         assert!(validate_attr_edit_support(&TypeDescriptor::Boolean, 2).is_err());
+    }
+
+    #[test]
+    fn fixed_ascii_runtime_encoding_and_decoding_roundtrip() {
+        let bytes = encode_fixed_string_value("abc", 5, true).expect("failed encoding fixed ascii");
+        assert_eq!(bytes, vec![b'a', b'b', b'c', 0, 0]);
+        assert_eq!(
+            decode_fixed_string_value(&bytes, 5, true).expect("failed decoding fixed ascii"),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn fixed_unicode_runtime_encoding_checks_capacity() {
+        let err = encode_fixed_string_value("hello", 4, false)
+            .expect_err("expected over-capacity fixed unicode to fail");
+        assert!(err
+            .to_string()
+            .contains("requires 5 bytes but current fixed size is 4"));
+    }
+
+    #[test]
+    fn parse_1d_lines_preserves_empty_entries() {
+        assert_eq!(
+            parse_1d_lines("first\n\nthird", 3).expect("failed parsing 1d lines"),
+            vec!["first", "", "third"]
+        );
     }
 }

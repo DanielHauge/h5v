@@ -50,8 +50,8 @@ use super::{
     input::handle_input_event,
     main_display::render_main_display,
     state::{
-        self, AppState, AttributeCursor, ContentShowMode, Focus, ImgState, LastFocused,
-        MatrixViewState, Mode,
+        self, AppState, AttributeCursor, ContentShowMode, FixedStringOverflowChoice, Focus,
+        ImgState, LastFocused, MatrixViewState, Mode,
     },
     tree_view::render_tree,
 };
@@ -416,6 +416,10 @@ pub fn init(filename: String, link: bool, writable: bool) -> Result<()> {
                     last_message = Some(format!("Edit Warning: - {e}"));
                     break;
                 }
+                AppError::FixedStringOverflow(e) => {
+                    last_message = Some(format!("Edit Error: - {e}"));
+                    break;
+                }
                 AppError::ChildNotFound(e) => {
                     last_message = Some(format!("Child not found: - {e}"));
                     break;
@@ -529,6 +533,7 @@ fn main_recover_loop(
         segment_state,
         edit_pause: edit_pause.clone(),
         command_state,
+        fixed_string_overflow_dialog: None,
         treeview: vec![],
         tree_view_cursor: 0,
         focus: Focus::Tree(LastFocused::Attributes),
@@ -587,7 +592,7 @@ fn main_recover_loop(
         match state.mode {
             Mode::Search => {}
             Mode::Command => render_command_dialog(frame, state),
-            Mode::Normal => {
+            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog => {
                 let selected_node = state.treeview[state.tree_view_cursor].node.clone();
                 match render_main_display(frame, &main_display_area, &selected_node, state) {
                     Ok(()) => {}
@@ -596,6 +601,16 @@ fn main_recover_loop(
             }
             Mode::Help => {}       // already handled above,
             Mode::MultiChart => {} // already handled above,
+        }
+
+        match state.mode {
+            Mode::FixedStringOverflowDialog => {
+                render_fixed_string_overflow_dialog(frame, content_area, state)
+            }
+            Mode::FixedStringResizeDialog => {
+                render_fixed_string_resize_dialog(frame, content_area, state)
+            }
+            _ => {}
         }
     };
 
@@ -1005,6 +1020,113 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(error_paragraph, frame.area());
+}
+
+fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+    let Some(dialog) = state.fixed_string_overflow_dialog.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(area, 72, 12);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        popup,
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Fixed string overflow ")
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    frame.render_widget(block, popup);
+
+    let rows = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(1),
+        Constraint::Length(3),
+    ])
+    .split(inner);
+
+    let message = Paragraph::new(format!(
+        "{} needs {} bytes, current fixed size is {} bytes.",
+        dialog.overflow.kind, dialog.overflow.required_size, dialog.overflow.current_size
+    ))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(message, rows[0]);
+
+    let choices = [
+        (FixedStringOverflowChoice::Cancel, "Cancel"),
+        (FixedStringOverflowChoice::ChangeToVarLen, "Change to Vlen"),
+        (FixedStringOverflowChoice::ChangeSize, "Change size"),
+    ]
+    .into_iter()
+    .map(|(choice, label)| {
+        let style = if dialog.selected_choice == choice {
+            Style::default().fg(Color::Black).bg(Color::Yellow).bold()
+        } else {
+            Style::default().fg(Color::White)
+        };
+        Span::styled(format!(" {label} "), style)
+    })
+    .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(Line::from(choices))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
+        rows[2],
+    );
+}
+
+fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+    let Some(dialog) = state.fixed_string_overflow_dialog.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(area, 56, 10);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        popup,
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Change fixed string size ")
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+    frame.render_widget(block, popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Length(1)]).split(inner);
+
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Enter new byte size (minimum {}).",
+            dialog.overflow.required_size
+        )),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(format!("> {}", dialog.size_input))
+            .style(Style::default().fg(Color::White).bold()),
+        rows[1],
+    );
+    frame.set_cursor_position(ratatui::layout::Position::new(
+        rows[1].x + 2 + dialog.size_input.len() as u16,
+        rows[1].y,
+    ));
 }
 
 fn render_help(frame: &mut Frame<'_>, area: Rect) {

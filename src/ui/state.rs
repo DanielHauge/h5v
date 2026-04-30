@@ -15,7 +15,7 @@ use ratatui_image::thread::ThreadProtocol;
 use crate::{
     data::DatasetPlotingData,
     data::PreviewSelection,
-    error::AppError,
+    error::{AppError, FixedStringOverflow},
     h5f::{H5FNode, HasPath, ImageType, Node},
     search::Searcher,
     ui::mchart::MultiChartState,
@@ -47,6 +47,8 @@ pub enum Mode {
     Help,
     Command,
     MultiChart,
+    FixedStringOverflowDialog,
+    FixedStringResizeDialog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,6 +238,22 @@ pub struct AttributeEditRequest {
     pub selection: AttributeViewSelection,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedStringOverflowChoice {
+    Cancel,
+    ChangeToVarLen,
+    ChangeSize,
+}
+
+#[derive(Clone)]
+pub struct FixedStringOverflowDialogState {
+    pub request: AttributeEditRequest,
+    pub new_value: String,
+    pub overflow: FixedStringOverflow,
+    pub selected_choice: FixedStringOverflowChoice,
+    pub size_input: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct AttributeCursor {
     pub attribute_index: usize,
@@ -320,6 +338,7 @@ pub struct AppState<'a> {
     pub chart_preview_state: ChartPreviwState,
     pub segment_state: SegmentState,
     pub command_state: CommandState,
+    pub fixed_string_overflow_dialog: Option<FixedStringOverflowDialogState>,
 }
 
 type Result<T> = std::result::Result<T, AppError>;

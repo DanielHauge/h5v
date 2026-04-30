@@ -199,7 +199,10 @@ fn compute_tree_view_rec<'a>(
 
 pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let bg = match (&state.focus, &state.mode) {
-        (Focus::Tree(_), Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        (
+            Focus::Tree(_),
+            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog,
+        ) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
     let header_block = Block::default()
@@ -220,7 +223,10 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let mut area = inner_area;
     let mode = state.mode.clone();
     match mode {
-        Mode::Normal | Mode::Command => {
+        Mode::Normal
+        | Mode::Command
+        | Mode::FixedStringOverflowDialog
+        | Mode::FixedStringResizeDialog => {
             let mut tree_view_skip_offset = 0;
             let mut highlight_index = state.tree_view_cursor;
             if area.height <= state.tree_view_cursor as u16 {

@@ -1,4 +1,4 @@
-use hdf5_metno::Attribute;
+use hdf5_metno::{Attribute, Group};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -7,7 +7,9 @@ use ratatui::{
 use crate::{color_consts, error::AppError, sprint_attributes::sprint_attribute};
 
 use super::{
-    codec::{copy_attr_to_group, write_attr_from_text},
+    codec::{
+        copy_attr_to_group, rewrite_fixed_string_attr, write_attr_from_text, FixedStringRewrite,
+    },
     model::{H5FNode, Node},
 };
 
@@ -108,6 +110,18 @@ impl HasAttributes for Node {
         group.delete_attr(old_name)?;
 
         Ok(())
+    }
+}
+
+fn node_attribute_group(node: &Node) -> Result<Group, AppError> {
+    match node {
+        Node::File(file) => file.as_group().map_err(AppError::from),
+        Node::Group(group, _) => group.as_group().map_err(AppError::from),
+        Node::Dataset(dataset, _) => dataset.as_group().map_err(AppError::from),
+        Node::Broken(_, _, _) => Err(hdf5_metno::Error::Internal(String::from(
+            "Cannot update attribute on broken link",
+        ))
+        .into()),
     }
 }
 
@@ -215,6 +229,21 @@ impl H5FNode {
     pub fn update_attribute(&mut self, attr_name: &str, new_value: String) -> Result<(), AppError> {
         let attr = self.node.attribute(attr_name)?;
         write_attr_from_text(&attr, &new_value)?;
+        self.recompute_attributes()?;
+        Ok(())
+    }
+
+    pub fn rewrite_fixed_string_attribute(
+        &mut self,
+        attr_name: &str,
+        new_value: &str,
+        rewrite: FixedStringRewrite,
+    ) -> Result<(), AppError> {
+        {
+            let group = node_attribute_group(&self.node)?;
+            let attr = self.node.attribute(attr_name)?;
+            rewrite_fixed_string_attr(&group, &attr, attr_name, new_value, rewrite)?;
+        }
         self.recompute_attributes()?;
         Ok(())
     }

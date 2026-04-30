@@ -108,7 +108,12 @@ pub fn render_main_display(
     let title = Line::from(tab_titles);
 
     let bg_color = match (&state.focus, &state.mode) {
-        (ui::state::Focus::Content, ui::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        (
+            ui::state::Focus::Content,
+            ui::state::Mode::Normal
+            | ui::state::Mode::FixedStringOverflowDialog
+            | ui::state::Mode::FixedStringResizeDialog,
+        ) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
     let break_line = Block::default()

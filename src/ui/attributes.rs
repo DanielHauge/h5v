@@ -51,7 +51,10 @@ pub fn render_info_attributes(
     state: &mut AppState,
 ) -> Result<(), hdf5_metno::Error> {
     let bg = match (&state.focus, &state.mode) {
-        (Focus::Attributes, Mode::Normal) => FOCUS_BG_COLOR,
+        (
+            Focus::Attributes,
+            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog,
+        ) => FOCUS_BG_COLOR,
         _ => BG_COLOR,
     };
 

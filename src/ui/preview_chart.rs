@@ -535,7 +535,12 @@ fn render_chart_widget(
         .graph_type(GraphType::Line)
         .data(data);
     let bg = match (&state.focus, &state.mode) {
-        (super::state::Focus::Content, super::state::Mode::Normal) => color_consts::FOCUS_BG_COLOR,
+        (
+            super::state::Focus::Content,
+            super::state::Mode::Normal
+            | super::state::Mode::FixedStringOverflowDialog
+            | super::state::Mode::FixedStringResizeDialog,
+        ) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
     let chart = Chart::new(vec![ds])
