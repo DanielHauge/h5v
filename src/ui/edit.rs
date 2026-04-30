@@ -96,8 +96,24 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn editor_command_line(editor: &str, path: &Path) -> String {
-    format!("{editor} {}", shell_quote(&path.to_string_lossy()))
+#[cfg(target_os = "windows")]
+fn launch_editor(editor: &str, path: &Path) -> Result<std::process::ExitStatus, AppError> {
+    let path_str = path.to_string_lossy();
+    Command::new("cmd")
+        .arg("/C")
+        .arg(format!("{editor} \"{path_str}\""))
+        .status()
+        .map_err(AppError::from)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_editor(editor: &str, path: &Path) -> Result<std::process::ExitStatus, AppError> {
+    let editor_cmd = format!("{editor} {}", shell_quote(&path.to_string_lossy()));
+    Command::new("sh")
+        .arg("-lc")
+        .arg(editor_cmd)
+        .status()
+        .map_err(AppError::from)
 }
 
 pub fn perform_edit(
@@ -122,10 +138,7 @@ pub fn perform_edit(
         let editor = env::var("VISUAL")
             .or_else(|_| env::var("EDITOR"))
             .unwrap_or_else(|_| "vi".to_string());
-        let status = Command::new("sh")
-            .arg("-lc")
-            .arg(editor_command_line(&editor, &path))
-            .status()?;
+        let status = launch_editor(&editor, &path)?;
         if !status.success() {
             let status_label = status
                 .code()
@@ -156,18 +169,11 @@ fn normalize_edited_content(mut content: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{editor_command_line, normalize_edited_content, shell_quote};
-    use std::path::Path;
+    use super::{normalize_edited_content, shell_quote};
 
     #[test]
     fn shell_quotes_single_quotes() {
         assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
-    }
-
-    #[test]
-    fn builds_editor_command_line_with_arguments() {
-        let command = editor_command_line("code --wait", Path::new("/tmp/test file.yml"));
-        assert_eq!(command, "code --wait '/tmp/test file.yml'");
     }
 
     #[test]

@@ -9,10 +9,7 @@ repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
 
 [dependencies]
-arboard = { version = "3.6.1", features = [
-    "wl-clipboard-rs",
-    "wayland-data-control",
-] }
+arboard = "3.6.1"
 bktree = "1.0.1"
 clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
@@ -41,6 +38,17 @@ syntect = { version = "5.3.0", default-features = false, features = [
 tempfile = "3.20.0"
 uuid = { version = "1.23.1", features = ["v8"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.6.1", features = [
+    "wl-clipboard-rs",
+    "wayland-data-control",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+arboard = "3.6.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+arboard = "3.6.1"
 
 [profile.release]
 lto = "fat"     # Enable link-time optimization
