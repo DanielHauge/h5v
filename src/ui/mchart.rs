@@ -1,6 +1,6 @@
 use hdf5_metno::{
     types::{FloatSize, IntSize, TypeDescriptor},
-    Attribute, File,
+    Attribute, Dataset, File, Hyperslab, Selection, SliceOrIndex,
 };
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
@@ -85,6 +85,7 @@ enum ExprBinaryOp {
 enum ExpressionAst {
     Number(f64),
     ItemRef(ChartItemId),
+    DatasetRef(ExpressionDatasetRef),
     AttributeRef(ExpressionAttributeRef),
     UnaryMinus(Box<ExpressionAst>),
     Binary {
@@ -97,6 +98,7 @@ enum ExpressionAst {
 #[derive(Debug, Clone, PartialEq)]
 enum ExpressionToken {
     ItemRef(ChartItemId),
+    DatasetRef(ExpressionDatasetRef),
     AttributeRef(ExpressionAttributeRef),
     Number(f64),
     Plus,
@@ -130,6 +132,108 @@ enum ExpressionAttributeRef {
         attr_name: String,
         absolute: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ExpressionDatasetSelector {
+    All,
+    Index(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExpressionDatasetRef {
+    path: String,
+    selectors: Option<Vec<ExpressionDatasetSelector>>,
+}
+
+impl ExpressionDatasetRef {
+    fn render(&self) -> String {
+        match &self.selectors {
+            None => format!("!{}", self.path),
+            Some(selectors) => {
+                let selectors = selectors
+                    .iter()
+                    .map(|selector| match selector {
+                        ExpressionDatasetSelector::All => "..".to_string(),
+                        ExpressionDatasetSelector::Index(index) => index.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("!{}[{selectors}]", self.path)
+            }
+        }
+    }
+
+    fn to_preview_selection(&self, shape: &[usize]) -> Result<PreviewSelection, String> {
+        if shape.is_empty() {
+            return Err(format!(
+                "Dataset reference {} must point to a non-scalar dataset",
+                self.render()
+            ));
+        }
+        let (x, index) = match &self.selectors {
+            None => {
+                if shape.len() != 1 {
+                    return Err(format!(
+                        "Dataset reference {} needs an explicit selector like !/path[..,0] for rank-{} datasets",
+                        self.render(),
+                        shape.len()
+                    ));
+                }
+                (0, vec![0])
+            }
+            Some(selectors) => {
+                if selectors.len() != shape.len() {
+                    return Err(format!(
+                        "Dataset reference {} must provide exactly {} selectors",
+                        self.render(),
+                        shape.len()
+                    ));
+                }
+                let mut x = None;
+                let mut index = vec![0; shape.len()];
+                for (dim, selector) in selectors.iter().enumerate() {
+                    match selector {
+                        ExpressionDatasetSelector::All => {
+                            if x.replace(dim).is_some() {
+                                return Err(format!(
+                                    "Dataset reference {} must contain exactly one '..' axis selector",
+                                    self.render()
+                                ));
+                            }
+                        }
+                        ExpressionDatasetSelector::Index(selected) => {
+                            if *selected >= shape[dim] {
+                                return Err(format!(
+                                    "Dataset reference {} selects index {} out of bounds for dim {} with length {}",
+                                    self.render(),
+                                    selected,
+                                    dim,
+                                    shape[dim]
+                                ));
+                            }
+                            index[dim] = *selected;
+                        }
+                    }
+                }
+                (
+                    x.ok_or_else(|| {
+                        format!(
+                            "Dataset reference {} must contain exactly one '..' axis selector",
+                            self.render()
+                        )
+                    })?,
+                    index,
+                )
+            }
+        };
+
+        Ok(PreviewSelection {
+            x,
+            index,
+            slice: SliceSelection::All,
+        })
+    }
 }
 
 impl ExpressionAttributeRef {
@@ -611,11 +715,17 @@ impl MultiChartState {
         collect_parsed_expression_refs(&parsed, &mut refs);
         refs.item_ids.sort_by_key(|id| id.0);
         refs.item_ids.dedup();
+        refs.dataset_refs
+            .sort_by_key(|dataset_ref| dataset_ref.render());
+        refs.dataset_refs.dedup();
         refs.attribute_refs
             .sort_by_key(|attr_ref| attr_ref.render());
         refs.attribute_refs.dedup();
-        if refs.item_ids.is_empty() {
-            return Err("Expression must reference at least one chart item like $3".to_string());
+        if refs.item_ids.is_empty() && refs.dataset_refs.is_empty() {
+            return Err(
+                "Expression must reference at least one chart item like $3 or dataset path like !/group/ds[..,0]"
+                    .to_string(),
+            );
         }
 
         let referenced = refs
@@ -628,15 +738,39 @@ impl MultiChartState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let first = referenced
-            .first()
-            .ok_or_else(|| "Expression must reference at least one chart item".to_string())?;
-        let expected_len = first.series.len();
+        let external_dataset_series = resolve_expression_dataset_series(file, &refs.dataset_refs)?;
+        let mut series_inputs = referenced
+            .iter()
+            .map(|item| ExpressionSeriesInput {
+                label: format!("${}", item.id.0),
+                points: item.series.points.clone(),
+            })
+            .collect::<Vec<_>>();
+        for dataset_ref in &refs.dataset_refs {
+            let points = external_dataset_series
+                .get(dataset_ref)
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "Dataset reference {} was not resolved",
+                        dataset_ref.render()
+                    )
+                })?;
+            series_inputs.push(ExpressionSeriesInput {
+                label: dataset_ref.render(),
+                points,
+            });
+        }
+
+        let first = series_inputs.first().ok_or_else(|| {
+            "Expression must reference at least one chart item or dataset".to_string()
+        })?;
+        let expected_len = first.points.len();
         if expected_len == 0 {
             return Err("Cannot build an expression from empty series".to_string());
         }
         let require_matching_x = matches!(parsed, ParsedExpression::YSeries(_));
-        validate_expression_series_compatibility(&referenced, expected_len, require_matching_x)?;
+        validate_expression_series_compatibility(&series_inputs, expected_len, require_matching_x)?;
 
         let attribute_values = resolve_expression_attribute_values(
             file,
@@ -649,15 +783,33 @@ impl MultiChartState {
         let kind = match &parsed {
             ParsedExpression::YSeries(ast) => {
                 for idx in 0..expected_len {
-                    let y = eval_expression_at(ast, idx, self, &attribute_values)?;
-                    points.push((first.series.points[idx].0, y));
+                    let y = eval_expression_at(
+                        ast,
+                        idx,
+                        self,
+                        &external_dataset_series,
+                        &attribute_values,
+                    )?;
+                    points.push((first.points[idx].0, y));
                 }
                 DerivedExpressionKind::YSeries
             }
             ParsedExpression::XySeries(x_ast, y_ast) => {
                 for idx in 0..expected_len {
-                    let x = eval_expression_at(x_ast, idx, self, &attribute_values)?;
-                    let y = eval_expression_at(y_ast, idx, self, &attribute_values)?;
+                    let x = eval_expression_at(
+                        x_ast,
+                        idx,
+                        self,
+                        &external_dataset_series,
+                        &attribute_values,
+                    )?;
+                    let y = eval_expression_at(
+                        y_ast,
+                        idx,
+                        self,
+                        &external_dataset_series,
+                        &attribute_values,
+                    )?;
                     points.push((x, y));
                 }
                 DerivedExpressionKind::XySeries
@@ -1511,11 +1663,11 @@ impl MultiChartState {
             ]),
             Line::from(vec![
                 Span::styled("Syntax ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
-                Span::raw("$1 * #SCALE   or   ($1 * #/:DIST_TICKS_PER_DIST, $2 + #OFFSET * #SCALE)"),
+                Span::raw("$1 + !/ds[..,0] * #SCALE   or   (!/x_ticks, $2 + #OFFSET * #SCALE)"),
             ]),
             Line::from(vec![
                 Span::styled("Rules ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
-                Span::raw("single expr => y-series; (x,y) => x/y series. $id uses sample alignment; #... attrs resolve from the selected dataset item unless absolute"),
+                Span::raw("single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series; #... attrs resolve from the selected dataset item unless absolute"),
             ]),
         ];
         if let Some(error) = &prompt.error {
@@ -1575,6 +1727,12 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
                     .parse::<u64>()
                     .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
                 tokens.push(ExpressionToken::ItemRef(ChartItemId(id)));
+            }
+            '!' => {
+                chars.next();
+                tokens.push(ExpressionToken::DatasetRef(parse_expression_dataset_ref(
+                    &mut chars,
+                )?));
             }
             '#' => {
                 chars.next();
@@ -1640,6 +1798,85 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
     }
 
     Ok(tokens)
+}
+
+fn parse_expression_dataset_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionDatasetRef, String> {
+    if chars.peek() != Some(&'/') {
+        return Err(
+            "Dataset references must use an absolute path like !/group/dataset".to_string(),
+        );
+    }
+
+    let mut path = String::new();
+    while let Some(&next) = chars.peek() {
+        if next == '[' || next.is_whitespace() || matches!(next, '+' | '-' | '*' | ',' | '(' | ')')
+        {
+            break;
+        }
+        path.push(next);
+        chars.next();
+    }
+    if path.is_empty() {
+        return Err("Expected an absolute dataset path after '!'".to_string());
+    }
+
+    let selectors = if chars.peek() == Some(&'[') {
+        chars.next();
+        let mut spec = String::new();
+        let mut closed = false;
+        while let Some(next) = chars.next() {
+            if next == ']' {
+                closed = true;
+                break;
+            }
+            spec.push(next);
+        }
+        if !closed {
+            return Err(format!(
+                "Dataset reference '!{path}[{spec}' is missing a closing ']'"
+            ));
+        }
+        Some(parse_expression_dataset_selectors(&path, &spec)?)
+    } else {
+        None
+    };
+
+    Ok(ExpressionDatasetRef { path, selectors })
+}
+
+fn parse_expression_dataset_selectors(
+    path: &str,
+    spec: &str,
+) -> Result<Vec<ExpressionDatasetSelector>, String> {
+    let parts = spec
+        .split(',')
+        .map(str::trim)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
+        return Err(format!(
+            "Dataset reference '!{path}[{spec}]' must use comma-separated selectors like [..,0]"
+        ));
+    }
+
+    parts
+        .into_iter()
+        .map(|part| {
+            if part == ".." {
+                Ok(ExpressionDatasetSelector::All)
+            } else {
+                part.parse::<usize>()
+                    .map(ExpressionDatasetSelector::Index)
+                    .map_err(|_| {
+                        format!(
+                            "Dataset reference '!{path}[{spec}]' has invalid selector '{part}'; use '..' or a non-negative integer"
+                        )
+                    })
+            }
+        })
+        .collect()
 }
 
 fn parse_expression_attribute_ref(
@@ -1755,6 +1992,10 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(ExpressionAst::ItemRef(*id))
             }
+            ExpressionToken::DatasetRef(dataset_ref) => {
+                *pos += 1;
+                Ok(ExpressionAst::DatasetRef(dataset_ref.clone()))
+            }
             ExpressionToken::AttributeRef(attr_ref) => {
                 *pos += 1;
                 Ok(ExpressionAst::AttributeRef(attr_ref.clone()))
@@ -1837,6 +2078,7 @@ fn split_top_level_tuple(
 #[derive(Debug, Default)]
 struct ExpressionRefs {
     item_ids: Vec<ChartItemId>,
+    dataset_refs: Vec<ExpressionDatasetRef>,
     attribute_refs: Vec<ExpressionAttributeRef>,
 }
 
@@ -1844,6 +2086,7 @@ fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
     match expr {
         ExpressionAst::Number(_) => {}
         ExpressionAst::ItemRef(id) => out.item_ids.push(*id),
+        ExpressionAst::DatasetRef(dataset_ref) => out.dataset_refs.push(dataset_ref.clone()),
         ExpressionAst::AttributeRef(attr_ref) => out.attribute_refs.push(attr_ref.clone()),
         ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
         ExpressionAst::Binary { lhs, rhs, .. } => {
@@ -1863,8 +2106,14 @@ fn collect_parsed_expression_refs(expr: &ParsedExpression, out: &mut ExpressionR
     }
 }
 
+#[derive(Debug, Clone)]
+struct ExpressionSeriesInput {
+    label: String,
+    points: Vec<Point>,
+}
+
 fn validate_expression_series_compatibility(
-    referenced: &[ChartItem],
+    referenced: &[ExpressionSeriesInput],
     expected_len: usize,
     require_matching_x: bool,
 ) -> Result<(), String> {
@@ -1872,18 +2121,18 @@ fn validate_expression_series_compatibility(
         return Err("Expression must reference at least one chart item".to_string());
     };
     for item in &referenced[1..] {
-        if item.series.len() != expected_len {
+        if item.points.len() != expected_len {
             return Err(format!(
-                "Expression series lengths must match exactly: ${} has len {}, but ${} has len {}",
-                first.id.0,
+                "Expression series lengths must match exactly: {} has len {}, but {} has len {}",
+                first.label,
                 expected_len,
-                item.id.0,
-                item.series.len()
+                item.label,
+                item.points.len()
             ));
         }
         if require_matching_x {
             for idx in 0..expected_len {
-                if item.series.points[idx].0 != first.series.points[idx].0 {
+                if item.points[idx].0 != first.points[idx].0 {
                     return Err(format!(
                         "Expression x-values must match exactly across referenced items; mismatch at sample index {}",
                         idx
@@ -1899,6 +2148,7 @@ fn eval_expression_at(
     expr: &ExpressionAst,
     idx: usize,
     state: &MultiChartState,
+    dataset_series: &std::collections::HashMap<ExpressionDatasetRef, Vec<Point>>,
     attribute_values: &std::collections::HashMap<ExpressionAttributeRef, f64>,
 ) -> Result<f64, String> {
     match expr {
@@ -1912,16 +2162,30 @@ fn eval_expression_at(
                     id.0, idx
                 )
             }),
+        ExpressionAst::DatasetRef(dataset_ref) => dataset_series
+            .get(dataset_ref)
+            .and_then(|points| points.get(idx).map(|(_, y)| *y))
+            .ok_or_else(|| {
+                format!(
+                    "Dataset reference {} is unavailable at sample index {}",
+                    dataset_ref.render(),
+                    idx
+                )
+            }),
         ExpressionAst::AttributeRef(attr_ref) => attribute_values
             .get(attr_ref)
             .copied()
             .ok_or_else(|| format!("Attribute reference {} was not resolved", attr_ref.render())),
-        ExpressionAst::UnaryMinus(inner) => {
-            Ok(-eval_expression_at(inner, idx, state, attribute_values)?)
-        }
+        ExpressionAst::UnaryMinus(inner) => Ok(-eval_expression_at(
+            inner,
+            idx,
+            state,
+            dataset_series,
+            attribute_values,
+        )?),
         ExpressionAst::Binary { op, lhs, rhs } => {
-            let lhs = eval_expression_at(lhs, idx, state, attribute_values)?;
-            let rhs = eval_expression_at(rhs, idx, state, attribute_values)?;
+            let lhs = eval_expression_at(lhs, idx, state, dataset_series, attribute_values)?;
+            let rhs = eval_expression_at(rhs, idx, state, dataset_series, attribute_values)?;
             match op {
                 ExprBinaryOp::Add => Ok(lhs + rhs),
                 ExprBinaryOp::Sub => Ok(lhs - rhs),
@@ -1971,6 +2235,182 @@ fn resolve_expression_attribute_values(
         values.insert(attr_ref.clone(), value);
     }
     Ok(values)
+}
+
+fn resolve_expression_dataset_series(
+    file: Option<&File>,
+    refs: &[ExpressionDatasetRef],
+) -> Result<std::collections::HashMap<ExpressionDatasetRef, Vec<Point>>, String> {
+    if refs.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let file = file.ok_or_else(|| {
+        "Dataset path references require an open file handle, but no file is loaded".to_string()
+    })?;
+    let mut series = std::collections::HashMap::with_capacity(refs.len());
+    for dataset_ref in refs {
+        let dataset = file.dataset(&dataset_ref.path).map_err(|error| {
+            format!(
+                "Dataset reference {} could not be opened: {}",
+                dataset_ref.render(),
+                error
+            )
+        })?;
+        let points = read_expression_dataset_points(&dataset, dataset_ref)?;
+        series.insert(dataset_ref.clone(), points);
+    }
+    Ok(series)
+}
+
+fn read_expression_dataset_points(
+    dataset: &Dataset,
+    dataset_ref: &ExpressionDatasetRef,
+) -> Result<Vec<Point>, String> {
+    let shape = dataset.shape();
+    let preview_selection = dataset_ref.to_preview_selection(&shape)?;
+    let selection = preview_selection_to_hyperslab(&shape, &preview_selection);
+    let dtype = dataset.dtype().map_err(|error| {
+        format!(
+            "Failed to inspect dataset type for {}: {}",
+            dataset_ref.render(),
+            error
+        )
+    })?;
+    let type_desc = dtype.to_descriptor().map_err(|error| {
+        format!(
+            "Failed to inspect dataset type for {}: {}",
+            dataset_ref.render(),
+            error
+        )
+    })?;
+
+    let values = match type_desc {
+        TypeDescriptor::Integer(IntSize::U1) => dataset
+            .read_slice_1d::<i8, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Integer(IntSize::U2) => dataset
+            .read_slice_1d::<i16, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Integer(IntSize::U4) => dataset
+            .read_slice_1d::<i32, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Integer(IntSize::U8) => dataset
+            .read_slice_1d::<i64, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Unsigned(IntSize::U1) => dataset
+            .read_slice_1d::<u8, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Unsigned(IntSize::U2) => dataset
+            .read_slice_1d::<u16, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Unsigned(IntSize::U4) => dataset
+            .read_slice_1d::<u32, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Unsigned(IntSize::U8) => dataset
+            .read_slice_1d::<u64, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Float(FloatSize::U4) => dataset
+            .read_slice_1d::<f32, _>(selection.clone())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>()
+            }),
+        TypeDescriptor::Float(FloatSize::U8) => dataset
+            .read_slice_1d::<f64, _>(selection.clone())
+            .map(|values| values.into_iter().collect::<Vec<_>>()),
+        TypeDescriptor::Boolean => dataset.read_slice_1d::<bool, _>(selection).map(|values| {
+            values
+                .into_iter()
+                .map(|value| if value { 1.0 } else { 0.0 })
+                .collect::<Vec<_>>()
+        }),
+        other => {
+            return Err(format!(
+                "Dataset reference {} must be numeric; got {}",
+                dataset_ref.render(),
+                other
+            ))
+        }
+    }
+    .map_err(|error| format!("Failed reading {}: {}", dataset_ref.render(), error))?;
+
+    let points = values
+        .into_iter()
+        .enumerate()
+        .map(|(idx, value)| (idx as f64, value))
+        .collect::<Vec<_>>();
+    if points.is_empty() {
+        return Err(format!(
+            "Dataset reference {} resolved to an empty series",
+            dataset_ref.render()
+        ));
+    }
+    Ok(points)
+}
+
+fn preview_selection_to_hyperslab(shape: &[usize], selection: &PreviewSelection) -> Selection {
+    let slice = match selection.slice {
+        SliceSelection::All => 0..shape[selection.x],
+        SliceSelection::FromTo(a, b) => a..b,
+    };
+
+    let mut slice_selections = Vec::new();
+    for idx in 0..shape.len() {
+        if idx == selection.x {
+            slice_selections.push(SliceOrIndex::SliceTo {
+                start: slice.start,
+                step: 1,
+                end: slice.end,
+                block: 1,
+            });
+        } else {
+            slice_selections.push(SliceOrIndex::Index(selection.index[idx]));
+        }
+    }
+
+    Selection::Hyperslab(Hyperslab::from(slice_selections))
 }
 
 fn resolve_expression_attribute_value(
@@ -2180,6 +2620,7 @@ mod tests {
     };
 
     use hdf5_metno::File;
+    use ndarray::Array;
 
     #[allow(deprecated)]
     fn make_state() -> MultiChartState {
@@ -2263,6 +2704,23 @@ mod tests {
         bias_attr
             .write_scalar(&5.0_f64)
             .expect("failed writing other dataset attr");
+        file.flush().expect("failed flushing temp hdf5 file");
+        (file, path)
+    }
+
+    fn make_dataset_ref_test_file() -> (File, std::path::PathBuf) {
+        let path = temp_hdf5_path("mchart-dataset-ref");
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        file.new_dataset_builder()
+            .with_data(&[2.0_f64, 4.0_f64, 6.0_f64])
+            .create("series")
+            .expect("failed creating 1d dataset");
+        let matrix = Array::from_shape_vec((3, 2), vec![10.0_f64, 1.0, 20.0, 2.0, 30.0, 3.0])
+            .expect("failed creating matrix test array");
+        file.new_dataset_builder()
+            .with_data(matrix.view())
+            .create("matrix")
+            .expect("failed creating 2d dataset");
         file.flush().expect("failed flushing temp hdf5 file");
         (file, path)
     }
@@ -2530,6 +2988,56 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_dataset_path_references() {
+        let tokens =
+            tokenize_expression("!/series + !/matrix[.., 1] + !/cube[1, .., 2, 3]").unwrap();
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::DatasetRef(ExpressionDatasetRef { path, selectors: None })
+                if path == "/series"
+        )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::DatasetRef(ExpressionDatasetRef { path, selectors: Some(selectors) })
+                if path == "/matrix"
+                    && selectors
+                        == &vec![
+                            ExpressionDatasetSelector::All,
+                            ExpressionDatasetSelector::Index(1),
+                        ]
+        )));
+    }
+
+    #[test]
+    fn dataset_path_reference_builds_preview_selection() {
+        let dataset_ref = ExpressionDatasetRef {
+            path: "/matrix".to_string(),
+            selectors: Some(vec![
+                ExpressionDatasetSelector::Index(1),
+                ExpressionDatasetSelector::All,
+                ExpressionDatasetSelector::Index(2),
+                ExpressionDatasetSelector::Index(3),
+            ]),
+        };
+        let selection = dataset_ref.to_preview_selection(&[4, 5, 6, 7]).unwrap();
+        assert_eq!(selection.x, 1);
+        assert_eq!(selection.index, vec![1, 0, 2, 3]);
+    }
+
+    #[test]
+    fn dataset_path_reference_requires_exactly_one_axis_selector() {
+        let dataset_ref = ExpressionDatasetRef {
+            path: "/matrix".to_string(),
+            selectors: Some(vec![
+                ExpressionDatasetSelector::Index(0),
+                ExpressionDatasetSelector::Index(1),
+            ]),
+        };
+        let err = dataset_ref.to_preview_selection(&[3, 4]).unwrap_err();
+        assert!(err.contains("exactly one '..'"));
+    }
+
+    #[test]
     fn parses_top_level_xy_expression_tuple() {
         let tokens = tokenize_expression("($1 * 2, $2 + #SCALE)").unwrap();
         let parsed = parse_derived_expression(&tokens).unwrap();
@@ -2572,6 +3080,45 @@ mod tests {
 
         state.expression_backspace();
         assert!(!state.modified);
+    }
+
+    #[test]
+    fn expression_derived_supports_dataset_path_series_inputs() {
+        let (file, path) = make_dataset_ref_test_file();
+        let mut state = make_state();
+
+        state
+            .create_expression_derived_with_file(
+                "!/series + !/matrix[..,1]".to_string(),
+                Some(&file),
+            )
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(
+            derived.series.points,
+            vec![(0.0, 3.0), (1.0, 6.0), (2.0, 9.0)]
+        );
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    fn expression_derived_dataset_path_refs_validate_series_lengths() {
+        let (file, path) = make_dataset_ref_test_file();
+        let mut state = make_state();
+
+        let err = state
+            .create_expression_derived_with_file(
+                "!/series + !/matrix[1,..]".to_string(),
+                Some(&file),
+            )
+            .unwrap_err();
+        assert!(err.contains("lengths must match"));
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
     }
 
     #[test]
