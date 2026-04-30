@@ -345,6 +345,10 @@ type Result<T> = std::result::Result<T, AppError>;
 impl AppState<'_> {
     const PREVIEW_DEBOUNCE_DELAY: Duration = Duration::from_millis(90);
 
+    fn normalized_node_path(path: &str) -> &str {
+        path.trim_start_matches('/')
+    }
+
     fn current_file_modified(&self) -> Option<SystemTime> {
         fs::metadata(&self.file_watch.path)
             .ok()
@@ -383,6 +387,89 @@ impl AppState<'_> {
         self.treeview
             .get(self.tree_view_cursor)
             .map(|item| item.node.borrow().node.path())
+    }
+
+    pub fn select_tree_node_by_path(&mut self, path: &str) -> Result<()> {
+        let normalized = Self::normalized_node_path(path);
+        if normalized.is_empty() {
+            self.tree_view_cursor = 0;
+            return Ok(());
+        }
+
+        let previous_cursor = self.tree_view_cursor;
+        let mut current = self.root.clone();
+        for segment in normalized.split('/') {
+            let (next, index) = {
+                let mut node = current.borrow_mut();
+                node.ensure_expanded()?;
+                let Some((index, child)) =
+                    node.children.iter().enumerate().find_map(|(index, child)| {
+                        let name = child.borrow().name();
+                        (name == segment).then(|| (index, child.clone()))
+                    })
+                else {
+                    self.compute_tree_view();
+                    self.tree_view_cursor =
+                        self.treeview.len().saturating_sub(1).min(previous_cursor);
+                    return Err(AppError::ChildNotFound(path.to_string()));
+                };
+                (child.clone(), index)
+            };
+            current.borrow_mut().view_loaded = (index + 50) as u32;
+            current = next;
+        }
+        self.compute_tree_view();
+        let Some((index, _)) = self
+            .treeview
+            .iter()
+            .enumerate()
+            .find(|(_, item)| Rc::ptr_eq(&item.node, &current))
+        else {
+            self.tree_view_cursor = self.treeview.len().saturating_sub(1).min(previous_cursor);
+            return Err(AppError::ChildNotFound(path.to_string()));
+        };
+        self.tree_view_cursor = index;
+        Ok(())
+    }
+
+    pub fn select_attribute_by_name(&mut self, attr_name: &str) -> Result<()> {
+        let tree_item = self
+            .treeview
+            .get(self.tree_view_cursor)
+            .ok_or_else(|| AppError::EditError("No selected tree item".to_string()))?;
+        let mut node = tree_item.node.borrow_mut();
+        let attributes = node.read_attributes()?;
+        let Some(index) = attributes
+            .rendered_attributes
+            .iter()
+            .position(|(name, _, _)| {
+                name.to_string()
+                    .trim_end_matches('=')
+                    .trim_end_matches('─')
+                    .trim_end()
+                    == attr_name
+            })
+        else {
+            return Err(AppError::ChildNotFound(attr_name.to_string()));
+        };
+        node.attributes_view_cursor.attribute_index = index;
+        node.attributes_view_cursor.attribute_view_selection = AttributeViewSelection::Value;
+        Ok(())
+    }
+
+    pub fn navigate_to_attribute_target(
+        &mut self,
+        path: &str,
+        attr_name: Option<&str>,
+    ) -> Result<()> {
+        self.select_tree_node_by_path(path)?;
+        if let Some(attr_name) = attr_name {
+            self.focus = Focus::Attributes;
+            self.select_attribute_by_name(attr_name)?;
+        } else {
+            self.focus = Focus::Tree(LastFocused::Attributes);
+        }
+        Ok(())
     }
 
     pub fn begin_preview_debounce(&mut self, path: String) -> u64 {

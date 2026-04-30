@@ -47,6 +47,11 @@ impl AppState<'_> {
         );
         tree_view.extend(children);
         self.treeview = tree_view;
+        self.tree_view_cursor = self
+            .treeview
+            .len()
+            .saturating_sub(1)
+            .min(self.tree_view_cursor);
     }
 }
 

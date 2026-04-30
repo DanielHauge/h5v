@@ -1,9 +1,19 @@
+use std::{ffi::CStr, os::raw::c_char, ptr};
+
+use hdf5_metno::{types::Reference, Attribute, ObjectReference1, ReferencedObject};
+use hdf5_metno_sys::{
+    h5p::H5P_DEFAULT,
+    h5r::{
+        H5R_ref_t, H5Rget_attr_name, H5Rget_obj_name, H5Rget_type, H5R_ATTR, H5R_DATASET_REGION2,
+        H5R_OBJECT2,
+    },
+};
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::{format_attr_for_edit, SYSTEM_ATTRIBUTES},
-    sprint_attributes::AttributeEditable,
+    h5f::{format_attr_for_edit, read_attr_memory_bytes, SYSTEM_ATTRIBUTES},
+    sprint_attributes::{attribute_type_descriptor, AttributeEditable},
     ui::{
         edit::perform_edit,
         state::{
@@ -19,11 +29,23 @@ use super::{
     EventResult,
 };
 
-fn selected_attribute_edit_request(
-    state: &mut AppState<'_>,
-) -> Result<AttributeEditRequest, EventResult> {
-    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+struct ReferenceNavigationTarget {
+    path: String,
+    attr_name: Option<String>,
+}
 
+fn rendered_attr_name(line: &ratatui::text::Line<'_>) -> String {
+    line.to_string()
+        .trim_end_matches('=')
+        .trim_end_matches('─')
+        .trim_end()
+        .to_string()
+}
+
+fn selected_attribute(
+    state: &mut AppState<'_>,
+) -> Result<(String, Attribute, crate::ui::state::AttributeViewSelection), EventResult> {
+    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
     let node_attributes_view_cursor = node.attributes_view_cursor.clone();
     let attributes = match node.read_attributes() {
         Ok(attributes) => attributes,
@@ -34,22 +56,181 @@ fn selected_attribute_edit_request(
             ))
         }
     };
-    let selected_rendered_attribute = attributes
+    let Some(rendered_attribute) = attributes
         .rendered_attributes
-        .get(node_attributes_view_cursor.attribute_index);
-    let Some(attribute) = selected_rendered_attribute else {
+        .get(node_attributes_view_cursor.attribute_index)
+    else {
         return Err(EventResult::Toast(
             AppToast::Error("No attribute selected".to_string()),
             true,
         ));
     };
-    let attr_name = attribute
-        .0
-        .to_string()
-        .trim_end_matches('=')
-        .trim_end_matches('─')
-        .trim_end()
-        .to_string();
+    let attr_name = rendered_attr_name(&rendered_attribute.0);
+    let Some((_, attr)) = attributes
+        .attributes
+        .iter()
+        .find(|(name, _)| name == &attr_name)
+    else {
+        return Err(EventResult::Toast(
+            AppToast::Error(format!("Attribute '{}' not found", attr_name)),
+            true,
+        ));
+    };
+    Ok((
+        attr_name,
+        attr.clone(),
+        node_attributes_view_cursor.attribute_view_selection,
+    ))
+}
+
+fn read_hdf5_name(
+    reader: impl Fn(*mut c_char, usize) -> isize,
+    context: &str,
+) -> Result<String, AppError> {
+    let len = reader(ptr::null_mut(), 0);
+    if len < 0 {
+        return Err(AppError::EditError(format!("Failed to read {context}")));
+    }
+    let mut buffer = vec![0 as c_char; len as usize + 1];
+    let written = reader(buffer.as_mut_ptr(), buffer.len());
+    if written < 0 {
+        return Err(AppError::EditError(format!("Failed to read {context}")));
+    }
+    Ok(unsafe { CStr::from_ptr(buffer.as_ptr()) }
+        .to_string_lossy()
+        .into_owned())
+}
+
+fn referenced_object_path(object: ReferencedObject) -> Result<String, AppError> {
+    match object {
+        ReferencedObject::Group(group) => Ok(group.name()),
+        ReferencedObject::Dataset(dataset) => Ok(dataset.name()),
+        ReferencedObject::Datatype(datatype) => datatype
+            .as_location()
+            .map(|location| location.name())
+            .map_err(AppError::from),
+    }
+}
+
+fn resolve_std_reference_target(attr: &Attribute) -> Result<ReferenceNavigationTarget, AppError> {
+    let bytes = read_attr_memory_bytes(attr)?;
+    if bytes.len() != std::mem::size_of::<H5R_ref_t>() {
+        return Err(AppError::EditError(
+            "Reference navigation requires a single target".to_string(),
+        ));
+    }
+
+    let reference = bytes.as_ptr().cast::<H5R_ref_t>();
+    match unsafe { H5Rget_type(reference) } {
+        H5R_OBJECT2 | H5R_DATASET_REGION2 => Ok(ReferenceNavigationTarget {
+            path: read_hdf5_name(
+                |name, size| unsafe {
+                    H5Rget_obj_name(reference, H5P_DEFAULT, name, size) as isize
+                },
+                "reference target path",
+            )?,
+            attr_name: None,
+        }),
+        H5R_ATTR => Ok(ReferenceNavigationTarget {
+            path: read_hdf5_name(
+                |name, size| unsafe {
+                    H5Rget_obj_name(reference, H5P_DEFAULT, name, size) as isize
+                },
+                "attribute owner path",
+            )?,
+            attr_name: Some(read_hdf5_name(
+                |name, size| unsafe { H5Rget_attr_name(reference, name, size) as isize },
+                "attribute target name",
+            )?),
+        }),
+        _ => Err(AppError::EditError(
+            "Unsupported reference target type".to_string(),
+        )),
+    }
+}
+
+fn navigate_reference_attribute_value(
+    state: &mut AppState<'_>,
+) -> Result<Option<EventResult>, EventResult> {
+    let (attr_name, attr, selection) = selected_attribute(state)?;
+    if !matches!(selection, Value) {
+        return Ok(None);
+    }
+
+    let type_desc = attribute_type_descriptor(&attr)
+        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+    let target = match type_desc {
+        hdf5_metno::types::TypeDescriptor::Reference(Reference::Object) => {
+            if attr.size() != 1 {
+                return Ok(Some(EventResult::Toast(
+                    AppToast::Warning(format!(
+                        "Attribute '{}' contains multiple references; navigation needs a single target",
+                        attr_name
+                    )),
+                    false,
+                )));
+            }
+            let reference = if attr.is_scalar() {
+                attr.read_scalar::<ObjectReference1>()
+            } else {
+                attr.read_1d::<ObjectReference1>()
+                    .map(|values| values.into_iter().next().expect("size checked above"))
+            }
+            .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+            let file = attr
+                .file()
+                .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+            let object = file
+                .dereference(&reference)
+                .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+            Some(ReferenceNavigationTarget {
+                path: referenced_object_path(object).map_err(|error| {
+                    EventResult::Toast(AppToast::Error(error.to_string()), false)
+                })?,
+                attr_name: None,
+            })
+        }
+        hdf5_metno::types::TypeDescriptor::Reference(Reference::Std) => {
+            if attr.size() != 1 {
+                return Ok(Some(EventResult::Toast(
+                    AppToast::Warning(format!(
+                        "Attribute '{}' contains multiple references; navigation needs a single target",
+                        attr_name
+                    )),
+                    false,
+                )));
+            }
+            Some(
+                resolve_std_reference_target(&attr).map_err(|error| {
+                    EventResult::Toast(AppToast::Error(error.to_string()), false)
+                })?,
+            )
+        }
+        hdf5_metno::types::TypeDescriptor::Reference(Reference::Region) => {
+            return Ok(Some(EventResult::Toast(
+                AppToast::Warning(
+                    "Dataset region reference navigation is not supported yet".to_string(),
+                ),
+                false,
+            )));
+        }
+        _ => None,
+    };
+
+    let Some(target) = target else {
+        return Ok(None);
+    };
+
+    state
+        .navigate_to_attribute_target(target.path.as_str(), target.attr_name.as_deref())
+        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+    Ok(Some(EventResult::Redraw))
+}
+
+fn selected_attribute_edit_request(
+    state: &mut AppState<'_>,
+) -> Result<AttributeEditRequest, EventResult> {
+    let (attr_name, attr, selection) = selected_attribute(state)?;
 
     if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
         return Err(EventResult::Toast(
@@ -61,22 +242,8 @@ fn selected_attribute_edit_request(
         ));
     }
 
-    let (_, attr) = match attributes
-        .attributes
-        .iter()
-        .find(|(name, _)| name == &attr_name)
-    {
-        Some(attr) => attr,
-        None => {
-            return Err(EventResult::Toast(
-                AppToast::Error(format!("Attribute '{}' not found", attr_name)),
-                true,
-            ))
-        }
-    };
-
     if let Err(e) = attr.can_edit() {
-        if let Value = node_attributes_view_cursor.attribute_view_selection {
+        if let Value = selection {
             return Err(EventResult::Toast(
                 AppToast::Error(format!(
                     "Attribute '{}' value cannot be edited: {}",
@@ -87,16 +254,16 @@ fn selected_attribute_edit_request(
         }
     }
 
-    let content = match node_attributes_view_cursor.attribute_view_selection {
+    let content = match selection {
         Name => attr_name.clone(),
-        Value => format_attr_for_edit(attr)
+        Value => format_attr_for_edit(&attr)
             .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?,
     };
 
     Ok(AttributeEditRequest {
         attr_name,
         content,
-        selection: node_attributes_view_cursor.attribute_view_selection,
+        selection,
     })
 }
 
@@ -232,6 +399,11 @@ pub fn handle_normal_attributes(
                     Ok(EventResult::Redraw)
                 }
                 Some(AttributesAction::Edit) => {
+                    match navigate_reference_attribute_value(state) {
+                        Ok(Some(event_result)) => return Ok(event_result),
+                        Ok(None) => {}
+                        Err(event_result) => return Ok(event_result),
+                    }
                     let request = match selected_attribute_edit_request(state) {
                         Ok(request) => request,
                         Err(event_result) => return Ok(event_result),

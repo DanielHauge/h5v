@@ -167,6 +167,21 @@ impl H5FNode {
         Ok(())
     }
 
+    pub fn ensure_expanded(&mut self) -> Result<(), hdf5_metno::Error> {
+        self.read_children()?;
+        if !self.expanded {
+            self.expanded = true;
+        }
+
+        for child in &self.children {
+            let mut child_node = child.borrow_mut();
+            if child_node.is_expandable() {
+                child_node.read_children()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn collapse(&mut self) {
         self.expanded = false;
     }
@@ -181,7 +196,7 @@ impl H5FNode {
     }
 
     pub fn expand_path(&mut self, relative_path: &str) -> Result<Option<usize>, AppError> {
-        self.expand()?;
+        self.ensure_expanded()?;
         let child_mame = relative_path.split('/').next();
 
         match child_mame {

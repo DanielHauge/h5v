@@ -943,14 +943,24 @@ mod tests {
         let dtype = attr.dtype().expect("failed getting attr dtype");
         h5check(unsafe { H5Awrite(attr.id(), dtype.id(), bytes.as_ptr().cast()) })
             .expect("failed writing compound attr bytes");
+        file.flush().expect("failed flushing temp hdf5 file");
+        drop(dtype);
+        drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
 
+        let reopened = File::open(&path).expect("failed reopening temp hdf5 file");
+        let attr = reopened
+            .attr("compound")
+            .expect("failed reopening compound attr");
         let rendered = sprint_attribute(&attr)
             .expect("failed rendering compound attr")
             .to_string();
         assert_eq!(rendered, "{field1: 7, field2: 9.81}");
 
         drop(attr);
-        file.close().expect("failed closing temp hdf5 file");
+        reopened
+            .close()
+            .expect("failed closing reopened temp hdf5 file");
         std::fs::remove_file(path).expect("failed removing temp hdf5 file");
     }
 
