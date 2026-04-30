@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::ui::mchart::BuiltinDerivedOp;
 use std::collections::VecDeque;
 
 use super::{input::EventResult, state::AppState};
@@ -9,6 +10,7 @@ pub enum CommandCategory {
     View,
     Selection,
     App,
+    MultiChart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,7 @@ pub enum CommandId {
     Index,
     Help,
     Repeat,
+    MultiChart,
     Noop,
 }
 
@@ -140,6 +143,18 @@ const PATH_ARG: CommandArgSpec = CommandArgSpec {
 
 const OPTIONAL_COMMAND_ARG: CommandArgSpec = CommandArgSpec {
     name: "command",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const ACTION_ARG: CommandArgSpec = CommandArgSpec {
+    name: "action",
+    kind: CommandArgKind::Word,
+    required: true,
+};
+
+const OPTIONAL_WORD_ARG: CommandArgSpec = CommandArgSpec {
+    name: "arg",
     kind: CommandArgKind::Word,
     required: false,
 };
@@ -335,6 +350,16 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         args: &[],
         handler: handle_repeat,
     },
+    CommandDescriptor {
+        id: CommandId::MultiChart,
+        name: "mchart",
+        aliases: &["multichart"],
+        description: "Control multichart from command mode: open, add, expr, derive, select, pan, zoom, clear, and more",
+        category: CommandCategory::MultiChart,
+        keybindings: &["M"],
+        args: &[ACTION_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG],
+        handler: handle_mchart,
+    },
 ];
 
 pub fn command_catalog() -> &'static [CommandDescriptor] {
@@ -413,6 +438,18 @@ impl CommandInvocation {
                 index + 1,
                 self.command_name
             ))),
+        }
+    }
+
+    pub fn word_arg_optional(&self, index: usize) -> Result<Option<&str>, AppError> {
+        match self.args.get(index) {
+            Some(CommandArgValue::Word(value)) => Ok(Some(value.as_str())),
+            Some(CommandArgValue::UnsignedInt(_)) => Err(AppError::InvalidCommand(format!(
+                "Argument {} for command '{}' must be a word",
+                index + 1,
+                self.command_name
+            ))),
+            None => Ok(None),
         }
     }
 }
@@ -1105,6 +1142,209 @@ fn handle_index(
     state.change_selected_index(delta.signum() * amount)
 }
 
+fn handle_mchart(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    let action = command.word_arg(0)?.to_ascii_lowercase();
+    match action.as_str() {
+        "open" | "show" => {
+            state.mode = super::state::Mode::MultiChart;
+            Ok(EventResult::Redraw)
+        }
+        "close" | "hide" => {
+            state.multi_chart.close_expression_prompt();
+            state.mode = super::state::Mode::Normal;
+            Ok(EventResult::Redraw)
+        }
+        "toggle" => {
+            state.multi_chart.close_expression_prompt();
+            state.mode = if matches!(state.mode, super::state::Mode::MultiChart) {
+                super::state::Mode::Normal
+            } else {
+                super::state::Mode::MultiChart
+            };
+            Ok(EventResult::Redraw)
+        }
+        "add" => {
+            if let Some(spec) = command.word_arg_optional(1)? {
+                let file = state.file.clone();
+                state
+                    .multi_chart
+                    .add_dataset_reference_command(spec, file.as_ref())
+                    .map_err(AppError::InvalidCommand)?;
+            } else {
+                let Some((source, points)) = state.capture_multichart_item()? else {
+                    return Err(AppError::InvalidCommand(
+                        "The current selection is not previewable as a multichart dataset"
+                            .to_string(),
+                    ));
+                };
+                state.multi_chart.add_chart_item(source, points);
+            }
+            state.compute_tree_view();
+            Ok(EventResult::Redraw)
+        }
+        "expr" | "expression" => {
+            let expression = command.word_arg(1)?.to_string();
+            let file = state.file.clone();
+            state
+                .multi_chart
+                .create_expression_derived_command(expression, file.as_ref())
+                .map_err(AppError::InvalidCommand)?;
+            Ok(EventResult::Redraw)
+        }
+        "prompt" => {
+            state.mode = super::state::Mode::MultiChart;
+            state.multi_chart.open_expression_prompt();
+            Ok(EventResult::Redraw)
+        }
+        "base" => match command.word_arg_optional(1)?.map(|arg| arg.to_ascii_lowercase()) {
+            None => {
+                state
+                    .multi_chart
+                    .toggle_marked_base()
+                    .map_err(AppError::InvalidCommand)?;
+                Ok(EventResult::Redraw)
+            }
+            Some(action) if action == "toggle" => {
+                state
+                    .multi_chart
+                    .toggle_marked_base()
+                    .map_err(AppError::InvalidCommand)?;
+                Ok(EventResult::Redraw)
+            }
+            Some(action) if action == "clear" => {
+                state.multi_chart.clear_marked_base();
+                Ok(EventResult::Redraw)
+            }
+            Some(other) => Err(AppError::InvalidCommand(format!(
+                "Unknown mchart base action '{}'. Expected toggle or clear",
+                other
+            ))),
+        },
+        "derive" => {
+            let operation = parse_multichart_derived_op(command.word_arg(1)?)?;
+            state
+                .multi_chart
+                .create_builtin_derived(operation)
+                .map_err(AppError::InvalidCommand)?;
+            Ok(EventResult::Redraw)
+        }
+        "select" | "move" => {
+            let delta = parse_direction_delta(command.word_arg(1)?)?;
+            let amount = parse_word_usize(command.word_arg_optional(2)?, 1, "mchart")?;
+            for _ in 0..amount {
+                if delta < 0 {
+                    state.multi_chart.move_up();
+                } else {
+                    state.multi_chart.move_down();
+                }
+            }
+            Ok(EventResult::Redraw)
+        }
+        "visible" | "visibility" => match command
+            .word_arg_optional(1)?
+            .map(|arg| arg.to_ascii_lowercase())
+        {
+            None => {
+                state.multi_chart.toggle_selected_visible();
+                Ok(EventResult::Redraw)
+            }
+            Some(action) if action == "toggle" => {
+                state.multi_chart.toggle_selected_visible();
+                Ok(EventResult::Redraw)
+            }
+            Some(action) if action == "show" => {
+                state.multi_chart.set_selected_visible(true);
+                Ok(EventResult::Redraw)
+            }
+            Some(action) if action == "hide" => {
+                state.multi_chart.set_selected_visible(false);
+                Ok(EventResult::Redraw)
+            }
+            Some(other) => Err(AppError::InvalidCommand(format!(
+                "Unknown mchart visibility action '{}'. Expected toggle, show, or hide",
+                other
+            ))),
+        },
+        "remove" | "delete" => {
+            state.multi_chart.clear_selected();
+            state.compute_tree_view();
+            Ok(EventResult::Redraw)
+        }
+        "clear" => {
+            match command.word_arg_optional(1)?.map(|arg| arg.to_ascii_lowercase()) {
+                None => {
+                    state.multi_chart.clear_all();
+                    state.compute_tree_view();
+                    Ok(EventResult::Redraw)
+                }
+                Some(action) if action == "all" => {
+                    state.multi_chart.clear_all();
+                    state.compute_tree_view();
+                    Ok(EventResult::Redraw)
+                }
+                Some(action) if action == "zoom" => {
+                    state.multi_chart.clear_zoom();
+                    Ok(EventResult::Redraw)
+                }
+                Some(other) => Err(AppError::InvalidCommand(format!(
+                    "Unknown mchart clear target '{}'. Expected all or zoom",
+                    other
+                ))),
+            }
+        }
+        "zoom" => {
+            let target = command.word_arg_optional(1)?.unwrap_or("reset");
+            match target.to_ascii_lowercase().as_str() {
+                "in" => {
+                    state
+                        .multi_chart
+                        .zoom_in(parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?);
+                    Ok(EventResult::Redraw)
+                }
+                "out" => {
+                    state
+                        .multi_chart
+                        .zoom_out(parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?);
+                    Ok(EventResult::Redraw)
+                }
+                "reset" | "clear" => {
+                    state.multi_chart.clear_zoom();
+                    Ok(EventResult::Redraw)
+                }
+                other => Err(AppError::InvalidCommand(format!(
+                    "Unknown mchart zoom action '{}'. Expected in, out, or reset",
+                    other
+                ))),
+            }
+        }
+        "pan" => {
+            let direction = command.word_arg(1)?;
+            let amount = parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?;
+            match direction.to_ascii_lowercase().as_str() {
+                "left" => {
+                    state.multi_chart.pan_left(amount);
+                    Ok(EventResult::Redraw)
+                }
+                "right" => {
+                    state.multi_chart.pan_right(amount);
+                    Ok(EventResult::Redraw)
+                }
+                other => Err(AppError::InvalidCommand(format!(
+                    "Unknown mchart pan direction '{}'. Expected left or right",
+                    other
+                ))),
+            }
+        }
+        other => Err(AppError::InvalidCommand(format!(
+            "Unknown mchart action '{}'. Expected open, close, add, expr, derive, select, visible, remove, clear, zoom, or pan",
+            other
+        ))),
+    }
+}
+
 fn handle_help(
     state: &mut AppState<'_>,
     command: &CommandInvocation,
@@ -1158,6 +1398,48 @@ fn parse_direction_delta(word: &str) -> Result<isize, AppError> {
             "Unknown direction '{}'. Expected next or prev",
             other
         ))),
+    }
+}
+
+fn parse_multichart_derived_op(word: &str) -> Result<BuiltinDerivedOp, AppError> {
+    match word.to_ascii_lowercase().as_str() {
+        "diff" | "difference" => Ok(BuiltinDerivedOp::Difference),
+        "sum" => Ok(BuiltinDerivedOp::Sum),
+        "ratio" => Ok(BuiltinDerivedOp::Ratio),
+        "product" | "mul" | "multiply" => Ok(BuiltinDerivedOp::Product),
+        "xy" | "x-y" | "pair" => Ok(BuiltinDerivedOp::Xy),
+        other => Err(AppError::InvalidCommand(format!(
+            "Unknown multichart derived operation '{}'. Expected difference, sum, ratio, product, or xy",
+            other
+        ))),
+    }
+}
+
+fn parse_word_usize(
+    word: Option<&str>,
+    default: usize,
+    command_name: &str,
+) -> Result<usize, AppError> {
+    match word {
+        Some(word) => word.parse::<usize>().map_err(|_| {
+            AppError::InvalidCommand(format!(
+                "Invalid numeric argument '{}' for command '{}'",
+                word, command_name
+            ))
+        }),
+        None => Ok(default),
+    }
+}
+
+fn parse_word_f64(word: Option<&str>, default: f64, command_name: &str) -> Result<f64, AppError> {
+    match word {
+        Some(word) => word.parse::<f64>().map_err(|_| {
+            AppError::InvalidCommand(format!(
+                "Invalid numeric argument '{}' for command '{}'",
+                word, command_name
+            ))
+        }),
+        None => Ok(default),
     }
 }
 
@@ -1316,6 +1598,34 @@ mod tests {
             vec![
                 CommandArgValue::Word("prev".to_string()),
                 CommandArgValue::UnsignedInt(10)
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_multichart_add_command_with_dataset_spec() {
+        let command =
+            parse_command_text("mchart add !/group/dataset[..,0]").expect("expected mchart add");
+        assert_eq!(command.id, CommandId::MultiChart);
+        assert_eq!(
+            command.args,
+            vec![
+                CommandArgValue::Word("add".to_string()),
+                CommandArgValue::Word("!/group/dataset[..,0]".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_multichart_expression_command_with_quoted_expression() {
+        let command = parse_command_text(r#"mchart expr "($1, !/ticks + #OFFSET)""#)
+            .expect("expected mchart expr");
+        assert_eq!(command.id, CommandId::MultiChart);
+        assert_eq!(
+            command.args,
+            vec![
+                CommandArgValue::Word("expr".to_string()),
+                CommandArgValue::Word("($1, !/ticks + #OFFSET)".to_string()),
             ]
         );
     }

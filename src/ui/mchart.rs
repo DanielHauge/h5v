@@ -974,6 +974,15 @@ impl MultiChartState {
         }
     }
 
+    pub fn set_selected_visible(&mut self, visible: bool) {
+        if let Some(item) = self.items.get_mut(self.idx) {
+            if item.visible != visible {
+                item.visible = visible;
+                self.modified = true;
+            }
+        }
+    }
+
     pub fn clear_selected(&mut self) {
         if self.idx < self.items.len() {
             let removed = self.items.remove(self.idx);
@@ -996,6 +1005,72 @@ impl MultiChartState {
         self.stateful_protocol = None;
         self.marked_base_item = None;
         self.modified = true;
+    }
+
+    pub fn clear_marked_base(&mut self) {
+        if self.marked_base_item.take().is_some() {
+            self.modified = true;
+        }
+    }
+
+    pub fn create_expression_derived_command(
+        &mut self,
+        expression: String,
+        file: Option<&File>,
+    ) -> Result<ChartItemId, String> {
+        self.create_expression_derived_with_file(expression, file)
+    }
+
+    pub fn add_dataset_reference_command(
+        &mut self,
+        dataset_spec: &str,
+        file: Option<&File>,
+    ) -> Result<ChartItemId, String> {
+        let normalized = dataset_spec.trim();
+        if normalized.is_empty() {
+            return Err("Dataset reference cannot be empty".to_string());
+        }
+        let prefixed = if normalized.starts_with('!') {
+            normalized.to_string()
+        } else {
+            format!("!{normalized}")
+        };
+        let tokens = tokenize_expression(&prefixed)?;
+        let Some(ExpressionToken::DatasetRef(dataset_ref)) = tokens.first() else {
+            return Err(format!(
+                "Dataset reference '{}' must look like !/path or !/path[..,0]",
+                dataset_spec
+            ));
+        };
+        if tokens.len() != 1 {
+            return Err(format!(
+                "Dataset reference '{}' must contain only a single dataset selector",
+                dataset_spec
+            ));
+        }
+        let file = file.ok_or_else(|| {
+            "Adding a dataset by path requires an open file handle, but no file is loaded"
+                .to_string()
+        })?;
+        let dataset = file.dataset(&dataset_ref.path).map_err(|error| {
+            format!(
+                "Dataset reference {} could not be opened: {}",
+                dataset_ref.render(),
+                error
+            )
+        })?;
+        let shape = dataset.shape();
+        let selection = dataset_ref.to_preview_selection(&shape)?;
+        let points = read_expression_dataset_points(&dataset, dataset_ref)?;
+        let source = ChartSource::DatasetSelection(DatasetChartSource {
+            dataset_path: dataset.name(),
+            display_path: dataset.name(),
+            selection,
+            shape,
+            kind: DatasetChartKind::Dataset,
+        });
+        self.add_chart_item(source, points)
+            .ok_or_else(|| "Failed to add dataset to multichart".to_string())
     }
 
     fn global_x_bounds(&self) -> Option<(usize, usize)> {
