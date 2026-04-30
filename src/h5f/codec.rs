@@ -1,10 +1,12 @@
 use std::str::FromStr;
 
+use hdf5_metno::h5check;
 use hdf5_metno::{
-    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
+    types::{EnumType, FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
     Attribute, Dataset, Group, H5Type, ObjectReference2,
 };
-use ndarray::IxDyn;
+use hdf5_metno_sys::h5a::H5Awrite;
+use ndarray::{Array1, IxDyn};
 
 use crate::error::AppError;
 
@@ -92,12 +94,17 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
                 copy_to_group::<f64>(attr, group, &type_desc, new_name)?
             }
         },
-        TypeDescriptor::Enum(_) | TypeDescriptor::Compound(_) => {
+        TypeDescriptor::Enum(enum_type) => {
+            copy_enum_to_group(attr, group, new_name, &enum_type)?;
+        }
+        TypeDescriptor::Compound(_) => {
             let data: Vec<u8> = attr.read_raw()?;
-            let new_attr = group
-                .new_attr_builder()
-                .empty_as(&type_desc)
-                .create(new_name)?;
+            let builder = group.new_attr_builder().empty_as(&type_desc);
+            let new_attr = if attr.is_scalar() {
+                builder.create(new_name)?
+            } else {
+                builder.shape(attr.shape()).create(new_name)?
+            };
             new_attr.write_raw(&data)?;
         }
         TypeDescriptor::Reference(_) => {
@@ -138,6 +145,56 @@ pub fn copy_attr_to_group(attr: &Attribute, group: &Group, new_name: &str) -> Re
     Ok(())
 }
 
+fn copy_enum_to_group(
+    attr: &Attribute,
+    group: &Group,
+    new_name: &str,
+    enum_type: &EnumType,
+) -> Result<(), AppError> {
+    let type_desc = TypeDescriptor::Enum(enum_type.clone());
+    let builder = group.new_attr_builder().empty_as(&type_desc);
+    let new_attr = if attr.is_scalar() {
+        builder.create(new_name)?
+    } else {
+        builder.shape(attr.shape()).create(new_name)?
+    };
+
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<i8>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<i16>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<i32>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<i64>(attr)?)
+            }
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<u8>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<u16>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<u32>(attr)?)
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                write_enum_memory(&new_attr, &read_enum_values_as::<u64>(attr)?)
+            }
+        },
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
 fn copy_to_group<T: H5Type>(
     attr: &Attribute,
     group: &Group,
@@ -161,8 +218,169 @@ fn copy_to_group<T: H5Type>(
     Ok(())
 }
 
+pub fn ensure_attr_editable(attr: &Attribute) -> Result<(), AppError> {
+    if !attr.is_valid() {
+        return Err(AppError::EditError("Invalid attribute".to_string()));
+    }
+
+    let type_desc = attr.dtype()?.to_descriptor()?;
+    validate_attr_edit_support(&type_desc, attr.ndim())
+}
+
+fn validate_attr_edit_support(type_desc: &TypeDescriptor, ndim: usize) -> Result<(), AppError> {
+    if ndim > 1 {
+        return Err(AppError::EditError(format!(
+            "Only scalar and 1D attributes can be edited, got {ndim}D attribute"
+        )));
+    }
+
+    if scalar_text_codec(type_desc).is_some() || matches!(type_desc, TypeDescriptor::Enum(_)) {
+        return Ok(());
+    }
+
+    Err(match type_desc {
+        TypeDescriptor::Compound(_) => AppError::EditError(
+            "Editing compound attributes is not supported".to_string(),
+        ),
+        TypeDescriptor::FixedArray(_, _) | TypeDescriptor::VarLenArray(_) => AppError::EditError(
+            "Editing nested array attributes is not supported".to_string(),
+        ),
+        TypeDescriptor::FixedAscii(_) => AppError::EditWarning("Editing FixedAscii attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()),
+        TypeDescriptor::FixedUnicode(_) => AppError::EditWarning("Editing FixedUnicode attributes is disabled due to performance and dependency concerns. \nIf you truly wish to edit this attribute, delete it and create it with desired type such as vlen string".to_string()),
+        TypeDescriptor::Reference(_) => AppError::EditError(
+            "Editing reference attributes is not supported".to_string(),
+        ),
+        _ => AppError::EditError(format!(
+            "{} attribute type is not supported for editing",
+            type_desc
+        )),
+    })
+}
+
+pub fn format_attr_for_edit(attr: &Attribute) -> Result<String, AppError> {
+    ensure_attr_editable(attr)?;
+    let type_desc = attr.dtype()?.to_descriptor()?;
+
+    if attr.is_scalar() {
+        return format_scalar_attr_for_edit(attr, &type_desc);
+    }
+
+    if attr.ndim() == 1 {
+        return format_1d_attr_for_edit(attr, &type_desc);
+    }
+
+    Err(AppError::EditError(format!(
+        "Only scalar and 1D attributes can be edited, got {}D attribute",
+        attr.ndim()
+    )))
+}
+
+fn format_scalar_attr_for_edit(
+    attr: &Attribute,
+    type_desc: &TypeDescriptor,
+) -> Result<String, AppError> {
+    match type_desc {
+        TypeDescriptor::Integer(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr.read_scalar::<i8>()?.to_string(),
+            hdf5_metno::types::IntSize::U2 => attr.read_scalar::<i16>()?.to_string(),
+            hdf5_metno::types::IntSize::U4 => attr.read_scalar::<i32>()?.to_string(),
+            hdf5_metno::types::IntSize::U8 => attr.read_scalar::<i64>()?.to_string(),
+        }),
+        TypeDescriptor::Unsigned(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr.read_scalar::<u8>()?.to_string(),
+            hdf5_metno::types::IntSize::U2 => attr.read_scalar::<u16>()?.to_string(),
+            hdf5_metno::types::IntSize::U4 => attr.read_scalar::<u32>()?.to_string(),
+            hdf5_metno::types::IntSize::U8 => attr.read_scalar::<u64>()?.to_string(),
+        }),
+        TypeDescriptor::Float(float_size) => Ok(match float_size {
+            hdf5_metno::types::FloatSize::U4 => attr.read_scalar::<f32>()?.to_string(),
+            hdf5_metno::types::FloatSize::U8 => attr.read_scalar::<f64>()?.to_string(),
+        }),
+        TypeDescriptor::Boolean => Ok(attr.read_scalar::<bool>()?.to_string()),
+        TypeDescriptor::VarLenAscii => Ok(attr.read_scalar::<VarLenAscii>()?.to_string()),
+        TypeDescriptor::VarLenUnicode => Ok(attr.read_scalar::<VarLenUnicode>()?.to_string()),
+        TypeDescriptor::Enum(enum_type) => Ok(format_enum_value_for_edit(
+            read_scalar_enum_value(attr, enum_type)?,
+            enum_type,
+        )),
+        _ => Err(non_editable_scalar_error(type_desc)),
+    }
+}
+
+fn format_1d_attr_for_edit(
+    attr: &Attribute,
+    type_desc: &TypeDescriptor,
+) -> Result<String, AppError> {
+    match type_desc {
+        TypeDescriptor::Integer(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => join_display_lines(attr.read_1d::<i8>()?.iter()),
+            hdf5_metno::types::IntSize::U2 => join_display_lines(attr.read_1d::<i16>()?.iter()),
+            hdf5_metno::types::IntSize::U4 => join_display_lines(attr.read_1d::<i32>()?.iter()),
+            hdf5_metno::types::IntSize::U8 => join_display_lines(attr.read_1d::<i64>()?.iter()),
+        }),
+        TypeDescriptor::Unsigned(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => join_display_lines(attr.read_1d::<u8>()?.iter()),
+            hdf5_metno::types::IntSize::U2 => join_display_lines(attr.read_1d::<u16>()?.iter()),
+            hdf5_metno::types::IntSize::U4 => join_display_lines(attr.read_1d::<u32>()?.iter()),
+            hdf5_metno::types::IntSize::U8 => join_display_lines(attr.read_1d::<u64>()?.iter()),
+        }),
+        TypeDescriptor::Float(float_size) => Ok(match float_size {
+            hdf5_metno::types::FloatSize::U4 => join_display_lines(attr.read_1d::<f32>()?.iter()),
+            hdf5_metno::types::FloatSize::U8 => join_display_lines(attr.read_1d::<f64>()?.iter()),
+        }),
+        TypeDescriptor::Boolean => Ok(join_display_lines(attr.read_1d::<bool>()?.iter())),
+        TypeDescriptor::VarLenAscii => {
+            Ok(join_display_lines(attr.read_1d::<VarLenAscii>()?.iter()))
+        }
+        TypeDescriptor::VarLenUnicode => {
+            Ok(join_display_lines(attr.read_1d::<VarLenUnicode>()?.iter()))
+        }
+        TypeDescriptor::Enum(enum_type) => Ok(read_1d_enum_values(attr, enum_type)?
+            .into_iter()
+            .map(|value| format_enum_value_for_edit(value, enum_type))
+            .collect::<Vec<_>>()
+            .join("\n")),
+        _ => Err(validate_attr_edit_support(type_desc, 1).unwrap_err()),
+    }
+}
+
+fn join_display_lines<'a, T>(values: impl IntoIterator<Item = &'a T>) -> String
+where
+    T: std::fmt::Display + 'a,
+{
+    values
+        .into_iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn write_attr_from_text(attr: &Attribute, new_value: &str) -> Result<String, AppError> {
+    ensure_attr_editable(attr)?;
+    let type_desc = attr.dtype()?.to_descriptor()?;
+
+    if attr.is_scalar() {
+        return write_scalar_attr_from_text(attr, new_value);
+    }
+
+    if attr.ndim() == 1 {
+        write_1d_attr_from_text(attr, new_value, &type_desc)?;
+        return Ok(type_desc.to_string());
+    }
+
+    Err(AppError::EditError(format!(
+        "Only scalar and 1D attributes can be edited, got {}D attribute",
+        attr.ndim()
+    )))
+}
+
 pub fn write_scalar_attr_from_text(attr: &Attribute, new_value: &str) -> Result<String, AppError> {
     let type_desc = attr.dtype()?.to_descriptor()?;
+    if let TypeDescriptor::Enum(enum_type) = &type_desc {
+        write_enum_scalar_attr_from_text(attr, new_value, enum_type)?;
+        return Ok(type_desc.to_string());
+    }
+
     match scalar_text_codec(&type_desc) {
         Some(ScalarTextCodec::I8) => write_parsed_scalar::<i8>(attr, new_value, "i8")?,
         Some(ScalarTextCodec::I16) => write_parsed_scalar::<i16>(attr, new_value, "i16")?,
@@ -194,6 +412,40 @@ pub fn write_scalar_attr_from_text(attr: &Attribute, new_value: &str) -> Result<
     Ok(type_desc.to_string())
 }
 
+fn write_1d_attr_from_text(
+    attr: &Attribute,
+    new_value: &str,
+    type_desc: &TypeDescriptor,
+) -> Result<(), AppError> {
+    match type_desc {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_parsed_1d_array::<i8>(attr, new_value, "i8"),
+            hdf5_metno::types::IntSize::U2 => write_parsed_1d_array::<i16>(attr, new_value, "i16"),
+            hdf5_metno::types::IntSize::U4 => write_parsed_1d_array::<i32>(attr, new_value, "i32"),
+            hdf5_metno::types::IntSize::U8 => write_parsed_1d_array::<i64>(attr, new_value, "i64"),
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_parsed_1d_array::<u8>(attr, new_value, "u8"),
+            hdf5_metno::types::IntSize::U2 => write_parsed_1d_array::<u16>(attr, new_value, "u16"),
+            hdf5_metno::types::IntSize::U4 => write_parsed_1d_array::<u32>(attr, new_value, "u32"),
+            hdf5_metno::types::IntSize::U8 => write_parsed_1d_array::<u64>(attr, new_value, "u64"),
+        },
+        TypeDescriptor::Float(float_size) => match float_size {
+            hdf5_metno::types::FloatSize::U4 => {
+                write_parsed_1d_array::<f32>(attr, new_value, "f32")
+            }
+            hdf5_metno::types::FloatSize::U8 => {
+                write_parsed_1d_array::<f64>(attr, new_value, "f64")
+            }
+        },
+        TypeDescriptor::Boolean => write_parsed_1d_array::<bool>(attr, new_value, "bool"),
+        TypeDescriptor::VarLenAscii => write_ascii_1d_array(attr, new_value),
+        TypeDescriptor::VarLenUnicode => write_unicode_1d_array(attr, new_value),
+        TypeDescriptor::Enum(enum_type) => write_enum_1d_attr_from_text(attr, new_value, enum_type),
+        _ => Err(validate_attr_edit_support(type_desc, 1).unwrap_err()),
+    }
+}
+
 fn write_parsed_scalar<T>(
     attr: &Attribute,
     new_value: &str,
@@ -203,17 +455,325 @@ where
     T: H5Type + FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    let parsed = T::from_str(new_value)
+    let parsed = T::from_str(new_value.trim())
         .map_err(|e| AppError::EditError(format!("Failed to convert to {}: {}", type_name, e)))?;
     attr.write_scalar(&parsed)
         .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
 }
 
+fn write_parsed_1d_array<T>(
+    attr: &Attribute,
+    new_value: &str,
+    type_name: &str,
+) -> Result<(), AppError>
+where
+    T: H5Type + FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    let parsed = parse_1d_lines(new_value, expected_1d_len(attr))?
+        .into_iter()
+        .map(|line| {
+            T::from_str(line.trim()).map_err(|e| {
+                AppError::EditError(format!("Failed to convert to {}: {}", type_name, e))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    attr.write(Array1::from(parsed).view())
+        .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
+}
+
+fn write_ascii_1d_array(attr: &Attribute, new_value: &str) -> Result<(), AppError> {
+    let parsed = parse_1d_lines(new_value, expected_1d_len(attr))?
+        .into_iter()
+        .map(|line| {
+            VarLenAscii::from_ascii(line).map_err(|e| {
+                AppError::EditError(format!("Failed to convert to VarLenAscii: {}", e))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    attr.write(Array1::from(parsed).view())
+        .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
+}
+
+fn write_unicode_1d_array(attr: &Attribute, new_value: &str) -> Result<(), AppError> {
+    let parsed = parse_1d_lines(new_value, expected_1d_len(attr))?
+        .into_iter()
+        .map(|line| {
+            VarLenUnicode::from_str(line).map_err(|e| {
+                AppError::EditError(format!("Failed to convert to VarLenUnicode: {}", e))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    attr.write(Array1::from(parsed).view())
+        .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))
+}
+
+fn write_enum_scalar_attr_from_text(
+    attr: &Attribute,
+    new_value: &str,
+    enum_type: &EnumType,
+) -> Result<(), AppError> {
+    let value = parse_enum_member_value(new_value, enum_type)?;
+    write_enum_value(attr, value, enum_type)
+}
+
+fn write_enum_1d_attr_from_text(
+    attr: &Attribute,
+    new_value: &str,
+    enum_type: &EnumType,
+) -> Result<(), AppError> {
+    let values = parse_1d_lines(new_value, expected_1d_len(attr))?
+        .into_iter()
+        .map(|line| parse_enum_member_value(line, enum_type))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as i8).collect())
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as i16).collect())
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as i32).collect())
+            }
+            hdf5_metno::types::IntSize::U8 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as i64).collect())
+            }
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as u8).collect())
+            }
+            hdf5_metno::types::IntSize::U2 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as u16).collect())
+            }
+            hdf5_metno::types::IntSize::U4 => {
+                write_enum_array(attr, values.into_iter().map(|value| value as u32).collect())
+            }
+            hdf5_metno::types::IntSize::U8 => write_enum_array(attr, values),
+        },
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn write_enum_value(attr: &Attribute, value: u64, enum_type: &EnumType) -> Result<(), AppError> {
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_enum_memory(attr, &[(value as i8)]),
+            hdf5_metno::types::IntSize::U2 => write_enum_memory(attr, &[(value as i16)]),
+            hdf5_metno::types::IntSize::U4 => write_enum_memory(attr, &[(value as i32)]),
+            hdf5_metno::types::IntSize::U8 => write_enum_memory(attr, &[(value as i64)]),
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => write_enum_memory(attr, &[(value as u8)]),
+            hdf5_metno::types::IntSize::U2 => write_enum_memory(attr, &[(value as u16)]),
+            hdf5_metno::types::IntSize::U4 => write_enum_memory(attr, &[(value as u32)]),
+            hdf5_metno::types::IntSize::U8 => write_enum_memory(attr, &[value]),
+        },
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn write_enum_array<T>(attr: &Attribute, values: Vec<T>) -> Result<(), AppError> {
+    write_enum_memory(attr, &values)
+}
+
+fn write_enum_memory<T>(attr: &Attribute, values: &[T]) -> Result<(), AppError> {
+    let dtype = attr.dtype()?;
+    h5check(unsafe { H5Awrite(attr.id(), dtype.id(), values.as_ptr().cast()) })
+        .map_err(|e| AppError::EditError(format!("Failed to write attribute: {}", e)))?;
+    Ok(())
+}
+
+fn read_enum_values_as<T: H5Type + Clone>(attr: &Attribute) -> Result<Vec<T>, AppError> {
+    if attr.is_scalar() {
+        Ok(vec![attr.read_scalar::<T>()?])
+    } else {
+        Ok(attr.read_1d::<T>()?.to_vec())
+    }
+}
+
+fn parse_1d_lines<'a>(new_value: &'a str, expected_len: usize) -> Result<Vec<&'a str>, AppError> {
+    if new_value.is_empty() {
+        return match expected_len {
+            0 => Ok(vec![]),
+            1 => Ok(vec![""]),
+            _ => Err(AppError::EditError(format!(
+                "Expected {expected_len} values, got 0"
+            ))),
+        };
+    }
+
+    let lines = new_value.lines().collect::<Vec<_>>();
+    if lines.len() != expected_len {
+        return Err(AppError::EditError(format!(
+            "Expected {expected_len} values, got {}",
+            lines.len()
+        )));
+    }
+
+    Ok(lines)
+}
+
+fn expected_1d_len(attr: &Attribute) -> usize {
+    attr.shape().first().copied().unwrap_or(0)
+}
+
+fn read_scalar_enum_value(attr: &Attribute, enum_type: &EnumType) -> Result<u64, AppError> {
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr.read_scalar::<i8>()? as u64,
+            hdf5_metno::types::IntSize::U2 => attr.read_scalar::<i16>()? as u64,
+            hdf5_metno::types::IntSize::U4 => attr.read_scalar::<i32>()? as u64,
+            hdf5_metno::types::IntSize::U8 => attr.read_scalar::<i64>()? as u64,
+        }),
+        TypeDescriptor::Unsigned(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr.read_scalar::<u8>()? as u64,
+            hdf5_metno::types::IntSize::U2 => attr.read_scalar::<u16>()? as u64,
+            hdf5_metno::types::IntSize::U4 => attr.read_scalar::<u32>()? as u64,
+            hdf5_metno::types::IntSize::U8 => attr.read_scalar::<u64>()?,
+        }),
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn read_1d_enum_values(attr: &Attribute, enum_type: &EnumType) -> Result<Vec<u64>, AppError> {
+    match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr
+                .read_1d::<i8>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U2 => attr
+                .read_1d::<i16>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U4 => attr
+                .read_1d::<i32>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U8 => attr
+                .read_1d::<i64>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+        }),
+        TypeDescriptor::Unsigned(int_size) => Ok(match int_size {
+            hdf5_metno::types::IntSize::U1 => attr
+                .read_1d::<u8>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U2 => attr
+                .read_1d::<u16>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U4 => attr
+                .read_1d::<u32>()?
+                .into_iter()
+                .map(|value| value as u64)
+                .collect(),
+            hdf5_metno::types::IntSize::U8 => attr.read_1d::<u64>()?.into_iter().collect(),
+        }),
+        _ => Err(AppError::EditError(format!(
+            "Unsupported enum base type: {}",
+            enum_type.base_type()
+        ))),
+    }
+}
+
+fn format_enum_value_for_edit(value: u64, enum_type: &EnumType) -> String {
+    enum_type
+        .members
+        .iter()
+        .find(|member| member.value == value)
+        .map(|member| member.name.clone())
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn enum_members_display(enum_type: &EnumType) -> String {
+    format!(
+        "[{}]",
+        enum_type
+            .members
+            .iter()
+            .map(|member| format!("\"{}\"", member.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn parse_enum_member_value(text: &str, enum_type: &EnumType) -> Result<u64, AppError> {
+    let text = text.trim();
+    if let Some(member) = enum_type.members.iter().find(|member| member.name == text) {
+        return Ok(member.value);
+    }
+
+    let parsed = match enum_type.base_type() {
+        TypeDescriptor::Integer(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => text.parse::<i8>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U2 => text.parse::<i16>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U4 => text.parse::<i32>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U8 => text.parse::<i64>().map(|value| value as u64),
+        },
+        TypeDescriptor::Unsigned(int_size) => match int_size {
+            hdf5_metno::types::IntSize::U1 => text.parse::<u8>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U2 => text.parse::<u16>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U4 => text.parse::<u32>().map(|value| value as u64),
+            hdf5_metno::types::IntSize::U8 => text.parse::<u64>(),
+        },
+        _ => {
+            return Err(AppError::EditError(format!(
+                "Unsupported enum base type: {}",
+                enum_type.base_type()
+            )))
+        }
+    };
+
+    let parsed = match parsed {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return Err(AppError::EditError(format!(
+                "Invalid enum value '{text}'. Available members: {}",
+                enum_members_display(enum_type)
+            )))
+        }
+    };
+
+    if enum_type
+        .members
+        .iter()
+        .any(|member| member.value == parsed)
+    {
+        Ok(parsed)
+    } else {
+        Err(AppError::EditError(format!(
+            "Invalid enum value '{text}'. Available members: {}",
+            enum_members_display(enum_type)
+        )))
+    }
+}
+
 pub fn non_editable_scalar_error(type_desc: &TypeDescriptor) -> AppError {
     match type_desc {
-        TypeDescriptor::Enum(_) => AppError::EditError(
-            "Editing enum attributes is not supported".to_string(),
-        ),
         TypeDescriptor::Compound(_) => AppError::EditError(
             "Editing compound attributes is not supported".to_string(),
         ),
@@ -275,4 +835,71 @@ where
         .next()
         .cloned()
         .ok_or_else(|| AppError::DrawingError("Expected one dataset value, found none".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use hdf5_metno::types::{EnumMember, EnumType, IntSize, TypeDescriptor};
+
+    use super::{parse_enum_member_value, validate_attr_edit_support};
+
+    fn color_enum() -> EnumType {
+        EnumType {
+            size: IntSize::U1,
+            signed: false,
+            members: vec![
+                EnumMember {
+                    name: "RED".to_string(),
+                    value: 1,
+                },
+                EnumMember {
+                    name: "GREEN".to_string(),
+                    value: 2,
+                },
+                EnumMember {
+                    name: "BLUE".to_string(),
+                    value: 3,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn parses_enum_member_names() {
+        assert_eq!(
+            parse_enum_member_value("GREEN", &color_enum()).expect("failed to parse enum member"),
+            2
+        );
+    }
+
+    #[test]
+    fn validates_numeric_enum_membership() {
+        assert_eq!(
+            parse_enum_member_value("3", &color_enum()).expect("failed to parse enum value"),
+            3
+        );
+
+        let err = parse_enum_member_value("4", &color_enum())
+            .expect_err("expected invalid enum value to fail");
+        assert!(err
+            .to_string()
+            .contains("Available members: [\"RED\", \"GREEN\", \"BLUE\"]"));
+    }
+
+    #[test]
+    fn invalid_enum_name_lists_available_members() {
+        let err = parse_enum_member_value("purple", &color_enum())
+            .expect_err("expected invalid enum name to fail");
+        assert!(err
+            .to_string()
+            .contains("Available members: [\"RED\", \"GREEN\", \"BLUE\"]"));
+    }
+
+    #[test]
+    fn supports_scalar_enums_and_1d_arrays_only() {
+        let enum_desc = TypeDescriptor::Enum(color_enum());
+        assert!(validate_attr_edit_support(&enum_desc, 0).is_ok());
+        assert!(validate_attr_edit_support(&TypeDescriptor::Boolean, 1).is_ok());
+        assert!(validate_attr_edit_support(&TypeDescriptor::Boolean, 2).is_err());
+    }
 }

@@ -1215,6 +1215,7 @@ dependencies = [
  "fuzzy-matcher",
  "git-version",
  "hdf5-metno",
+ "hdf5-metno-sys",
  "image 0.25.10",
  "itertools",
  "ndarray",

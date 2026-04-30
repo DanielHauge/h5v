@@ -1,13 +1,13 @@
 use hdf5_metno::Attribute;
 use ratatui::{
     style::Style,
-    text::{Line, Span, ToSpan},
+    text::{Line, Span},
 };
 
 use crate::{color_consts, error::AppError, sprint_attributes::sprint_attribute};
 
 use super::{
-    codec::{copy_attr_to_group, write_scalar_attr_from_text},
+    codec::{copy_attr_to_group, write_attr_from_text},
     model::{H5FNode, Node},
 };
 
@@ -152,33 +152,6 @@ impl ComputedAttributes {
         })
     }
 
-    fn update_value_inplace(
-        &mut self,
-        attr_name: &str,
-        new_value: String,
-        typedesc: String,
-    ) -> Result<(), AppError> {
-        for (name_line, value_line, type_desc) in &mut self.rendered_attributes {
-            if name_line.to_span().to_string().starts_with(attr_name) {
-                let first_span = value_line.spans.get_mut(0).ok_or_else(|| {
-                    AppError::EditError(format!(
-                        "Value line for attribute '{}' has no spans",
-                        attr_name
-                    ))
-                })?;
-                first_span.content = new_value.into();
-
-                let new_type_desc_line = Line::from(vec![Span::styled(
-                    format!(" ({})", typedesc),
-                    Style::default().fg(color_consts::TYPE_DESC_COLOR),
-                )]);
-                *type_desc = new_type_desc_line;
-                break;
-            }
-        }
-        Ok(())
-    }
-
     fn render_attributes(
         attributes: &Vec<(String, Attribute)>,
         name_area_width: usize,
@@ -241,23 +214,8 @@ impl H5FNode {
 
     pub fn update_attribute(&mut self, attr_name: &str, new_value: String) -> Result<(), AppError> {
         let attr = self.node.attribute(attr_name)?;
-        if !attr.is_scalar() {
-            return Err(AppError::EditError(
-                "Only scalar attributes can be edited".to_string(),
-            ));
-        }
-        let type_desc = write_scalar_attr_from_text(&attr, &new_value)?;
-        match &mut self.computed_attributes {
-            Some(computed_attributes) => {
-                computed_attributes.update_value_inplace(attr_name, new_value, type_desc)?;
-            }
-            None => {
-                Err(AppError::EditError(
-                    "Failed to update attribute view: Computed attributes not found".to_string(),
-                ))?;
-            }
-        }
-
+        write_attr_from_text(&attr, &new_value)?;
+        self.recompute_attributes()?;
         Ok(())
     }
 

@@ -10,7 +10,7 @@ use ratatui::{text::Line, text::Span};
 
 use crate::{
     color_consts,
-    h5f::scalar_text_codec,
+    h5f::ensure_attr_editable,
     sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
@@ -705,19 +705,7 @@ pub trait AttributeEditable {
 
 impl AttributeEditable for Attribute {
     fn can_edit(&self) -> Result<(), String> {
-        if self.is_valid() {
-            let dtype = self.dtype().map_err(|e| e.to_string())?;
-            let type_desc = dtype.to_descriptor().map_err(|e| e.to_string())?;
-            if scalar_text_codec(&type_desc).is_some() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "{type_desc} attribute type is not supported for editing. Delete it and create a new one with a supported type if you want to edit it."
-                ))
-            }
-        } else {
-            Err("Invalid attribute".to_string())
-        }
+        ensure_attr_editable(self).map_err(|e| e.to_string())
     }
 }
 

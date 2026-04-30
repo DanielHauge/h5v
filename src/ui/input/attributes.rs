@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::SYSTEM_ATTRIBUTES,
+    h5f::{format_attr_for_edit, SYSTEM_ATTRIBUTES},
     sprint_attributes::AttributeEditable,
     ui::{
         edit::perform_edit,
@@ -88,12 +88,8 @@ fn selected_attribute_edit_request(
 
     let content = match node_attributes_view_cursor.attribute_view_selection {
         Name => attr_name.clone(),
-        Value => attribute
-            .1
-            .to_string()
-            .trim_start_matches("\"")
-            .trim_end_matches("\"")
-            .to_string(),
+        Value => format_attr_for_edit(attr)
+            .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?,
     };
 
     Ok(AttributeEditRequest {
