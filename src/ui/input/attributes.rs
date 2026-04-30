@@ -346,37 +346,45 @@ pub fn handle_normal_attributes(
     match event {
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => match attributes_action(&key_event) {
-                Some(AttributesAction::Move(Direction::Up)) => {
+                Some(AttributesAction::Move(Direction::Up, amount)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let attributes_count = node.read_attributes()?.rendered_attributes.len();
-                    if node.attributes_view_cursor.attribute_index > 0 {
-                        if node.attributes_view_cursor.attribute_index >= attributes_count {
-                            node.attributes_view_cursor.attribute_index = attributes_count - 2;
+                    if attributes_count == 0 {
+                        Ok(EventResult::Continue)
+                    } else {
+                        let max_index = attributes_count.saturating_sub(1);
+                        let current_index =
+                            node.attributes_view_cursor.attribute_index.min(max_index);
+                        let new_index = current_index.saturating_sub(amount);
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        if new_index != current_index {
+                            Ok(EventResult::Redraw)
                         } else {
-                            node.attributes_view_cursor.attribute_index -= 1;
+                            Ok(EventResult::Continue)
                         }
-                        Ok(EventResult::Redraw)
-                    } else {
-                        node.attributes_view_cursor.attribute_index = 0;
-                        Ok(EventResult::Continue)
                     }
                 }
-                Some(AttributesAction::Move(Direction::Down)) => {
+                Some(AttributesAction::Move(Direction::Down, amount)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let attributes_count = node.read_attributes()?.rendered_attributes.len();
-
-                    if node.attributes_view_cursor.attribute_index < attributes_count - 1 {
-                        node.attributes_view_cursor.attribute_index += 1;
-
-                        Ok(EventResult::Redraw)
-                    } else {
-                        node.attributes_view_cursor.attribute_index = attributes_count - 1;
+                    if attributes_count == 0 {
                         Ok(EventResult::Continue)
+                    } else {
+                        let max_index = attributes_count.saturating_sub(1);
+                        let current_index =
+                            node.attributes_view_cursor.attribute_index.min(max_index);
+                        let new_index = current_index.saturating_add(amount).min(max_index);
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        if new_index != current_index {
+                            Ok(EventResult::Redraw)
+                        } else {
+                            Ok(EventResult::Continue)
+                        }
                     }
                 }
-                Some(AttributesAction::Move(Direction::Left)) => {
+                Some(AttributesAction::Move(Direction::Left, _)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     match node.attributes_view_cursor.attribute_view_selection {
@@ -387,7 +395,7 @@ pub fn handle_normal_attributes(
                     }
                     Ok(EventResult::Redraw)
                 }
-                Some(AttributesAction::Move(Direction::Right)) => {
+                Some(AttributesAction::Move(Direction::Right, _)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     match node.attributes_view_cursor.attribute_view_selection {

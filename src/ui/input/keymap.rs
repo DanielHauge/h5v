@@ -49,13 +49,13 @@ pub enum TreeAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentAction {
-    Move(Direction),
+    Move(Direction, usize),
     Copy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributesAction {
-    Move(Direction),
+    Move(Direction, usize),
     Edit,
     Copy,
 }
@@ -188,12 +188,20 @@ pub fn tree_action(key: &KeyEvent) -> Option<TreeAction> {
 
 pub fn content_action(key: &KeyEvent) -> Option<ContentAction> {
     match (key.code, key.modifiers) {
-        (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Some(ContentAction::Move(Direction::Left)),
-        (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
-            Some(ContentAction::Move(Direction::Right))
+        (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
+            Some(ContentAction::Move(Direction::Left, 1))
         }
-        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(ContentAction::Move(Direction::Up)),
-        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Some(ContentAction::Move(Direction::Down)),
+        (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
+            Some(ContentAction::Move(Direction::Right, 1))
+        }
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(ContentAction::Move(Direction::Up, 1)),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
+            Some(ContentAction::Move(Direction::Down, 1))
+        }
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(ContentAction::Move(Direction::Up, 10)),
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            Some(ContentAction::Move(Direction::Down, 10))
+        }
         (KeyCode::Char('y'), _) => Some(ContentAction::Copy),
         _ => None,
     }
@@ -201,15 +209,23 @@ pub fn content_action(key: &KeyEvent) -> Option<ContentAction> {
 
 pub fn attributes_action(key: &KeyEvent) -> Option<AttributesAction> {
     match (key.code, key.modifiers) {
-        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(AttributesAction::Move(Direction::Up)),
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
+            Some(AttributesAction::Move(Direction::Up, 1))
+        }
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-            Some(AttributesAction::Move(Direction::Down))
+            Some(AttributesAction::Move(Direction::Down, 1))
+        }
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+            Some(AttributesAction::Move(Direction::Up, 10))
+        }
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            Some(AttributesAction::Move(Direction::Down, 10))
         }
         (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
-            Some(AttributesAction::Move(Direction::Left))
+            Some(AttributesAction::Move(Direction::Left, 1))
         }
         (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
-            Some(AttributesAction::Move(Direction::Right))
+            Some(AttributesAction::Move(Direction::Right, 1))
         }
         (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => Some(AttributesAction::Edit),
         (KeyCode::Char('y'), _) => Some(AttributesAction::Copy),
