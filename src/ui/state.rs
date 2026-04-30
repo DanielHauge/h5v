@@ -285,6 +285,7 @@ pub struct AttributeEditRequest {
     pub attr_name: String,
     pub content: String,
     pub selection: AttributeViewSelection,
+    pub edit_name_hint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

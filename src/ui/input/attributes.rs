@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use std::{ffi::CStr, os::raw::c_char, ptr};
 
 use hdf5_metno::{types::Reference, Attribute, ObjectReference1, ReferencedObject};
@@ -12,7 +14,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::{format_attr_for_edit, read_attr_memory_bytes, SYSTEM_ATTRIBUTES},
+    h5f::{format_attr_for_edit, read_attr_memory_bytes, HasPath, SYSTEM_ATTRIBUTES},
     sprint_attributes::{attribute_type_descriptor, AttributeEditable},
     ui::{
         edit::perform_edit,
@@ -274,6 +276,15 @@ fn selected_attribute_edit_request(
     }
 
     let (_, attr, _) = selected_attribute(state)?;
+    let edit_name_hint = {
+        let node = state.treeview[state.tree_view_cursor].node.borrow();
+        let node_path = node.node.path();
+        if matches!(selection, Name) || Path::new(&attr_name).extension().is_some() {
+            attr_name.clone()
+        } else {
+            format!("{node_path}/{attr_name}")
+        }
+    };
 
     if let Err(e) = attr.can_edit() {
         if let Value = selection {
@@ -297,6 +308,7 @@ fn selected_attribute_edit_request(
         attr_name,
         content,
         selection,
+        edit_name_hint,
     })
 }
 
@@ -305,7 +317,11 @@ pub fn apply_attribute_edit_request(
     request: &AttributeEditRequest,
 ) -> Result<EventResult, AppError> {
     state.editing = true;
-    let new_value = match perform_edit(state, request.content.clone()) {
+    let new_value = match perform_edit(
+        state,
+        request.content.clone(),
+        Some(&request.edit_name_hint),
+    ) {
         Ok(new_value) => new_value,
         Err(e) => {
             state.editing = false;

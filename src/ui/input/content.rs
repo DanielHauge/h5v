@@ -21,6 +21,7 @@ struct ContentEditRequest {
     meta: DatasetMeta,
     selection: Option<Selection>,
     content: String,
+    edit_name_hint: String,
 }
 
 fn exact_element_selection(indices: &[usize]) -> Selection {
@@ -138,6 +139,7 @@ fn selected_content_edit_request(
             }
         }
     };
+    let edit_name_hint = meta.virtual_path().unwrap_or(&dataset.name()).to_string();
 
     let content = format_dataset_value_for_edit(&dataset, &meta, selection.as_ref())
         .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
@@ -147,6 +149,7 @@ fn selected_content_edit_request(
         meta,
         selection,
         content,
+        edit_name_hint,
     })
 }
 
@@ -163,7 +166,11 @@ fn apply_content_edit_request(
         ));
     }
 
-    let edited_content = perform_edit(state, request.content.clone())?;
+    let edited_content = perform_edit(
+        state,
+        request.content.clone(),
+        Some(&request.edit_name_hint),
+    )?;
     if edited_content == request.content {
         return Ok(EventResult::Continue);
     }

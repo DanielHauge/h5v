@@ -1,6 +1,8 @@
 use std::{
+    env,
     fs::File,
     io::{stdout, Read, Write},
+    path::Path,
     process::Command,
 };
 
@@ -8,7 +10,7 @@ use ratatui::crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use uuid::Uuid;
+use tempfile::{Builder, NamedTempFile};
 
 use crate::{error::AppError, ui::state::AppState};
 
@@ -25,20 +27,76 @@ pub fn reenter_h5v() -> Result<(), AppError> {
     Ok(())
 }
 
-fn create_tmp_file() -> Result<(File, String), AppError> {
-    let buf: [u8; 16] = *b"abcdefghijklmnop";
-    let uuid = Uuid::new_v8(buf);
-    let tmp_dir = dirs::cache_dir()
-        .unwrap_or_default()
-        .to_str()
-        .unwrap_or("/tmp")
+fn sanitize_file_component(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('_')
         .to_string();
-    let tmp_file_path = format!("{tmp_dir}/h5v_edit_{uuid}");
-    let file = File::create(&tmp_file_path)?;
-    Ok((file, tmp_file_path))
+
+    if sanitized.is_empty() {
+        "edit".to_string()
+    } else {
+        sanitized
+    }
 }
 
-pub fn perform_edit(state: &mut AppState<'_>, content: String) -> Result<String, AppError> {
+fn create_tmp_file(name_hint: Option<&str>) -> Result<NamedTempFile, AppError> {
+    let hinted_component = name_hint
+        .and_then(|hint| {
+            let parts = hint
+                .split('/')
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            parts
+                .iter()
+                .rev()
+                .find(|part| Path::new(part).extension().is_some())
+                .copied()
+                .or_else(|| parts.last().copied())
+        })
+        .unwrap_or("edit");
+
+    let hinted_path = Path::new(hinted_component);
+    let prefix = format!(
+        "h5v-{}-",
+        sanitize_file_component(
+            hinted_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or(hinted_component)
+        )
+    );
+
+    let mut builder = Builder::new();
+    builder.prefix(&prefix);
+
+    let suffix = if let Some(extension) = hinted_path.extension().and_then(|ext| ext.to_str()) {
+        let extension = sanitize_file_component(extension);
+        if extension.is_empty() {
+            None
+        } else {
+            Some(format!(".{extension}"))
+        }
+    } else {
+        None
+    };
+    if let Some(ref suffix) = suffix {
+        builder.suffix(suffix);
+    }
+
+    builder.tempfile().map_err(AppError::from)
+}
+
+pub fn perform_edit(
+    state: &mut AppState<'_>,
+    content: String,
+    name_hint: Option<&str>,
+) -> Result<String, AppError> {
     if state.readonly {
         return Err(AppError::EditError(
             "Cannot edit in read-only mode, open file with -w flag".to_string(),
@@ -47,21 +105,26 @@ pub fn perform_edit(state: &mut AppState<'_>, content: String) -> Result<String,
 
     leave_h5v()?;
     let edit_pause = state.edit_pause.write()?;
-    let (mut file, path) = create_tmp_file()?;
-    file.write_all(&content.into_bytes())?;
-    drop(file);
+    let edit_result = (|| -> Result<String, AppError> {
+        let mut file = create_tmp_file(name_hint)?;
+        file.write_all(content.as_bytes())?;
+        file.flush()?;
+        let path = file.path().to_path_buf();
 
-    let editor = option_env!("EDITOR").unwrap_or("vi");
-    let editor_proc = Command::new(editor).arg(&path).spawn()?;
-    editor_proc.wait_with_output()?;
-    let mut new_content = String::new();
-
-    let mut file = File::open(path)?;
-    file.read_to_string(&mut new_content)?;
-    let new_content = normalize_edited_content(new_content);
+        let editor = env::var("VISUAL")
+            .or_else(|_| env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+        Command::new(editor)
+            .arg(&path)
+            .spawn()?
+            .wait_with_output()?;
+        let mut new_content = String::new();
+        File::open(&path)?.read_to_string(&mut new_content)?;
+        Ok(normalize_edited_content(new_content))
+    })();
     drop(edit_pause);
     reenter_h5v()?;
-    Ok(new_content)
+    edit_result
 }
 
 fn normalize_edited_content(mut content: String) -> String {

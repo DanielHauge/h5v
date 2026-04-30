@@ -74,7 +74,5 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Edit file on readonly -> ask to open in write mode.
-- [ ] Add edit value for dataset values (scalar and single values)
 - [ ] Adding/Updating/Deletion of attributes/matrix values
 - [ ] Add more command support: All actions could be cmd'able -> delete attribute, remove dataset from multi-chart, go up 50, etc. Anything that could change the state basically.
