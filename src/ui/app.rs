@@ -1344,6 +1344,10 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                             &["mchart expr \"($1, !/ticks + #OFFSET)\""],
                             "create a derived multichart series directly",
                         ),
+                        (
+                            &["press ctrl+w o", "press M j enter"],
+                            "drive existing keymaps from scripts or command mode",
+                        ),
                         (&["Tab", "Shift-Tab"], "complete next / prev"),
                         (&["↑", "↓"], "suggestion select"),
                         (&["Ctrl-P", "Ctrl-N"], "history prev / next"),

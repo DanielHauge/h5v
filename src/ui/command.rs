@@ -1,8 +1,12 @@
 use crate::error::AppError;
 use crate::ui::mchart::BuiltinDerivedOp;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::collections::VecDeque;
 
-use super::{input::EventResult, state::AppState};
+use super::{
+    input::{handle_input_event, EventResult},
+    state::AppState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandCategory {
@@ -11,6 +15,7 @@ pub enum CommandCategory {
     Selection,
     App,
     MultiChart,
+    Input,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +40,7 @@ pub enum CommandId {
     Help,
     Repeat,
     MultiChart,
+    Press,
     Noop,
 }
 
@@ -155,6 +161,30 @@ const ACTION_ARG: CommandArgSpec = CommandArgSpec {
 
 const OPTIONAL_WORD_ARG: CommandArgSpec = CommandArgSpec {
     name: "arg",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const KEY_ARG_1: CommandArgSpec = CommandArgSpec {
+    name: "key1",
+    kind: CommandArgKind::Word,
+    required: true,
+};
+
+const KEY_ARG_2: CommandArgSpec = CommandArgSpec {
+    name: "key2",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const KEY_ARG_3: CommandArgSpec = CommandArgSpec {
+    name: "key3",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const KEY_ARG_4: CommandArgSpec = CommandArgSpec {
+    name: "key4",
     kind: CommandArgKind::Word,
     required: false,
 };
@@ -359,6 +389,16 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         keybindings: &["M"],
         args: &[ACTION_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG],
         handler: handle_mchart,
+    },
+    CommandDescriptor {
+        id: CommandId::Press,
+        name: "press",
+        aliases: &["key", "keys"],
+        description: "Simulate one or more key presses through the normal keymap dispatcher",
+        category: CommandCategory::Input,
+        keybindings: &[],
+        args: &[KEY_ARG_1, KEY_ARG_2, KEY_ARG_3, KEY_ARG_4],
+        handler: handle_press,
     },
 ];
 
@@ -1381,6 +1421,39 @@ fn handle_repeat(
     execute_command(state, &last_command)
 }
 
+fn handle_press(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    let mut last_result = EventResult::Redraw;
+    let mut pressed_any = false;
+    for index in 0..4 {
+        let Some(key_spec) = command.word_arg_optional(index)? else {
+            continue;
+        };
+        pressed_any = true;
+        let key_event = parse_simulated_key(key_spec)?;
+        let result = handle_input_event(state, Event::Key(key_event))?;
+        match result {
+            EventResult::Continue => {}
+            EventResult::Quit
+            | EventResult::ReloadFile { .. }
+            | EventResult::Error(_)
+            | EventResult::Toast(_, _)
+            | EventResult::Copying => return Ok(result),
+            EventResult::Redraw => last_result = EventResult::Redraw,
+        }
+    }
+
+    if !pressed_any {
+        return Err(AppError::InvalidCommand(
+            "Command 'press' expects at least one key".to_string(),
+        ));
+    }
+
+    Ok(last_result)
+}
+
 fn parse_usize_arg(token: &str, arg_name: &str, command_name: &str) -> Result<usize, AppError> {
     token.parse::<usize>().map_err(|_| {
         AppError::InvalidCommand(format!(
@@ -1443,6 +1516,88 @@ fn parse_word_f64(word: Option<&str>, default: f64, command_name: &str) -> Resul
     }
 }
 
+fn parse_simulated_key(key_spec: &str) -> Result<KeyEvent, AppError> {
+    let normalized = key_spec.trim();
+    if normalized.is_empty() {
+        return Err(AppError::InvalidCommand(
+            "Key spec cannot be empty".to_string(),
+        ));
+    }
+
+    let mut modifiers = KeyModifiers::NONE;
+    let mut parts = normalized.split('+').peekable();
+    let mut base = None;
+    while let Some(part) = parts.next() {
+        let part = part.trim();
+        if part.is_empty() {
+            return Err(AppError::InvalidCommand(format!(
+                "Invalid key spec '{}'",
+                key_spec
+            )));
+        }
+        let lower = part.to_ascii_lowercase();
+        if parts.peek().is_some() {
+            match lower.as_str() {
+                "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+                "alt" | "meta" => modifiers |= KeyModifiers::ALT,
+                "shift" => modifiers |= KeyModifiers::SHIFT,
+                _ => {
+                    return Err(AppError::InvalidCommand(format!(
+                        "Unknown key modifier '{}' in '{}'",
+                        part, key_spec
+                    )))
+                }
+            }
+        } else {
+            base = Some(part);
+        }
+    }
+
+    let base = base
+        .ok_or_else(|| AppError::InvalidCommand(format!("Missing base key in '{}'", key_spec)))?;
+    let key_code = match base.to_ascii_lowercase().as_str() {
+        "enter" | "return" => KeyCode::Enter,
+        "esc" | "escape" => KeyCode::Esc,
+        "tab" => KeyCode::Tab,
+        "backtab" | "shift-tab" => {
+            modifiers |= KeyModifiers::SHIFT;
+            KeyCode::BackTab
+        }
+        "space" => KeyCode::Char(' '),
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "pageup" | "page-up" | "pgup" => KeyCode::PageUp,
+        "pagedown" | "page-down" | "pgdown" => KeyCode::PageDown,
+        "backspace" => KeyCode::Backspace,
+        "delete" | "del" => KeyCode::Delete,
+        "insert" | "ins" => KeyCode::Insert,
+        value if value.len() == 1 => {
+            let ch = base.chars().next().ok_or_else(|| {
+                AppError::InvalidCommand(format!("Invalid key spec '{}'", key_spec))
+            })?;
+            KeyCode::Char(ch)
+        }
+        _ => {
+            return Err(AppError::InvalidCommand(format!(
+                "Unknown key '{}' in '{}'",
+                base, key_spec
+            )))
+        }
+    };
+
+    let key_code = if key_code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT) {
+        KeyCode::BackTab
+    } else {
+        key_code
+    };
+
+    Ok(KeyEvent::new(key_code, modifiers))
+}
+
 fn first_token(buffer: &str) -> Option<&str> {
     buffer.split_whitespace().next()
 }
@@ -1498,6 +1653,8 @@ fn command_tail(buffer: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
     use super::{
         describe_command_descriptor, describe_command_invocation, find_command_descriptor,
         format_command_invocation, parse_command_text, parse_startup_commands,
@@ -1628,6 +1785,26 @@ mod tests {
                 CommandArgValue::Word("($1, !/ticks + #OFFSET)".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn parses_press_command_with_multiple_keys() {
+        let command = parse_command_text("press ctrl+w o").expect("expected press command");
+        assert_eq!(command.id, CommandId::Press);
+        assert_eq!(
+            command.args,
+            vec![
+                CommandArgValue::Word("ctrl+w".to_string()),
+                CommandArgValue::Word("o".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_shift_tab_key_spec() {
+        let key = super::parse_simulated_key("shift+tab").expect("shift+tab key");
+        assert_eq!(key.code, KeyCode::BackTab);
+        assert!(key.modifiers.contains(KeyModifiers::SHIFT));
     }
 
     #[test]
