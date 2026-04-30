@@ -1,10 +1,18 @@
+use std::{ffi::c_void, slice};
+
 use hdf5_metno::{
+    datatype::Datatype,
+    from_id, h5check,
     types::{
         self, CompoundType, FixedAscii, FixedUnicode, Reference, TypeDescriptor, VarLenArray,
         VarLenAscii, VarLenUnicode,
     },
     Attribute, Error, H5Type, ObjectReference, ObjectReference1, ObjectReference2,
     ReferencedObject,
+};
+use hdf5_metno_sys::{
+    h5p::H5P_DEFAULT,
+    h5t::{H5Tget_class, H5Tget_super, H5Treclaim, H5T_REFERENCE, H5T_VLEN},
 };
 use ratatui::{text::Line, text::Span};
 
@@ -17,6 +25,13 @@ use crate::{
 
 pub trait Renderable {
     fn render(self) -> Span<'static>;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RawVarLen {
+    len: usize,
+    ptr: *const c_void,
 }
 
 fn styled_span(value: impl std::fmt::Display, color: ratatui::style::Color) -> Span<'static> {
@@ -258,6 +273,70 @@ where
     Ok(render_referenced_object(object))
 }
 
+fn render_reference_array<R>(attr: &Attribute) -> Result<Vec<Span<'static>>, Error>
+where
+    R: ObjectReference + H5Type,
+{
+    let references = attr.read_1d::<R>()?;
+    let file = attr.file()?;
+    let rendered = references
+        .iter()
+        .map(|reference| file.dereference(reference).map(render_referenced_object))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(comma_separated_groups(rendered))
+}
+
+fn detect_reference_descriptor(dtype: &Datatype) -> Result<TypeDescriptor, Error> {
+    let object_ref = Datatype::from_descriptor(&TypeDescriptor::Reference(Reference::Object))?;
+    if dtype == &object_ref {
+        return Ok(TypeDescriptor::Reference(Reference::Object));
+    }
+
+    let region_ref = Datatype::from_descriptor(&TypeDescriptor::Reference(Reference::Region))?;
+    if dtype == &region_ref {
+        return Ok(TypeDescriptor::Reference(Reference::Region));
+    }
+
+    let std_ref = Datatype::from_descriptor(&TypeDescriptor::Reference(Reference::Std))?;
+    if dtype == &std_ref {
+        return Ok(TypeDescriptor::Reference(Reference::Std));
+    }
+
+    Err(Error::from("Unsupported reference datatype"))
+}
+
+fn fallback_type_descriptor(dtype: &Datatype) -> Result<TypeDescriptor, Error> {
+    match unsafe { H5Tget_class(dtype.id()) } {
+        H5T_REFERENCE => detect_reference_descriptor(dtype),
+        H5T_VLEN => {
+            let super_dtype = unsafe { from_id::<Datatype>(H5Tget_super(dtype.id())) }?;
+            Ok(TypeDescriptor::VarLenArray(Box::new(
+                type_descriptor_for_dtype(&super_dtype)?,
+            )))
+        }
+        _ => Err(Error::from("Unsupported datatype class")),
+    }
+}
+
+fn type_descriptor_for_dtype(dtype: &Datatype) -> Result<TypeDescriptor, Error> {
+    match dtype.to_descriptor() {
+        Ok(type_desc) => Ok(type_desc),
+        Err(err) if err.to_string() == "Unsupported datatype class" => {
+            fallback_type_descriptor(dtype)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub fn attribute_type_descriptor(attr: &Attribute) -> Result<TypeDescriptor, Error> {
+    let dtype = attr.dtype()?;
+    type_descriptor_for_dtype(&dtype)
+}
+
+pub fn attribute_type_description(attr: &Attribute) -> Result<String, Error> {
+    attribute_type_descriptor(attr).map(|type_desc| type_desc.to_string())
+}
+
 fn to_array<const N: usize>(bytes: &[u8]) -> Result<[u8; N], Error> {
     bytes.try_into().map_err(|_| {
         Error::from(format!(
@@ -445,6 +524,116 @@ fn render_raw_array_values(
     Ok(comma_separated_groups(rendered))
 }
 
+fn render_varlen_entry(
+    file: &hdf5_metno::File,
+    entry: RawVarLen,
+    element_type: &TypeDescriptor,
+) -> Result<Vec<Span<'static>>, Error> {
+    if entry.len == 0 || entry.ptr.is_null() {
+        return Ok(bracketed_spans(vec![]));
+    }
+
+    match element_type {
+        TypeDescriptor::Reference(Reference::Object) => {
+            let refs =
+                unsafe { slice::from_raw_parts(entry.ptr.cast::<ObjectReference1>(), entry.len) };
+            let rendered = refs
+                .iter()
+                .map(|reference| file.dereference(reference).map(render_referenced_object))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(bracketed_spans(comma_separated_groups(rendered)))
+        }
+        TypeDescriptor::Reference(Reference::Std) => {
+            let refs =
+                unsafe { slice::from_raw_parts(entry.ptr.cast::<ObjectReference2>(), entry.len) };
+            let rendered = refs
+                .iter()
+                .map(|reference| file.dereference(reference).map(render_referenced_object))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(bracketed_spans(comma_separated_groups(rendered)))
+        }
+        TypeDescriptor::Reference(Reference::Region) => Ok(bracketed_spans(vec![styled_span(
+            format!("{} region references", entry.len),
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        TypeDescriptor::VarLenAscii
+        | TypeDescriptor::VarLenUnicode
+        | TypeDescriptor::VarLenArray(_) => Ok(bracketed_spans(vec![styled_span(
+            sprint_typedescriptor(&TypeDescriptor::VarLenArray(Box::new(element_type.clone()))),
+            color_consts::TYPE_DESC_COLOR,
+        )])),
+        _ => {
+            let element_size = element_type.size();
+            let bytes =
+                unsafe { slice::from_raw_parts(entry.ptr.cast::<u8>(), entry.len * element_size) };
+            let rendered = bytes
+                .chunks_exact(element_size)
+                .map(|chunk| render_value_from_bytes(chunk, element_type))
+                .collect::<Result<Vec<_>, Error>>()?;
+            Ok(bracketed_spans(comma_separated_groups(rendered)))
+        }
+    }
+}
+
+fn render_varlen_attr_values(
+    attr: &Attribute,
+    element_type: &TypeDescriptor,
+    wrap_output: bool,
+) -> Result<Vec<Span<'static>>, Error> {
+    let dtype = attr.dtype()?;
+    let space = attr.space()?;
+    let file = attr.file()?;
+    let mut bytes = read_attr_memory_bytes(attr).map_err(|e| Error::from(e.to_string()))?;
+    let result = (|| {
+        let entries = bytes
+            .chunks_exact(std::mem::size_of::<RawVarLen>())
+            .map(|chunk| {
+                let mut raw = [0_u8; std::mem::size_of::<RawVarLen>()];
+                raw.copy_from_slice(chunk);
+                let (len_bytes, ptr_bytes) = raw.split_at(std::mem::size_of::<usize>());
+                Ok(RawVarLen {
+                    len: usize::from_ne_bytes(
+                        len_bytes
+                            .try_into()
+                            .map_err(|_| Error::from("Invalid varlen length bytes"))?,
+                    ),
+                    ptr: usize::from_ne_bytes(
+                        ptr_bytes
+                            .try_into()
+                            .map_err(|_| Error::from("Invalid varlen pointer bytes"))?,
+                    ) as *const c_void,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let rendered = entries
+            .into_iter()
+            .map(|entry| render_varlen_entry(&file, entry, element_type))
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(if wrap_output {
+            bracketed_spans(comma_separated_groups(rendered))
+        } else {
+            comma_separated_groups(rendered)
+        })
+    })();
+    let reclaim_result = h5check(unsafe {
+        H5Treclaim(
+            dtype.id(),
+            space.id(),
+            H5P_DEFAULT,
+            bytes.as_mut_ptr().cast(),
+        )
+    })
+    .map(|_| ());
+
+    match (result, reclaim_result) {
+        (Ok(rendered), Ok(())) => Ok(rendered),
+        (Err(err), _) => Err(err),
+        (_, Err(err)) => Err(Error::from(format!(
+            "Failed to reclaim varlen attribute memory: {err}"
+        ))),
+    }
+}
+
 fn render_scalar_varlen_array(
     attr: &Attribute,
     type_desc: &TypeDescriptor,
@@ -501,21 +690,12 @@ fn render_scalar_varlen_array(
             "standard references",
             color_consts::TYPE_DESC_COLOR,
         )])),
-        TypeDescriptor::Compound(_) => Ok(bracketed_spans(vec![styled_span(
-            "compound values",
-            color_consts::TYPE_DESC_COLOR,
-        )])),
-        TypeDescriptor::VarLenArray(inner) => Ok(bracketed_spans(vec![styled_span(
-            format!("nested {}", sprint_typedescriptor(inner)),
-            color_consts::TYPE_DESC_COLOR,
-        )])),
-        TypeDescriptor::VarLenAscii
+        TypeDescriptor::Compound(_)
+        | TypeDescriptor::VarLenArray(_)
+        | TypeDescriptor::VarLenAscii
         | TypeDescriptor::VarLenUnicode
         | TypeDescriptor::FixedAscii(_)
-        | TypeDescriptor::FixedUnicode(_) => Ok(bracketed_spans(vec![styled_span(
-            sprint_typedescriptor(type_desc),
-            color_consts::TYPE_DESC_COLOR,
-        )])),
+        | TypeDescriptor::FixedUnicode(_) => render_varlen_attr_values(attr, type_desc, true),
     }
 }
 
@@ -623,59 +803,20 @@ fn spring_attribute_array(
             render_raw_array_values(attr, &TypeDescriptor::FixedArray(type_descriptor, size))?
         }
         TypeDescriptor::FixedUnicode(size) => render_fixed_unicode_array(attr, size)?,
-        TypeDescriptor::VarLenArray(type_descriptor) => match type_descriptor.as_ref() {
-            TypeDescriptor::Integer(_)
-            | TypeDescriptor::Unsigned(_)
-            | TypeDescriptor::Float(_)
-            | TypeDescriptor::Boolean => {
-                vec![render_unsupported_type("varlen array of primitive type")]
-            }
-            TypeDescriptor::Enum(enum_type) => {
-                let enum_renderer = EnumRenderer::new(enum_type.clone());
-                let varlen_enums = attr.read_1d::<VarLenArray<u64>>()?;
-                varlen_enums
-                    .into_iter()
-                    .flat_map(|varlen_enum| {
-                        comma_separated(varlen_enum.iter().map(|v| enum_renderer.render_as_span(v)))
-                    })
-                    .collect()
-            }
-            TypeDescriptor::Compound(compound_type) => {
-                vec![render_unsupported_type(format!(
-                    "varlen array of compound type with fields: {}",
-                    compound_type
-                        .fields
-                        .iter()
-                        .map(|f| f.name.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                ))]
-            }
-            TypeDescriptor::FixedArray(type_descriptor, _) => {
-                vec![render_unsupported_type(format!(
-                    "recursive limit reached - varlen array of fixed array of {type_descriptor}"
-                ))]
-            }
-            TypeDescriptor::VarLenAscii
-            | TypeDescriptor::VarLenUnicode
-            | TypeDescriptor::FixedAscii(_)
-            | TypeDescriptor::FixedUnicode(_) => {
-                vec![render_unsupported_type("varlen array of strings should be handled by non scalar variants of those types")]
-            }
-            TypeDescriptor::VarLenArray(type_descriptor) => {
-                vec![render_unsupported_type(format!(
-                    "recursive limit reached - varlen array of varlen array of {type_descriptor}"
-                ))]
-            }
-            TypeDescriptor::Reference(_) => {
-                vec![render_unsupported_type(
-                    "varlen array of reference".to_string(),
-                )]
-            }
-        },
+        TypeDescriptor::VarLenArray(type_descriptor) => {
+            render_varlen_attr_values(attr, type_descriptor.as_ref(), false)?
+        }
         TypeDescriptor::VarLenAscii => render_values(attr.read_1d::<VarLenAscii>()?),
         TypeDescriptor::VarLenUnicode => render_values(attr.read_1d::<VarLenUnicode>()?),
-        TypeDescriptor::Reference(_) => vec![render_unsupported_type("reference array")],
+        TypeDescriptor::Reference(Reference::Object) => {
+            render_reference_array::<ObjectReference1>(attr)?
+        }
+        TypeDescriptor::Reference(Reference::Std) => {
+            render_reference_array::<ObjectReference2>(attr)?
+        }
+        TypeDescriptor::Reference(Reference::Region) => {
+            vec![render_unsupported_type("region reference array")]
+        }
     };
     Ok(gg)
 }
@@ -683,12 +824,12 @@ fn spring_attribute_array(
 pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, Error> {
     if attr.is_valid() {
         if attr.is_scalar() {
-            let attr_type = attr.dtype()?.to_descriptor()?;
+            let attr_type = attribute_type_descriptor(attr)?;
             let spans = sprint_attribute_scalar(attr, attr_type)?;
             let line = Line::from(spans);
             Ok(line)
         } else {
-            let attr_type = attr.dtype()?.to_descriptor()?;
+            let attr_type = attribute_type_descriptor(attr)?;
             let spans = bracketed_spans(spring_attribute_array(attr, attr_type)?);
             let line = Line::from(spans);
             Ok(line)
@@ -714,11 +855,14 @@ mod tests {
     use hdf5_metno::{
         h5check,
         types::{CompoundField, CompoundType, FloatSize, IntSize, TypeDescriptor},
-        File,
+        Datatype, File,
     };
     use hdf5_metno_sys::h5a::H5Awrite;
 
-    use super::{render_value_from_bytes, sprint_attribute};
+    use super::{
+        render_value_from_bytes, render_varlen_entry, sprint_attribute, type_descriptor_for_dtype,
+        RawVarLen,
+    };
 
     #[test]
     fn renders_scalar_compound_attribute() {
@@ -806,6 +950,53 @@ mod tests {
         assert_eq!(rendered, "{field1: 7, field2: 9.81}");
 
         drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
+        std::fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    fn resolves_reference_dtype_descriptor() {
+        let dtype = Datatype::from_descriptor(&TypeDescriptor::Reference(
+            hdf5_metno::types::Reference::Object,
+        ))
+        .expect("failed creating reference dtype");
+        let descriptor =
+            type_descriptor_for_dtype(&dtype).expect("failed resolving reference dtype");
+        assert_eq!(
+            descriptor,
+            TypeDescriptor::Reference(hdf5_metno::types::Reference::Object)
+        );
+    }
+
+    #[test]
+    fn renders_varlen_compound_entry() {
+        let compound = CompoundType {
+            fields: vec![
+                CompoundField::new("field1", TypeDescriptor::Integer(IntSize::U4), 0, 0),
+                CompoundField::new("field2", TypeDescriptor::Float(FloatSize::U8), 8, 1),
+            ],
+            size: 16,
+        };
+        let mut bytes = vec![0_u8; 16];
+        bytes[0..4].copy_from_slice(&7_i32.to_le_bytes());
+        bytes[8..16].copy_from_slice(&9.81_f64.to_le_bytes());
+        let entry = RawVarLen {
+            len: 1,
+            ptr: bytes.as_ptr().cast(),
+        };
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("h5v-varlen-compound-entry-{unique}.h5"));
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let rendered = ratatui::text::Line::from(
+            render_varlen_entry(&file, entry, &TypeDescriptor::Compound(compound))
+                .expect("failed rendering varlen compound entry"),
+        )
+        .to_string();
+        assert_eq!(rendered, "[{field1: 7, field2: 9.81}]");
         file.close().expect("failed closing temp hdf5 file");
         std::fs::remove_file(path).expect("failed removing temp hdf5 file");
     }

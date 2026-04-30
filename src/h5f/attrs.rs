@@ -4,7 +4,11 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::{color_consts, error::AppError, sprint_attributes::sprint_attribute};
+use crate::{
+    color_consts,
+    error::AppError,
+    sprint_attributes::{attribute_type_description, sprint_attribute},
+};
 
 use super::{
     codec::{
@@ -194,12 +198,9 @@ impl ComputedAttributes {
                     Style::default().fg(color_consts::ERROR_COLOR),
                 ),
             };
-            let type_desc_str = match attr.dtype() {
-                Ok(dtype) => match dtype.to_descriptor() {
-                    Ok(td) => td.to_string(),
-                    Err(e) => format!("Error getting type descriptor: {}", e),
-                },
-                Err(e) => format!("Error getting dtype: {}", e),
+            let type_desc_str = match attribute_type_description(attr) {
+                Ok(type_desc) => type_desc,
+                Err(e) => format!("Error getting type descriptor: {}", e),
             };
             let type_desc = Line::styled(
                 format!(" ({})", type_desc_str),
