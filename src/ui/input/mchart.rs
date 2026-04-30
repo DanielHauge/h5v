@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{Event, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
 use crate::{
     error::AppError,
@@ -137,6 +137,53 @@ pub(crate) fn handle_mchart_event(
             }
             KeyEventKind::Repeat => Ok(EventResult::Continue),
             KeyEventKind::Release => Ok(EventResult::Continue),
+        },
+        Event::Mouse(mouse_event) => match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                state
+                    .multi_chart
+                    .start_drag_at_position(mouse_event.column, mouse_event.row);
+                Ok(EventResult::Continue)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if state.multi_chart.drag_to_position(mouse_event.column) {
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if state
+                    .multi_chart
+                    .finish_drag_at_position(mouse_event.column)
+                {
+                    Ok(EventResult::Redraw)
+                } else {
+                    state.multi_chart.end_drag();
+                    Ok(EventResult::Continue)
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if state
+                    .multi_chart
+                    .zoom_in_at_position(mouse_event.column, mouse_event.row, 10.0)
+                {
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if state
+                    .multi_chart
+                    .zoom_out_at_position(mouse_event.column, mouse_event.row, 10.0)
+                {
+                    Ok(EventResult::Redraw)
+                } else {
+                    Ok(EventResult::Continue)
+                }
+            }
+            _ => Ok(EventResult::Continue),
         },
         Event::Resize(_, _) => Ok(EventResult::Redraw),
         _ => Ok(EventResult::Continue),
