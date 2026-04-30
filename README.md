@@ -47,10 +47,22 @@ h5v path/to/file.h5
 
 - `backspace/delete/d`: Remove currently selected source from multichart
 - `M`: Toggle back to normal mode
+- `e`: Open the expression prompt
+- `space`: Mark or unmark the base series
+- `D`/`S`/`R`/`P`/`X`: Create derived difference, sum, ratio, product, or x/y series
+- `enter`/`v`: Hide or show the selected series
+- `C`: Clear all series
 - `c`: Clear zoom
 - `j`/`k`: Move between series
 - `h`/`l` or `shift` + `right`/`left`: Pan right/left
 - `+`/`-` or `shift` + `up`/`down`: Zoom in/out by 10%
+
+Expression-derived series support:
+
+- series references by workspace id: `$1`
+- scalar numeric attributes: `#SCALE`, `#../:OFFSET`, `#/group/ds:BIAS`
+- exact dataset path series: `!/my_dataset`, `!/my_dataset[..,0]`, `!/my_dataset_bigger_dim[1,..,2,3]`
+- tuple expressions for computed x/y series: `($1 * #SCALE, !/ticks + #OFFSET)`
 
 ## Edit mode
 
@@ -80,6 +92,12 @@ Examples:
 - `x next`
 - `row prev`
 - `index next 10`
+- `mchart open`
+- `mchart add /group/dataset[..,0]`
+- `mchart expr "($1, !/ticks + #OFFSET)"`
+- `mchart derive difference`
+- `press ctrl+w o`
+- `press M j enter`
 
 Legacy numeric aliases are still supported:
 
@@ -104,6 +122,8 @@ Examples:
 
 ```bash
 h5v file.h5 -c "focus content" -c "mode matrix"
+h5v file.h5 -c "mchart open" -c "mchart add /group/dataset[..,0]"
+h5v file.h5 -c "mchart expr \"($1, !/ticks + #OFFSET)\""
 h5v file.h5 --script setup.h5v
 printf 'toggle-tree; mode preview\nreload\n' | h5v file.h5
 h5v file.h5 --script-test --script setup.h5v
@@ -119,6 +139,3 @@ cargo install h5v
 
 - [ ] Adding/Deletion of attributes/matrix values
 - [ ] Adding/Deletion of datasets and groups
-- [ ] Broaden command coverage further so more edit, multichart, and navigation actions are scriptable.
-- [ ] yank images / previews to clipboard - Also multichart
-- [ ] Improvements to multichart mode: better visuals and support for controls and commands

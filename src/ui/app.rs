@@ -1362,7 +1362,10 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                         (&["M", "Esc"], "open / close"),
                         (&["j", "k"], "select series"),
                         (&["m"], "add current previewable selection from tree"),
-                        (&["e"], "open expression prompt"),
+                        (
+                            &["e"],
+                            "open expression prompt ($id, !/path[..], #ATTR, or (x,y))",
+                        ),
                         (&["Space"], "mark / unmark base series"),
                         (
                             &["D", "S", "R", "P", "X"],
