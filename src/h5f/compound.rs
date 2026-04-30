@@ -5,7 +5,9 @@ use hdf5_metno::{
 use ndarray::{Array1, Array2};
 
 use crate::{
-    data::{DatasetPlotingData, PreviewSelection, SliceSelection},
+    data::{
+        validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
+    },
     error::AppError,
 };
 
@@ -418,12 +420,14 @@ pub fn plot_projected(
     meta: &DatasetMeta,
     selection: &PreviewSelection,
 ) -> Result<DatasetPlotingData, AppError> {
+    let shape = dataset.shape();
+    validate_preview_selection_shape(&shape, selection).map_err(AppError::Hdf5)?;
     let slice = match selection.slice {
-        SliceSelection::All => 0..dataset.shape()[selection.x],
+        SliceSelection::All => 0..shape[selection.x],
         SliceSelection::FromTo(a, b) => a..b,
     };
     let mut slice_selections = Vec::new();
-    for idx in 0..dataset.shape().len() {
+    for idx in 0..shape.len() {
         if idx == selection.x {
             slice_selections.push(hdf5_metno::SliceOrIndex::SliceTo {
                 start: slice.start,

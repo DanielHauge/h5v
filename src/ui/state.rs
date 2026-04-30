@@ -367,6 +367,12 @@ pub struct SegmentState {
     pub segment_count: i32,
 }
 
+impl SegmentState {
+    fn max_index(&self) -> Option<i32> {
+        (self.segment_count > 0).then_some(self.segment_count.saturating_sub(1))
+    }
+}
+
 pub enum AppToast {
     Empty,
     Info(String),
@@ -439,7 +445,10 @@ pub(crate) fn preview_selection_for_node(
     }
 
     if !x_selectable_dims.contains(&node.selected_x) {
-        node.selected_x = x_selectable_dims[0];
+        let Some(first_selectable_dim) = x_selectable_dims.first().copied() else {
+            return None;
+        };
+        node.selected_x = first_selectable_dim;
     }
     if node.selected_dim == node.selected_x {
         node.selected_dim = x_selectable_dims
@@ -459,7 +468,7 @@ pub(crate) fn preview_selection_for_node(
 
     Some(PreviewSelection {
         x: node.selected_x,
-        index: node.selected_indexes[..total_dims].to_vec(),
+        index: node.selected_indexes.get(..total_dims)?.to_vec(),
         slice,
     })
 }
@@ -754,7 +763,10 @@ impl AppState<'_> {
         if available.contains(&self.content_mode) {
             self.content_mode
         } else {
-            available[0]
+            available
+                .first()
+                .copied()
+                .unwrap_or(ContentShowMode::Preview)
         }
     }
 
@@ -977,11 +989,15 @@ impl AppState<'_> {
                     }
                 }
                 SegmentType::Chart => {
+                    let Some(max_index) = self.segment_state.max_index() else {
+                        self.segment_state.idx = 0;
+                        return Ok(EventResult::Continue);
+                    };
                     self.segment_state.idx = self
                         .segment_state
                         .idx
                         .saturating_sub(dec as i32)
-                        .clamp(0, self.segment_state.segment_count - 1);
+                        .clamp(0, max_index);
                     Ok(EventResult::Redraw)
                 }
                 SegmentType::NoSegment => {
@@ -1030,22 +1046,28 @@ impl AppState<'_> {
         match self.content_mode {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
-                    if self.img_state.idx_to_load <= self.segment_state.segment_count - inc as i32
-                        && self.img_state.idx_to_load + inc as i32
-                            <= self.segment_state.segment_count - 1
-                    {
-                        self.img_state.idx_to_load += inc as i32;
+                    let Some(max_index) = self.segment_state.max_index() else {
+                        self.img_state.idx_to_load = 0;
+                        return Ok(EventResult::Continue);
+                    };
+                    let proposed = self.img_state.idx_to_load.saturating_add(inc as i32);
+                    if proposed <= max_index {
+                        self.img_state.idx_to_load = proposed;
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
                     }
                 }
                 SegmentType::Chart => {
+                    let Some(max_index) = self.segment_state.max_index() else {
+                        self.segment_state.idx = 0;
+                        return Ok(EventResult::Continue);
+                    };
                     self.segment_state.idx = self
                         .segment_state
                         .idx
                         .saturating_add(inc as i32)
-                        .clamp(0, self.segment_state.segment_count - 1);
+                        .clamp(0, max_index);
                     Ok(EventResult::Redraw)
                 }
                 SegmentType::NoSegment => {
@@ -1090,7 +1112,7 @@ impl AppState<'_> {
                         window.center_on(idx);
                         return Ok(EventResult::Redraw);
                     }
-                    if idx < self.segment_state.segment_count as usize {
+                    if idx < self.segment_state.segment_count.max(0) as usize {
                         self.img_state.idx_to_load = idx as i32;
                         Ok(EventResult::Redraw)
                     } else {
@@ -1098,9 +1120,12 @@ impl AppState<'_> {
                     }
                 }
                 SegmentType::Chart => {
+                    let Some(max_index) = self.segment_state.max_index() else {
+                        self.segment_state.idx = 0;
+                        return Ok(EventResult::Continue);
+                    };
                     if idx > 0 {
-                        self.segment_state.idx =
-                            ((idx - 1) as i32).clamp(0, self.segment_state.segment_count - 1);
+                        self.segment_state.idx = ((idx - 1) as i32).clamp(0, max_index);
                         Ok(EventResult::Redraw)
                     } else {
                         self.segment_state.idx = 0;

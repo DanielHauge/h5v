@@ -38,10 +38,16 @@ pub struct DatasetTableData<T> {
 
 impl StringLengths for DatasetTableData<String> {
     fn string_lengths(&self) -> Vec<usize> {
-        let mut lengths = Vec::with_capacity(self.data.shape()[0]);
-        (0..self.data.shape()[0]).for_each(|i| {
+        let shape = self.data.shape();
+        if shape.len() < 2 {
+            return Vec::new();
+        }
+        let rows = shape[0];
+        let cols = shape[1];
+        let mut lengths = Vec::with_capacity(rows);
+        (0..rows).for_each(|i| {
             lengths.push(0);
-            for j in 0..self.data.shape()[1] - 1 {
+            for j in 0..cols.saturating_sub(1) {
                 let len = self.data[[i, j]].len();
                 if lengths[i] + 2 < len {
                     lengths[i] = len + 2;
@@ -90,6 +96,49 @@ pub struct PreviewSelection {
     pub slice: SliceSelection,
 }
 
+pub(crate) fn validate_preview_selection_shape(
+    shape: &[usize],
+    selection: &PreviewSelection,
+) -> Result<(), Error> {
+    if selection.x >= shape.len() {
+        return Err(Error::from(format!(
+            "Preview selection x-axis {} is out of bounds for shape {:?}",
+            selection.x, shape
+        )));
+    }
+    if selection.index.len() < shape.len() {
+        return Err(Error::from(format!(
+            "Preview selection index rank {} does not match shape rank {}",
+            selection.index.len(),
+            shape.len()
+        )));
+    }
+    for (idx, dim_len) in shape.iter().copied().enumerate() {
+        if idx == selection.x {
+            continue;
+        }
+        if selection.index[idx] >= dim_len {
+            return Err(Error::from(format!(
+                "Preview selection index {} is out of bounds for dim {} with length {}",
+                selection.index[idx], idx, dim_len
+            )));
+        }
+    }
+    match selection.slice {
+        SliceSelection::All => {}
+        SliceSelection::FromTo(start, end) => {
+            let axis_len = shape[selection.x];
+            if start > end || end > axis_len {
+                return Err(Error::from(format!(
+                    "Preview selection slice {}..{} is invalid for axis length {}",
+                    start, end, axis_len
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl PartialEq for PreviewSelection {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index && self.x == other.x && self.slice == other.slice
@@ -120,13 +169,15 @@ impl MatrixValues for Dataset {
 
 impl Previewable for Dataset {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error> {
+        let shape = self.shape();
+        validate_preview_selection_shape(&shape, selection)?;
         let slice = match selection.slice {
-            SliceSelection::All => 0..self.shape()[selection.x],
+            SliceSelection::All => 0..shape[selection.x],
             SliceSelection::FromTo(a, b) => a..b,
         };
 
         let mut slice_selections: Vec<SliceOrIndex> = Vec::new();
-        for idx in 0..self.shape().len() {
+        for idx in 0..shape.len() {
             if idx == selection.x {
                 slice_selections.push(SliceOrIndex::SliceTo {
                     start: slice.start,
@@ -156,5 +207,44 @@ impl Previewable for Dataset {
             max,
             min,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        validate_preview_selection_shape, DatasetTableData, PreviewSelection, SliceSelection,
+        StringLengths,
+    };
+    use ndarray::Array2;
+
+    #[test]
+    fn preview_selection_validation_rejects_short_index_rank() {
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 1,
+            slice: SliceSelection::All,
+        };
+        let error = validate_preview_selection_shape(&[3, 4], &selection).unwrap_err();
+        assert!(error.to_string().contains("rank"));
+    }
+
+    #[test]
+    fn preview_selection_validation_rejects_out_of_bounds_slice() {
+        let selection = PreviewSelection {
+            index: vec![0, 0],
+            x: 1,
+            slice: SliceSelection::FromTo(0, 9),
+        };
+        let error = validate_preview_selection_shape(&[3, 4], &selection).unwrap_err();
+        assert!(error.to_string().contains("invalid"));
+    }
+
+    #[test]
+    fn string_lengths_handles_empty_second_dimension() {
+        let data = DatasetTableData {
+            data: Array2::<String>::default((2, 0)),
+        };
+        assert_eq!(data.string_lengths(), vec![0, 0]);
     }
 }

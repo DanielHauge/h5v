@@ -17,7 +17,7 @@ use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
 use crate::{
     color_consts,
-    data::{PreviewSelection, SliceSelection},
+    data::{validate_preview_selection_shape, PreviewSelection, SliceSelection},
     error::log_error,
 };
 
@@ -2556,7 +2556,7 @@ fn read_expression_dataset_points(
 ) -> Result<Vec<Point>, String> {
     let shape = dataset.shape();
     let preview_selection = dataset_ref.to_preview_selection(&shape)?;
-    let selection = preview_selection_to_hyperslab(&shape, &preview_selection);
+    let selection = preview_selection_to_hyperslab(&shape, &preview_selection)?;
     let dtype = dataset.dtype().map_err(|error| {
         format!(
             "Failed to inspect dataset type for {}: {}",
@@ -2678,7 +2678,11 @@ fn read_expression_dataset_points(
     Ok(points)
 }
 
-fn preview_selection_to_hyperslab(shape: &[usize], selection: &PreviewSelection) -> Selection {
+fn preview_selection_to_hyperslab(
+    shape: &[usize],
+    selection: &PreviewSelection,
+) -> Result<Selection, String> {
+    validate_preview_selection_shape(shape, selection).map_err(|error| error.to_string())?;
     let slice = match selection.slice {
         SliceSelection::All => 0..shape[selection.x],
         SliceSelection::FromTo(a, b) => a..b,
@@ -2698,7 +2702,7 @@ fn preview_selection_to_hyperslab(shape: &[usize], selection: &PreviewSelection)
         }
     }
 
-    Selection::Hyperslab(Hyperslab::from(slice_selections))
+    Ok(Selection::Hyperslab(Hyperslab::from(slice_selections)))
 }
 
 fn resolve_expression_attribute_value(

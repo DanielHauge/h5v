@@ -473,10 +473,17 @@ fn render_raw_img(
                         hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)
                     ) {
                         let i = state.img_state.idx_to_load;
+                        let frame_count = ds.shape().first().copied().unwrap_or(1) as i32;
                         state.img_state.idx_loaded = i;
-                        state.segment_state.segumented = SegmentType::Image;
-                        state.segment_state.segment_count = ds.shape()[0] as i32;
-                        state.segment_state.idx = i;
+                        if frame_count > 1 {
+                            state.segment_state.segumented = SegmentType::Image;
+                            state.segment_state.segment_count = frame_count;
+                            state.segment_state.idx = i.clamp(0, frame_count - 1);
+                        } else {
+                            state.segment_state.segumented = SegmentType::NoSegment;
+                            state.segment_state.segment_count = frame_count.max(0);
+                            state.segment_state.idx = 0;
+                        }
                         state.img_state.current_key = Some(desired_key.clone());
                         state
                             .img_state
@@ -701,7 +708,22 @@ pub fn handle_imagefsvlen_load(
                 .dataset
                 .read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All)
             {
-                Ok(d) => d[req.key.idx as usize].as_slice().to_vec(),
+                Ok(d) => {
+                    let frame_idx = req.key.idx;
+                    let Some(bytes) = d.get(frame_idx as usize) else {
+                        send_image_failure(
+                            &tx_events,
+                            req.key,
+                            format!(
+                                "Varlen image index {} is out of bounds for {} frame(s)",
+                                frame_idx,
+                                d.len()
+                            ),
+                        );
+                        continue;
+                    };
+                    bytes.as_slice().to_vec()
+                }
                 Err(e) => {
                     send_image_failure(&tx_events, req.key, e.to_string());
                     continue;

@@ -204,12 +204,23 @@ fn navigate_reference_attribute_value(
                 )));
             }
             let reference = if attr.is_scalar() {
-                attr.read_scalar::<ObjectReference1>()
+                attr.read_scalar::<ObjectReference1>().map_err(|error| {
+                    EventResult::Toast(AppToast::Error(error.to_string()), false)
+                })?
             } else {
                 attr.read_1d::<ObjectReference1>()
-                    .map(|values| values.into_iter().next().expect("size checked above"))
-            }
-            .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+                    .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        EventResult::Toast(
+                            AppToast::Error(
+                                "Reference attribute unexpectedly contained no values".to_string(),
+                            ),
+                            false,
+                        )
+                    })?
+            };
             let file = attr
                 .file()
                 .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;

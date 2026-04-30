@@ -113,7 +113,13 @@ pub fn render_chart_preview(
                 }
                 crate::sprint_typedesc::MatrixRenderType::Enum => {
                     let TypeDescriptor::Enum(et) = ds.dtype()?.to_descriptor()? else {
-                        unreachable!("MatrixRenderType::Enum should only be set for enum types")
+                        render_error(
+                            f,
+                            area,
+                            "Dataset preview enum metadata is inconsistent with the actual type"
+                                .to_string(),
+                        );
+                        return Ok(());
                     };
                     let enum_rendere = EnumRenderer::new(et);
                     let scalar_value = read_single_value_dataset::<u64>(&ds)?;
@@ -142,7 +148,16 @@ pub fn render_chart_preview(
     }
 
     if !x_selectable_dims.contains(&node.selected_x) {
-        node.selected_x = x_selectable_dims[0];
+        let Some(first_selectable_dim) = x_selectable_dims.first().copied() else {
+            render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Not enough data for selectable dimensions for x-axis",
+            );
+            return Ok(());
+        };
+        node.selected_x = first_selectable_dim;
     }
     if node.selected_dim == node.selected_x {
         node.selected_dim = x_selectable_dims
@@ -167,6 +182,18 @@ pub fn render_chart_preview(
         })
     };
 
+    let Some(selection_indexes) = node
+        .selected_indexes
+        .get(0..total_dims)
+        .map(|indexes| indexes.to_vec())
+    else {
+        render_error(
+            f,
+            area,
+            "Preview selection rank no longer matches the dataset rank".to_string(),
+        );
+        return Ok(());
+    };
     let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
@@ -178,7 +205,7 @@ pub fn render_chart_preview(
         let max_len = shape[node.selected_x];
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
-            index: node.selected_indexes[0..total_dims].to_vec(),
+            index: selection_indexes.clone(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
                 (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
@@ -188,7 +215,7 @@ pub fn render_chart_preview(
     } else {
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
-            index: node.selected_indexes[0..total_dims].to_vec(),
+            index: selection_indexes,
             slice: SliceSelection::All,
         };
 
@@ -329,7 +356,13 @@ fn render_projected_chart_preview(
             }
             Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
                 let hdf5_metno::types::TypeDescriptor::Enum(et) = &ds_meta.type_descriptor else {
-                    unreachable!("Projected enum field should retain enum descriptor");
+                    render_error(
+                        f,
+                        area,
+                        "Projected preview enum metadata is inconsistent with the field type"
+                            .to_string(),
+                    );
+                    return Ok(());
                 };
                 let enum_renderer = EnumRenderer::new(et.clone());
                 let scalar_value = read_projected_scalar::<u64>(&ds, &ds_meta)?;
@@ -367,7 +400,16 @@ fn render_projected_chart_preview(
     }
 
     if !x_selectable_dims.contains(&node.selected_x) {
-        node.selected_x = x_selectable_dims[0];
+        let Some(first_selectable_dim) = x_selectable_dims.first().copied() else {
+            render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Projected field is not previewable",
+            );
+            return Ok(());
+        };
+        node.selected_x = first_selectable_dim;
     }
     if node.selected_dim == node.selected_x {
         node.selected_dim = x_selectable_dims
@@ -392,6 +434,18 @@ fn render_projected_chart_preview(
         })
     };
 
+    let Some(selection_indexes) = node
+        .selected_indexes
+        .get(0..total_dims)
+        .map(|indexes| indexes.to_vec())
+    else {
+        render_error(
+            f,
+            area,
+            "Projected preview selection rank no longer matches the dataset rank".to_string(),
+        );
+        return Ok(());
+    };
     let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
@@ -403,7 +457,7 @@ fn render_projected_chart_preview(
         let max_len = shape[node.selected_x];
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
-            index: node.selected_indexes[0..total_dims].to_vec(),
+            index: selection_indexes.clone(),
             slice: SliceSelection::FromTo(
                 MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
                 (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
@@ -413,7 +467,7 @@ fn render_projected_chart_preview(
     } else {
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
-            index: node.selected_indexes[0..total_dims].to_vec(),
+            index: selection_indexes,
             slice: SliceSelection::All,
         };
         (chart_area, data_preview_selection)

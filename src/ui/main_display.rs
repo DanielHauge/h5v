@@ -81,13 +81,16 @@ pub fn render_main_display(
     let is_supported = supported_display_modes.contains(current_display_mode);
     let supported_modes_count = supported_display_modes.len();
     let display_mode = if is_supported {
-        current_display_mode
+        *current_display_mode
     } else {
-        &supported_display_modes[0]
+        supported_display_modes
+            .first()
+            .copied()
+            .unwrap_or(ContentShowMode::Preview)
     };
     let display_index = supported_display_modes
         .iter()
-        .position(|x| x == display_mode)
+        .position(|x| *x == display_mode)
         .unwrap_or(0);
 
     // Do tab titles:
@@ -163,7 +166,12 @@ pub fn render_main_display(
             let (ds, attr) = match node.node.clone() {
                 Node::Dataset(ds, attr) => (ds, attr),
                 _ => {
-                    unreachable!("Should not render matrix for anything other than dataset")
+                    render_not_yet_implemented(
+                        f,
+                        &content_area,
+                        "Matrix mode is only available for datasets",
+                    );
+                    return Ok(());
                 }
             };
             if attr.is_empty() {
@@ -272,7 +280,12 @@ pub fn render_main_display(
                     }
                     MatrixRenderType::Enum => {
                         let TypeDescriptor::Enum(et) = attr.type_descriptor.clone() else {
-                            unreachable!("MatrixRenderType::Enum should only be set for enum types")
+                            render_not_yet_implemented(
+                                f,
+                                &content_area,
+                                "Matrix enum metadata is inconsistent with the dataset type",
+                            );
+                            return Ok(());
                         };
 
                         let enum_mapper = EnumRenderer::new(et);
