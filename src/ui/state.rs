@@ -450,21 +450,18 @@ impl AppState<'_> {
         let previous_cursor = self.tree_view_cursor;
         let mut current = self.root.clone();
         for segment in normalized.split('/') {
-            let (next, index) = {
+            let next_and_index = {
                 let mut node = current.borrow_mut();
                 node.ensure_expanded()?;
-                let Some((index, child)) =
-                    node.children.iter().enumerate().find_map(|(index, child)| {
-                        let name = child.borrow().name();
-                        (name == segment).then(|| (index, child.clone()))
-                    })
-                else {
-                    self.compute_tree_view();
-                    self.tree_view_cursor =
-                        self.treeview.len().saturating_sub(1).min(previous_cursor);
-                    return Err(AppError::ChildNotFound(path.to_string()));
-                };
-                (child.clone(), index)
+                node.children.iter().enumerate().find_map(|(index, child)| {
+                    let name = child.borrow().name();
+                    (name == segment).then(|| (index, child.clone()))
+                })
+            };
+            let Some((index, next)) = next_and_index else {
+                self.compute_tree_view();
+                self.tree_view_cursor = self.treeview.len().saturating_sub(1).min(previous_cursor);
+                return Err(AppError::ChildNotFound(path.to_string()));
             };
             current.borrow_mut().view_loaded = (index + 50) as u32;
             current = next;
