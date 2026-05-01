@@ -164,6 +164,31 @@ Prebuilt binaries (recommended once a release is published):
 cargo binstall h5v
 ```
 
+Shell installer (Linux/macOS, installs the latest release to `~/.local/bin` by default):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
+```
+
+PowerShell installer (Windows, installs the latest release to `~/.local/bin` by default):
+
+```powershell
+irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex
+```
+
+Homebrew (Linux/macOS, after a release updates the in-repo formula):
+
+```bash
+brew install DanielHauge/h5v/h5v
+```
+
+Scoop (Windows, after a release updates the in-repo bucket manifest):
+
+```powershell
+scoop bucket add h5v https://github.com/DanielHauge/h5v
+scoop install h5v/h5v
+```
+
 Or download the archive for your platform from the GitHub Releases page.
 
 Source build fallback:
