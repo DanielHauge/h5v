@@ -9,7 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Run side-effecting release steps (tags, uploads, registry/package-manager publication)"
+        description: "Run side-effecting release steps (tags, uploads,
+          registry/package-manager publication)"
         type: boolean
         required: true
         default: true
@@ -345,7 +346,7 @@ jobs:
     needs:
       - generate-changelog
       - package-manager-assets
-    if: ${{ inputs.publish && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+    if: ${{ inputs.publish }}
     runs-on: windows-latest
     permissions:
       contents: read
@@ -362,6 +363,7 @@ jobs:
           path: package-manager-assets
 
       - name: Submit WinGet manifest
+        if: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
         shell: pwsh
         run: |
           curl.exe -JLO https://aka.ms/wingetcreate/latest
@@ -372,7 +374,7 @@ jobs:
     name: Publish AUR package
     needs:
       - package-manager-assets
-    if: ${{ inputs.publish && secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
 
     steps:
@@ -391,6 +393,7 @@ jobs:
             bash -lc 'useradd -m builder && chown -R builder:builder /work && su builder -c "bash -lc '\''cd /work && makepkg --printsrcinfo > .SRCINFO'\''"'
 
       - name: Configure AUR SSH
+        if: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
