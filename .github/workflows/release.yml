@@ -363,7 +363,6 @@ jobs:
           path: package-manager-assets
 
       - name: Submit WinGet manifest
-        if: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
         shell: pwsh
         run: |
           curl.exe -JLO https://aka.ms/wingetcreate/latest
@@ -393,7 +392,6 @@ jobs:
             bash -lc 'useradd -m builder && chown -R builder:builder /work && su builder -c "bash -lc '\''cd /work && makepkg --printsrcinfo > .SRCINFO'\''"'
 
       - name: Configure AUR SSH
-        if: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
