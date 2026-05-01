@@ -172,10 +172,4 @@ Source build fallback:
 cargo install h5v
 ```
 
-On Linux, source builds may require native build dependencies such as `cmake`, `pkg-config`,
-`libfontconfig`, `freetype`, and `expat` development packages.
-
-## Roadmap
-
-- [ ] Richer schema-focused UX for compound datasets
-- [ ] Adding/Deletion of datasets and groups
+On Linux, source builds may require native build dependencies such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development packages.
