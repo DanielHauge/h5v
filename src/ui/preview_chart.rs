@@ -26,7 +26,7 @@ use crate::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
         preview::render_string_preview,
-        segment_scroll::render_segment_scroll,
+        segment_scroll::{render_segment_panel, SegmentDisplayInfo},
         state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs, SegmentType},
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
@@ -198,21 +198,34 @@ pub fn render_chart_preview(
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
             (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
-        let areas_split =
-            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
-        render_segment_scroll(f, &areas_split[1], state)?;
-
         let max_len = shape[node.selected_x];
+        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
+        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
+        let areas_split =
+            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(24)]).split(chart_area);
+        render_segment_panel(
+            f,
+            &areas_split[1],
+            &SegmentDisplayInfo {
+                title: "Segment",
+                current: state.segment_state.idx.max(0) as usize,
+                total: state.segment_state.segment_count.max(0) as usize,
+                range_start,
+                range_end,
+                total_items: max_len,
+                unit: "pts",
+            },
+        )?;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes.clone(),
-            slice: SliceSelection::FromTo(
-                MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
-                (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
-            ),
+            slice: SliceSelection::FromTo(range_start, range_end),
         };
         (areas_split[0], data_preview_selection)
     } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes,
@@ -450,21 +463,34 @@ fn render_projected_chart_preview(
         state.segment_state.segumented = SegmentType::Chart;
         state.segment_state.segment_count =
             (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
-        let areas_split =
-            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
-        render_segment_scroll(f, &areas_split[1], state)?;
-
         let max_len = shape[node.selected_x];
+        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
+        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
+        let areas_split =
+            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(24)]).split(chart_area);
+        render_segment_panel(
+            f,
+            &areas_split[1],
+            &SegmentDisplayInfo {
+                title: "Segment",
+                current: state.segment_state.idx.max(0) as usize,
+                total: state.segment_state.segment_count.max(0) as usize,
+                range_start,
+                range_end,
+                total_items: max_len,
+                unit: "pts",
+            },
+        )?;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes.clone(),
-            slice: SliceSelection::FromTo(
-                MAX_SEGMENT_SIZE * state.segment_state.idx as usize,
-                (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len),
-            ),
+            slice: SliceSelection::FromTo(range_start, range_end),
         };
         (areas_split[0], data_preview_selection)
     } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes,

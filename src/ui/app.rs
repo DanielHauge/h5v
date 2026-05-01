@@ -1463,6 +1463,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                             &["a", "d", "Delete"],
                             "create / delete attribute (attrs pane)",
                         ),
+                        (&["j/k", "PgUp/PgDn"], "navigate large preview segments"),
                         (&["m", "M"], "add / open chart"),
                     ],
                 ),

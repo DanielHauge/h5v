@@ -172,6 +172,13 @@ pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
     )
 }
 
+fn visible_matrix_capacity(matrix_area: Rect, row_len: usize, col_len: usize) -> MatrixSelection {
+    MatrixSelection {
+        cols: usize::from(matrix_area.width / 24).min(col_len),
+        rows: usize::from(matrix_area.height).min(row_len),
+    }
+}
+
 fn render_matrix_with_reader<T: Display>(
     f: &mut Frame,
     area: &Rect,
@@ -224,31 +231,16 @@ fn render_matrix_with_reader<T: Display>(
     } else {
         area_inner
     };
-    let width = matrix_area.width;
-    let heigh = matrix_area.height;
-
-    let col_ds_len = attr
-        .shape
-        .get(node.selected_col)
-        .map(|x| *x as u16)
-        .unwrap_or(0);
-    let row_ds_len = attr
-        .shape
-        .get(node.selected_row)
-        .map(|x| *x as u16)
-        .unwrap_or(0);
-
-    let max_cols = (width / 24).min(col_ds_len);
-    let max_rows = heigh.min(row_ds_len);
-    state.matrix_view_state.rows_currently_available = max_rows as usize;
-    state.matrix_view_state.cols_currently_available = max_cols as usize;
-    let matrix_selection = MatrixSelection {
-        cols: max_cols,
-        rows: max_rows,
-    };
+    let col_ds_len = attr.shape.get(node.selected_col).copied().unwrap_or(0);
+    let row_ds_len = attr.shape.get(node.selected_row).copied().unwrap_or(0);
+    let matrix_selection = visible_matrix_capacity(matrix_area, row_ds_len, col_ds_len);
+    let max_cols = matrix_selection.cols;
+    let max_rows = matrix_selection.rows;
+    state.matrix_view_state.rows_currently_available = max_rows;
+    state.matrix_view_state.cols_currently_available = max_cols;
     let slice_selection = state.get_matrix_selection(node, matrix_selection, &attr.shape);
 
-    let mut rows_area_constraints = Vec::with_capacity(max_rows as usize);
+    let mut rows_area_constraints = Vec::with_capacity(max_rows);
     (0..max_rows).for_each(|_| {
         rows_area_constraints.push(Constraint::Length(1));
     });
@@ -311,18 +303,18 @@ fn render_matrix_with_reader<T: Display>(
     } else {
         let data = read_table(slice_selection)?;
 
-        let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
+        let mut col_constraint = Vec::with_capacity(max_cols + 1);
         col_constraint.push(Constraint::Length(15));
         (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
         let col_header_areas = Layout::horizontal(col_constraint).split(rows_areas[0]);
 
         for col in 0..max_cols {
-            let col_area = col_header_areas[(col + 1) as usize];
+            let col_area = col_header_areas[col + 1];
             let col_idx = state
                 .matrix_view_state
                 .col_offset
-                .min(attr.shape[node.selected_col].saturating_sub(max_cols as usize))
-                + col as usize;
+                .min(attr.shape[node.selected_col].saturating_sub(max_cols))
+                + col;
             f.render_widget(
                 Line::from(format!("{col_idx}"))
                     // .bg(color_consts::NUMBER_COLOR)
@@ -332,35 +324,35 @@ fn render_matrix_with_reader<T: Display>(
         }
 
         for i in 0..max_rows {
-            let mut col_constraint = Vec::with_capacity((max_cols + 1) as usize);
+            let mut col_constraint = Vec::with_capacity(max_cols + 1);
             col_constraint.push(Constraint::Length(15));
 
             (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
-            let row_area = rows_areas[i as usize];
+            let row_area = rows_areas[i];
             let col_areas = Layout::horizontal(col_constraint).split(row_area);
             let idx_area = col_areas[0];
             state.ui_layout.matrix_rows.push(MatrixRowHitbox {
                 area: idx_area,
-                row: i as usize,
+                row: i,
             });
 
             let idx = state.matrix_view_state.row_offset.min(
                 attr.shape[node.selected_row]
                     .saturating_sub(state.matrix_view_state.rows_currently_available),
-            ) + i as usize;
+            ) + i;
             let idx_line = Line::from(format!("{idx}")).left_aligned();
             f.render_widget(idx_line, idx_area);
             for j in 0..max_cols {
-                let val_area = col_areas[(j + 1) as usize];
+                let val_area = col_areas[j + 1];
                 state.ui_layout.matrix_cells.push(MatrixCellHitbox {
                     area: val_area,
-                    row: i as usize,
-                    col: j as usize,
+                    row: i,
+                    col: j,
                 });
 
                 let val_bg_color = match (
-                    (i as usize + state.matrix_view_state.row_offset).is_multiple_of(2),
-                    (j as usize + state.matrix_view_state.col_offset).is_multiple_of(2),
+                    (i + state.matrix_view_state.row_offset).is_multiple_of(2),
+                    (j + state.matrix_view_state.col_offset).is_multiple_of(2),
                 ) {
                     (true, true) => color_consts::BG_VAL3_COLOR,
                     (true, false) => color_consts::BG_VAL4_COLOR,
@@ -368,9 +360,9 @@ fn render_matrix_with_reader<T: Display>(
                     (false, false) => color_consts::BG_VAL2_COLOR,
                 };
                 let idx = if node.selected_row > node.selected_col {
-                    (j as usize, i as usize)
+                    (j, i)
                 } else {
-                    (i as usize, j as usize)
+                    (i, j)
                 };
 
                 let val = data.get(idx);
@@ -451,5 +443,21 @@ mod tests {
             renderer.render_as_line(&99).to_string(),
             "Unknown enum value: 99"
         );
+    }
+
+    #[test]
+    fn visible_matrix_capacity_handles_large_dimensions_without_wrapping() {
+        let selection = visible_matrix_capacity(
+            Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 20,
+            },
+            65_536,
+            65_537,
+        );
+        assert_eq!(selection.rows, 20);
+        assert_eq!(selection.cols, 5);
     }
 }

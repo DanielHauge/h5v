@@ -119,8 +119,8 @@ pub fn render_dim_selector(
 }
 
 pub struct MatrixSelection {
-    pub cols: u16,
-    pub rows: u16,
+    pub cols: usize,
+    pub rows: usize,
 }
 
 pub trait HasMatrixSelection {
@@ -149,7 +149,7 @@ impl HasMatrixSelection for AppState<'_> {
                     .row_offset
                     .min(shape[0].saturating_sub(self.matrix_view_state.rows_currently_available)),
                 step: 1,
-                end: (self.matrix_view_state.row_offset + matrix_view.rows as usize).min(shape[0]),
+                end: (self.matrix_view_state.row_offset + matrix_view.rows).min(shape[0]),
                 block: 1,
             });
         } else {
@@ -162,8 +162,7 @@ impl HasMatrixSelection for AppState<'_> {
                                 .saturating_sub(self.matrix_view_state.cols_currently_available),
                         ),
                         step: 1,
-                        end: (self.matrix_view_state.col_offset + matrix_view.cols as usize)
-                            .min(shape[dim]),
+                        end: (self.matrix_view_state.col_offset + matrix_view.cols).min(shape[dim]),
                         block: 1,
                     });
                 } else if node.selected_row == dim {
@@ -173,8 +172,7 @@ impl HasMatrixSelection for AppState<'_> {
                                 .saturating_sub(self.matrix_view_state.rows_currently_available),
                         ),
                         step: 1,
-                        end: (self.matrix_view_state.row_offset + matrix_view.rows as usize)
-                            .min(shape[dim]),
+                        end: (self.matrix_view_state.row_offset + matrix_view.rows).min(shape[dim]),
                         block: 1,
                     });
                 } else {
