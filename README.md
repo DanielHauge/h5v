@@ -158,7 +158,7 @@ h5v file.h5 --script-test --script setup.h5v
 
 ## Installation
 
-Prebuilt binaries (recommended once a release is published):
+Prebuilt binaries:
 
 ```bash
 cargo binstall h5v
@@ -176,13 +176,13 @@ PowerShell installer (Windows, installs the latest release to `~/.local/bin` by 
 irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex
 ```
 
-Homebrew (Linux/macOS, after a release updates the in-repo formula):
+Homebrew:
 
 ```bash
 brew install DanielHauge/h5v/h5v
 ```
 
-Scoop (Windows, after a release updates the in-repo bucket manifest):
+Scoop:
 
 ```powershell
 scoop bucket add h5v https://github.com/DanielHauge/h5v
