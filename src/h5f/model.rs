@@ -176,7 +176,9 @@ impl H5FNode {
             Node::File(_) => {}
             Node::Broken(_, _, _) => {}
             Node::Group(_, _) => {}
-            Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {}
+            Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
+                result.push(ContentShowMode::Preview);
+            }
             Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
                 Some(matrix_renderable) => match matrix_renderable {
                     MatrixRenderType::Float64 => {

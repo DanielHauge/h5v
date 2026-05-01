@@ -20,6 +20,7 @@ use crate::{
     },
     ui::{
         edit::perform_edit,
+        preview::preview_text_for_compound_schema,
         preview_chart::render_image_chart,
         state::{preview_selection_for_node, AppState, AppToast, ContentShowMode},
     },
@@ -117,6 +118,10 @@ fn preview_text_value(
 ) -> Result<Option<String>, AppError> {
     if meta.image.is_some() {
         return Ok(None);
+    }
+
+    if let Some(schema) = preview_text_for_compound_schema(meta) {
+        return Ok(Some(schema));
     }
 
     if meta.matrixable.is_none() {
@@ -316,6 +321,12 @@ fn selected_content_edit_request(
             if meta.image.is_some() {
                 return Err(EventResult::Toast(
                     AppToast::Warning("Image previews are not editable".to_string()),
+                    false,
+                ));
+            }
+            if meta.is_compound_container() {
+                return Err(EventResult::Toast(
+                    AppToast::Warning("Compound schema previews are not editable".to_string()),
                     false,
                 ));
             }

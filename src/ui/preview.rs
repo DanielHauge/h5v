@@ -11,7 +11,16 @@ use super::{
 use crate::{
     error::AppError,
     h5f::{read_scalar_string_dataset, Encoding, H5FNode, Node},
+    sprint_typedesc::sprint_type_schema,
 };
+
+fn compound_schema_preview_text(attr: &crate::h5f::DatasetMeta) -> String {
+    let path = attr.virtual_path().unwrap_or(attr.display_name.as_str());
+    format!(
+        "Compound schema: {path}\n\n{}",
+        sprint_type_schema(&attr.type_descriptor)
+    )
+}
 
 pub fn render_preview(
     f: &mut Frame,
@@ -28,6 +37,16 @@ pub fn render_preview(
     if let Node::Dataset(_, attr) = node {
         if attr.is_empty() {
             render_empty_dataset(f, &area_inner);
+            return;
+        }
+        if attr.is_compound_container() {
+            render_string(
+                f,
+                &area_inner,
+                selected_node,
+                compound_schema_preview_text(&attr),
+                None,
+            );
             return;
         }
         match &attr.image {
@@ -104,4 +123,9 @@ pub fn render_string_preview(
         }
     }
     Ok(())
+}
+
+pub fn preview_text_for_compound_schema(meta: &crate::h5f::DatasetMeta) -> Option<String> {
+    meta.is_compound_container()
+        .then(|| compound_schema_preview_text(meta))
 }
