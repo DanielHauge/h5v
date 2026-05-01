@@ -7,6 +7,12 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Run side-effecting release steps (tags, uploads, registry/package-manager publication)"
+        type: boolean
+        required: true
+        default: true
 
 jobs:
   build-test:
@@ -63,7 +69,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag
-        if: ${{ !env.ACT }}
+        if: ${{ inputs.publish }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -180,7 +186,7 @@ jobs:
 
       - name: Publish to GitHub
         uses: svenstaro/upload-release-action@v2
-        if: ${{ !env.ACT }}
+        if: ${{ inputs.publish }}
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
@@ -198,7 +204,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish to crates.io
-        if: matrix.build.NAME == 'linux-x64-glibc' && !env.ACT
+        if: ${{ matrix.build.NAME == 'linux-x64-glibc' && inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
         run: |
@@ -247,7 +253,7 @@ jobs:
 
       - name: Publish package manager assets to GitHub
         uses: svenstaro/upload-release-action@v2
-        if: ${{ !env.ACT }}
+        if: ${{ inputs.publish }}
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: package-manager-assets/**
@@ -283,7 +289,7 @@ jobs:
           cp package-manager-assets/homebrew/h5v.rb Formula/h5v.rb
 
       - name: Commit formula update
-        if: ${{ !env.ACT }}
+        if: ${{ inputs.publish }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -322,7 +328,7 @@ jobs:
           cp package-manager-assets/scoop/h5v.json bucket/h5v.json
 
       - name: Commit Scoop manifest update
-        if: ${{ !env.ACT }}
+        if: ${{ inputs.publish }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -339,7 +345,7 @@ jobs:
     needs:
       - generate-changelog
       - package-manager-assets
-    if: ${{ !env.ACT && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+    if: ${{ inputs.publish && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
     runs-on: windows-latest
     permissions:
       contents: read
@@ -366,7 +372,7 @@ jobs:
     name: Publish AUR package
     needs:
       - package-manager-assets
-    if: ${{ !env.ACT && secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    if: ${{ inputs.publish && secrets.AUR_SSH_PRIVATE_KEY != '' }}
     runs-on: ubuntu-latest
 
     steps:
