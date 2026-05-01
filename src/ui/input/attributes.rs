@@ -14,12 +14,16 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::{
     error::AppError,
-    h5f::{format_attr_for_edit, read_attr_memory_bytes, HasPath, SYSTEM_ATTRIBUTES},
+    h5f::{
+        format_attr_for_edit, read_attr_memory_bytes, AttributeCreateType, HasPath,
+        SYSTEM_ATTRIBUTES,
+    },
     sprint_attributes::{attribute_type_descriptor, AttributeEditable},
     ui::{
         edit::perform_edit,
         state::{
-            AppState, AppToast, AttributeEditRequest,
+            AppState, AppToast, AttributeCreateDialogState, AttributeCreateField,
+            AttributeDeleteDialogState, AttributeEditRequest,
             AttributeViewSelection::{Name, Value},
             FixedStringOverflowChoice, FixedStringOverflowDialogState, Mode,
         },
@@ -113,6 +117,20 @@ fn selected_attribute_name_and_selection(
         rendered_attr_name(&rendered_attribute.0),
         node_attributes_view_cursor.attribute_view_selection,
     ))
+}
+
+fn selected_custom_attribute_name(state: &mut AppState<'_>) -> Result<String, EventResult> {
+    let (attr_name, _) = selected_attribute_name_and_selection(state)?;
+    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+        return Err(EventResult::Toast(
+            AppToast::Warning(format!(
+                "'{}' is a built-in h5v metadata field and cannot be modified",
+                attr_name
+            )),
+            false,
+        ));
+    }
+    Ok(attr_name)
 }
 
 fn read_hdf5_name(
@@ -548,6 +566,45 @@ pub fn handle_normal_attributes(
                             }
                         }
                     }
+                }
+                Some(AttributesAction::Create) => {
+                    if state.readonly {
+                        return Ok(EventResult::Toast(
+                            AppToast::Warning(
+                                "Cannot edit in read-only mode; reopen with -w to modify the file"
+                                    .to_string(),
+                            ),
+                            false,
+                        ));
+                    }
+                    state.attribute_create_dialog = Some(AttributeCreateDialogState {
+                        name: String::new(),
+                        name_cursor: 0,
+                        attr_type: AttributeCreateType::String,
+                        value: String::new(),
+                        value_cursor: 0,
+                        active_field: AttributeCreateField::Name,
+                    });
+                    state.mode = Mode::AttributeCreateDialog;
+                    Ok(EventResult::Redraw)
+                }
+                Some(AttributesAction::Delete) => {
+                    if state.readonly {
+                        return Ok(EventResult::Toast(
+                            AppToast::Warning(
+                                "Cannot edit in read-only mode; reopen with -w to modify the file"
+                                    .to_string(),
+                            ),
+                            false,
+                        ));
+                    }
+                    let attr_name = match selected_custom_attribute_name(state) {
+                        Ok(attr_name) => attr_name,
+                        Err(event_result) => return Ok(event_result),
+                    };
+                    state.attribute_delete_dialog = Some(AttributeDeleteDialogState { attr_name });
+                    state.mode = Mode::AttributeDeleteDialog;
+                    Ok(EventResult::Redraw)
                 }
 
                 _ => Ok(EventResult::Continue),

@@ -54,7 +54,11 @@ pub fn render_info_attributes(
     let bg = match (&state.focus, &state.mode) {
         (
             Focus::Attributes,
-            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog,
+            Mode::Normal
+            | Mode::AttributeCreateDialog
+            | Mode::AttributeDeleteDialog
+            | Mode::FixedStringOverflowDialog
+            | Mode::FixedStringResizeDialog,
         ) => FOCUS_BG_COLOR,
         _ => BG_COLOR,
     };

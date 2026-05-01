@@ -8,12 +8,15 @@ use crate::{
     color_consts,
     error::AppError,
     sprint_attributes::{attribute_type_description, sprint_attribute},
+    ui::state::AttributeViewSelection,
 };
 
 use super::{
     codec::{
-        copy_attr_to_group, rewrite_fixed_string_attr, write_attr_from_text, FixedStringRewrite,
+        copy_attr_to_group, create_scalar_attr_from_text, rewrite_fixed_string_attr,
+        write_attr_from_text, AttributeCreateType, FixedStringRewrite,
     },
+    meta::SYSTEM_ATTRIBUTES,
     model::{H5FNode, Node},
 };
 
@@ -21,6 +24,13 @@ pub trait HasAttributes {
     fn attribute(&self, name: &str) -> Result<Attribute, hdf5_metno::Error>;
     fn attribute_names(&self) -> Result<Vec<String>, hdf5_metno::Error>;
     fn attributes(&self) -> Result<Vec<(String, Attribute)>, hdf5_metno::Error>;
+    fn create_attr(
+        &self,
+        name: &str,
+        attr_type: AttributeCreateType,
+        value: &str,
+    ) -> Result<String, AppError>;
+    fn delete_attr(&self, name: &str) -> Result<(), AppError>;
     fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError>;
 }
 
@@ -96,7 +106,41 @@ impl HasAttributes for Node {
         }
     }
 
+    fn create_attr(
+        &self,
+        name: &str,
+        attr_type: AttributeCreateType,
+        value: &str,
+    ) -> Result<String, AppError> {
+        let name = validate_user_attribute_name(name)?;
+        let group = node_attribute_group(self)?;
+        let existing = group.attr_names()?;
+        if existing.iter().any(|existing_name| existing_name == &name) {
+            return Err(AppError::EditError(format!(
+                "Attribute '{}' already exists",
+                name
+            )));
+        }
+        create_scalar_attr_from_text(&group, &name, attr_type, value)
+    }
+
+    fn delete_attr(&self, name: &str) -> Result<(), AppError> {
+        let name = validate_user_attribute_name(name)?;
+        let group = node_attribute_group(self)?;
+        let existing = group.attr_names()?;
+        if !existing.iter().any(|existing_name| existing_name == &name) {
+            return Err(AppError::EditError(format!(
+                "Attribute '{}' does not exist",
+                name
+            )));
+        }
+        group.delete_attr(&name)?;
+        group.file()?.flush()?;
+        Ok(())
+    }
+
     fn update_attr_name(&self, old_name: &str, new_name: &str) -> Result<(), AppError> {
+        let new_name = validate_user_attribute_name(new_name)?;
         let group = match self {
             Node::File(file) => file.as_group()?,
             Node::Group(group, _) => group.as_group()?,
@@ -110,8 +154,19 @@ impl HasAttributes for Node {
         };
 
         let attr = group.attr(old_name)?;
-        copy_attr_to_group(&attr, &group, new_name)?;
+        let existing = group.attr_names()?;
+        if existing
+            .iter()
+            .any(|existing_name| existing_name == &new_name && existing_name != old_name)
+        {
+            return Err(AppError::EditError(format!(
+                "Attribute '{}' already exists",
+                new_name
+            )));
+        }
+        copy_attr_to_group(&attr, &group, &new_name)?;
         group.delete_attr(old_name)?;
+        group.file()?.flush()?;
 
         Ok(())
     }
@@ -127,6 +182,22 @@ fn node_attribute_group(node: &Node) -> Result<Group, AppError> {
         ))
         .into()),
     }
+}
+
+pub fn validate_user_attribute_name(name: &str) -> Result<String, AppError> {
+    let trimmed = name.trim_matches('=').trim_matches('─').trim();
+    if trimmed.is_empty() {
+        return Err(AppError::EditError(
+            "Attribute name cannot be empty".to_string(),
+        ));
+    }
+    if SYSTEM_ATTRIBUTES.contains(&trimmed) {
+        return Err(AppError::EditError(format!(
+            "'{}' is a built-in h5v metadata field and cannot be used as an attribute name",
+            trimmed
+        )));
+    }
+    Ok(trimmed.to_string())
 }
 
 #[derive(Debug)]
@@ -214,14 +285,60 @@ impl ComputedAttributes {
 }
 
 impl H5FNode {
+    fn rendered_attribute_index(&mut self, attr_name: &str) -> Result<usize, AppError> {
+        let attributes = self.read_attributes()?;
+        attributes
+            .rendered_attributes
+            .iter()
+            .position(|(name, _, _)| {
+                name.to_string()
+                    .trim_end_matches('=')
+                    .trim_end_matches('─')
+                    .trim_end()
+                    == attr_name
+            })
+            .ok_or_else(|| AppError::EditError(format!("Attribute '{}' not found", attr_name)))
+    }
+
+    pub fn create_attribute(
+        &mut self,
+        attr_name: &str,
+        attr_type: AttributeCreateType,
+        value: &str,
+    ) -> Result<String, AppError> {
+        let attr_name = validate_user_attribute_name(attr_name)?;
+        let created_type = self.node.create_attr(&attr_name, attr_type, value)?;
+        self.recompute_attributes()?;
+        self.attributes_view_cursor.attribute_index = self.rendered_attribute_index(&attr_name)?;
+        self.attributes_view_cursor.attribute_view_selection = AttributeViewSelection::Value;
+        Ok(created_type)
+    }
+
+    pub fn delete_attribute(&mut self, attr_name: &str) -> Result<(), AppError> {
+        let attr_name = validate_user_attribute_name(attr_name)?;
+        let current_index = self.attributes_view_cursor.attribute_index;
+        let deleted_index = self.rendered_attribute_index(&attr_name)?;
+        self.node.delete_attr(&attr_name)?;
+        self.recompute_attributes()?;
+        let len = self.read_attributes()?.rendered_attributes.len();
+        self.attributes_view_cursor.attribute_index = if len == 0 {
+            0
+        } else if deleted_index < current_index {
+            current_index.saturating_sub(1).min(len - 1)
+        } else {
+            current_index.min(len - 1)
+        };
+        Ok(())
+    }
+
     pub fn update_attribute_name(
         &mut self,
         attr_name: &str,
         new_name: &str,
     ) -> Result<(), AppError> {
-        let new_name = new_name.trim_matches('=').trim_matches('─').trim();
-        if !attr_name.eq(new_name) {
-            self.node.update_attr_name(attr_name, new_name)?;
+        let new_name = validate_user_attribute_name(new_name)?;
+        if !attr_name.eq(&new_name) {
+            self.node.update_attr_name(attr_name, &new_name)?;
         }
         self.recompute_attributes()?;
         Ok(())

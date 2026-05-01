@@ -41,6 +41,64 @@ pub enum FixedStringRewrite {
     Resize(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeCreateType {
+    Bool,
+    I64,
+    U64,
+    F64,
+    String,
+    Ascii,
+}
+
+impl AttributeCreateType {
+    pub const ALL: [Self; 6] = [
+        Self::Bool,
+        Self::I64,
+        Self::U64,
+        Self::F64,
+        Self::String,
+        Self::Ascii,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::I64 => "i64",
+            Self::U64 => "u64",
+            Self::F64 => "f64",
+            Self::String => "string",
+            Self::Ascii => "ascii",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::I64 => "i64",
+            Self::U64 => "u64",
+            Self::F64 => "f64",
+            Self::String => "VarLenUnicode",
+            Self::Ascii => "VarLenAscii",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, AppError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "bool" | "boolean" => Ok(Self::Bool),
+            "i64" | "int" | "integer" => Ok(Self::I64),
+            "u64" | "uint" | "unsigned" => Ok(Self::U64),
+            "f64" | "float" | "double" => Ok(Self::F64),
+            "string" | "str" | "text" | "unicode" => Ok(Self::String),
+            "ascii" => Ok(Self::Ascii),
+            other => Err(AppError::InvalidCommand(format!(
+                "Unsupported attribute type '{}'. Expected one of: bool, i64, u64, f64, string, ascii",
+                other
+            ))),
+        }
+    }
+}
+
 pub fn scalar_text_codec(type_desc: &TypeDescriptor) -> Option<ScalarTextCodec> {
     match type_desc {
         TypeDescriptor::Integer(int_size) => Some(match int_size {
@@ -312,6 +370,48 @@ fn copy_to_group<T: H5Type>(
             .create(new_name)?;
     }
     Ok(())
+}
+
+pub fn create_scalar_attr_from_text(
+    group: &Group,
+    attr_name: &str,
+    attr_type: AttributeCreateType,
+    value: &str,
+) -> Result<String, AppError> {
+    match attr_type {
+        AttributeCreateType::Bool => {
+            let attr = group.new_attr_builder().empty::<bool>().create(attr_name)?;
+            write_parsed_scalar::<bool>(&attr, value, "bool")?;
+        }
+        AttributeCreateType::I64 => {
+            let attr = group.new_attr_builder().empty::<i64>().create(attr_name)?;
+            write_parsed_scalar::<i64>(&attr, value, "i64")?;
+        }
+        AttributeCreateType::U64 => {
+            let attr = group.new_attr_builder().empty::<u64>().create(attr_name)?;
+            write_parsed_scalar::<u64>(&attr, value, "u64")?;
+        }
+        AttributeCreateType::F64 => {
+            let attr = group.new_attr_builder().empty::<f64>().create(attr_name)?;
+            write_parsed_scalar::<f64>(&attr, value, "f64")?;
+        }
+        AttributeCreateType::String => {
+            let attr = group
+                .new_attr_builder()
+                .empty::<VarLenUnicode>()
+                .create(attr_name)?;
+            write_scalar_attr_from_text(&attr, value)?;
+        }
+        AttributeCreateType::Ascii => {
+            let attr = group
+                .new_attr_builder()
+                .empty::<VarLenAscii>()
+                .create(attr_name)?;
+            write_scalar_attr_from_text(&attr, value)?;
+        }
+    }
+    group.file()?.flush()?;
+    Ok(attr_type.description().to_string())
 }
 
 pub fn ensure_attr_editable(attr: &Attribute) -> Result<(), AppError> {
@@ -1546,12 +1646,23 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use hdf5_metno::types::{EnumMember, EnumType, IntSize, TypeDescriptor};
+    use hdf5_metno::File;
 
     use super::{
-        decode_fixed_string_value, encode_fixed_string_value, parse_1d_lines,
-        parse_enum_member_value, validate_attr_edit_support,
+        create_scalar_attr_from_text, decode_fixed_string_value, encode_fixed_string_value,
+        parse_1d_lines, parse_enum_member_value, validate_attr_edit_support, AttributeCreateType,
     };
+
+    fn temp_hdf5_path(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("h5v-{name}-{unique}.h5"))
+    }
 
     fn color_enum() -> EnumType {
         EnumType {
@@ -1638,5 +1749,33 @@ mod tests {
             parse_1d_lines("first\n\nthird", 3).expect("failed parsing 1d lines"),
             vec!["first", "", "third"]
         );
+    }
+
+    #[test]
+    fn creates_scalar_unicode_attribute_from_text() {
+        let path = temp_hdf5_path("codec-create-attr");
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let root = file.as_group().expect("failed opening root as group");
+        create_scalar_attr_from_text(&root, "title", AttributeCreateType::String, "hello")
+            .expect("failed creating attribute");
+        let attr = file.attr("title").expect("failed reading created attr");
+        let rendered = super::format_attr_for_edit(&attr).expect("failed formatting created attr");
+        assert_eq!(rendered, "hello");
+        drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
+        std::fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    fn parses_attribute_create_type_aliases() {
+        assert_eq!(
+            AttributeCreateType::parse("integer").expect("integer alias"),
+            AttributeCreateType::I64
+        );
+        assert_eq!(
+            AttributeCreateType::parse("text").expect("text alias"),
+            AttributeCreateType::String
+        );
+        assert!(AttributeCreateType::parse("compound").is_err());
     }
 }

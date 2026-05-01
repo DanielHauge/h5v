@@ -4,8 +4,8 @@ use hdf5_metno::{
 };
 use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
-    prelude::{BitMapBackend, IntoDrawingArea, WHITE},
-    style::{Color as _, IntoFont, Palette},
+    prelude::{BitMapBackend, IntoDrawingArea},
+    style::{Color as _, IntoFont, RGBColor, ShapeStyle},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
@@ -503,8 +503,7 @@ impl ChartItem {
     }
 
     pub fn rgb_color(&self) -> (u8, u8, u8) {
-        let rgb = plotters::prelude::Palette99::pick(self.color_slot).to_rgba();
-        (rgb.0, rgb.1, rgb.2)
+        color_consts::rgb_channels(color_consts::chart_series_color(self.color_slot))
     }
 
     pub fn reference_label(&self) -> String {
@@ -1393,10 +1392,17 @@ impl MultiChartState {
 
         let width = self.width;
         let height = self.height;
+        let selected_item_id = self.selected_item().map(|item| item.id);
         self.plot_buffer = vec![0; (width * height * 3) as usize];
         let root =
             BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
-        if let Err(e) = root.fill(&WHITE) {
+        let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::CHART_PLOT_BG_COLOR);
+        let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::CHART_GRID_COLOR);
+        let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::CHART_AXIS_COLOR);
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(e) = root.fill(&plot_bg) {
             log_error(e);
             return false;
         }
@@ -1477,7 +1483,7 @@ impl MultiChartState {
             let data_points = item.series.points[local_x_min..local_x_max]
                 .iter()
                 .map(|(x, y)| (*x, *y));
-            (item.label.clone(), item.color_slot, data_points)
+            (item.id, item.label.clone(), item.color_slot, data_points)
         });
 
         let y_label_area_size = format!("{y_max:.4}").len() as u32 * 3 + 30;
@@ -1498,16 +1504,30 @@ impl MultiChartState {
         if let Err(e) = chart
             .configure_mesh()
             .x_desc(self.x_axis_policy.label())
-            .y_label_style(("sans-serif", 18).into_font())
-            .x_label_style(("sans-serif", 18).into_font())
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
             .draw()
         {
             log_error(e);
         }
 
-        for (label, color_slot, data) in data_series {
-            let color = plotters::prelude::Palette99::pick(color_slot);
-            let line_series = plotters::prelude::LineSeries::new(data, &color);
+        for (item_id, label, color_slot, data) in data_series {
+            let (r, g, b) =
+                color_consts::rgb_channels(color_consts::chart_series_color(color_slot));
+            let color = RGBColor(r, g, b);
+            let stroke_width =
+                if self.marked_base_item == Some(item_id) || selected_item_id == Some(item_id) {
+                    4
+                } else {
+                    3
+                };
+            let line_series = plotters::prelude::LineSeries::new(
+                data,
+                ShapeStyle::from(&color).stroke_width(stroke_width),
+            );
             let series = match chart.draw_series(line_series) {
                 Ok(series) => series,
                 Err(e) => {
@@ -1520,7 +1540,7 @@ impl MultiChartState {
                     vec![(x, y), (x + 20, y)],
                     plotters::prelude::ShapeStyle {
                         filled: true,
-                        stroke_width: 2,
+                        stroke_width,
                         color: plotters::style::Color::to_rgba(&color),
                     },
                 )
@@ -1637,7 +1657,8 @@ impl MultiChartState {
             .enumerate()
             .map(|(offset, item)| {
                 let absolute_idx = start + offset;
-                let color = plotters::prelude::Palette99::pick(item.color_slot).to_rgba();
+                let (r, g, b) =
+                    color_consts::rgb_channels(color_consts::chart_series_color(item.color_slot));
                 let marker = if item.visible { "●" } else { "○" };
                 let prefix = if absolute_idx == self.idx { "> " } else { "  " };
                 let is_selected = absolute_idx == self.idx;
@@ -1669,12 +1690,7 @@ impl MultiChartState {
                             Style::default().fg(color_consts::BREAK_COLOR)
                         },
                     ),
-                    Span::styled(
-                        marker,
-                        Style::default()
-                            .fg(Color::Rgb(color.0, color.1, color.2))
-                            .bold(),
-                    ),
+                    Span::styled(marker, Style::default().fg(Color::Rgb(r, g, b)).bold()),
                     Span::raw(" "),
                     Span::styled(format!("(${}) ", item.id.0), id_style),
                     Span::styled(item.list_label(), label_style),

@@ -556,6 +556,8 @@ fn main_recover_loop(
         segment_state,
         edit_pause: edit_pause.clone(),
         command_state,
+        attribute_create_dialog: None,
+        attribute_delete_dialog: None,
         fixed_string_overflow_dialog: None,
         treeview: vec![],
         tree_view_cursor: 0,
@@ -626,6 +628,8 @@ fn main_recover_loop(
             Mode::Search => {}
             Mode::Command
             | Mode::Normal
+            | Mode::AttributeCreateDialog
+            | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog => {
                 let selected_node = state.treeview[state.tree_view_cursor].node.clone();
@@ -640,6 +644,12 @@ fn main_recover_loop(
 
         match state.mode {
             Mode::Command => render_command_dialog(frame, command_area, state),
+            Mode::AttributeCreateDialog => {
+                render_attribute_create_dialog(frame, content_area, state)
+            }
+            Mode::AttributeDeleteDialog => {
+                render_attribute_delete_dialog(frame, content_area, state)
+            }
             Mode::FixedStringOverflowDialog => {
                 render_fixed_string_overflow_dialog(frame, content_area, state)
             }
@@ -1127,6 +1137,150 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
     frame.render_widget(error_paragraph, frame.area());
 }
 
+fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+    let Some(dialog) = state.attribute_create_dialog.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(area, 84, 13);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        popup,
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Create attribute ")
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+    frame.render_widget(block, popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    frame.render_widget(
+        Paragraph::new("Tab/Shift-Tab switch fields, Left/Right changes type, Enter creates")
+            .style(Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+        rows[0],
+    );
+
+    let active_style = Style::default().fg(Color::Black).bg(Color::Yellow).bold();
+    let idle_style = Style::default().fg(Color::White);
+    let name_style = if dialog.active_field == state::AttributeCreateField::Name {
+        active_style
+    } else {
+        idle_style
+    };
+    let type_style = if dialog.active_field == state::AttributeCreateField::Type {
+        active_style
+    } else {
+        idle_style
+    };
+    let value_style = if dialog.active_field == state::AttributeCreateField::Value {
+        active_style
+    } else {
+        idle_style
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Name: ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(dialog.name.clone(), name_style),
+        ])),
+        rows[1],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Type: ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                format!(
+                    "< {} >  ({})",
+                    dialog.attr_type.label(),
+                    dialog.attr_type.description()
+                ),
+                type_style,
+            ),
+        ])),
+        rows[2],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Value: ",
+                Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            ),
+            Span::styled(dialog.value.clone(), value_style),
+        ]))
+        .wrap(Wrap { trim: false }),
+        rows[3],
+    );
+    frame.render_widget(
+        Paragraph::new("Types: bool, i64, u64, f64, string, ascii")
+            .style(Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+        rows[5],
+    );
+
+    match dialog.active_field {
+        state::AttributeCreateField::Name => frame.set_cursor_position(
+            ratatui::layout::Position::new(rows[1].x + 6 + dialog.name_cursor as u16, rows[1].y),
+        ),
+        state::AttributeCreateField::Type => {}
+        state::AttributeCreateField::Value => frame.set_cursor_position(
+            ratatui::layout::Position::new(rows[3].x + 7 + dialog.value_cursor as u16, rows[3].y),
+        ),
+    }
+}
+
+fn render_attribute_delete_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+    let Some(dialog) = state.attribute_delete_dialog.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(area, 64, 9);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        popup,
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Delete attribute ")
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+    frame.render_widget(block, popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Length(1)]).split(inner);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Delete attribute '{}'?\nPress Enter to confirm or Esc to cancel.",
+            dialog.attr_name
+        ))
+        .wrap(Wrap { trim: true }),
+        rows[0],
+    );
+}
+
 fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
     let Some(dialog) = state.fixed_string_overflow_dialog.as_ref() else {
         return;
@@ -1305,6 +1459,10 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                     &[
                         (&["Tab"], "preview / matrix"),
                         (&["y"], "copy selected"),
+                        (
+                            &["a", "d", "Delete"],
+                            "create / delete attribute (attrs pane)",
+                        ),
                         (&["m", "M"], "add / open chart"),
                     ],
                 ),
@@ -1336,6 +1494,14 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                         (&["."], "repeat command"),
                         (&["help", "help reload"], "help overlay / command help"),
                         (&["goto /group/dataset"], "jump to an HDF5 path"),
+                        (
+                            &["attr create title string \"hello\""],
+                            "create scalar attribute on the selected node",
+                        ),
+                        (
+                            &["attr delete title"],
+                            "delete attribute from the selected node",
+                        ),
                         (
                             &["mchart add /group/dataset[..,0]"],
                             "add a dataset to multichart from anywhere",

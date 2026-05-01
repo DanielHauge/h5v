@@ -51,3 +51,43 @@ pub const TYPE_DESC_COLOR: ratatui::prelude::Color = Color::Rgb(150, 150, 150);
 pub const LOAD_MORE_COLOR: Color = Color::Yellow;
 
 pub const LINE_NUM_COLOR: Color = Color::DarkGray;
+
+pub const CHART_AXIS_COLOR: Color = BUILT_IN_VALUE_COLOR;
+pub const CHART_GRID_COLOR: Color = BREAK_COLOR;
+pub const CHART_LABEL_COLOR: Color = TYPE_DESC_COLOR;
+pub const CHART_PREVIEW_LINE_COLOR: Color = VARIABLE_BLUE_BUILTIN;
+pub const CHART_PLOT_BG_COLOR: Color = FOCUS_BG_COLOR;
+
+pub const CHART_SERIES_COLORS: [Color; 8] = [
+    VARIABLE_BLUE_BUILTIN,
+    DATASET_FILE_COLOR,
+    GROUP_COLOR,
+    COMPOUND_COLOR,
+    STRING_COLOR,
+    BOOL_COLOR,
+    ROOT_FILE_COLOR,
+    Color::Rgb(129, 199, 132),
+];
+
+pub fn chart_series_color(slot: usize) -> Color {
+    CHART_SERIES_COLORS[slot % CHART_SERIES_COLORS.len()]
+}
+
+pub fn rgb_channels(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::White => (255, 255, 255),
+        Color::Yellow => (255, 255, 0),
+        Color::Cyan => (0, 255, 255),
+        Color::DarkGray => (169, 169, 169),
+        other => {
+            let fallback = format!("{other:?}");
+            if fallback == "Reset" {
+                (255, 255, 255)
+            } else {
+                (255, 255, 255)
+            }
+        }
+    }
+}

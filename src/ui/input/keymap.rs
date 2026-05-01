@@ -61,6 +61,8 @@ pub enum AttributesAction {
     Move(Direction, usize),
     Edit,
     Copy,
+    Create,
+    Delete,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +243,8 @@ pub fn attributes_action(key: &KeyEvent) -> Option<AttributesAction> {
         }
         (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => Some(AttributesAction::Edit),
         (KeyCode::Char('y'), _) => Some(AttributesAction::Copy),
+        (KeyCode::Char('a'), _) => Some(AttributesAction::Create),
+        (KeyCode::Char('d'), _) | (KeyCode::Delete, _) => Some(AttributesAction::Delete),
         _ => None,
     }
 }

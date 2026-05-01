@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::h5f::AttributeCreateType;
 use crate::ui::mchart::BuiltinDerivedOp;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::collections::VecDeque;
@@ -13,6 +14,7 @@ pub enum CommandCategory {
     Navigation,
     View,
     Selection,
+    Attributes,
     App,
     MultiChart,
     Input,
@@ -38,6 +40,7 @@ pub enum CommandId {
     Dim,
     Index,
     Help,
+    Attr,
     Repeat,
     MultiChart,
     Press,
@@ -369,6 +372,16 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         keybindings: &["?"],
         args: &[OPTIONAL_COMMAND_ARG],
         handler: handle_help,
+    },
+    CommandDescriptor {
+        id: CommandId::Attr,
+        name: "attr",
+        aliases: &["attribute"],
+        description: "Create or delete scalar attributes on the selected node",
+        category: CommandCategory::Attributes,
+        keybindings: &["a", "d", "Delete"],
+        args: &[ACTION_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG],
+        handler: handle_attr,
     },
     CommandDescriptor {
         id: CommandId::Repeat,
@@ -1409,6 +1422,52 @@ fn handle_help(
     ))
 }
 
+fn handle_attr(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    if state.readonly {
+        return Err(AppError::EditError(
+            "Cannot edit in read-only mode; reopen with -w to modify the file".to_string(),
+        ));
+    }
+
+    let action = command.word_arg(0)?.to_ascii_lowercase();
+    match action.as_str() {
+        "create" | "add" | "new" => {
+            let attr_name = command.word_arg(1)?;
+            let attr_type = AttributeCreateType::parse(command.word_arg(2)?)?;
+            let value = command.word_arg_optional(3)?.unwrap_or("");
+            let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+            let created_type = selected_node.create_attribute(attr_name, attr_type, value)?;
+            drop(selected_node);
+            state.acknowledge_file_write();
+            Ok(EventResult::Toast(
+                super::state::AppToast::Info(format!(
+                    "Created attribute '{}' ({})",
+                    attr_name, created_type
+                )),
+                true,
+            ))
+        }
+        "delete" | "remove" | "rm" => {
+            let attr_name = command.word_arg(1)?;
+            let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+            selected_node.delete_attribute(attr_name)?;
+            drop(selected_node);
+            state.acknowledge_file_write();
+            Ok(EventResult::Toast(
+                super::state::AppToast::Info(format!("Deleted attribute '{}'", attr_name)),
+                true,
+            ))
+        }
+        other => Err(AppError::InvalidCommand(format!(
+            "Unknown attr action '{}'. Expected create or delete",
+            other
+        ))),
+    }
+}
+
 fn handle_repeat(
     state: &mut AppState<'_>,
     _command: &CommandInvocation,
@@ -1875,6 +1934,35 @@ mod tests {
         assert_eq!(
             command.args,
             vec![CommandArgValue::Word("reload".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_attr_create_command() {
+        let command =
+            parse_command_text(r#"attr create title string "hello world""#).expect("attr create");
+        assert_eq!(command.id, CommandId::Attr);
+        assert_eq!(
+            command.args,
+            vec![
+                CommandArgValue::Word("create".to_string()),
+                CommandArgValue::Word("title".to_string()),
+                CommandArgValue::Word("string".to_string()),
+                CommandArgValue::Word("hello world".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_attr_delete_command() {
+        let command = parse_command_text("attr delete title").expect("attr delete");
+        assert_eq!(command.id, CommandId::Attr);
+        assert_eq!(
+            command.args,
+            vec![
+                CommandArgValue::Word("delete".to_string()),
+                CommandArgValue::Word("title".to_string()),
+            ]
         );
     }
 

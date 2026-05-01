@@ -144,6 +144,8 @@ pub fn render_main_display(
         (
             ui::state::Focus::Content,
             ui::state::Mode::Normal
+            | ui::state::Mode::AttributeCreateDialog
+            | ui::state::Mode::AttributeDeleteDialog
             | ui::state::Mode::FixedStringOverflowDialog
             | ui::state::Mode::FixedStringResizeDialog,
         ) => color_consts::FOCUS_BG_COLOR,

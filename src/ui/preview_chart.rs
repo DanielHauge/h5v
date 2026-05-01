@@ -2,7 +2,7 @@ use hdf5_metno::types::TypeDescriptor;
 use plotters::{
     chart::ChartBuilder,
     prelude::{BitMapBackend, IntoDrawingArea},
-    style::IntoFont,
+    style::{Color as _, IntoFont, RGBColor, ShapeStyle},
 };
 
 use ratatui::{
@@ -561,14 +561,15 @@ fn render_chart_widget(
     state: &AppState,
     data_preview: DatasetPlotingData,
 ) {
+    let x_axis_max = preview_x_axis_max(&data_preview);
     let x_label_count = match chart_area.width {
-        0 => 0,
+        0..=7 => 1,
         _ => chart_area.width / 8,
     };
     let x_labels = (0..=x_label_count)
         .map(|i| {
-            let x = (data_preview.length as f64) * (i as f64) / (x_label_count as f64);
-            Span::styled(format!("{:.1}", x), color_consts::COLOR_WHITE)
+            let x = x_axis_max * (i as f64) / (x_label_count as f64);
+            Span::styled(format!("{:.1}", x), color_consts::CHART_LABEL_COLOR)
         })
         .collect::<Vec<_>>();
 
@@ -581,7 +582,7 @@ fn render_chart_widget(
         .map(|i| {
             let y = data_preview.min
                 + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
-            Span::styled(format!("{:.1}", y), color_consts::COLOR_WHITE)
+            Span::styled(format!("{:.1}", y), color_consts::CHART_LABEL_COLOR)
         })
         .collect::<Vec<_>>();
 
@@ -589,11 +590,18 @@ fn render_chart_widget(
     let ds = Dataset::default()
         .marker(Marker::Braille)
         .graph_type(GraphType::Line)
+        .style(
+            Style::default()
+                .fg(color_consts::CHART_PREVIEW_LINE_COLOR)
+                .bold(),
+        )
         .data(data);
     let bg = match (&state.focus, &state.mode) {
         (
             super::state::Focus::Content,
             super::state::Mode::Normal
+            | super::state::Mode::AttributeCreateDialog
+            | super::state::Mode::AttributeDeleteDialog
             | super::state::Mode::FixedStringOverflowDialog
             | super::state::Mode::FixedStringResizeDialog,
         ) => color_consts::FOCUS_BG_COLOR,
@@ -604,14 +612,14 @@ fn render_chart_widget(
         .x_axis(
             Axis::default()
                 .title("X axis")
-                .style(Style::default().fg(ratatui::style::Color::White))
+                .style(Style::default().fg(color_consts::CHART_AXIS_COLOR))
                 .labels(x_labels)
-                .bounds((0.0, data_preview.length as f64).into()),
+                .bounds((0.0, x_axis_max).into()),
         )
         .y_axis(
             Axis::default()
                 .title("Y axis")
-                .style(Style::default().fg(ratatui::style::Color::White))
+                .style(Style::default().fg(color_consts::CHART_AXIS_COLOR))
                 .labels(y_labels)
                 .bounds((data_preview.min, data_preview.max).into()),
         );
@@ -625,9 +633,20 @@ pub fn render_image_chart(
     x_min: f64,
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
+    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::CHART_PLOT_BG_COLOR);
+    let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::CHART_GRID_COLOR);
+    let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::CHART_AXIS_COLOR);
+    let (line_r, line_g, line_b) =
+        color_consts::rgb_channels(color_consts::CHART_PREVIEW_LINE_COLOR);
+    let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+    let grid = RGBColor(grid_r, grid_g, grid_b);
+    let axis = RGBColor(axis_r, axis_g, axis_b);
+    let line = RGBColor(line_r, line_g, line_b);
+
+    let x_axis_max = preview_x_axis_max(&data_preview);
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     root.margin(10, 10, 10, 10);
-    root.fill(&plotters::prelude::WHITE)
+    root.fill(&plot_bg)
         .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
     let max = data_preview.max;
     let y_label_area_size = format!("{max:.4}").len() as u32 * 3 + 30;
@@ -637,7 +656,7 @@ pub fn render_image_chart(
         .x_label_area_size(30)
         .y_label_area_size(y_label_area_size)
         .build_cartesian_2d(
-            x_min..(x_min + data_preview.length as f64),
+            x_min..(x_min + x_axis_max),
             data_preview.min..data_preview.max,
         )
         .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
@@ -645,17 +664,56 @@ pub fn render_image_chart(
     // Draw the mesh (grid lines)
     chart
         .configure_mesh()
-        .x_label_style(("sans-serif", 18).into_font())
-        .y_label_style(("sans-serif", 18).into_font())
+        .x_label_style(("sans-serif", 18).into_font().color(&axis))
+        .y_label_style(("sans-serif", 18).into_font().color(&axis))
+        .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+        .light_line_style(grid.mix(0.35))
+        .bold_line_style(grid.mix(0.55))
         .draw()
         .map_err(|e| AppError::DrawingError(format!("Error drawing mesh: {}", e)))?;
 
     let data = data_preview.data.iter().map(|(x, y)| (x_min + *x, *y));
-    let line_series = plotters::prelude::LineSeries::new(data, plotters::prelude::BLUE);
+    let line_series =
+        plotters::prelude::LineSeries::new(data, ShapeStyle::from(&line).stroke_width(3));
     chart
         .draw_series(line_series)
         .map_err(|e| AppError::DrawingError(format!("Error drawing line series: {}", e)))?;
     root.present()
         .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
     Ok(())
+}
+
+fn preview_x_axis_max(data_preview: &DatasetPlotingData) -> f64 {
+    match data_preview.data.last() {
+        Some((x, _)) if data_preview.length > 1 => *x,
+        Some(_) | None => 1.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preview_x_axis_max;
+    use crate::data::DatasetPlotingData;
+
+    #[test]
+    fn preview_x_axis_max_uses_last_sample_index_for_multiple_points() {
+        let preview = DatasetPlotingData {
+            data: vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+            length: 3,
+            max: 3.0,
+            min: 1.0,
+        };
+        assert_eq!(preview_x_axis_max(&preview), 2.0);
+    }
+
+    #[test]
+    fn preview_x_axis_max_keeps_single_point_visible() {
+        let preview = DatasetPlotingData {
+            data: vec![(0.0, 1.0)],
+            length: 1,
+            max: 1.0,
+            min: 1.0,
+        };
+        assert_eq!(preview_x_axis_max(&preview), 1.0);
+    }
 }

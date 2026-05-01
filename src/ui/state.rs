@@ -16,7 +16,7 @@ use ratatui_image::thread::ThreadProtocol;
 use crate::{
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::{AppError, FixedStringOverflow},
-    h5f::{plot_projected, H5FNode, HasPath, ImageType, Node},
+    h5f::{plot_projected, AttributeCreateType, H5FNode, HasPath, ImageType, Node},
     search::Searcher,
     ui::mchart::{ChartSource, DatasetChartKind, DatasetChartSource, MultiChartState, Point},
 };
@@ -61,6 +61,8 @@ pub enum Mode {
     Help,
     Command,
     MultiChart,
+    AttributeCreateDialog,
+    AttributeDeleteDialog,
     FixedStringOverflowDialog,
     FixedStringResizeDialog,
 }
@@ -311,6 +313,28 @@ pub struct AttributeEditRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeCreateField {
+    Name,
+    Type,
+    Value,
+}
+
+#[derive(Clone)]
+pub struct AttributeCreateDialogState {
+    pub name: String,
+    pub name_cursor: usize,
+    pub attr_type: AttributeCreateType,
+    pub value: String,
+    pub value_cursor: usize,
+    pub active_field: AttributeCreateField,
+}
+
+#[derive(Clone)]
+pub struct AttributeDeleteDialogState {
+    pub attr_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixedStringOverflowChoice {
     Cancel,
     ChangeToVarLen,
@@ -416,6 +440,8 @@ pub struct AppState<'a> {
     pub chart_preview_state: ChartPreviwState,
     pub segment_state: SegmentState,
     pub command_state: CommandState,
+    pub attribute_create_dialog: Option<AttributeCreateDialogState>,
+    pub attribute_delete_dialog: Option<AttributeDeleteDialogState>,
     pub fixed_string_overflow_dialog: Option<FixedStringOverflowDialogState>,
     pub ui_layout: UiLayoutState,
 }

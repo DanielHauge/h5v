@@ -221,7 +221,11 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     let bg = match (&state.focus, &state.mode) {
         (
             Focus::Tree(_),
-            Mode::Normal | Mode::FixedStringOverflowDialog | Mode::FixedStringResizeDialog,
+            Mode::Normal
+            | Mode::AttributeCreateDialog
+            | Mode::AttributeDeleteDialog
+            | Mode::FixedStringOverflowDialog
+            | Mode::FixedStringResizeDialog,
         ) => color_consts::FOCUS_BG_COLOR,
         _ => color_consts::BG_COLOR,
     };
@@ -245,6 +249,8 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
     match mode {
         Mode::Normal
         | Mode::Command
+        | Mode::AttributeCreateDialog
+        | Mode::AttributeDeleteDialog
         | Mode::FixedStringOverflowDialog
         | Mode::FixedStringResizeDialog => {
             let mut tree_view_skip_offset = 0;
