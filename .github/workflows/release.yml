@@ -85,9 +85,23 @@ jobs:
           - NAME: linux-x64-glibc
             OS: ubuntu-latest
             TARGET: x86_64-unknown-linux-gnu
+            BIN: h5v
+            ARCHIVE_FORMAT: tar.gz
           - NAME: windows-x64-msvc
             OS: windows-latest
             TARGET: x86_64-pc-windows-msvc
+            BIN: h5v.exe
+            ARCHIVE_FORMAT: zip
+          - NAME: macos-x64
+            OS: macos-13
+            TARGET: x86_64-apple-darwin
+            BIN: h5v
+            ARCHIVE_FORMAT: tar.gz
+          - NAME: macos-arm64
+            OS: macos-14
+            TARGET: aarch64-apple-darwin
+            BIN: h5v
+            ARCHIVE_FORMAT: tar.gz
 
     env:
       RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
@@ -103,6 +117,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
 
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -115,25 +133,57 @@ jobs:
 
       - name: Prepare release assets
         shell: bash
+        env:
+          TARGET: ${{ matrix.build.TARGET }}
+          BIN_NAME: ${{ matrix.build.BIN }}
+          ARCHIVE_FORMAT: ${{ matrix.build.ARCHIVE_FORMAT }}
         run: |
-          mkdir -p release
+          python <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import shutil
+          import tarfile
+          import zipfile
 
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            bin="h5v.exe"
-          else
-            bin="h5v"
-          fi
+          release_version = os.environ["RELEASE_VERSION"]
+          target = os.environ["TARGET"]
+          bin_name = os.environ["BIN_NAME"]
+          archive_format = os.environ["ARCHIVE_FORMAT"]
 
-          cp "target/${{ matrix.build.TARGET }}/release/$bin" release/
-          sha512sum "target/${{ matrix.build.TARGET }}/release/$bin" > "release/${bin}.sha512"
-          mv release/ "h5v-${RELEASE_VERSION}/"
+          archive_stem = f"h5v-{target}-v{release_version}"
+          root_dir = pathlib.Path(archive_stem)
+          root_dir.mkdir(exist_ok=True)
+
+          binary_path = pathlib.Path("target") / target / "release" / bin_name
+          shutil.copy2(binary_path, root_dir / bin_name)
+
+          if archive_format == "tar.gz":
+              archive_path = pathlib.Path(f"{archive_stem}.tar.gz")
+              with tarfile.open(archive_path, "w:gz") as tar:
+                  tar.add(root_dir, arcname=root_dir.name)
+          elif archive_format == "zip":
+              archive_path = pathlib.Path(f"{archive_stem}.zip")
+              with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                  for path in root_dir.rglob("*"):
+                      archive.write(path, arcname=path.relative_to(root_dir.parent))
+          else:
+              raise RuntimeError(f"Unsupported archive format: {archive_format}")
+
+          digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+          pathlib.Path(f"{archive_path.name}.sha256").write_text(
+              f"{digest}  {archive_path.name}\n",
+              encoding="utf-8",
+          )
+          shutil.rmtree(root_dir)
+          PY
 
       - name: Publish to GitHub
         uses: svenstaro/upload-release-action@v2
         if: ${{ !env.ACT }}
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: h5v-${{ env.RELEASE_VERSION }}/*
+          file: h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
           file_glob: true
           overwrite: false
           tag: v${{ env.RELEASE_VERSION }}

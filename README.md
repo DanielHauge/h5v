@@ -158,9 +158,22 @@ h5v file.h5 --script-test --script setup.h5v
 
 ## Installation
 
+Prebuilt binaries (recommended once a release is published):
+
+```bash
+cargo binstall h5v
+```
+
+Or download the archive for your platform from the GitHub Releases page.
+
+Source build fallback:
+
 ```bash
 cargo install h5v
 ```
+
+On Linux, source builds may require native build dependencies such as `cmake`, `pkg-config`,
+`libfontconfig`, `freetype`, and `expat` development packages.
 
 ## Roadmap
 

@@ -8,6 +8,14 @@ readme = "README.md"
 repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }{ archive-suffix }"
+bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.'cfg(windows)']
+pkg-fmt = "zip"
+
 [dependencies]
 arboard = "3.6.1"
 bktree = "1.0.1"
