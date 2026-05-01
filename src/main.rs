@@ -32,7 +32,7 @@ pub const GIT_VERSION: &str =
 #[derive(Parser, Debug)]
 #[clap(
     author = "Daniel F. Hauge animcuil@gmail.com",
-    about = "HDF5 Terminal Viewer (h5v)",
+    about = "HDF5 terminal viewer with previews, compound schema browsing, and scripting",
     version = GIT_VERSION
 )]
 struct Args {

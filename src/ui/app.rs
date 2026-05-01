@@ -1457,13 +1457,15 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                 (
                     "View",
                     &[
-                        (&["Tab"], "preview / matrix"),
+                        (&["Tab"], "preview / matrix / schema"),
                         (&["y"], "copy selected"),
                         (
                             &["a", "d", "Delete"],
                             "create / delete attribute (attrs pane)",
                         ),
+                        (&["Esc"], "cancel active popup"),
                         (&["j/k", "PgUp/PgDn"], "navigate large preview segments"),
+                        (&["compound root"], "recursive schema preview"),
                         (&["m", "M"], "add / open chart"),
                     ],
                 ),

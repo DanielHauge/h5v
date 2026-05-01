@@ -1,8 +1,7 @@
 # h5v
 
-HDF5 Terminal Viewer.
-
-It is a viewer for HDF5 files, allowing you to explore the contents of HDF5 files in a terminal with chart,string, matrix and image previews of the data including attributes.
+HDF5 terminal viewer with matrix/chart/image previews, compound-schema browsing, editable
+attributes, and startup scripting.
 
 Run `h5v` with the path to an HDF5 file:
 
@@ -14,11 +13,21 @@ h5v path/to/file.h5
 ![](./docs/image_example.png)
 ![](./docs/matrix_example.png)
 
+## Highlights
+
+- Explore files as a tree with dataset, group, link, and synthetic compound-field nodes.
+- Preview numeric data as charts, dense data as matrices, and image datasets inline.
+- Browse compound datasets from the root schema down to individual projected fields.
+- Edit values and attributes in-place, and create or delete scalar attributes from the UI or
+  command mode.
+- Script startup actions with `--command`, `--script`, `--script-test`, and `press ...`.
+
 ## Controls
 
 - `j`/`k`/`up`/`down`: Navigate lists and move selections
 - `h`/`l`/`left`/`right`: Collapse/expand tree items and move within content
 - `enter`/`space`: Toggle tree items
+- `Tab`: Switch between preview and matrix when both are available
 - `shift` + `arrow`: Shift focus between panes
 - `ctrl` + `w`, then `h`/`j`/`k`/`l`: Move focus vim-style between panes
 - `s` or `ctrl` + `w`, then `o`: Toggle the tree/attribute sidebar
@@ -34,6 +43,10 @@ h5v path/to/file.h5
 - `c`/`C`: Shift column axis in matrix mode.
 - `r`/`R`: Shift row axis in matrix mode.
 - `x`/`X`: Shift x-axis selector in preview mode.
+- `e`: Edit the focused preview value or attribute
+- `a`: Create an attribute from the attributes pane
+- `d`/`Delete`: Delete the focused attribute from the attributes pane
+- `Esc`: Cancel popups such as attribute create/delete dialogs
 - `g`/`Home`: Go to the top
 - `G`/`End`: Go to the bottom
 - `m`: Add currently selected preview to multichart
@@ -68,6 +81,16 @@ Expression-derived series support:
 
 Shift focus to an attribute name or value or preview value and press `enter` or `e` to enter edit mode. Edit mode will open \"$EDITOR\" with the current value. Edit the value then save and close the editor to update the value in the file. In read-only mode, h5v will warn instead of editing.
 
+## Compound datasets
+
+Compound datasets expose synthetic child nodes for each field. When you focus the root compound node,
+the Preview tab now shows a recursive schema view for the current compound type instead of a blank
+content pane. Nested compounds and compound arrays are expanded, and pathological recursion is cut
+off with an explicit placeholder so schema rendering always terminates cleanly.
+
+Use the tree to drill into individual compound fields when you want normal preview or matrix behavior
+for a projected leaf field.
+
 ## Commands
 
 Use `:` to open the bottom command minibuffer, type a command, and press `enter` to run it.
@@ -92,6 +115,8 @@ Examples:
 - `x next`
 - `row prev`
 - `index next 10`
+- `attr create title string "release candidate"`
+- `attr delete title`
 - `mchart open`
 - `mchart add /group/dataset[..,0]`
 - `mchart expr "($1, !/ticks + #OFFSET)"`
@@ -114,6 +139,7 @@ Startup commands use the same parser and command catalog as the interactive mini
 - `--script -`: read startup commands from stdin and warn if EOF arrives without any commands
 - piped stdin is also consumed implicitly without `--script -`
 - `--script-test` or `-ct`: validate startup commands and print a formatted dry-run summary
+- attribute commands, multichart commands, and `press ...` are all available from startup scripts
 
 Scripts and inline command strings can separate commands with either newlines or `;`.
 Blank lines and lines starting with `#` are ignored in script input.
@@ -123,6 +149,7 @@ Examples:
 ```bash
 h5v file.h5 -c "focus content" -c "mode matrix"
 h5v file.h5 -c "mchart open" -c "mchart add /group/dataset[..,0]"
+h5v file.h5 -c "attr create title string \"draft\""
 h5v file.h5 -c "mchart expr \"($1, !/ticks + #OFFSET)\""
 h5v file.h5 --script setup.h5v
 printf 'toggle-tree; mode preview\nreload\n' | h5v file.h5
@@ -137,5 +164,5 @@ cargo install h5v
 
 ## Roadmap
 
-- [ ] Adding/Deletion of attributes/matrix values
+- [ ] Richer schema-focused UX for compound datasets
 - [ ] Adding/Deletion of datasets and groups
