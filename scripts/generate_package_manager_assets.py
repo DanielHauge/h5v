@@ -9,7 +9,7 @@ import textwrap
 
 
 LINUX_X64_TARGET = "x86_64-unknown-linux-gnu"
-MACOS_X64_TARGET = "x86_64-apple-darwin"
+# MACOS_X64_TARGET = "x86_64-apple-darwin"
 MACOS_ARM64_TARGET = "aarch64-apple-darwin"
 WINDOWS_X64_TARGET = "x86_64-pc-windows-msvc"
 
@@ -32,9 +32,10 @@ def release_url(repo: str, version: str, filename: str) -> str:
     return f"https://github.com/{repo}/releases/download/v{version}/{filename}"
 
 
-def write_homebrew_formula(output_dir: Path, asset_dir: Path, repo: str, version: str) -> None:
+def write_homebrew_formula(
+    output_dir: Path, asset_dir: Path, repo: str, version: str
+) -> None:
     linux_filename = asset_name(version, LINUX_X64_TARGET, "tar.gz")
-    macos_x64_filename = asset_name(version, MACOS_X64_TARGET, "tar.gz")
     macos_arm64_filename = asset_name(version, MACOS_ARM64_TARGET, "tar.gz")
 
     formula = textwrap.dedent(
@@ -46,13 +47,8 @@ def write_homebrew_formula(output_dir: Path, asset_dir: Path, repo: str, version
           license "Apache-2.0"
 
           on_macos do
-            if Hardware::CPU.arm?
               url "{release_url(repo, version, macos_arm64_filename)}"
               sha256 "{sha256_for(asset_dir, macos_arm64_filename)}"
-            else
-              url "{release_url(repo, version, macos_x64_filename)}"
-              sha256 "{sha256_for(asset_dir, macos_x64_filename)}"
-            end
           end
 
           on_linux do
@@ -75,14 +71,18 @@ def write_homebrew_formula(output_dir: Path, asset_dir: Path, repo: str, version
     formula_path.write_text(formula, encoding="utf-8")
 
 
-def write_winget_manifests(output_dir: Path, asset_dir: Path, repo: str, version: str) -> None:
+def write_winget_manifests(
+    output_dir: Path, asset_dir: Path, repo: str, version: str
+) -> None:
     package_identifier = "DanielHauge.h5v"
     windows_filename = asset_name(version, WINDOWS_X64_TARGET, "zip")
     windows_url = release_url(repo, version, windows_filename)
     windows_sha = sha256_for(asset_dir, windows_filename)
     relative_binary = f"h5v-{WINDOWS_X64_TARGET}-v{version}/h5v.exe"
 
-    manifest_dir = output_dir / "winget" / "manifests" / "d" / "DanielHauge" / "h5v" / version
+    manifest_dir = (
+        output_dir / "winget" / "manifests" / "d" / "DanielHauge" / "h5v" / version
+    )
     manifest_dir.mkdir(parents=True, exist_ok=True)
 
     version_manifest = textwrap.dedent(
@@ -142,7 +142,9 @@ def write_winget_manifests(output_dir: Path, asset_dir: Path, repo: str, version
         """
     )
 
-    (manifest_dir / "DanielHauge.h5v.yaml").write_text(version_manifest, encoding="utf-8")
+    (manifest_dir / "DanielHauge.h5v.yaml").write_text(
+        version_manifest, encoding="utf-8"
+    )
     (manifest_dir / "DanielHauge.h5v.installer.yaml").write_text(
         installer_manifest,
         encoding="utf-8",
@@ -153,7 +155,9 @@ def write_winget_manifests(output_dir: Path, asset_dir: Path, repo: str, version
     )
 
 
-def write_scoop_manifest(output_dir: Path, asset_dir: Path, repo: str, version: str) -> None:
+def write_scoop_manifest(
+    output_dir: Path, asset_dir: Path, repo: str, version: str
+) -> None:
     windows_filename = asset_name(version, WINDOWS_X64_TARGET, "zip")
     manifest = {
         "version": version,
@@ -182,7 +186,9 @@ def write_scoop_manifest(output_dir: Path, asset_dir: Path, repo: str, version: 
     manifest_path.write_text(f"{json.dumps(manifest, indent=2)}\n", encoding="utf-8")
 
 
-def write_aur_pkgbuild(output_dir: Path, asset_dir: Path, repo: str, version: str) -> None:
+def write_aur_pkgbuild(
+    output_dir: Path, asset_dir: Path, repo: str, version: str
+) -> None:
     linux_filename = asset_name(version, LINUX_X64_TARGET, "tar.gz")
     pkgbuild = textwrap.dedent(
         f"""\
