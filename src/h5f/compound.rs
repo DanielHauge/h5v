@@ -340,6 +340,27 @@ impl ProjectionDecode for u64 {
 impl ProjectionDecode for String {
     fn decode(field_type: &TypeDescriptor, bytes: &[u8]) -> Result<Self, AppError> {
         match field_type {
+            TypeDescriptor::FixedArray(inner, size) => {
+                let inner_size = inner.size();
+                let values = bytes
+                    .chunks_exact(inner_size)
+                    .take(*size)
+                    .map(|chunk| String::decode(inner, chunk))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("[{}]", values.join(", ")))
+            }
+            TypeDescriptor::Integer(_) => Ok(decode_i64(field_type, bytes)?.to_string()),
+            TypeDescriptor::Unsigned(_) => Ok(decode_u64(field_type, bytes)?.to_string()),
+            TypeDescriptor::Boolean => Ok((decode_u64(field_type, bytes)? != 0).to_string()),
+            TypeDescriptor::Float(FloatSize::U4) => {
+                Ok(f32::from_le_bytes(to_array(bytes)?).to_string())
+            }
+            TypeDescriptor::Float(FloatSize::U8) => {
+                Ok(f64::from_le_bytes(to_array(bytes)?).to_string())
+            }
+            TypeDescriptor::Enum(enum_type) => {
+                Ok(decode_u64(&TypeDescriptor::Enum(enum_type.clone()), bytes)?.to_string())
+            }
             TypeDescriptor::FixedAscii(_) | TypeDescriptor::FixedUnicode(_) => {
                 let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
                 Ok(String::from_utf8_lossy(&bytes[..end]).to_string())

@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     error::AppError,
-    h5f::{read_scalar_string_dataset, Encoding, H5FNode, Node},
+    h5f::{read_string_dataset_preview, Encoding, H5FNode, Node},
     sprint_typedesc::sprint_type_schema,
 };
 
@@ -116,7 +116,7 @@ pub fn render_string_preview(
             );
         }
         Encoding::Ascii | Encoding::UTF8 | Encoding::UTF8Fixed | Encoding::AsciiFixed => {
-            match read_scalar_string_dataset(dataset, &meta.encoding) {
+            match read_string_dataset_preview(dataset, &meta.encoding) {
                 Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
                 Err(e) => render_error(f, area, format!("Error: {}", e)),
             }

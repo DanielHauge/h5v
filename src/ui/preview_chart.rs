@@ -50,6 +50,12 @@ pub fn render_chart_preview(
     if ds_meta.is_compound_leaf() {
         return render_projected_chart_preview(f, area, node, state, ds, ds_meta);
     }
+    if matches!(
+        ds_meta.matrixable,
+        Some(crate::sprint_typedesc::MatrixRenderType::Strings)
+    ) {
+        return render_string_preview(f, area, node);
+    }
 
     let shape = ds.shape();
     let total_dims = shape.len();

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use hdf5_metno::{Dataset, File, Group};
+use hdf5_metno::{types::TypeDescriptor, Dataset, File, Group};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -178,6 +178,17 @@ impl H5FNode {
             Node::Group(_, _) => {}
             Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
                 result.push(ContentShowMode::Preview);
+            }
+            Node::Dataset(_, dataset_meta)
+                if dataset_meta.is_compound_leaf()
+                    && matches!(
+                        dataset_meta.type_descriptor,
+                        TypeDescriptor::FixedArray(_, _)
+                    ) =>
+            {
+                if dataset_meta.shape.iter().any(|x| *x > 1) {
+                    result.push(ContentShowMode::Matrix);
+                }
             }
             Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
                 Some(matrix_renderable) => match matrix_renderable {

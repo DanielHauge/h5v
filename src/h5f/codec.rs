@@ -1621,6 +1621,76 @@ pub fn read_scalar_string_dataset(
     }
 }
 
+pub fn read_string_dataset_preview(
+    dataset: &Dataset,
+    encoding: &Encoding,
+) -> Result<String, AppError> {
+    if dataset.size() <= 1 {
+        return read_scalar_string_dataset(dataset, encoding);
+    }
+
+    fn format_values(shape: &[usize], values: impl Iterator<Item = String>) -> String {
+        let preview_limit = 64usize;
+        let collected = values.take(preview_limit + 1).collect::<Vec<_>>();
+        let truncated = collected.len() > preview_limit;
+        let shown = if truncated {
+            &collected[..preview_limit]
+        } else {
+            &collected[..]
+        };
+        let mut out = format!("shape {:?}\n\n", shape);
+        for (idx, value) in shown.iter().enumerate() {
+            out.push_str(&format!("[{idx}] {value}\n"));
+        }
+        if truncated {
+            out.push_str("...\n");
+        }
+        out.trim_end().to_string()
+    }
+
+    let shape = dataset.shape();
+    match encoding {
+        Encoding::Ascii => Ok(format_values(
+            &shape,
+            dataset
+                .read::<VarLenAscii, IxDyn>()
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+        )),
+        Encoding::UTF8 => Ok(format_values(
+            &shape,
+            dataset
+                .read::<VarLenUnicode, IxDyn>()
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+        )),
+        Encoding::UTF8Fixed => Ok(format_values(
+            &shape,
+            dataset
+                .read::<FixedUnicode<32768>, IxDyn>()
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+        )),
+        Encoding::AsciiFixed => Ok(format_values(
+            &shape,
+            dataset
+                .read::<FixedAscii<32768>, IxDyn>()
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+        )),
+        Encoding::LittleEndian => Err(AppError::EditError(
+            "LittleEndian not supported for string data".to_string(),
+        )),
+        Encoding::Unknown => Err(AppError::EditError(
+            "Unknown encoding not supported for string data".to_string(),
+        )),
+    }
+}
+
 pub fn read_single_value_dataset<T>(dataset: &Dataset) -> Result<T, AppError>
 where
     T: H5Type + Clone,

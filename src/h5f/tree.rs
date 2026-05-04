@@ -31,6 +31,20 @@ pub enum ExternalObject {
     LinkBroken(String, String),
 }
 
+fn highlight_hint_from_name(name: &str) -> Option<String> {
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.trim())
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.to_ascii_lowercase())
+}
+
+fn resolve_highlight_hint(attr_hint: Option<String>, dataset_name: &str) -> Option<String> {
+    attr_hint
+        .map(|hint| hint.trim().to_ascii_lowercase())
+        .filter(|hint| !hint.is_empty())
+        .or_else(|| highlight_hint_from_name(dataset_name))
+}
+
 impl HasChildren for Group {
     fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
         let soft_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
@@ -404,6 +418,17 @@ fn build_dataset_meta(
     data_bytesize: usize,
     total_elems: usize,
 ) -> Result<DatasetMeta, hdf5_metno::Error> {
+    fn projected_matrixable(
+        type_descriptor: &hdf5_metno::types::TypeDescriptor,
+    ) -> Option<crate::sprint_typedesc::MatrixRenderType> {
+        match type_descriptor {
+            hdf5_metno::types::TypeDescriptor::FixedArray(_, _) => {
+                Some(crate::sprint_typedesc::MatrixRenderType::Strings)
+            }
+            _ => is_type_matrixable(type_descriptor),
+        }
+    }
+
     let is_compound_container = compound_projection
         .as_ref()
         .and_then(|projection| projection.current_compound_type())
@@ -420,11 +445,13 @@ fn build_dataset_meta(
     let hl = if compound_projection.is_some() {
         None
     } else {
-        dataset.attr("HIGHLIGHT").ok().map(|a| {
-            a.read_scalar::<VarLenUnicode>()
-                .map(|v| v.to_string())
-                .unwrap_or_default()
-        })
+        resolve_highlight_hint(
+            dataset
+                .attr("HIGHLIGHT")
+                .ok()
+                .and_then(|a| a.read_scalar::<VarLenUnicode>().ok().map(|v| v.to_string())),
+            &display_name,
+        )
     };
 
     Ok(DatasetMeta {
@@ -441,6 +468,8 @@ fn build_dataset_meta(
         chunk_shape,
         matrixable: if is_compound_container {
             None
+        } else if compound_projection.is_some() {
+            projected_matrixable(&type_descriptor)
         } else {
             is_type_matrixable(&type_descriptor)
         },
@@ -475,5 +504,39 @@ impl H5F {
         root.borrow_mut().expand_toggle()?;
 
         Ok(Self { root, file })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{highlight_hint_from_name, resolve_highlight_hint};
+
+    #[test]
+    fn highlight_attribute_takes_precedence_over_extension() {
+        assert_eq!(
+            resolve_highlight_hint(Some("json".to_string()), "demo.py"),
+            Some("json".to_string())
+        );
+    }
+
+    #[test]
+    fn dataset_extension_is_used_when_attribute_is_missing() {
+        assert_eq!(
+            resolve_highlight_hint(None, "pipeline.yml"),
+            Some("yml".to_string())
+        );
+    }
+
+    #[test]
+    fn blank_attribute_still_falls_back_to_extension() {
+        assert_eq!(
+            resolve_highlight_hint(Some("   ".to_string()), "demo.py"),
+            Some("py".to_string())
+        );
+    }
+
+    #[test]
+    fn names_without_extensions_do_not_get_highlighting() {
+        assert_eq!(highlight_hint_from_name("messages"), None);
     }
 }

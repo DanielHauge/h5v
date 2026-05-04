@@ -1004,21 +1004,58 @@ pub fn handle_image_load(
                     send_image_success(&tx_events, key, thread_protocol, clipboard_image);
                 }
                 ImageType::Bitmap => {
-                    let data: Array2<bool> = match match window_bounds(window) {
-                        Some((start, end)) => match window.map(|w| w.axis) {
-                            Some(ImageWindowAxis::Cols) => {
-                                req.dataset.read_slice::<bool, _, _>(s![.., start..end])
+                    let data: Array2<bool> = match req
+                        .dataset
+                        .dtype()
+                        .ok()
+                        .and_then(|dtype| dtype.to_descriptor().ok())
+                    {
+                        Some(hdf5_metno::types::TypeDescriptor::Boolean) => {
+                            match match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => {
+                                        req.dataset.read_slice::<bool, _, _>(s![.., start..end])
+                                    }
+                                    Some(ImageWindowAxis::Rows) => {
+                                        req.dataset.read_slice::<bool, _, _>(s![start..end, ..])
+                                    }
+                                    None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
+                                },
+                                None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
+                            } {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    send_image_failure(&tx_events, key.clone(), e.to_string());
+                                    continue;
+                                }
                             }
-                            Some(ImageWindowAxis::Rows) => {
-                                req.dataset.read_slice::<bool, _, _>(s![start..end, ..])
+                        }
+                        Some(hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)) => {
+                            match match window_bounds(window) {
+                                Some((start, end)) => match window.map(|w| w.axis) {
+                                    Some(ImageWindowAxis::Cols) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![.., start..end])
+                                    }
+                                    Some(ImageWindowAxis::Rows) => {
+                                        req.dataset.read_slice::<u8, _, _>(s![start..end, ..])
+                                    }
+                                    None => req.dataset.read_slice::<u8, _, _>(s![.., ..]),
+                                },
+                                None => req.dataset.read_slice::<u8, _, _>(s![.., ..]),
+                            } {
+                                Ok(d) => d.mapv(|value| value != 0),
+                                Err(e) => {
+                                    send_image_failure(&tx_events, key.clone(), e.to_string());
+                                    continue;
+                                }
                             }
-                            None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
-                        },
-                        None => req.dataset.read_slice::<bool, _, _>(s![.., ..]),
-                    } {
-                        Ok(d) => d,
-                        Err(e) => {
-                            send_image_failure(&tx_events, key.clone(), e.to_string());
+                        }
+                        _ => {
+                            send_image_failure(
+                                &tx_events,
+                                key.clone(),
+                                "Unsupported bitmap storage type; expected bool or u8",
+                            );
                             continue;
                         }
                     };
