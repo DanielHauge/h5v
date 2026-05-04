@@ -134,8 +134,41 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-wix
+        if: runner.os == 'Windows'
+        run: cargo install --locked cargo-wix
+
       - name: Build
         run: cargo build --release --target ${{ matrix.build.TARGET }}
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.build.TARGET }}
+        run: |
+          cargo wix \
+            --no-build \
+            --target "$TARGET" \
+            --target-bin-dir "target/$TARGET/release" \
+            --version "${RELEASE_VERSION}" \
+            --output "h5v-${TARGET}-v${RELEASE_VERSION}.msi"
+
+          python <<'PY'
+          import hashlib
+          import os
+          import pathlib
+
+          release_version = os.environ["RELEASE_VERSION"]
+          target = os.environ["TARGET"]
+          msi_path = pathlib.Path(f"h5v-{target}-v{release_version}.msi")
+
+          digest = hashlib.sha256(msi_path.read_bytes()).hexdigest()
+          pathlib.Path(f"{msi_path.name}.sha256").write_text(
+              f"{digest}  {msi_path.name}\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Prepare release assets
         shell: bash
@@ -306,59 +339,6 @@ jobs:
           git commit -m "chore: update package manager manifests for v${RELEASE_VERSION}"
           git pull --rebase origin "$branch"
           git push origin HEAD:"$branch"
-
-  submit-winget:
-    name: Submit WinGet manifest
-    needs:
-      - generate-changelog
-      - package-manager-assets
-    if: ${{ inputs.publish }}
-    runs-on: windows-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    env:
-      RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
-      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
-
-    steps:
-      - name: Download package manager artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: package-manager-assets
-          path: package-manager-assets
-
-      - name: Validate WinGet token
-        shell: pwsh
-        run: |
-          if (-not $env:WINGET_CREATE_GITHUB_TOKEN) {
-            throw "WINGET_CREATE_GITHUB_TOKEN is required for WinGet submission."
-          }
-
-          $headers = curl.exe -fsSI `
-            -H "Authorization: Bearer $env:WINGET_CREATE_GITHUB_TOKEN" `
-            -H "User-Agent: h5v-release-workflow" `
-            https://api.github.com/user
-
-          $oauthScopes = (
-            $headers |
-            Select-String '^x-oauth-scopes:\s*(.*)$'
-          ).Matches.Groups[1].Value.Trim()
-
-          if (-not $oauthScopes) {
-            throw "WINGET_CREATE_GITHUB_TOKEN must be a classic GitHub PAT. Fine-grained tokens are not supported by wingetcreate."
-          }
-
-          if ($oauthScopes -notmatch '(^|,\s*)(public_repo|repo)(,|$)') {
-            throw "WINGET_CREATE_GITHUB_TOKEN must include the public_repo scope."
-          }
-
-      - name: Submit WinGet manifest
-        shell: pwsh
-        run: |
-          curl.exe -JLO https://aka.ms/wingetcreate/latest
-          $manifestPath = "package-manager-assets/winget/manifests/d/DanielHauge/h5v/${env:RELEASE_VERSION}"
-          .\wingetcreate.exe submit --prtitle "Add h5v ${env:RELEASE_VERSION}" --no-open $manifestPath
 
   publish-aur:
     name: Publish AUR package
