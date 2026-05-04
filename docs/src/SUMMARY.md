@@ -1,3 +1,18 @@
 # Summary
 
 - [Introduction](./intro.md)
+- [Installation](./installation.md)
+- [Quick start](./quick-start.md)
+- [Navigation and layout](./navigation.md)
+- [Controls reference](./controls.md)
+- [HDF5 feature support](./hdf5-support.md)
+- [Preview types](./previews.md)
+- [Matrix views](./matrix.md)
+- [Images](./images.md)
+  - [Image conventions](./image-conventions.md)
+- [Compound datasets](./compound-datasets.md)
+- [Commands](./commands.md)
+  - [Startup scripting](./startup-scripting.md)
+- [Multichart](./multichart.md)
+  - [Multichart expressions](./multichart-expressions.md)
+- [Troubleshooting and limits](./troubleshooting.md)
