@@ -3,7 +3,7 @@
 set -eu
 
 REPO="${H5V_REPO:-DanielHauge/h5v}"
-INSTALL_DIR="${H5V_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${H5V_INSTALL_DIR-}"
 VERSION=""
 DRY_RUN=0
 
@@ -16,7 +16,8 @@ Usage:
 
 Environment:
   H5V_REPO         Override the GitHub repository (default: DanielHauge/h5v)
-  H5V_INSTALL_DIR  Override the install directory (default: ~/.local/bin)
+  H5V_INSTALL_DIR  Override the install directory (default: first writable PATH dir,
+                   otherwise ~/.local/bin on Linux or ~/bin elsewhere)
 EOF
 }
 
@@ -64,6 +65,30 @@ normalize_version() {
     esac
 }
 
+default_install_dir() {
+    platform="$1"
+    old_ifs=$IFS
+    IFS=:
+    for dir in $PATH; do
+        [ -n "$dir" ] || continue
+        [ -d "$dir" ] || continue
+        [ -w "$dir" ] || continue
+        printf '%s\n' "$dir"
+        IFS=$old_ifs
+        return
+    done
+    IFS=$old_ifs
+
+    case "$platform" in
+        linux)
+            printf '%s\n' "$HOME/.local/bin"
+            ;;
+        *)
+            printf '%s\n' "$HOME/bin"
+            ;;
+    esac
+}
+
 latest_tag() {
     curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" \
         | sed 's|.*/||'
@@ -88,7 +113,6 @@ verify_sha256() {
 }
 
 require_cmd curl
-require_cmd tar
 require_cmd mktemp
 require_cmd sed
 
@@ -97,16 +121,35 @@ arch="$(uname -m)"
 
 case "${os}:${arch}" in
     Linux:x86_64|Linux:amd64)
+        platform="linux"
         target="x86_64-unknown-linux-gnu"
+        archive_format="tar.gz"
+        binary_name="h5v"
         ;;
     Darwin:x86_64)
+        platform="macos"
         target="x86_64-apple-darwin"
+        archive_format="tar.gz"
+        binary_name="h5v"
         ;;
     Darwin:arm64|Darwin:aarch64)
+        platform="macos"
         target="aarch64-apple-darwin"
+        archive_format="tar.gz"
+        binary_name="h5v"
         ;;
     Linux:arm64|Linux:aarch64)
         echo "Linux ARM64 installers are not published yet." >&2
+        exit 1
+        ;;
+    MINGW*:x86_64|MINGW*:amd64|MSYS*:x86_64|MSYS*:amd64|CYGWIN*:x86_64|CYGWIN*:amd64)
+        platform="windows"
+        target="x86_64-pc-windows-msvc"
+        archive_format="zip"
+        binary_name="h5v.exe"
+        ;;
+    MINGW*:arm64|MINGW*:aarch64|MSYS*:arm64|MSYS*:aarch64|CYGWIN*:arm64|CYGWIN*:aarch64)
+        echo "Windows ARM64 installers are not published yet." >&2
         exit 1
         ;;
     *)
@@ -114,6 +157,10 @@ case "${os}:${arch}" in
         exit 1
         ;;
 esac
+
+if [ -z "$INSTALL_DIR" ]; then
+    INSTALL_DIR="$(default_install_dir "$platform")"
+fi
 
 if [ -n "$VERSION" ]; then
     version="$(normalize_version "$VERSION")"
@@ -123,7 +170,7 @@ else
     version="$(normalize_version "$tag")"
 fi
 
-archive="h5v-${target}-v${version}.tar.gz"
+archive="h5v-${target}-v${version}.${archive_format}"
 checksum="${archive}.sha256"
 archive_url="https://github.com/${REPO}/releases/download/${tag}/${archive}"
 checksum_url="https://github.com/${REPO}/releases/download/${tag}/${checksum}"
@@ -146,12 +193,33 @@ checksum_path="${tmpdir}/${checksum}"
 curl -fsSL "$archive_url" -o "$archive_path"
 curl -fsSL "$checksum_url" -o "$checksum_path"
 verify_sha256 "$archive_path" "$checksum_path"
-tar -xzf "$archive_path" -C "$tmpdir"
+
+case "$archive_format" in
+    tar.gz)
+        require_cmd tar
+        tar -xzf "$archive_path" -C "$tmpdir"
+        ;;
+    zip)
+        if tar -tf "$archive_path" >/dev/null 2>&1; then
+            tar -xf "$archive_path" -C "$tmpdir"
+        elif command -v unzip >/dev/null 2>&1; then
+            unzip -q "$archive_path" -d "$tmpdir"
+        elif command -v bsdtar >/dev/null 2>&1; then
+            bsdtar -xf "$archive_path" -C "$tmpdir"
+        else
+            echo "Need tar, unzip, or bsdtar to extract ${archive}" >&2
+            exit 1
+        fi
+        ;;
+esac
 
 mkdir -p "$INSTALL_DIR"
-install -m 755 "${tmpdir}/h5v-${target}-v${version}/h5v" "${INSTALL_DIR}/h5v"
+cp "${tmpdir}/h5v-${target}-v${version}/${binary_name}" "${INSTALL_DIR}/${binary_name}"
+if [ "$platform" != "windows" ]; then
+    chmod 755 "${INSTALL_DIR}/${binary_name}"
+fi
 
-printf 'Installed h5v to %s/h5v\n' "$INSTALL_DIR"
+printf 'Installed h5v to %s/%s\n' "$INSTALL_DIR" "$binary_name"
 case ":$PATH:" in
     *":${INSTALL_DIR}:"*) ;;
     *)

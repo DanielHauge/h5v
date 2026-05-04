@@ -11,7 +11,11 @@
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
 
+The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin. It defaults to the first writable directory already on `PATH`, falling back to `~/.local/bin` on Linux and `~/bin` elsewhere.
+
 `h5v` is a Rust TUI for inspecting HDF5 files without leaving the terminal. It is built for fast data exploration: browse the tree, switch between chart and matrix views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows for repeatable sessions.
+
+<div class="oranda-hide">
 
 ## What it looks like
 
@@ -30,6 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | s
 - Edit values and scalar attributes in place when the file is opened with `-w`.
 - Automate repeatable sessions with `--command`, `--script`, `--script-test`, and simulated `press ...` input.
 - Build derived comparisons and expression-based overlays in multichart mode.
+
+</div>
 
 ## Quick start
 

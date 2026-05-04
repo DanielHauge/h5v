@@ -2,11 +2,13 @@
 
 ## Recommended: shell installer
 
-Linux and macOS can install the latest release directly to `~/.local/bin` by default:
+Linux and macOS can install the latest release directly from GitHub:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
+
+The shell installer also works in Git Bash, MSYS2, and Cygwin on Windows. By default it installs to the first writable directory already on `PATH`; if none is available, it falls back to `~/.local/bin` on Linux and `~/bin` elsewhere.
 
 The installer also supports:
 

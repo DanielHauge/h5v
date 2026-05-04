@@ -8,7 +8,31 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $InstallDir) {
-    $InstallDir = Join-Path $HOME ".local\bin"
+    function Test-DirectoryWritable([string]$Path) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+            return $false
+        }
+
+        $probe = Join-Path $Path (".h5v-write-test-" + [guid]::NewGuid().ToString("N"))
+        try {
+            [System.IO.File]::WriteAllText($probe, "")
+            Remove-Item -LiteralPath $probe -Force
+            return $true
+        } catch {
+            return $false
+        }
+    }
+
+    foreach ($pathEntry in ($env:PATH -split ';') | Where-Object { $_ }) {
+        if (Test-DirectoryWritable $pathEntry) {
+            $InstallDir = $pathEntry
+            break
+        }
+    }
+
+    if (-not $InstallDir) {
+        $InstallDir = Join-Path $HOME "bin"
+    }
 }
 
 function Normalize-Version([string]$Value) {
