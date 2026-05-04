@@ -16,6 +16,12 @@ pkg-fmt = "tgz"
 [package.metadata.binstall.overrides.'cfg(windows)']
 pkg-fmt = "zip"
 
+[package.metadata.wix]
+upgrade-guid = "28EED06D-832F-4103-9790-5C224AF6204D"
+path-guid = "FDD2D27B-BEA3-41FA-A316-683AF91FDF97"
+license = false
+eula = false
+
 [dependencies]
 arboard = "3.6.1"
 bktree = "1.0.1"
@@ -61,3 +67,8 @@ arboard = "3.6.1"
 [profile.release]
 lto = "fat"     # Enable link-time optimization
 panic = "abort"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
