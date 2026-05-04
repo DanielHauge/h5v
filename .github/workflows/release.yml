@@ -15,6 +15,10 @@ on:
         required: true
         default: true
 
+concurrency:
+  group: deployment-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-test:
     name: Build and verify
@@ -258,8 +262,8 @@ jobs:
           tag: v${{ env.RELEASE_VERSION }}
           release_name: Release v${{ env.RELEASE_VERSION }}
 
-  publish-homebrew-formula:
-    name: Publish Homebrew formula
+  publish-package-manager-manifests:
+    name: Publish package manager manifests
     needs:
       - generate-changelog
       - package-manager-assets
@@ -279,62 +283,29 @@ jobs:
           name: package-manager-assets
           path: package-manager-assets
 
-      - name: Update Formula/h5v.rb
+      - name: Update Homebrew formula and Scoop manifest
         run: |
           mkdir -p Formula
           cp package-manager-assets/homebrew/h5v.rb Formula/h5v.rb
-
-      - name: Commit formula update
-        if: ${{ inputs.publish }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/h5v.rb
-          if git diff --cached --quiet; then
-            echo "Formula unchanged"
-            exit 0
-          fi
-          git commit -m "chore: update Homebrew formula for v${RELEASE_VERSION}"
-          git push origin HEAD:${{ github.ref_name }}
-
-  publish-scoop-manifest:
-    name: Publish Scoop manifest
-    needs:
-      - generate-changelog
-      - package-manager-assets
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Download package manager artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: package-manager-assets
-          path: package-manager-assets
-
-      - name: Update bucket/h5v.json
-        run: |
           mkdir -p bucket
           cp package-manager-assets/scoop/h5v.json bucket/h5v.json
 
-      - name: Commit Scoop manifest update
+      - name: Commit package manager manifest updates
         if: ${{ inputs.publish }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch="${{ github.ref_name }}"
+          git fetch origin "$branch"
+          git add Formula/h5v.rb
           git add bucket/h5v.json
           if git diff --cached --quiet; then
-            echo "Scoop manifest unchanged"
+            echo "Package manager manifests unchanged"
             exit 0
           fi
-          git commit -m "chore: update Scoop manifest for v${RELEASE_VERSION}"
-          git push origin HEAD:${{ github.ref_name }}
+          git commit -m "chore: update package manager manifests for v${RELEASE_VERSION}"
+          git pull --rebase origin "$branch"
+          git push origin HEAD:"$branch"
 
   submit-winget:
     name: Submit WinGet manifest
@@ -356,6 +327,31 @@ jobs:
         with:
           name: package-manager-assets
           path: package-manager-assets
+
+      - name: Validate WinGet token
+        shell: pwsh
+        run: |
+          if (-not $env:WINGET_CREATE_GITHUB_TOKEN) {
+            throw "WINGET_CREATE_GITHUB_TOKEN is required for WinGet submission."
+          }
+
+          $headers = curl.exe -fsSI `
+            -H "Authorization: Bearer $env:WINGET_CREATE_GITHUB_TOKEN" `
+            -H "User-Agent: h5v-release-workflow" `
+            https://api.github.com/user
+
+          $oauthScopes = (
+            $headers |
+            Select-String '^x-oauth-scopes:\s*(.*)$'
+          ).Matches.Groups[1].Value.Trim()
+
+          if (-not $oauthScopes) {
+            throw "WINGET_CREATE_GITHUB_TOKEN must be a classic GitHub PAT. Fine-grained tokens are not supported by wingetcreate."
+          }
+
+          if ($oauthScopes -notmatch '(^|,\s*)(public_repo|repo)(,|$)') {
+            throw "WINGET_CREATE_GITHUB_TOKEN must include the public_repo scope."
+          }
 
       - name: Submit WinGet manifest
         shell: pwsh
