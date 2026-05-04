@@ -1,7 +1,7 @@
 
 <div class="oranda-hide">
 <p align="center" class="hide-">
-  <img src="./docs/src/assets/banner.png" alt="h5v banner showing HDF5 terminal viewing" />
+  <img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/banner.png" alt="h5v banner showing HDF5 terminal viewing" />
 </p>
 </div>
 
@@ -21,11 +21,11 @@ The shell installer works on Linux, macOS, and POSIX-style Windows shells such a
 
 | Charts | Images |
 | --- | --- |
-| ![Chart preview](./docs/src/assets/chart.jpg) | ![Image preview](./docs/src/assets/images.jpg) |
+| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg) | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg) |
 | Multichart | Commands |
-| ![Multichart view](./docs/src/assets/multi-chart.jpg) | ![Command mode](./docs/src/assets/cmd.jpg) |
+| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg) |
 | Help | Scripting |
-| ![Help overlay](./docs/src/assets/help.jpg) | ![Startup scripting and code view](./docs/src/assets/code.jpg) |
+| ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg) | ![Startup scripting and code view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/code.jpg) |
 
 ## Highlights
 
@@ -93,19 +93,19 @@ On Linux, source builds may require native packages such as `cmake`, `pkg-config
 
 ## Documentation
 
-The full manual lives in [`docs/src`](./docs/src) and is organized as an mdBook.
+The full manual is published as an mdBook at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
 
 | Guide | Link |
 | --- | --- |
-| Book contents | [`docs/src/SUMMARY.md`](./docs/src/SUMMARY.md) |
-| Installation | [`docs/src/installation.md`](./docs/src/installation.md) |
-| Navigation and layout | [`docs/src/navigation.md`](./docs/src/navigation.md) |
-| Controls reference | [`docs/src/controls.md`](./docs/src/controls.md) |
-| HDF5 support and previews | [`docs/src/hdf5-support.md`](./docs/src/hdf5-support.md) |
-| Images and conventions | [`docs/src/images.md`](./docs/src/images.md) |
-| Commands and scripting | [`docs/src/commands.md`](./docs/src/commands.md) |
-| Multichart guide | [`docs/src/multichart.md`](./docs/src/multichart.md) |
-| Bundled example workflow | [`examples/h5v-example.h5`](./examples/h5v-example.h5) and [`examples/h5v-example.h5v`](./examples/h5v-example.h5v) |
+| Book contents | [Overview](https://danielhauge.github.io/h5v/book/) |
+| Installation | [Installation](https://danielhauge.github.io/h5v/book/installation.html) |
+| Navigation and layout | [Navigation](https://danielhauge.github.io/h5v/book/navigation.html) |
+| Controls reference | [Controls](https://danielhauge.github.io/h5v/book/controls.html) |
+| HDF5 support and previews | [HDF5 support](https://danielhauge.github.io/h5v/book/hdf5-support.html) |
+| Images and conventions | [Images](https://danielhauge.github.io/h5v/book/images.html) |
+| Commands and scripting | [Commands](https://danielhauge.github.io/h5v/book/commands.html) |
+| Multichart guide | [Multichart](https://danielhauge.github.io/h5v/book/multichart.html) |
+| Bundled example workflow | [`examples/h5v-example.h5`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5) and [`examples/h5v-example.h5v`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5v) |
 
 ## Core interaction model
 
