@@ -1,6 +1,6 @@
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
-use crate::ui::state::{AppToast, Mode};
+use crate::ui::state::AppToast;
 use crate::{error::AppError, ui::state::AppState};
 
 use super::{
@@ -17,7 +17,7 @@ pub fn handle_command_event(
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => match command_action(&key_event) {
                 Some(CommandAction::Submit) => {
-                    state.mode = Mode::Normal;
+                    state.mode = state.command_return_mode.clone();
                     match state.command_state.parse_command() {
                         Ok(cmd) => match execute_command(state, &cmd) {
                             Ok(result) => {
@@ -65,7 +65,7 @@ pub fn handle_command_event(
                     }
                 }
                 Some(CommandAction::Cancel) => {
-                    state.mode = Mode::Normal;
+                    state.mode = state.command_return_mode.clone();
                     Ok(EventResult::Redraw)
                 }
                 Some(CommandAction::ClearWord) | Some(CommandAction::Clear) => {

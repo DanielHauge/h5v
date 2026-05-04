@@ -564,6 +564,7 @@ fn main_recover_loop(
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
         mode: Mode::Normal,
+        command_return_mode: Mode::Normal,
         copying: false,
         searcher: None,
         pending_chord: None,
@@ -588,6 +589,8 @@ fn main_recover_loop(
     }
 
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
+        let command_over_multichart = matches!(state.mode, Mode::Command)
+            && matches!(state.command_return_mode, Mode::MultiChart);
         let frame_area = match state.toast {
             AppToast::Empty => frame.area(),
             AppToast::Info(_) | AppToast::Warning(_) | AppToast::Error(_) => {
@@ -605,8 +608,11 @@ fn main_recover_loop(
             render_help(frame, content_area);
             return;
         }
-        if let Mode::MultiChart = state.mode {
+        if matches!(state.mode, Mode::MultiChart) || command_over_multichart {
             state.multi_chart.render(frame, content_area);
+            if matches!(state.mode, Mode::Command) {
+                render_command_dialog(frame, command_area, state);
+            }
             return;
         }
 

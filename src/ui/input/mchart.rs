@@ -65,6 +65,12 @@ pub(crate) fn handle_mchart_event(
                 }
 
                 match multichart_action(&key_event) {
+                    Some(MultiChartAction::EnterCommand) => {
+                        state.command_return_mode = Mode::MultiChart;
+                        state.mode = Mode::Command;
+                        state.command_state.begin_new_entry();
+                        Ok(EventResult::Redraw)
+                    }
                     Some(MultiChartAction::Exit) => {
                         state.mode = Mode::Normal;
                         Ok(EventResult::Redraw)

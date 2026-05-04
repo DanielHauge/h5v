@@ -426,6 +426,7 @@ pub struct AppState<'a> {
     pub focus: Focus,
     pub multi_chart: MultiChartState,
     pub mode: Mode,
+    pub command_return_mode: Mode,
     pub searcher: Option<Searcher>,
     pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,

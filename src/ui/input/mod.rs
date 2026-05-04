@@ -65,6 +65,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 if let Some(action) = normal_action(&key_event) {
                     return match action {
                         NormalAction::EnterCommand => {
+                            state.command_return_mode = Mode::Normal;
                             state.mode = Mode::Command;
                             state.command_state.begin_new_entry();
                             Ok(EventResult::Redraw)

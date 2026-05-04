@@ -77,6 +77,7 @@ pub enum SearchAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MultiChartAction {
+    EnterCommand,
     Exit,
     Quit,
     ZoomIn,
@@ -269,6 +270,7 @@ pub fn search_action(key: &KeyEvent) -> Option<SearchAction> {
 
 pub fn multichart_action(key: &KeyEvent) -> Option<MultiChartAction> {
     match (key.code, key.modifiers) {
+        (KeyCode::Char(':'), _) => Some(MultiChartAction::EnterCommand),
         (KeyCode::Esc, _) | (KeyCode::Char('M'), _) => Some(MultiChartAction::Exit),
         (KeyCode::Char('q'), _) => Some(MultiChartAction::Quit),
         (KeyCode::Up, KeyModifiers::SHIFT) | (KeyCode::Char('+'), _) | (KeyCode::Char('='), _) => {
@@ -346,6 +348,15 @@ mod tests {
         assert_eq!(
             multichart_action(&key),
             Some(MultiChartAction::ToggleSelectedVisible)
+        );
+    }
+
+    #[test]
+    fn multichart_colon_enters_command_mode() {
+        let key = KeyEvent::new(KeyCode::Char(':'), KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key),
+            Some(MultiChartAction::EnterCommand)
         );
     }
 }
