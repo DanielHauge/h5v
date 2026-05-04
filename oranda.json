@@ -8,13 +8,13 @@
         "artifacts": {
             "package_managers": {
                 "preferred": {
-                    "shell": "curl -fsSL https: //raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh",
-                    "scoop": "scoop bucket add h5v https://github.com/DanielHauge/h5v\nscoop install h5v",
+                    "cargo": "cargo install h5v --locked",
                     "binstall": "cargo binstall h5v",
-                    "arch": "pacman -S h5v-bin"
+                    "shell": "curl -fsSL https: //raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
                 },
                 "additional": {
-                    "cargo": "cargo install h5v --locked"
+                    "arch": "pacman -S h5v-bin",
+                    "scoop": "scoop bucket add h5v https://github.com/DanielHauge/h5v\nscoop install h5v"
                 }
             }
         }
