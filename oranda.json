@@ -6,11 +6,12 @@
     "components": {
         "changelog": true,
         "artifacts": {
+            "cargo_dist": true,
             "package_managers": {
                 "preferred": {
                     "cargo": "cargo install h5v --locked",
                     "binstall": "cargo binstall h5v",
-                    "shell": "curl -fsSL https: //raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
+                    "shell": "curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
                 },
                 "additional": {
                     "arch": "pacman -S h5v-bin",

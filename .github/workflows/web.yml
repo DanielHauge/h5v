@@ -43,7 +43,7 @@ on:
   # tab for your repo to see this one running (the gh-pages deploy will also
   # only show up there).
   workflow_run:
-    workflows: [ "Release" ]
+    workflows: [ "Deployment" ]
     types:
       - completed
 
