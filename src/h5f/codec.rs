@@ -1156,12 +1156,13 @@ pub fn format_dataset_value_for_edit(
     selection: Option<&Selection>,
 ) -> Result<String, AppError> {
     let type_desc = dataset_value_type_descriptor(meta);
-    validate_dataset_value_edit_support(&type_desc)?;
 
     if meta.compound_projection.is_some() {
         let bytes = read_projected_selection_bytes(dataset, meta, selection)?;
-        return format_scalar_memory_for_edit(&type_desc, &bytes);
+        return format_projected_value_for_edit(&type_desc, &bytes);
     }
+
+    validate_dataset_value_edit_support(&type_desc)?;
 
     match &type_desc {
         TypeDescriptor::Integer(int_size) => match int_size {
@@ -1226,14 +1227,15 @@ pub fn write_dataset_value_from_text(
     new_value: &str,
 ) -> Result<String, AppError> {
     let type_desc = dataset_value_type_descriptor(meta);
-    validate_dataset_value_edit_support(&type_desc)?;
 
     if meta.compound_projection.is_some() {
-        let bytes = encode_scalar_memory_from_text(&type_desc, new_value)?;
+        let bytes = encode_projected_value_from_text(&type_desc, new_value)?;
         write_projected_selection_bytes(dataset, meta, selection, &bytes)?;
         dataset.file()?.flush()?;
         return Ok(type_desc.to_string());
     }
+
+    validate_dataset_value_edit_support(&type_desc)?;
 
     match &type_desc {
         TypeDescriptor::Integer(int_size) => match int_size {
@@ -1463,6 +1465,29 @@ fn format_scalar_memory_for_edit(
     }
 }
 
+fn format_fixed_array_memory_for_edit(
+    inner_type: &TypeDescriptor,
+    size: usize,
+    bytes: &[u8],
+) -> Result<String, AppError> {
+    let inner_size = inner_type.size();
+    let expected_len = inner_size * size;
+    if bytes.len() != expected_len {
+        return Err(AppError::EditError(format!(
+            "FixedArray edit size mismatch: expected {} bytes, got {}",
+            expected_len,
+            bytes.len()
+        )));
+    }
+
+    bytes
+        .chunks_exact(inner_size)
+        .take(size)
+        .map(|chunk| format_scalar_memory_for_edit(inner_type, chunk))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|values| values.join("\n"))
+}
+
 fn encode_scalar_memory_from_text(
     type_desc: &TypeDescriptor,
     new_value: &str,
@@ -1519,6 +1544,56 @@ fn encode_scalar_memory_from_text(
         TypeDescriptor::FixedUnicode(size) => encode_fixed_string_value(new_value, *size, false),
         TypeDescriptor::Enum(enum_type) => encode_enum_value_bytes(new_value, enum_type),
         _ => Err(non_editable_dataset_error(type_desc)),
+    }
+}
+
+fn encode_fixed_array_memory_from_text(
+    inner_type: &TypeDescriptor,
+    size: usize,
+    new_value: &str,
+) -> Result<Vec<u8>, AppError> {
+    let mut lines = new_value
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .collect::<Vec<_>>();
+    if matches!(lines.last(), Some(last) if last.is_empty()) {
+        lines.pop();
+    }
+    if lines.len() != size {
+        return Err(AppError::EditError(format!(
+            "Expected {size} array values, got {}. Put one value on each line.",
+            lines.len()
+        )));
+    }
+
+    let mut bytes = Vec::with_capacity(inner_type.size() * size);
+    for line in lines {
+        bytes.extend(encode_scalar_memory_from_text(inner_type, line)?);
+    }
+    Ok(bytes)
+}
+
+fn format_projected_value_for_edit(
+    type_desc: &TypeDescriptor,
+    bytes: &[u8],
+) -> Result<String, AppError> {
+    match type_desc {
+        TypeDescriptor::FixedArray(inner_type, size) => {
+            format_fixed_array_memory_for_edit(inner_type, *size, bytes)
+        }
+        _ => format_scalar_memory_for_edit(type_desc, bytes),
+    }
+}
+
+fn encode_projected_value_from_text(
+    type_desc: &TypeDescriptor,
+    new_value: &str,
+) -> Result<Vec<u8>, AppError> {
+    match type_desc {
+        TypeDescriptor::FixedArray(inner_type, size) => {
+            encode_fixed_array_memory_from_text(inner_type, *size, new_value)
+        }
+        _ => encode_scalar_memory_from_text(type_desc, new_value),
     }
 }
 
@@ -1722,8 +1797,10 @@ mod tests {
     use hdf5_metno::File;
 
     use super::{
-        create_scalar_attr_from_text, decode_fixed_string_value, encode_fixed_string_value,
-        parse_1d_lines, parse_enum_member_value, validate_attr_edit_support, AttributeCreateType,
+        create_scalar_attr_from_text, decode_fixed_string_value,
+        encode_fixed_array_memory_from_text, encode_fixed_string_value,
+        format_fixed_array_memory_for_edit, parse_1d_lines, parse_enum_member_value,
+        validate_attr_edit_support, AttributeCreateType,
     };
 
     fn temp_hdf5_path(name: &str) -> std::path::PathBuf {
@@ -1819,6 +1896,33 @@ mod tests {
             parse_1d_lines("first\n\nthird", 3).expect("failed parsing 1d lines"),
             vec!["first", "", "third"]
         );
+    }
+
+    #[test]
+    fn fixed_array_edit_format_uses_one_line_per_value() {
+        let rendered = format_fixed_array_memory_for_edit(
+            &TypeDescriptor::Integer(IntSize::U2),
+            3,
+            &[0, 0, 1, 0, 2, 0],
+        )
+        .expect("failed formatting fixed array edit content");
+        assert_eq!(rendered, "0\n1\n2");
+    }
+
+    #[test]
+    fn fixed_array_edit_encoding_requires_exact_line_count() {
+        let encoded = encode_fixed_array_memory_from_text(
+            &TypeDescriptor::Integer(IntSize::U2),
+            3,
+            "3\n4\n5\n",
+        )
+        .expect("failed encoding fixed array edit content");
+        assert_eq!(encoded, vec![3, 0, 4, 0, 5, 0]);
+
+        let err =
+            encode_fixed_array_memory_from_text(&TypeDescriptor::Integer(IntSize::U2), 3, "1\n2")
+                .expect_err("expected missing array entries to fail");
+        assert!(err.to_string().contains("Expected 3 array values"));
     }
 
     #[test]

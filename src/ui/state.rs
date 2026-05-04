@@ -797,8 +797,17 @@ impl AppState<'_> {
         }
     }
 
+    pub fn active_content_mode(&self) -> ContentShowMode {
+        let available = self
+            .treeview
+            .get(self.tree_view_cursor)
+            .map(|item| item.node.borrow().content_show_modes())
+            .unwrap_or_default();
+        self.content_show_mode_eval(available)
+    }
+
     pub fn change_row(&mut self, delta: isize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
@@ -896,7 +905,7 @@ impl AppState<'_> {
         } else {
             next as usize
         };
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => {
                 if new_selected_dim != node.selected_x {
                     node.selected_dim = new_selected_dim;
@@ -963,7 +972,7 @@ impl AppState<'_> {
     }
 
     pub fn change_col(&mut self, delta: isize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
@@ -998,7 +1007,7 @@ impl AppState<'_> {
     }
 
     pub fn change_x(&mut self, delta: isize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
@@ -1018,7 +1027,7 @@ impl AppState<'_> {
     }
 
     pub fn up(&mut self, dec: usize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if self.img_state.idx_to_load >= (dec as i32)
@@ -1085,7 +1094,7 @@ impl AppState<'_> {
     }
 
     pub fn down(&mut self, inc: usize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     let Some(max_index) = self.segment_state.max_index() else {
@@ -1147,7 +1156,7 @@ impl AppState<'_> {
     }
 
     pub fn set(&mut self, idx: usize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if let Some(window) = self.active_image_window_mut() {
@@ -1211,7 +1220,7 @@ impl AppState<'_> {
     }
 
     pub fn right(&mut self, inc: isize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if let Some(window) = self.active_image_window_mut() {
@@ -1255,7 +1264,7 @@ impl AppState<'_> {
     }
 
     pub fn left(&mut self, inc: isize) -> Result<EventResult> {
-        match self.content_mode {
+        match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
                 SegmentType::Image => {
                     if let Some(window) = self.active_image_window_mut() {

@@ -173,7 +173,9 @@ impl H5FNode {
         let mut result = vec![];
 
         match &self.node {
-            Node::File(_) => {}
+            Node::File(_) => {
+                result.push(ContentShowMode::Preview);
+            }
             Node::Broken(_, _, _) => {}
             Node::Group(_, _) => {
                 result.push(ContentShowMode::Preview);
@@ -252,4 +254,19 @@ impl H5FNode {
 pub struct H5F {
     pub root: Rc<RefCell<H5FNode>>,
     pub file: File,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{H5FNode, Node};
+    use crate::ui::state::ContentShowMode;
+
+    #[test]
+    fn file_nodes_support_preview_mode() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let node = H5FNode::new(Node::File(file));
+
+        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Preview]);
+    }
 }
