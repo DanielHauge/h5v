@@ -10,10 +10,11 @@
                 "preferred": {
                     "cargo": "cargo install h5v --locked",
                     "binstall": "cargo binstall h5v",
-                    "shell": "curl -fsSL https: //raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
+                    "shell": "curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
                 },
                 "additional": {
                     "arch": "pacman -S h5v-bin",
+                    "powershell": "irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex",
                     "scoop": "scoop bucket add h5v https://github.com/DanielHauge/h5v\nscoop install h5v"
                 }
             }

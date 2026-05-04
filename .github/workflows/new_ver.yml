@@ -1,0 +1,145 @@
+name: Prepare Release
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create the release commit and push the release tag"
+        type: boolean
+        required: true
+        default: true
+
+concurrency:
+  group: prepare-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify crate
+        run: |
+          cargo fmt --check
+          cargo test --quiet
+          cargo publish --dry-run --locked -p h5v
+
+  prepare-release:
+    name: Derive version and tag release
+    needs: build-test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
+        id: git-cliff
+        with:
+          args: -vv --bump --unreleased
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          version=$(echo "${{ steps.git-cliff.outputs.content }}" | grep -m1 -oP '(?<=## \[)[^]]+')
+          if [ -z "$version" ]; then
+            echo "Failed to extract version from changelog output" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+
+      - name: Update versioned files
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          cargo_toml = Path("Cargo.toml")
+          original = cargo_toml.read_text(encoding="utf-8")
+          updated, count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{version}"',
+              original,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Failed to update package version in Cargo.toml")
+          cargo_toml.write_text(updated, encoding="utf-8")
+          PY
+          cargo update -w
+
+      - name: Validate bumped version
+        run: cargo publish --dry-run --locked -p h5v
+
+      - name: Commit release bump
+        if: ${{ inputs.publish }}
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          branch="${{ github.ref_name }}"
+          git fetch origin "$branch"
+          git checkout "$branch"
+          git pull --rebase origin "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No versioned files changed; refusing to create a release tag" >&2
+            exit 1
+          fi
+          git commit -m "chore: release v${RELEASE_VERSION}"
+          git push origin HEAD:"$branch"
+
+      - name: Create and push tag
+        if: ${{ inputs.publish }}
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists locally" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists on origin" >&2
+            exit 1
+          fi
+          git tag "$RELEASE_TAG"
+          git push origin "$RELEASE_TAG"

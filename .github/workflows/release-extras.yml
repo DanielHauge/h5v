@@ -1,0 +1,269 @@
+name: Release extras
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  meta:
+    name: Read release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_version: ${{ steps.meta.outputs.release_version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      default_branch: ${{ steps.meta.outputs.default_branch }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          release_tag=$(jq -r '.announcement_tag' <<<"$PLAN")
+          release_version=$(jq -r '.releases[0].app_version' <<<"$PLAN")
+          prerelease=$(jq -r '.announcement_is_prerelease' <<<"$PLAN")
+          default_branch=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef -q .defaultBranchRef.name)
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+
+  publish-crates:
+    name: Publish crate
+    needs:
+      - meta
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+      RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.meta.outputs.release_tag }}
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches crate version
+        shell: bash
+        run: |
+          crate_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ "v${crate_version}" != "$RELEASE_TAG" ]; then
+            echo "Tag $RELEASE_TAG does not match Cargo.toml version $crate_version" >&2
+            exit 1
+          fi
+
+      - name: Publish to crates.io
+        run: |
+          for i in {1..5}; do
+            cargo publish --locked -p h5v && exit 0
+            echo "Publish failed, retrying in 10s..."
+            sleep 10
+          done
+          exit 1
+
+  package-manager-assets:
+    name: Generate package manager assets
+    needs:
+      - meta
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
+      RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.meta.outputs.release_tag }}
+          persist-credentials: false
+
+      - name: Download release assets
+        run: gh release download "$RELEASE_TAG" --dir release-assets
+
+      - name: Generate package manager assets
+        run: |
+          python scripts/generate_package_manager_assets.py \
+            --version "$RELEASE_VERSION" \
+            --repo "$REPOSITORY" \
+            --asset-dir release-assets \
+            --output-dir package-manager-assets
+
+      - name: Upload package manager artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-manager-assets
+          path: package-manager-assets/**
+          if-no-files-found: error
+
+      - name: Publish package manager assets to GitHub release
+        shell: bash
+        run: |
+          find package-manager-assets -type f -print0 | xargs -0 gh release upload "$RELEASE_TAG" --clobber
+
+  publish-package-manager-manifests:
+    name: Publish package manager manifests
+    needs:
+      - meta
+      - package-manager-assets
+    if: ${{ needs.meta.outputs.prerelease != 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      DEFAULT_BRANCH: ${{ needs.meta.outputs.default_branch }}
+      RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.meta.outputs.default_branch }}
+
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: package-manager-assets
+          path: package-manager-assets
+
+      - name: Update Homebrew formula and Scoop manifest
+        run: |
+          mkdir -p Formula
+          cp package-manager-assets/homebrew/h5v.rb Formula/h5v.rb
+          mkdir -p bucket
+          cp package-manager-assets/scoop/h5v.json bucket/h5v.json
+
+      - name: Commit package manager manifest updates
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout "$DEFAULT_BRANCH"
+          git add Formula/h5v.rb bucket/h5v.json
+          if git diff --cached --quiet; then
+            echo "Package manager manifests unchanged"
+            exit 0
+          fi
+          git commit -m "chore: update package manager manifests for v${RELEASE_VERSION}"
+          git pull --rebase origin "$DEFAULT_BRANCH"
+          git push origin HEAD:"$DEFAULT_BRANCH"
+
+  submit-winget:
+    name: Submit WinGet manifest
+    needs:
+      - meta
+      - package-manager-assets
+    if: ${{ needs.meta.outputs.prerelease != 'true' }}
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+    steps:
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: package-manager-assets
+          path: package-manager-assets
+
+      - name: Validate WinGet token
+        shell: pwsh
+        run: |
+          if (-not $env:WINGET_CREATE_GITHUB_TOKEN) {
+            throw "WINGET_CREATE_GITHUB_TOKEN is required for WinGet submission."
+          }
+
+          $headers = curl.exe -fsSI `
+            -H "Authorization: Bearer $env:WINGET_CREATE_GITHUB_TOKEN" `
+            -H "User-Agent: h5v-release-workflow" `
+            https://api.github.com/user
+
+          $oauthScopes = (
+            $headers |
+            Select-String '^x-oauth-scopes:\s*(.*)$'
+          ).Matches.Groups[1].Value.Trim()
+
+          if (-not $oauthScopes) {
+            throw "WINGET_CREATE_GITHUB_TOKEN must be a classic GitHub PAT. Fine-grained tokens are not supported by wingetcreate."
+          }
+
+          if ($oauthScopes -notmatch '(^|,\s*)(public_repo|repo)(,|$)') {
+            throw "WINGET_CREATE_GITHUB_TOKEN must include the public_repo scope."
+          }
+
+      - name: Submit WinGet manifest
+        shell: pwsh
+        run: |
+          $manifestPath = "package-manager-assets/winget/manifests/d/DanielHauge/h5v/${env:RELEASE_VERSION}"
+          curl.exe -JLO https://aka.ms/wingetcreate/latest
+          .\wingetcreate.exe submit --prtitle "Add h5v ${env:RELEASE_VERSION}" --no-open $manifestPath
+
+  publish-aur:
+    name: Publish AUR package
+    needs:
+      - meta
+      - package-manager-assets
+    if: ${{ needs.meta.outputs.prerelease != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: package-manager-assets
+          path: package-manager-assets
+
+      - name: Generate .SRCINFO
+        run: |
+          docker run --rm \
+            -v "${PWD}/package-manager-assets/aur:/work" \
+            -w /work \
+            archlinux:base-devel \
+            bash -lc 'useradd -m builder && chown -R builder:builder /work && su builder -c "bash -lc '\''cd /work && makepkg --printsrcinfo > .SRCINFO'\''"'
+
+      - name: Configure AUR SSH
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Push PKGBUILD to AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/h5v-bin.git aur-repo
+          cp package-manager-assets/aur/PKGBUILD aur-repo/PKGBUILD
+          cp package-manager-assets/aur/.SRCINFO aur-repo/.SRCINFO
+          cd aur-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR package unchanged"
+            exit 0
+          fi
+          git commit -m "Update h5v-bin package"
+          git push origin HEAD
