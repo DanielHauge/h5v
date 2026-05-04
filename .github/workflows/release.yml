@@ -58,7 +58,6 @@ jobs:
         uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
         id: git-cliff
         with:
-          config: cliff.toml
           # Only generate a changelog for the latest release, and bump the version in Cargo.toml
           args: -vv --bump --unreleased
 
@@ -339,6 +338,53 @@ jobs:
           git commit -m "chore: update package manager manifests for v${RELEASE_VERSION}"
           git pull --rebase origin "$branch"
           git push origin HEAD:"$branch"
+
+  deploy-site:
+    name: Build and deploy site
+    needs:
+      - generate-changelog
+      - publish-binaries
+      - package-manager-assets
+      - publish-package-manager-manifests
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate latest changelog for site
+        uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
+        with:
+          args: -vv --latest
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Install and run oranda
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/oranda/releases/latest/download/oranda-installer.sh | sh
+          oranda build
+
+      - name: Prepare HTML for link checking
+        run: |
+          mkdir -p /tmp/public/
+          cp -R public /tmp/public/h5v
+
+      - name: Check HTML for broken internal links
+        uses: untitaker/hyperlink@0.1.29
+        with:
+          args: /tmp/public/
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
+        with:
+          branch: gh-pages
+          folder: public
+          token: ${{ secrets.GITHUB_TOKEN }}
+          single-commit: true
 
   publish-aur:
     name: Publish AUR package
