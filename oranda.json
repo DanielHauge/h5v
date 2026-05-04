@@ -1,0 +1,25 @@
+{
+    "build": {
+        "path_prefix": "oranda"
+    },
+    "styles": {
+        "theme": "axodark",
+        "favicon": "https://www.axo.dev/favicon.ico"
+    },
+    "components": {
+        "changelog": true,
+        "artifacts": {
+            "package_managers": {
+                "preferred": {
+                    "shell": "curl -fsSL https: //raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh"
+                },
+                "additional": {
+                    "cargo": "cargo install h5v --locked",
+                    "binstall": "cargo binstall h5v",
+                    "arch": "pacman -S h5v",
+                    "scoop": "scoop bucket add h5v https://github.com/DanielHauge/h5v\nscoop install h5v"
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,10 @@
+[book]
+authors = ["Daniel Hauge"]
+language = "en"
+multilingual = false
+src = "src"
+
+[output.markdown]
+[output.html]
+edit-url-template = "https://github.com/danielhauge/h5v/edit/main/docs/{path}"
+search.use-boolean-and = true
