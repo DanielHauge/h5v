@@ -262,31 +262,6 @@ jobs:
           tag: v${{ env.RELEASE_VERSION }}
           release_name: Release v${{ env.RELEASE_VERSION }}
 
-      - name: Generate dist manifest
-        run: |
-          python scripts/generate_dist_manifest.py \
-            --version "${RELEASE_VERSION}" \
-            --repo "${REPOSITORY}" \
-            --asset-dir release-assets \
-            --output dist-manifest.json
-
-      - name: Upload dist manifest artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-manifest
-          path: dist-manifest.json
-          if-no-files-found: error
-
-      - name: Publish dist manifest to GitHub
-        uses: svenstaro/upload-release-action@v2
-        if: ${{ inputs.publish }}
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: dist-manifest.json
-          overwrite: true
-          tag: v${{ env.RELEASE_VERSION }}
-          release_name: Release v${{ env.RELEASE_VERSION }}
-
   publish-package-manager-manifests:
     name: Publish package manager manifests
     needs:
