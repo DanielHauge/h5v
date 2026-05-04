@@ -1229,7 +1229,7 @@ fn handle_mchart(
             } else {
                 let Some((source, points)) = state.capture_multichart_item()? else {
                     return Err(AppError::InvalidCommand(
-                        "The current selection is not previewable as a multichart dataset"
+                        "The current selection is not previewable as a multichart chart item"
                             .to_string(),
                     ));
                 };

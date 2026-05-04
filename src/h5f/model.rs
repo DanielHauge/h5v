@@ -175,7 +175,9 @@ impl H5FNode {
         match &self.node {
             Node::File(_) => {}
             Node::Broken(_, _, _) => {}
-            Node::Group(_, _) => {}
+            Node::Group(_, _) => {
+                result.push(ContentShowMode::Preview);
+            }
             Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
                 result.push(ContentShowMode::Preview);
             }

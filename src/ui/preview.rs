@@ -2,7 +2,7 @@ use ratatui::{layout::Rect, Frame};
 
 use super::{
     image_preview::render_img,
-    preview_chart::render_chart_preview,
+    preview_chart::{render_chart_preview, render_precomputed_chart_preview},
     state::AppState,
     std_comp_render::{
         render_empty_dataset, render_error, render_string, render_unsupported_rendering,
@@ -33,6 +33,44 @@ pub fn render_preview(
         vertical: 1,
     });
     let node = selected_node.node.clone();
+
+    if let Node::Group(_, meta) = node {
+        match meta.preview_expr.as_deref() {
+            Some(expression) => {
+                match state
+                    .multi_chart
+                    .evaluate_expression_preview(expression, state.file.as_ref())
+                {
+                    Ok(data_preview) => {
+                        if let Err(e) = render_precomputed_chart_preview(
+                            f,
+                            &area_inner,
+                            selected_node,
+                            state,
+                            data_preview,
+                        ) {
+                            render_error(f, &area_inner, format!("Render chart error: {}", e));
+                        }
+                    }
+                    Err(e) => {
+                        render_error(
+                            f,
+                            &area_inner,
+                            format!("Error evaluating H5V_PREVIEW_EXPR: {}", e),
+                        );
+                    }
+                }
+            }
+            None => render_string(
+                f,
+                &area_inner,
+                selected_node,
+                "This group is just hanging out.\n\nThere is nothing previewable here yet. Add an `H5V_PREVIEW_EXPR` attribute if you want a chart in this pane.".to_string(),
+                None,
+            ),
+        }
+        return;
+    }
 
     if let Node::Dataset(_, attr) = node {
         if attr.is_empty() {

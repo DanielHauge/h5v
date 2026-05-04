@@ -834,34 +834,49 @@ impl AppState<'_> {
     pub fn capture_multichart_item(&self) -> Result<Option<(ChartSource, Vec<Point>)>> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
-        let (ds, meta, shape) = match &node.node {
-            Node::Dataset(ds, dsattr) => (ds.clone(), dsattr.clone(), dsattr.shape.clone()),
-            _ => return Ok(None),
-        };
-        if meta.is_compound_container() {
-            return Ok(None);
+        match &node.node {
+            Node::Group(_, meta) => {
+                let Some(expression) = meta.preview_expr.as_deref() else {
+                    return Ok(None);
+                };
+                let item = self
+                    .multi_chart
+                    .capture_expression_chart_item(expression, self.file.as_ref())
+                    .map_err(AppError::InvalidCommand)?;
+                return Ok(Some(item));
+            }
+            Node::Dataset(_, dsattr) if dsattr.is_compound_container() => {
+                return Ok(None);
+            }
+            Node::Dataset(ds, dsattr) => {
+                let ds = ds.clone();
+                let meta = dsattr.clone();
+                let shape = dsattr.shape.clone();
+                let Some(selection) =
+                    preview_selection_for_node(&mut node, &shape, self.segment_state.idx)
+                else {
+                    return Ok(None);
+                };
+                let data = if meta.is_compound_leaf() {
+                    plot_projected(&ds, &meta, &selection)?.data
+                } else {
+                    ds.plot(&selection)?.data
+                };
+                let source = ChartSource::DatasetSelection(DatasetChartSource {
+                    dataset_path: ds.name(),
+                    display_path: meta.virtual_path().unwrap_or(&ds.name()).to_string(),
+                    selection,
+                    shape,
+                    kind: if meta.is_compound_leaf() {
+                        DatasetChartKind::CompoundLeaf
+                    } else {
+                        DatasetChartKind::Dataset
+                    },
+                });
+                Ok(Some((source, data)))
+            }
+            _ => Ok(None),
         }
-        let Some(selection) = preview_selection_for_node(&mut node, &shape, self.segment_state.idx)
-        else {
-            return Ok(None);
-        };
-        let data = if meta.is_compound_leaf() {
-            plot_projected(&ds, &meta, &selection)?.data
-        } else {
-            ds.plot(&selection)?.data
-        };
-        let source = ChartSource::DatasetSelection(DatasetChartSource {
-            dataset_path: ds.name(),
-            display_path: meta.virtual_path().unwrap_or(&ds.name()).to_string(),
-            selection,
-            shape,
-            kind: if meta.is_compound_leaf() {
-                DatasetChartKind::CompoundLeaf
-            } else {
-                DatasetChartKind::Dataset
-            },
-        });
-        Ok(Some((source, data)))
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {

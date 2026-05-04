@@ -50,6 +50,7 @@ pub struct GroupMeta {
     pub is_link: bool,
     pub filename: String,
     pub display_name: String,
+    pub preview_expr: Option<String>,
 }
 
 #[derive(Debug, Clone)]

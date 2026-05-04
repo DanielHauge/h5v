@@ -17,7 +17,9 @@ use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
 use crate::{
     color_consts,
-    data::{validate_preview_selection_shape, PreviewSelection, SliceSelection},
+    data::{
+        validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
+    },
     error::log_error,
 };
 
@@ -711,12 +713,54 @@ impl MultiChartState {
         self.create_expression_derived_with_file(expression, None)
     }
 
+    pub fn evaluate_expression_preview(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<DatasetPlotingData, String> {
+        let evaluated = self.evaluate_expression_with_file(expression, file)?;
+        dataset_ploting_data_from_points(evaluated.points)
+    }
+
+    pub fn capture_expression_chart_item(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<(ChartSource, Vec<Point>), String> {
+        let evaluated = self.evaluate_expression_with_file(expression, file)?;
+        let len = evaluated.points.len();
+        let source = ChartSource::DerivedExpression {
+            expression: expression.to_string(),
+            input_ids: evaluated.input_ids,
+            len,
+            kind: evaluated.kind,
+        };
+        Ok((source, evaluated.points))
+    }
+
     fn create_expression_derived_with_file(
         &mut self,
         expression: String,
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
-        let tokens = tokenize_expression(&expression)?;
+        let evaluated = self.evaluate_expression_with_file(&expression, file)?;
+        let len = evaluated.points.len();
+        let source = ChartSource::DerivedExpression {
+            expression,
+            input_ids: evaluated.input_ids,
+            len,
+            kind: evaluated.kind,
+        };
+        self.add_chart_item(source, evaluated.points)
+            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
+    }
+
+    fn evaluate_expression_with_file(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<EvaluatedExpression, String> {
+        let tokens = tokenize_expression(expression)?;
         let parsed = parse_derived_expression(&tokens)?;
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
@@ -793,14 +837,12 @@ impl MultiChartState {
                 DerivedExpressionKind::XySeries
             }
         };
-        let source = ChartSource::DerivedExpression {
-            expression,
-            input_ids: refs.item_ids,
-            len: expected_len,
+
+        Ok(EvaluatedExpression {
+            points,
             kind,
-        };
-        self.add_chart_item(source, points)
-            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
+            input_ids: refs.item_ids,
+        })
     }
 
     pub fn add_chart_item(
@@ -2451,6 +2493,12 @@ struct ExpressionSeriesInput {
     points: Vec<Point>,
 }
 
+struct EvaluatedExpression {
+    points: Vec<Point>,
+    kind: DerivedExpressionKind,
+    input_ids: Vec<ChartItemId>,
+}
+
 fn validate_expression_series_compatibility(
     referenced: &[ExpressionSeriesInput],
     expected_len: usize,
@@ -2481,6 +2529,23 @@ fn validate_expression_series_compatibility(
         }
     }
     Ok(())
+}
+
+fn dataset_ploting_data_from_points(points: Vec<Point>) -> Result<DatasetPlotingData, String> {
+    let Some((_, first_y)) = points.first().copied() else {
+        return Err("Cannot build a preview from an empty series".to_string());
+    };
+    let (min, max) = points
+        .iter()
+        .fold((first_y, first_y), |(min, max), (_, y)| {
+            (min.min(*y), max.max(*y))
+        });
+    Ok(DatasetPlotingData {
+        length: points.len(),
+        min,
+        max,
+        data: points,
+    })
 }
 
 fn eval_expression_at(

@@ -37,6 +37,96 @@ use super::state::AppState;
 
 pub const MAX_SEGMENT_SIZE: usize = 250000;
 
+pub fn render_precomputed_chart_preview(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    state: &mut AppState,
+    data_preview: DatasetPlotingData,
+) -> Result<(), AppError> {
+    let chart_area = area.inner(ratatui::layout::Margin {
+        horizontal: 0,
+        vertical: 1,
+    });
+    let preview_selection = PreviewSelection {
+        x: 0,
+        index: vec![],
+        slice: SliceSelection::All,
+    };
+    let image_capable = image_capable_terminal();
+    let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
+
+    if image_capable && state.should_debounce_preview(&node.node) {
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
+        return Ok(());
+    }
+
+    if image_capable
+        && state.chart_preview_state.is_from_ds(&node.node)
+        && loaded_preview_selection == Some(preview_selection.clone())
+    {
+        if let Some(ref error) = state.chart_preview_state.error {
+            render_error(
+                f,
+                &chart_area,
+                format!("Error loading chart preview: {}", error),
+            );
+            return Ok(());
+        }
+        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
+        } else {
+            render_string(
+                f,
+                &chart_area,
+                node,
+                "Loading chart preview...".to_string(),
+                None,
+            );
+        }
+        return Ok(());
+    }
+
+    if image_capable {
+        state.chart_preview_state.ds_loaded = Some(node.node.path());
+        state.chart_preview_state.ds_selection = Some(preview_selection.clone());
+        state.chart_preview_state.error = None;
+        state.chart_preview_state.protocol = None;
+        state.chart_preview_state.clipboard_image = None;
+        let chart_preview_load_request = ChartPreviewLoadRequest {
+            ds_path: node.node.path(),
+            source: ChartPreviewSource::Precomputed { data_preview },
+            selection: preview_selection,
+            width: chart_area.width,
+            height: chart_area.height,
+            segment_state: state.segment_state.clone(),
+        };
+        state
+            .chart_preview_state
+            .tx_load_chartpreview
+            .send(chart_preview_load_request)
+            .ok();
+
+        render_string(
+            f,
+            &chart_area,
+            node,
+            "Loading chart preview...".to_string(),
+            None,
+        );
+    } else {
+        render_chart_widget(f, &chart_area, state, data_preview);
+    }
+
+    Ok(())
+}
+
 pub fn render_chart_preview(
     f: &mut Frame,
     area: &Rect,

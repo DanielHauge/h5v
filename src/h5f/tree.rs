@@ -314,6 +314,10 @@ impl H5FNode {
                 is_link,
                 display_name,
                 filename: g.filename().to_string(),
+                preview_expr: g
+                    .attr("H5V_PREVIEW_EXPR")
+                    .ok()
+                    .and_then(|a| a.read_scalar::<VarLenUnicode>().ok().map(|v| v.to_string())),
             };
             children.push(Rc::new(RefCell::new(H5FNode::new(Node::Group(g, meta)))));
         }
