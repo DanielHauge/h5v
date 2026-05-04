@@ -150,7 +150,7 @@ jobs:
             --no-build \
             --target "$TARGET" \
             --target-bin-dir "target/$TARGET/release" \
-            --version "${RELEASE_VERSION}" \
+            --install-version "${RELEASE_VERSION}" \
             --output "h5v-${TARGET}-v${RELEASE_VERSION}.msi"
 
           python <<'PY'
@@ -161,6 +161,10 @@ jobs:
           release_version = os.environ["RELEASE_VERSION"]
           target = os.environ["TARGET"]
           msi_path = pathlib.Path(f"h5v-{target}-v{release_version}.msi")
+          if not msi_path.is_file():
+              raise FileNotFoundError(
+                  f"Expected MSI at {msi_path}, but cargo wix did not create it"
+              )
 
           digest = hashlib.sha256(msi_path.read_bytes()).hexdigest()
           pathlib.Path(f"{msi_path.name}.sha256").write_text(
