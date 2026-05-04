@@ -92,8 +92,8 @@ enum ExprBinaryOp {
 enum ExpressionAst {
     Number(f64),
     ItemRef(ChartItemId),
-    DatasetRef(ExpressionDatasetRef),
-    AttributeRef(ExpressionAttributeRef),
+    SeriesRef(ExpressionSeriesRef),
+    ScalarRef(ExpressionScalarRef),
     UnaryMinus(Box<ExpressionAst>),
     Binary {
         op: ExprBinaryOp,
@@ -105,8 +105,8 @@ enum ExpressionAst {
 #[derive(Debug, Clone, PartialEq)]
 enum ExpressionToken {
     ItemRef(ChartItemId),
-    DatasetRef(ExpressionDatasetRef),
-    AttributeRef(ExpressionAttributeRef),
+    SeriesRef(ExpressionSeriesRef),
+    ScalarRef(ExpressionScalarRef),
     Number(f64),
     Plus,
     Minus,
@@ -130,33 +130,47 @@ enum ParsedExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum ExpressionAttributeRef {
-    SelectedDataset {
-        attr_name: String,
-    },
-    ObjectPath {
-        path: String,
-        attr_name: String,
-        absolute: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ExpressionDatasetSelector {
     All,
     Index(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ExpressionDatasetRef {
-    path: String,
+enum ExpressionObjectTarget {
+    AbsolutePath(String),
+    ItemRef(ChartItemId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExpressionSeriesRef {
+    target: ExpressionObjectTarget,
+    attr_name: Option<String>,
     selectors: Option<Vec<ExpressionDatasetSelector>>,
 }
 
-impl ExpressionDatasetRef {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExpressionScalarRef {
+    target: ExpressionObjectTarget,
+    attr_name: Option<String>,
+}
+
+impl ExpressionObjectTarget {
     fn render(&self) -> String {
+        match self {
+            ExpressionObjectTarget::AbsolutePath(path) => path.clone(),
+            ExpressionObjectTarget::ItemRef(id) => format!("${}", id.0),
+        }
+    }
+}
+
+impl ExpressionSeriesRef {
+    fn render(&self) -> String {
+        let base = match &self.attr_name {
+            Some(attr_name) => format!("!{}:{attr_name}", self.target.render()),
+            None => format!("!{}", self.target.render()),
+        };
         match &self.selectors {
-            None => format!("!{}", self.path),
+            None => base,
             Some(selectors) => {
                 let selectors = selectors
                     .iter()
@@ -166,24 +180,23 @@ impl ExpressionDatasetRef {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("!{}[{selectors}]", self.path)
+                format!("{base}[{selectors}]")
             }
         }
     }
 
     fn to_preview_selection(&self, shape: &[usize]) -> Result<PreviewSelection, String> {
+        let reference = self.render();
         if shape.is_empty() {
             return Err(format!(
-                "Dataset reference {} must point to a non-scalar dataset",
-                self.render()
+                "Series reference {reference} must point to a non-scalar array"
             ));
         }
         let (x, index) = match &self.selectors {
             None => {
                 if shape.len() != 1 {
                     return Err(format!(
-                        "Dataset reference {} needs an explicit selector like !/path[..,0] for rank-{} datasets",
-                        self.render(),
+                        "Series reference {reference} needs an explicit selector like !/path[..,0] for rank-{} arrays",
                         shape.len()
                     ));
                 }
@@ -226,8 +239,7 @@ impl ExpressionDatasetRef {
                 (
                     x.ok_or_else(|| {
                         format!(
-                            "Dataset reference {} must contain exactly one '..' axis selector",
-                            self.render()
+                            "Series reference {reference} must contain exactly one '..' axis selector"
                         )
                     })?,
                     index,
@@ -243,27 +255,12 @@ impl ExpressionDatasetRef {
     }
 }
 
-impl ExpressionAttributeRef {
+impl ExpressionScalarRef {
     fn render(&self) -> String {
-        match self {
-            ExpressionAttributeRef::SelectedDataset { attr_name } => format!("#{attr_name}"),
-            ExpressionAttributeRef::ObjectPath {
-                path,
-                attr_name,
-                absolute: _,
-            } => format!("#{path}:{attr_name}"),
+        match &self.attr_name {
+            Some(attr_name) => format!("#{}:{attr_name}", self.target.render()),
+            None => format!("#{}", self.target.render()),
         }
-    }
-
-    fn needs_selected_dataset_context(&self) -> bool {
-        matches!(
-            self,
-            ExpressionAttributeRef::SelectedDataset { .. }
-                | ExpressionAttributeRef::ObjectPath {
-                    absolute: false,
-                    ..
-                }
-        )
     }
 }
 
@@ -725,15 +722,15 @@ impl MultiChartState {
         collect_parsed_expression_refs(&parsed, &mut refs);
         refs.item_ids.sort_by_key(|id| id.0);
         refs.item_ids.dedup();
-        refs.dataset_refs
-            .sort_by_key(|dataset_ref| dataset_ref.render());
-        refs.dataset_refs.dedup();
-        refs.attribute_refs
-            .sort_by_key(|attr_ref| attr_ref.render());
-        refs.attribute_refs.dedup();
-        if refs.item_ids.is_empty() && refs.dataset_refs.is_empty() {
+        refs.series_refs
+            .sort_by_key(|series_ref| series_ref.render());
+        refs.series_refs.dedup();
+        refs.scalar_refs
+            .sort_by_key(|scalar_ref| scalar_ref.render());
+        refs.scalar_refs.dedup();
+        if refs.item_ids.is_empty() && refs.series_refs.is_empty() {
             return Err(
-                "Expression must reference at least one chart item like $3 or dataset path like !/group/ds[..,0]"
+                "Expression must reference at least one series such as $3, !/group/ds[..,0], or !$3:ATTR"
                     .to_string(),
             );
         }
@@ -748,7 +745,7 @@ impl MultiChartState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let external_dataset_series = resolve_expression_dataset_series(file, &refs.dataset_refs)?;
+        let external_series = resolve_expression_series_values(self, file, &refs.series_refs)?;
         let mut series_inputs = referenced
             .iter()
             .map(|item| ExpressionSeriesInput {
@@ -756,18 +753,12 @@ impl MultiChartState {
                 points: item.series.points.clone(),
             })
             .collect::<Vec<_>>();
-        for dataset_ref in &refs.dataset_refs {
-            let points = external_dataset_series
-                .get(dataset_ref)
-                .cloned()
-                .ok_or_else(|| {
-                    format!(
-                        "Dataset reference {} was not resolved",
-                        dataset_ref.render()
-                    )
-                })?;
+        for series_ref in &refs.series_refs {
+            let points = external_series.get(series_ref).cloned().ok_or_else(|| {
+                format!("Series reference {} was not resolved", series_ref.render())
+            })?;
             series_inputs.push(ExpressionSeriesInput {
-                label: dataset_ref.render(),
+                label: series_ref.render(),
                 points,
             });
         }
@@ -782,44 +773,21 @@ impl MultiChartState {
         let require_matching_x = matches!(parsed, ParsedExpression::YSeries(_));
         validate_expression_series_compatibility(&series_inputs, expected_len, require_matching_x)?;
 
-        let attribute_values = resolve_expression_attribute_values(
-            file,
-            self.selected_item()
-                .and_then(|item| item.source.dataset_source()),
-            &refs.attribute_refs,
-        )?;
+        let scalar_values = resolve_expression_scalar_values(self, file, &refs.scalar_refs)?;
 
         let mut points = Vec::with_capacity(expected_len);
         let kind = match &parsed {
             ParsedExpression::YSeries(ast) => {
                 for idx in 0..expected_len {
-                    let y = eval_expression_at(
-                        ast,
-                        idx,
-                        self,
-                        &external_dataset_series,
-                        &attribute_values,
-                    )?;
+                    let y = eval_expression_at(ast, idx, self, &external_series, &scalar_values)?;
                     points.push((first.points[idx].0, y));
                 }
                 DerivedExpressionKind::YSeries
             }
             ParsedExpression::XySeries(x_ast, y_ast) => {
                 for idx in 0..expected_len {
-                    let x = eval_expression_at(
-                        x_ast,
-                        idx,
-                        self,
-                        &external_dataset_series,
-                        &attribute_values,
-                    )?;
-                    let y = eval_expression_at(
-                        y_ast,
-                        idx,
-                        self,
-                        &external_dataset_series,
-                        &attribute_values,
-                    )?;
+                    let x = eval_expression_at(x_ast, idx, self, &external_series, &scalar_values)?;
+                    let y = eval_expression_at(y_ast, idx, self, &external_series, &scalar_values)?;
                     points.push((x, y));
                 }
                 DerivedExpressionKind::XySeries
@@ -1046,7 +1014,7 @@ impl MultiChartState {
             format!("!{normalized}")
         };
         let tokens = tokenize_expression(&prefixed)?;
-        let Some(ExpressionToken::DatasetRef(dataset_ref)) = tokens.first() else {
+        let Some(ExpressionToken::SeriesRef(series_ref)) = tokens.first() else {
             return Err(format!(
                 "Dataset reference '{}' must look like !/path or !/path[..,0]",
                 dataset_spec
@@ -1062,16 +1030,27 @@ impl MultiChartState {
             "Adding a dataset by path requires an open file handle, but no file is loaded"
                 .to_string()
         })?;
-        let dataset = file.dataset(&dataset_ref.path).map_err(|error| {
+        if !matches!(series_ref.target, ExpressionObjectTarget::AbsolutePath(_))
+            || series_ref.attr_name.is_some()
+        {
+            return Err(format!(
+                "Dataset reference '{}' must look like !/path or !/path[..,0]",
+                dataset_spec
+            ));
+        }
+        let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target else {
+            unreachable!();
+        };
+        let dataset = file.dataset(path).map_err(|error| {
             format!(
                 "Dataset reference {} could not be opened: {}",
-                dataset_ref.render(),
+                series_ref.render(),
                 error
             )
         })?;
         let shape = dataset.shape();
-        let selection = dataset_ref.to_preview_selection(&shape)?;
-        let points = read_expression_dataset_points(&dataset, dataset_ref)?;
+        let selection = series_ref.to_preview_selection(&shape)?;
+        let points = read_expression_dataset_points(&dataset, series_ref)?;
         let source = ChartSource::DatasetSelection(DatasetChartSource {
             dataset_path: dataset.name(),
             display_path: dataset.name(),
@@ -1960,11 +1939,15 @@ impl MultiChartState {
             ]),
             Line::from(vec![
                 Span::styled("Syntax ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
-                Span::raw("$1 + !/ds[..,0] * #SCALE   or   (!/x_ticks, $2 + #OFFSET * #SCALE)"),
+                Span::raw(
+                    "$1 + !/ds[..,0] * #/cal:scale   or   (!/x_ticks, $2 + #/cal/offset)",
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Rules ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
-                Span::raw("single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series; #... attrs resolve from the selected dataset item unless absolute"),
+                Span::raw(
+                    "single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series, #/path for scalar datasets, and :ATTR on ! or # for explicit attributes",
+                ),
             ]),
         ];
         if let Some(error) = &prompt.error {
@@ -2015,34 +1998,21 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
             }
             '$' => {
                 chars.next();
-                let mut digits = String::new();
-                while let Some(next) = chars.peek() {
-                    if next.is_ascii_digit() {
-                        digits.push(*next);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                if digits.is_empty() {
-                    return Err("Expected digits after '$' item reference".to_string());
-                }
-                let id = digits
-                    .parse::<u64>()
-                    .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
-                tokens.push(ExpressionToken::ItemRef(ChartItemId(id)));
+                tokens.push(ExpressionToken::ItemRef(parse_expression_item_id(
+                    &mut chars,
+                )?));
             }
             '!' => {
                 chars.next();
-                tokens.push(ExpressionToken::DatasetRef(parse_expression_dataset_ref(
+                tokens.push(ExpressionToken::SeriesRef(parse_expression_series_ref(
                     &mut chars,
                 )?));
             }
             '#' => {
                 chars.next();
-                tokens.push(ExpressionToken::AttributeRef(
-                    parse_expression_attribute_ref(&mut chars)?,
-                ));
+                tokens.push(ExpressionToken::ScalarRef(parse_expression_scalar_ref(
+                    &mut chars,
+                )?));
             }
             '0'..='9' | '.' => {
                 let mut number = String::new();
@@ -2094,7 +2064,7 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
             }
             other => {
                 return Err(format!(
-                    "Unsupported character '{}' in expression. Use $id item references, #attribute references, numbers, + - * /, commas, and parentheses",
+                    "Unsupported character '{}' in expression. Use $id item references, !series references, #scalar references, numbers, + - * /, commas, and parentheses",
                     other
                 ));
             }
@@ -2104,18 +2074,36 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
     Ok(tokens)
 }
 
-fn parse_expression_dataset_ref(
+fn parse_expression_item_id(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionDatasetRef, String> {
-    if chars.peek() != Some(&'/') {
-        return Err(
-            "Dataset references must use an absolute path like !/group/dataset".to_string(),
-        );
+) -> Result<ChartItemId, String> {
+    let mut digits = String::new();
+    while let Some(next) = chars.peek() {
+        if next.is_ascii_digit() {
+            digits.push(*next);
+            chars.next();
+        } else {
+            break;
+        }
     }
+    if digits.is_empty() {
+        return Err("Expected digits after '$' item reference".to_string());
+    }
+    let id = digits
+        .parse::<u64>()
+        .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
+    Ok(ChartItemId(id))
+}
 
+fn parse_expression_absolute_path(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<String, String> {
     let mut path = String::new();
     while let Some(&next) = chars.peek() {
-        if next == '[' || next.is_whitespace() || matches!(next, '+' | '-' | '*' | ',' | '(' | ')')
+        if next == '['
+            || next == ':'
+            || next.is_whitespace()
+            || matches!(next, '+' | '-' | '*' | ',' | '(' | ')')
         {
             break;
         }
@@ -2123,7 +2111,60 @@ fn parse_expression_dataset_ref(
         chars.next();
     }
     if path.is_empty() {
-        return Err("Expected an absolute dataset path after '!'".to_string());
+        return Err("Expected an absolute HDF5 path beginning with '/'".to_string());
+    }
+    Ok(path)
+}
+
+fn parse_expression_object_target(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    prefix: char,
+) -> Result<ExpressionObjectTarget, String> {
+    match chars.peek().copied() {
+        Some('/') => Ok(ExpressionObjectTarget::AbsolutePath(parse_expression_absolute_path(
+            chars,
+        )?)),
+        Some('$') => {
+            chars.next();
+            Ok(ExpressionObjectTarget::ItemRef(parse_expression_item_id(chars)?))
+        }
+        _ => Err(match prefix {
+            '!' => {
+                "Series references must use an absolute path like !/group/dataset or an item-backed attribute like !$1:ATTR"
+                    .to_string()
+            }
+            '#' => {
+                "Scalar references must use an absolute path like #/group/scalar or an item-backed attribute like #$1:ATTR"
+                    .to_string()
+            }
+            _ => "Invalid expression reference".to_string(),
+        }),
+    }
+}
+
+fn parse_expression_series_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionSeriesRef, String> {
+    let target = parse_expression_object_target(chars, '!')?;
+    let attr_name = if chars.peek() == Some(&':') {
+        chars.next();
+        let attr_name = parse_expression_attribute_name(chars);
+        if attr_name.is_empty() {
+            return Err(format!(
+                "Expected an attribute name after '{}:' in series reference",
+                target.render()
+            ));
+        }
+        Some(attr_name)
+    } else {
+        None
+    };
+
+    if attr_name.is_some() && chars.peek() == Some(&'[') {
+        return Err(
+            "Series attribute references currently use the full attribute value and do not support selectors"
+                .to_string(),
+        );
     }
 
     let selectors = if chars.peek() == Some(&'[') {
@@ -2139,19 +2180,61 @@ fn parse_expression_dataset_ref(
         }
         if !closed {
             return Err(format!(
-                "Dataset reference '!{path}[{spec}' is missing a closing ']'"
+                "Series reference '{}[{spec}' is missing a closing ']'",
+                match &attr_name {
+                    Some(attr_name) => format!("!{}:{attr_name}", target.render()),
+                    None => format!("!{}", target.render()),
+                }
             ));
         }
-        Some(parse_expression_dataset_selectors(&path, &spec)?)
+        Some(parse_expression_dataset_selectors(
+            &match &attr_name {
+                Some(attr_name) => format!("!{}:{attr_name}", target.render()),
+                None => format!("!{}", target.render()),
+            },
+            &spec,
+        )?)
     } else {
         None
     };
 
-    Ok(ExpressionDatasetRef { path, selectors })
+    Ok(ExpressionSeriesRef {
+        target,
+        attr_name,
+        selectors,
+    })
+}
+
+fn parse_expression_scalar_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionScalarRef, String> {
+    let target = parse_expression_object_target(chars, '#')?;
+    let attr_name = if chars.peek() == Some(&':') {
+        chars.next();
+        let attr_name = parse_expression_attribute_name(chars);
+        if attr_name.is_empty() {
+            return Err(format!(
+                "Expected an attribute name after '{}:' in scalar reference",
+                target.render()
+            ));
+        }
+        Some(attr_name)
+    } else {
+        None
+    };
+
+    if matches!(target, ExpressionObjectTarget::ItemRef(_)) && attr_name.is_none() {
+        return Err("Scalar item references must name an attribute like #$1:OFFSET".to_string());
+    }
+    if chars.peek() == Some(&'[') {
+        return Err("Scalar references cannot use series selectors".to_string());
+    }
+
+    Ok(ExpressionScalarRef { target, attr_name })
 }
 
 fn parse_expression_dataset_selectors(
-    path: &str,
+    reference: &str,
     spec: &str,
 ) -> Result<Vec<ExpressionDatasetSelector>, String> {
     let parts = spec
@@ -2161,7 +2244,7 @@ fn parse_expression_dataset_selectors(
         .collect::<Vec<_>>();
     if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
         return Err(format!(
-            "Dataset reference '!{path}[{spec}]' must use comma-separated selectors like [..,0]"
+            "Series reference '{reference}[{spec}]' must use comma-separated selectors like [..,0]"
         ));
     }
 
@@ -2175,7 +2258,7 @@ fn parse_expression_dataset_selectors(
                     .map(ExpressionDatasetSelector::Index)
                     .map_err(|_| {
                         format!(
-                            "Dataset reference '!{path}[{spec}]' has invalid selector '{part}'; use '..' or a non-negative integer"
+                            "Series reference '{reference}[{spec}]' has invalid selector '{part}'; use '..' or a non-negative integer"
                         )
                     })
             }
@@ -2183,59 +2266,11 @@ fn parse_expression_dataset_selectors(
         .collect()
 }
 
-fn parse_expression_attribute_ref(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionAttributeRef, String> {
-    let Some(&first) = chars.peek() else {
-        return Err("Expected an attribute reference after '#'".to_string());
-    };
-
-    if first == '/' || first == '.' {
-        let mut path = String::new();
-        while let Some(&next) = chars.peek() {
-            if next == ':' {
-                break;
-            }
-            if next.is_whitespace() || matches!(next, '+' | '*' | '(' | ')') {
-                return Err(format!(
-                    "Attribute path reference '#{path}' must include ':ATTR_NAME'"
-                ));
-            }
-            path.push(next);
-            chars.next();
-        }
-        if path.is_empty() {
-            return Err("Expected a path after '#' for scalar attribute lookup".to_string());
-        }
-        if chars.next() != Some(':') {
-            return Err(format!(
-                "Attribute path reference '#{path}' must include ':ATTR_NAME'"
-            ));
-        }
-        let attr_name = parse_expression_attribute_name(chars);
-        if attr_name.is_empty() {
-            return Err(format!(
-                "Expected an attribute name after '#{path}:' in expression"
-            ));
-        }
-        Ok(ExpressionAttributeRef::ObjectPath {
-            absolute: first == '/',
-            path,
-            attr_name,
-        })
-    } else {
-        let attr_name = parse_expression_attribute_name(chars);
-        if attr_name.is_empty() {
-            return Err("Expected an attribute name after '#'".to_string());
-        }
-        Ok(ExpressionAttributeRef::SelectedDataset { attr_name })
-    }
-}
-
 fn parse_expression_attribute_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
     let mut attr_name = String::new();
     while let Some(&next) = chars.peek() {
-        if next.is_whitespace() || matches!(next, '+' | '-' | '*' | '/' | '(' | ')') {
+        if next == '[' || next.is_whitespace() || matches!(next, '+' | '-' | '*' | '/' | '(' | ')')
+        {
             break;
         }
         attr_name.push(next);
@@ -2296,13 +2331,13 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(ExpressionAst::ItemRef(*id))
             }
-            ExpressionToken::DatasetRef(dataset_ref) => {
+            ExpressionToken::SeriesRef(series_ref) => {
                 *pos += 1;
-                Ok(ExpressionAst::DatasetRef(dataset_ref.clone()))
+                Ok(ExpressionAst::SeriesRef(series_ref.clone()))
             }
-            ExpressionToken::AttributeRef(attr_ref) => {
+            ExpressionToken::ScalarRef(scalar_ref) => {
                 *pos += 1;
-                Ok(ExpressionAst::AttributeRef(attr_ref.clone()))
+                Ok(ExpressionAst::ScalarRef(scalar_ref.clone()))
             }
             ExpressionToken::Minus => {
                 *pos += 1;
@@ -2382,16 +2417,16 @@ fn split_top_level_tuple(
 #[derive(Debug, Default)]
 struct ExpressionRefs {
     item_ids: Vec<ChartItemId>,
-    dataset_refs: Vec<ExpressionDatasetRef>,
-    attribute_refs: Vec<ExpressionAttributeRef>,
+    series_refs: Vec<ExpressionSeriesRef>,
+    scalar_refs: Vec<ExpressionScalarRef>,
 }
 
 fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
     match expr {
         ExpressionAst::Number(_) => {}
         ExpressionAst::ItemRef(id) => out.item_ids.push(*id),
-        ExpressionAst::DatasetRef(dataset_ref) => out.dataset_refs.push(dataset_ref.clone()),
-        ExpressionAst::AttributeRef(attr_ref) => out.attribute_refs.push(attr_ref.clone()),
+        ExpressionAst::SeriesRef(series_ref) => out.series_refs.push(series_ref.clone()),
+        ExpressionAst::ScalarRef(scalar_ref) => out.scalar_refs.push(scalar_ref.clone()),
         ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
         ExpressionAst::Binary { lhs, rhs, .. } => {
             collect_expression_refs(lhs, out);
@@ -2452,8 +2487,8 @@ fn eval_expression_at(
     expr: &ExpressionAst,
     idx: usize,
     state: &MultiChartState,
-    dataset_series: &std::collections::HashMap<ExpressionDatasetRef, Vec<Point>>,
-    attribute_values: &std::collections::HashMap<ExpressionAttributeRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionSeriesRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionScalarRef, f64>,
 ) -> Result<f64, String> {
     match expr {
         ExpressionAst::Number(value) => Ok(*value),
@@ -2466,30 +2501,30 @@ fn eval_expression_at(
                     id.0, idx
                 )
             }),
-        ExpressionAst::DatasetRef(dataset_ref) => dataset_series
-            .get(dataset_ref)
+        ExpressionAst::SeriesRef(series_ref) => series_values
+            .get(series_ref)
             .and_then(|points| points.get(idx).map(|(_, y)| *y))
             .ok_or_else(|| {
                 format!(
-                    "Dataset reference {} is unavailable at sample index {}",
-                    dataset_ref.render(),
+                    "Series reference {} is unavailable at sample index {}",
+                    series_ref.render(),
                     idx
                 )
             }),
-        ExpressionAst::AttributeRef(attr_ref) => attribute_values
-            .get(attr_ref)
+        ExpressionAst::ScalarRef(scalar_ref) => scalar_values
+            .get(scalar_ref)
             .copied()
-            .ok_or_else(|| format!("Attribute reference {} was not resolved", attr_ref.render())),
+            .ok_or_else(|| format!("Scalar reference {} was not resolved", scalar_ref.render())),
         ExpressionAst::UnaryMinus(inner) => Ok(-eval_expression_at(
             inner,
             idx,
             state,
-            dataset_series,
-            attribute_values,
+            series_values,
+            scalar_values,
         )?),
         ExpressionAst::Binary { op, lhs, rhs } => {
-            let lhs = eval_expression_at(lhs, idx, state, dataset_series, attribute_values)?;
-            let rhs = eval_expression_at(rhs, idx, state, dataset_series, attribute_values)?;
+            let lhs = eval_expression_at(lhs, idx, state, series_values, scalar_values)?;
+            let rhs = eval_expression_at(rhs, idx, state, series_values, scalar_values)?;
             match op {
                 ExprBinaryOp::Add => Ok(lhs + rhs),
                 ExprBinaryOp::Sub => Ok(lhs - rhs),
@@ -2509,81 +2544,92 @@ fn eval_expression_at(
     }
 }
 
-fn resolve_expression_attribute_values(
+fn resolve_expression_scalar_values(
+    state: &MultiChartState,
     file: Option<&File>,
-    selected_dataset: Option<&DatasetChartSource>,
-    refs: &[ExpressionAttributeRef],
-) -> Result<std::collections::HashMap<ExpressionAttributeRef, f64>, String> {
+    refs: &[ExpressionScalarRef],
+) -> Result<std::collections::HashMap<ExpressionScalarRef, f64>, String> {
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
     let file = file.ok_or_else(|| {
-        "Scalar attribute references require an open file handle, but no file is loaded".to_string()
+        "Scalar references require an open file handle, but no file is loaded".to_string()
     })?;
-
-    let selected_dataset_path = selected_dataset.map(|source| source.dataset_path.as_str());
-    if refs
-        .iter()
-        .any(ExpressionAttributeRef::needs_selected_dataset_context)
-        && selected_dataset_path.is_none()
-    {
-        return Err(
-            "Relative scalar attribute references require the selected multichart item to be dataset-backed"
-                .to_string(),
-        );
-    }
-
     let mut values = std::collections::HashMap::with_capacity(refs.len());
-    for attr_ref in refs {
-        let value = resolve_expression_attribute_value(file, selected_dataset_path, attr_ref)?;
-        values.insert(attr_ref.clone(), value);
+    for scalar_ref in refs {
+        let value = resolve_expression_scalar_value(state, file, scalar_ref)?;
+        values.insert(scalar_ref.clone(), value);
     }
     Ok(values)
 }
 
-fn resolve_expression_dataset_series(
+fn resolve_expression_series_values(
+    state: &MultiChartState,
     file: Option<&File>,
-    refs: &[ExpressionDatasetRef],
-) -> Result<std::collections::HashMap<ExpressionDatasetRef, Vec<Point>>, String> {
+    refs: &[ExpressionSeriesRef],
+) -> Result<std::collections::HashMap<ExpressionSeriesRef, Vec<Point>>, String> {
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
     let file = file.ok_or_else(|| {
-        "Dataset path references require an open file handle, but no file is loaded".to_string()
+        "Series references require an open file handle, but no file is loaded".to_string()
     })?;
     let mut series = std::collections::HashMap::with_capacity(refs.len());
-    for dataset_ref in refs {
-        let dataset = file.dataset(&dataset_ref.path).map_err(|error| {
-            format!(
-                "Dataset reference {} could not be opened: {}",
-                dataset_ref.render(),
-                error
-            )
-        })?;
-        let points = read_expression_dataset_points(&dataset, dataset_ref)?;
-        series.insert(dataset_ref.clone(), points);
+    for series_ref in refs {
+        let points = resolve_expression_series_value(state, file, series_ref)?;
+        series.insert(series_ref.clone(), points);
     }
     Ok(series)
 }
 
+fn resolve_expression_series_value(
+    state: &MultiChartState,
+    file: &File,
+    series_ref: &ExpressionSeriesRef,
+) -> Result<Vec<Point>, String> {
+    match (&series_ref.target, &series_ref.attr_name) {
+        (ExpressionObjectTarget::ItemRef(id), None) => state
+            .item_by_id(*id)
+            .map(|item| item.series.points.clone())
+            .ok_or_else(|| format!("Unknown chart item reference ${}", id.0)),
+        (target, Some(attr_name)) => {
+            let object_path = resolve_expression_target_path(state, target, &series_ref.render())?;
+            let attr = open_expression_attribute(file, &object_path, attr_name)?;
+            read_expression_numeric_series_attr(&attr, &series_ref.render())
+        }
+        (ExpressionObjectTarget::AbsolutePath(path), None) => {
+            let object_path = normalize_absolute_object_path(path)?;
+            let dataset = file.dataset(&object_path).map_err(|error| {
+                format!(
+                    "Series reference {} could not open dataset '{}': {}",
+                    series_ref.render(),
+                    object_path,
+                    error
+                )
+            })?;
+            read_expression_dataset_points(&dataset, series_ref)
+        }
+    }
+}
+
 fn read_expression_dataset_points(
     dataset: &Dataset,
-    dataset_ref: &ExpressionDatasetRef,
+    series_ref: &ExpressionSeriesRef,
 ) -> Result<Vec<Point>, String> {
     let shape = dataset.shape();
-    let preview_selection = dataset_ref.to_preview_selection(&shape)?;
+    let preview_selection = series_ref.to_preview_selection(&shape)?;
     let selection = preview_selection_to_hyperslab(&shape, &preview_selection)?;
     let dtype = dataset.dtype().map_err(|error| {
         format!(
             "Failed to inspect dataset type for {}: {}",
-            dataset_ref.render(),
+            series_ref.render(),
             error
         )
     })?;
     let type_desc = dtype.to_descriptor().map_err(|error| {
         format!(
             "Failed to inspect dataset type for {}: {}",
-            dataset_ref.render(),
+            series_ref.render(),
             error
         )
     })?;
@@ -2672,13 +2718,13 @@ fn read_expression_dataset_points(
         }),
         other => {
             return Err(format!(
-                "Dataset reference {} must be numeric; got {}",
-                dataset_ref.render(),
+                "Series reference {} must be numeric; got {}",
+                series_ref.render(),
                 other
             ))
         }
     }
-    .map_err(|error| format!("Failed reading {}: {}", dataset_ref.render(), error))?;
+    .map_err(|error| format!("Failed reading {}: {}", series_ref.render(), error))?;
 
     let points = values
         .into_iter()
@@ -2687,8 +2733,8 @@ fn read_expression_dataset_points(
         .collect::<Vec<_>>();
     if points.is_empty() {
         return Err(format!(
-            "Dataset reference {} resolved to an empty series",
-            dataset_ref.render()
+            "Series reference {} resolved to an empty series",
+            series_ref.render()
         ));
     }
     Ok(points)
@@ -2721,53 +2767,35 @@ fn preview_selection_to_hyperslab(
     Ok(Selection::Hyperslab(Hyperslab::from(slice_selections)))
 }
 
-fn resolve_expression_attribute_value(
+fn resolve_expression_scalar_value(
+    state: &MultiChartState,
     file: &File,
-    selected_dataset_path: Option<&str>,
-    attr_ref: &ExpressionAttributeRef,
+    scalar_ref: &ExpressionScalarRef,
 ) -> Result<f64, String> {
-    let (object_path, attr_name) = match attr_ref {
-        ExpressionAttributeRef::SelectedDataset { attr_name } => (
-            selected_dataset_path
-                .ok_or_else(|| {
-                    format!(
-                        "Attribute reference {} requires a selected dataset-backed chart item",
-                        attr_ref.render()
-                    )
-                })?
-                .to_string(),
-            attr_name.as_str(),
-        ),
-        ExpressionAttributeRef::ObjectPath {
-            path,
-            attr_name,
-            absolute,
-        } => {
-            let resolved_path = if *absolute {
-                normalize_absolute_attribute_path(path)?
-            } else {
-                resolve_relative_attribute_path(
-                    selected_dataset_path.ok_or_else(|| {
-                        format!(
-                            "Attribute reference {} requires a selected dataset-backed chart item",
-                            attr_ref.render()
-                        )
-                    })?,
-                    path,
-                )?
-            };
-            (resolved_path, attr_name.as_str())
+    let object_path =
+        resolve_expression_target_path(state, &scalar_ref.target, &scalar_ref.render())?;
+    match &scalar_ref.attr_name {
+        Some(attr_name) => {
+            let attr = open_expression_attribute(file, &object_path, attr_name)?;
+            read_expression_numeric_scalar_attr(&attr, &scalar_ref.render())
         }
-    };
-    let attr = open_expression_attribute(file, &object_path, attr_name)?;
-    read_expression_numeric_scalar_attr(&attr, &attr_ref.render())
+        None => {
+            let dataset = file.dataset(&object_path).map_err(|error| {
+                format!(
+                    "Scalar reference {} could not open dataset '{}': {}",
+                    scalar_ref.render(),
+                    object_path,
+                    error
+                )
+            })?;
+            read_expression_numeric_scalar_dataset(&dataset, &scalar_ref.render())
+        }
+    }
 }
 
-fn normalize_absolute_attribute_path(path: &str) -> Result<String, String> {
+fn normalize_absolute_object_path(path: &str) -> Result<String, String> {
     if !path.starts_with('/') {
-        return Err(format!(
-            "Absolute attribute path '{path}' must start with '/'"
-        ));
+        return Err(format!("Absolute path '{path}' must start with '/'"));
     }
     let mut components = Vec::new();
     for segment in path.split('/') {
@@ -2778,9 +2806,7 @@ fn normalize_absolute_attribute_path(path: &str) -> Result<String, String> {
             "." => {}
             ".." => {
                 if components.pop().is_none() {
-                    return Err(format!(
-                        "Absolute attribute path '{path}' escapes above root"
-                    ));
+                    return Err(format!("Absolute path '{path}' escapes above root"));
                 }
             }
             other => components.push(other),
@@ -2793,33 +2819,23 @@ fn normalize_absolute_attribute_path(path: &str) -> Result<String, String> {
     }
 }
 
-fn resolve_relative_attribute_path(
-    base_object_path: &str,
-    relative_path: &str,
+fn resolve_expression_target_path(
+    state: &MultiChartState,
+    target: &ExpressionObjectTarget,
+    reference: &str,
 ) -> Result<String, String> {
-    let mut components = base_object_path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    for segment in relative_path.split('/') {
-        if segment.is_empty() || segment == "." {
-            continue;
-        }
-        if segment == ".." {
-            if components.pop().is_none() {
-                return Err(format!(
-                    "Relative attribute path '{relative_path}' escapes above the file root"
-                ));
-            }
-            continue;
-        }
-        components.push(segment.to_string());
-    }
-    if components.is_empty() {
-        Ok("/".to_string())
-    } else {
-        Ok(format!("/{}", components.join("/")))
+    match target {
+        ExpressionObjectTarget::AbsolutePath(path) => normalize_absolute_object_path(path),
+        ExpressionObjectTarget::ItemRef(id) => state
+            .item_by_id(*id)
+            .and_then(|item| item.source.dataset_source())
+            .map(|dataset_source| dataset_source.dataset_path.clone())
+            .ok_or_else(|| {
+                format!(
+                    "Reference {} requires chart item ${} to be dataset-backed",
+                    reference, id.0
+                )
+            }),
     }
 }
 
@@ -2829,18 +2845,15 @@ fn open_expression_attribute(
     attr_name: &str,
 ) -> Result<Attribute, String> {
     if object_path == "/" {
-        return file.attr(attr_name).map_err(|error| {
-            format!(
-                "Failed to read scalar attribute '#/:{}': {}",
-                attr_name, error
-            )
-        });
+        return file
+            .attr(attr_name)
+            .map_err(|error| format!("Failed to read attribute '#/:{}': {}", attr_name, error));
     }
 
     if let Ok(group) = file.group(object_path) {
         return group.attr(attr_name).map_err(|error| {
             format!(
-                "Failed to read scalar attribute '#{}:{}': {}",
+                "Failed to read attribute '#{}:{}': {}",
                 object_path, attr_name, error
             )
         });
@@ -2849,7 +2862,7 @@ fn open_expression_attribute(
     if let Ok(dataset) = file.dataset(object_path) {
         return dataset.attr(attr_name).map_err(|error| {
             format!(
-                "Failed to read scalar attribute '#{}:{}': {}",
+                "Failed to read attribute '#{}:{}': {}",
                 object_path, attr_name, error
             )
         });
@@ -2915,6 +2928,167 @@ fn read_expression_numeric_scalar_attr(attr: &Attribute, reference: &str) -> Res
             .map_err(|error| format!("Failed reading {reference}: {error}")),
         other => Err(format!(
             "Attribute reference {reference} must be numeric; got {other}"
+        )),
+    }
+}
+
+fn read_expression_numeric_series_attr(
+    attr: &Attribute,
+    reference: &str,
+) -> Result<Vec<Point>, String> {
+    if attr.is_scalar() {
+        return Err(format!(
+            "Series reference {reference} must resolve to a non-scalar numeric attribute"
+        ));
+    }
+    if attr.shape().len() != 1 {
+        return Err(format!(
+            "Series reference {reference} currently supports only rank-1 numeric attributes"
+        ));
+    }
+
+    let dtype = attr.dtype().map_err(|error| {
+        format!("Failed to inspect series attribute type for {reference}: {error}")
+    })?;
+    let type_desc = dtype.to_descriptor().map_err(|error| {
+        format!("Failed to inspect series attribute type for {reference}: {error}")
+    })?;
+    let values = match type_desc {
+        TypeDescriptor::Integer(IntSize::U1) => attr.read_1d::<i8>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Integer(IntSize::U2) => attr.read_1d::<i16>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Integer(IntSize::U4) => attr.read_1d::<i32>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Integer(IntSize::U8) => attr.read_1d::<i64>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Unsigned(IntSize::U1) => attr.read_1d::<u8>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Unsigned(IntSize::U2) => attr.read_1d::<u16>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Unsigned(IntSize::U4) => attr.read_1d::<u32>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Unsigned(IntSize::U8) => attr.read_1d::<u64>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Float(FloatSize::U4) => attr.read_1d::<f32>().map(|values| {
+            values
+                .into_iter()
+                .map(|value| value as f64)
+                .collect::<Vec<_>>()
+        }),
+        TypeDescriptor::Float(FloatSize::U8) => attr
+            .read_1d::<f64>()
+            .map(|values| values.into_iter().collect::<Vec<_>>()),
+        other => {
+            return Err(format!(
+                "Series reference {reference} must be numeric; got {other}"
+            ))
+        }
+    }
+    .map_err(|error| format!("Failed reading {reference}: {error}"))?;
+
+    if values.is_empty() {
+        return Err(format!(
+            "Series reference {reference} resolved to an empty series"
+        ));
+    }
+    Ok(values
+        .into_iter()
+        .enumerate()
+        .map(|(idx, value)| (idx as f64, value))
+        .collect())
+}
+
+fn read_expression_numeric_scalar_dataset(
+    dataset: &Dataset,
+    reference: &str,
+) -> Result<f64, String> {
+    if !dataset.is_scalar() {
+        return Err(format!(
+            "Scalar reference {reference} must resolve to a scalar numeric dataset"
+        ));
+    }
+
+    let dtype = dataset.dtype().map_err(|error| {
+        format!("Failed to inspect scalar dataset type for {reference}: {error}")
+    })?;
+    let type_desc = dtype.to_descriptor().map_err(|error| {
+        format!("Failed to inspect scalar dataset type for {reference}: {error}")
+    })?;
+    match type_desc {
+        TypeDescriptor::Integer(IntSize::U1) => dataset
+            .read_scalar::<i8>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U2) => dataset
+            .read_scalar::<i16>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U4) => dataset
+            .read_scalar::<i32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Integer(IntSize::U8) => dataset
+            .read_scalar::<i64>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U1) => dataset
+            .read_scalar::<u8>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U2) => dataset
+            .read_scalar::<u16>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U4) => dataset
+            .read_scalar::<u32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Unsigned(IntSize::U8) => dataset
+            .read_scalar::<u64>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Float(FloatSize::U4) => dataset
+            .read_scalar::<f32>()
+            .map(|value| value as f64)
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        TypeDescriptor::Float(FloatSize::U8) => dataset
+            .read_scalar::<f64>()
+            .map_err(|error| format!("Failed reading {reference}: {error}")),
+        other => Err(format!(
+            "Scalar reference {reference} must be numeric; got {other}"
         )),
     }
 }
@@ -2999,6 +3173,11 @@ mod tests {
         flag_attr
             .write_scalar(&true)
             .expect("failed writing non numeric attr");
+        dataset
+            .new_attr_builder()
+            .with_data(&[4.0_f64, 8.0_f64])
+            .create("TRACE")
+            .expect("failed creating series attr");
         let other = parent
             .new_dataset_builder()
             .with_data(&[0.0_f64])
@@ -3012,6 +3191,14 @@ mod tests {
         bias_attr
             .write_scalar(&5.0_f64)
             .expect("failed writing other dataset attr");
+        let scalar = parent
+            .new_dataset_builder()
+            .empty::<f64>()
+            .create("scalar")
+            .expect("failed creating scalar dataset");
+        scalar
+            .write_scalar(&7.0_f64)
+            .expect("failed writing scalar dataset");
         file.flush().expect("failed flushing temp hdf5 file");
         (file, path)
     }
@@ -3029,6 +3216,14 @@ mod tests {
             .with_data(matrix.view())
             .create("matrix")
             .expect("failed creating 2d dataset");
+        let scalar = file
+            .new_dataset_builder()
+            .empty::<f64>()
+            .create("scalar")
+            .expect("failed creating scalar dataset");
+        scalar
+            .write_scalar(&1.5_f64)
+            .expect("failed writing scalar dataset");
         file.flush().expect("failed flushing temp hdf5 file");
         (file, path)
     }
@@ -3267,59 +3462,72 @@ mod tests {
     }
 
     #[test]
-    fn tokenizes_scalar_attribute_references() {
-        let tokens = tokenize_expression(
-            "$1 * #SCALE + #../:CHILD_OFFSET + #../../otherds:BIAS + #/parent/otherds:BIAS",
-        )
-        .unwrap();
+    fn tokenizes_explicit_scalar_references() {
+        let tokens =
+            tokenize_expression("$1 * #/parent/scalar + #/parent/otherds:BIAS + #$1:SCALE")
+                .unwrap();
         assert!(tokens.iter().any(|token| matches!(
             token,
-            ExpressionToken::AttributeRef(ExpressionAttributeRef::SelectedDataset { attr_name })
-                if attr_name == "SCALE"
+            ExpressionToken::ScalarRef(ExpressionScalarRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: None,
+            }) if path == "/parent/scalar"
         )));
         assert!(tokens.iter().any(|token| matches!(
             token,
-            ExpressionToken::AttributeRef(ExpressionAttributeRef::ObjectPath {
-                path,
-                attr_name,
-                absolute: false,
-            }) if path == "../" && attr_name == "CHILD_OFFSET"
-        )));
-        assert!(tokens.iter().any(|token| matches!(
-            token,
-            ExpressionToken::AttributeRef(ExpressionAttributeRef::ObjectPath {
-                path,
-                attr_name,
-                absolute: true,
+            ExpressionToken::ScalarRef(ExpressionScalarRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: Some(attr_name),
             }) if path == "/parent/otherds" && attr_name == "BIAS"
+        )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::ScalarRef(ExpressionScalarRef {
+                target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
+                attr_name: Some(attr_name),
+            }) if attr_name == "SCALE"
         )));
     }
 
     #[test]
-    fn tokenizes_dataset_path_references() {
-        let tokens =
-            tokenize_expression("!/series + !/matrix[.., 1] + !/cube[1, .., 2, 3]").unwrap();
+    fn tokenizes_explicit_series_references() {
+        let tokens = tokenize_expression("!/series + !/matrix[.., 1] + !$1:TRACE").unwrap();
         assert!(tokens.iter().any(|token| matches!(
             token,
-            ExpressionToken::DatasetRef(ExpressionDatasetRef { path, selectors: None })
-                if path == "/series"
+            ExpressionToken::SeriesRef(ExpressionSeriesRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: None,
+                selectors: None,
+            }) if path == "/series"
         )));
         assert!(tokens.iter().any(|token| matches!(
             token,
-            ExpressionToken::DatasetRef(ExpressionDatasetRef { path, selectors: Some(selectors) })
-                if path == "/matrix"
+            ExpressionToken::SeriesRef(ExpressionSeriesRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: None,
+                selectors: Some(selectors),
+            }) if path == "/matrix"
                     && selectors
                         == &vec![
                             ExpressionDatasetSelector::All,
                             ExpressionDatasetSelector::Index(1),
                         ]
         )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::SeriesRef(ExpressionSeriesRef {
+                target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
+                attr_name: Some(attr_name),
+                selectors: None,
+            }) if attr_name == "TRACE"
+        )));
     }
 
     #[test]
     fn dataset_path_reference_builds_preview_selection() {
-        let dataset_ref = ExpressionDatasetRef {
-            path: "/matrix".to_string(),
+        let dataset_ref = ExpressionSeriesRef {
+            target: ExpressionObjectTarget::AbsolutePath("/matrix".to_string()),
+            attr_name: None,
             selectors: Some(vec![
                 ExpressionDatasetSelector::Index(1),
                 ExpressionDatasetSelector::All,
@@ -3334,8 +3542,9 @@ mod tests {
 
     #[test]
     fn dataset_path_reference_requires_exactly_one_axis_selector() {
-        let dataset_ref = ExpressionDatasetRef {
-            path: "/matrix".to_string(),
+        let dataset_ref = ExpressionSeriesRef {
+            target: ExpressionObjectTarget::AbsolutePath("/matrix".to_string()),
+            attr_name: None,
             selectors: Some(vec![
                 ExpressionDatasetSelector::Index(0),
                 ExpressionDatasetSelector::Index(1),
@@ -3347,7 +3556,7 @@ mod tests {
 
     #[test]
     fn parses_top_level_xy_expression_tuple() {
-        let tokens = tokenize_expression("($1 * 2, $2 + #SCALE)").unwrap();
+        let tokens = tokenize_expression("($1 * 2, $2 + #/calibration/offset)").unwrap();
         let parsed = parse_derived_expression(&tokens).unwrap();
         match parsed {
             ParsedExpression::XySeries(_, _) => {}
@@ -3356,20 +3565,18 @@ mod tests {
     }
 
     #[test]
-    fn resolves_relative_scalar_attribute_paths_from_selected_dataset() {
+    fn normalizes_absolute_expression_paths() {
         assert_eq!(
-            resolve_relative_attribute_path("/parent/child/ds", "../").unwrap(),
-            "/parent/child"
-        );
-        assert_eq!(
-            resolve_relative_attribute_path("/parent/child/ds", "../../otherds").unwrap(),
+            normalize_absolute_object_path("/parent/otherds").unwrap(),
             "/parent/otherds"
         );
-        assert_eq!(
-            normalize_absolute_attribute_path("/parent/otherds").unwrap(),
-            "/parent/otherds"
-        );
-        assert!(resolve_relative_attribute_path("/parent/child/ds", "../../../../").is_err());
+        assert!(normalize_absolute_object_path("/../../../../").is_err());
+    }
+
+    #[test]
+    fn rejects_implicit_context_scalar_attributes() {
+        let err = tokenize_expression("$1 + #SCALE").unwrap_err();
+        assert!(err.contains("Scalar references must use an absolute path"));
     }
 
     #[test]
@@ -3406,6 +3613,25 @@ mod tests {
         assert_eq!(
             derived.series.points,
             vec![(0.0, 3.0), (1.0, 6.0), (2.0, 9.0)]
+        );
+
+        drop(file);
+        fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    fn expression_derived_supports_scalar_dataset_inputs() {
+        let (file, path) = make_dataset_ref_test_file();
+        let mut state = make_state();
+
+        state
+            .create_expression_derived_with_file("!/series + #/scalar".to_string(), Some(&file))
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(
+            derived.series.points,
+            vec![(0.0, 3.5), (1.0, 5.5), (2.0, 7.5)]
         );
 
         drop(file);
@@ -3513,14 +3739,14 @@ mod tests {
 
         state
             .create_expression_derived_with_file(
-                "$1 * #SCALE + #../:CHILD_OFFSET + #../../otherds:BIAS + #/parent/otherds:BIAS"
+                "$1 * #$1:SCALE + #/parent/child:CHILD_OFFSET + #/parent/otherds:BIAS + #/parent/scalar"
                     .to_string(),
                 Some(&file),
             )
             .unwrap();
 
         let derived = state.chart_items().last().unwrap();
-        assert_eq!(derived.series.points, vec![(0.0, 15.0), (1.0, 17.0)]);
+        assert_eq!(derived.series.points, vec![(0.0, 17.0), (1.0, 19.0)]);
 
         drop(file);
         fs::remove_file(path).expect("failed removing temp hdf5 file");
@@ -3549,7 +3775,7 @@ mod tests {
         );
 
         let err = state
-            .create_expression_derived_with_file("$1 + #FLAG".to_string(), Some(&file))
+            .create_expression_derived_with_file("$1 + #$1:FLAG".to_string(), Some(&file))
             .unwrap_err();
         assert!(err.contains("must be numeric"));
 
@@ -3559,7 +3785,7 @@ mod tests {
 
     #[test]
     #[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
-    fn expression_derived_rejects_invalid_relative_attribute_paths() {
+    fn expression_derived_supports_series_attributes_on_dataset_items() {
         let (file, path) = make_attribute_test_file();
         let mut state = make_state();
         let selection = PreviewSelection {
@@ -3579,13 +3805,15 @@ mod tests {
             vec![(0.0, 1.0), (1.0, 2.0)],
         );
 
-        let err = state
+        state
             .create_expression_derived_with_file(
-                "$1 + #../../../../:OFFSET".to_string(),
+                "!$1:TRACE + #/parent/scalar".to_string(),
                 Some(&file),
             )
-            .unwrap_err();
-        assert!(err.contains("escapes above"));
+            .unwrap();
+
+        let derived = state.chart_items().last().unwrap();
+        assert_eq!(derived.series.points, vec![(0.0, 11.0), (1.0, 15.0)]);
 
         drop(file);
         fs::remove_file(path).expect("failed removing temp hdf5 file");

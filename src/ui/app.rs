@@ -1516,7 +1516,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                             "add a dataset to multichart from anywhere",
                         ),
                         (
-                            &["mchart expr \"($1, !/ticks + #OFFSET)\""],
+                            &["mchart expr \"($1, !/ticks + #/calibration/offset)\""],
                             "create a derived multichart series directly",
                         ),
                         (
@@ -1539,7 +1539,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                         (&["m"], "add current previewable selection from tree"),
                         (
                             &["e"],
-                            "open expression prompt ($id, !/path[..], #ATTR, or (x,y))",
+                            "open expression prompt ($id, !/path[..], #/path, !/path:attr, or (x,y))",
                         ),
                         (&["Space"], "mark / unmark base series"),
                         (
