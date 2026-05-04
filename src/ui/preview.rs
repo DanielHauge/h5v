@@ -1,9 +1,10 @@
 use std::{fs, path::Path, time::SystemTime};
 
 use ratatui::{
-    layout::{Constraint, Rect},
+    layout::{Alignment, Constraint, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table},
+    text::{Line, Text},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
@@ -82,6 +83,30 @@ fn format_permissions(metadata: &fs::Metadata) -> String {
 
 fn truncate_left(text: &str, offset: usize) -> String {
     text.chars().skip(offset).collect()
+}
+
+fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
+    let text = Text::from(vec![
+        Line::from("This group is just chilling."),
+        Line::from(""),
+        Line::from("No preview expression lives here yet."),
+        Line::from(""),
+        Line::from("Add `H5V_PREVIEW_EXPR` if you want this pane"),
+        Line::from("to wake up and draw a chart."),
+        Line::from(""),
+        Line::from("   (for now it is a cozy little folder void)"),
+    ]);
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+                .title(" Empty group preview ")
+                .title_alignment(Alignment::Center),
+        );
+    f.render_widget(paragraph, *area);
 }
 
 fn render_file_preview(
@@ -178,7 +203,7 @@ fn render_file_preview(
         )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-        .style(Style::default().bg(color_consts::BG_VAL3_COLOR));
+        .style(Style::default().bg(color_consts::BG_COLOR));
     let inner = outer.inner(*area);
     f.render_widget(outer, *area);
 
@@ -205,9 +230,9 @@ fn render_file_preview(
         .enumerate()
         .map(|(index, (label, value))| {
             let bg = if index % 2 == 0 {
-                color_consts::BG_VAL1_COLOR
+                color_consts::BG_COLOR
             } else {
-                color_consts::BG_VAL4_COLOR
+                color_consts::BG_VAL1_COLOR
             };
             Row::new(vec![
                 Cell::from(label).style(
@@ -286,13 +311,7 @@ pub fn render_preview(
                     }
                 }
             }
-            None => render_string(
-                f,
-                &area_inner,
-                selected_node,
-                "This group is just hanging out.\n\nThere is nothing previewable here yet. Add an `H5V_PREVIEW_EXPR` attribute if you want a chart in this pane.".to_string(),
-                None,
-            ),
+            None => render_empty_group_preview(f, &area_inner),
         }
         return;
     }
