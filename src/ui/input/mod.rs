@@ -186,7 +186,7 @@ fn handle_normal_mouse_event(
 
     match mouse_event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_click(state, mouse_event.column, mouse_event.row)
+            handle_left_click(state, mouse_event.column, mouse_event.row, false)
         }
         _ => Ok(EventResult::Continue),
     }
@@ -196,6 +196,7 @@ fn handle_left_click(
     state: &mut AppState<'_>,
     column: u16,
     row: u16,
+    toggle_if_selected: bool,
 ) -> Result<EventResult, AppError> {
     if let Some(tab_hitbox) = state
         .ui_layout
@@ -241,7 +242,21 @@ fn handle_left_click(
                 let clicked_row = row.saturating_sub(tree.inner.y) as usize;
                 let clicked_index = tree.row_offset.saturating_add(clicked_row);
                 if clicked_row < tree.visible_rows && clicked_index < state.treeview.len() {
+                    let was_selected = state.tree_view_cursor == clicked_index;
                     state.tree_view_cursor = clicked_index;
+                    if was_selected || toggle_if_selected {
+                        let tree_item = &state.treeview[clicked_index];
+                        if tree_item.load_more {
+                            tree_item.node.borrow_mut().view_loaded += 50;
+                            state.compute_tree_view();
+                            return Ok(EventResult::Redraw);
+                        }
+                        if tree_item.node.borrow().is_expandable() {
+                            tree_item.node.borrow_mut().expand_toggle()?;
+                            state.compute_tree_view();
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
                 }
             }
             return Ok(EventResult::Redraw);
