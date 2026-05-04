@@ -541,17 +541,15 @@ pub fn handle_normal_attributes(
                         Value => {
                             if let Some(attribute) = selected_rendered_attribute {
                                 let attr_name = rendered_attr_name(&attribute.0);
-                                let Some((_, attr)) = attributes
+                                let value_string = if let Some((_, attr)) = attributes
                                     .attributes
                                     .iter()
                                     .find(|(name, _)| name == &attr_name)
-                                else {
-                                    return Err(AppError::ClipboardError(format!(
-                                        "Attribute '{}' not found for copy",
-                                        attr_name
-                                    )));
+                                {
+                                    format_attr_for_edit(&attr)?
+                                } else {
+                                    attribute.1.to_string().trim_end().to_string()
                                 };
-                                let value_string = format_attr_for_edit(&attr)?;
                                 match state.clipboard.set_text(value_string) {
                                     Ok(()) => Ok(EventResult::Copying),
                                     Err(e) => Err(AppError::ClipboardError(format!(
