@@ -180,6 +180,16 @@ impl H5FNode {
             Node::Group(_, _) => {
                 result.push(ContentShowMode::Preview);
             }
+            Node::Dataset(_, dataset_meta)
+                if dataset_meta.is_compound_leaf()
+                    && matches!(dataset_meta.matrixable, Some(MatrixRenderType::Strings)) =>
+            {
+                if dataset_meta.shape.iter().any(|x| *x > 1) {
+                    result.push(ContentShowMode::Matrix);
+                } else {
+                    result.push(ContentShowMode::Preview);
+                }
+            }
             Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
                 result.push(ContentShowMode::Preview);
             }
@@ -259,7 +269,12 @@ pub struct H5F {
 #[cfg(test)]
 mod tests {
     use super::{H5FNode, Node};
-    use crate::ui::state::ContentShowMode;
+    use crate::{
+        h5f::{CompoundFieldProjection, DatasetMeta, Encoding},
+        sprint_typedesc::MatrixRenderType,
+        ui::state::ContentShowMode,
+    };
+    use hdf5_metno::types::TypeDescriptor;
 
     #[test]
     fn file_nodes_support_preview_mode() {
@@ -268,5 +283,44 @@ mod tests {
         let node = H5FNode::new(Node::File(file));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Preview]);
+    }
+
+    #[test]
+    fn projected_multi_value_string_leaves_are_matrix_only() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "labels".to_string(),
+                shape: vec![2],
+                data_type: "[2]string (len 8)".to_string(),
+                type_descriptor: TypeDescriptor::FixedAscii(8),
+                data_bytesize: 16,
+                storage_required: 16,
+                total_bytes: 16,
+                total_elems: 2,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::Strings),
+                encoding: Encoding::AsciiFixed,
+                image: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: Some(CompoundFieldProjection {
+                    field_path: vec![],
+                    field_type: TypeDescriptor::FixedAscii(8),
+                    virtual_path: "/values/labels".to_string(),
+                }),
+            },
+        ));
+
+        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
     }
 }

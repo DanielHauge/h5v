@@ -137,6 +137,23 @@ pub fn render_chart_preview(
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
     };
+    if ds_meta.is_compound_leaf()
+        && matches!(
+            ds_meta.matrixable,
+            Some(crate::sprint_typedesc::MatrixRenderType::Strings)
+        )
+    {
+        let shape = ds.shape();
+        if shape.iter().any(|len| *len > 1) {
+            render_unsupported_rendering(
+                f,
+                area,
+                &node.node,
+                "Projected string fields are matrix-only; use Matrix mode for multi-value string previews",
+            );
+            return Ok(());
+        }
+    }
     if ds_meta.is_compound_leaf() {
         return render_projected_chart_preview(f, area, node, state, ds, ds_meta);
     }
