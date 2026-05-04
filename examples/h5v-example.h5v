@@ -1,0 +1,14 @@
+# Bundled example startup walkthrough
+goto /signals/sine_wave
+focus content
+mchart add
+goto /signals/cosine_wave
+mchart add
+mchart open
+mchart select prev
+mchart visible
+mchart base toggle
+mchart select next
+mchart visible
+mchart derive difference
+mchart zoom in 20
