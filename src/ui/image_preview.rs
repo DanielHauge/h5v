@@ -10,6 +10,8 @@ use ndarray::{s, Array2, Array3};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
+    text::{Line, Span},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{
@@ -40,6 +42,9 @@ use super::{
 };
 
 const SMART_IMAGE_WINDOW_MIN_CLIPPED_FRACTION: f32 = 0.5;
+const IMAGE_CHROME_SCROLL_WIDTH: u16 = 2;
+const IMAGE_CHROME_STACK_HEIGHT: u16 = 1;
+const IMAGE_CHROME_WINDOW_HEIGHT: u16 = 4;
 
 fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
     let _ = tx_events.send(event);
@@ -141,18 +146,13 @@ fn compute_image_window(
     ds_path: &str,
     image_type: &ImageType,
     ds: &Dataset,
-    area: &Rect,
+    viewport_area: &Rect,
     image_cell_size: (u16, u16),
-    has_chrome: bool,
     current: Option<&ImageWindowState>,
 ) -> Option<ImageWindowState> {
     let (_, height, width) = dataset_image_dims(image_type, ds)?;
-    let chrome_width_loss = if has_chrome { 2 } else { 0 };
-    let chrome_height_loss = if has_chrome { 1 } else { 0 };
-    let viewport_width = area.width.saturating_sub(chrome_width_loss).max(1) as f32
-        * image_cell_size.0.max(1) as f32;
-    let viewport_height = area.height.saturating_sub(chrome_height_loss).max(1) as f32
-        * image_cell_size.1.max(1) as f32;
+    let viewport_width = viewport_area.width.max(1) as f32 * image_cell_size.0.max(1) as f32;
+    let viewport_height = viewport_area.height.max(1) as f32 * image_cell_size.1.max(1) as f32;
     let viewport_aspect = viewport_width / viewport_height;
 
     let candidate = if (width as f32 / height as f32) > viewport_aspect {
@@ -193,6 +193,27 @@ fn window_bounds(window: Option<&ImageWindowState>) -> Option<(usize, usize)> {
     window.map(|window| (window.start, window.end()))
 }
 
+fn image_content_area(area: Rect, has_stack: bool, has_window: bool) -> Rect {
+    if !has_stack && !has_window {
+        return area;
+    }
+
+    let chrome_height = if has_window {
+        IMAGE_CHROME_WINDOW_HEIGHT
+    } else {
+        IMAGE_CHROME_STACK_HEIGHT
+    };
+    let areas_split = Layout::horizontal(vec![
+        Constraint::Min(1),
+        Constraint::Length(IMAGE_CHROME_SCROLL_WIDTH),
+    ])
+    .split(area);
+    let content_areas =
+        Layout::vertical(vec![Constraint::Length(chrome_height), Constraint::Min(2)])
+            .split(areas_split[0]);
+    content_areas[1]
+}
+
 fn render_image_chrome(
     f: &mut Frame,
     area: &Rect,
@@ -203,31 +224,19 @@ fn render_image_chrome(
         return Ok(*area);
     }
 
-    let areas_split =
-        Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(2)]).split(*area);
-    let content_areas =
-        Layout::vertical(vec![Constraint::Length(1), Constraint::Min(2)]).split(areas_split[0]);
-
-    let title = match (stack, window) {
-        (Some((idx, count)), Some(window)) => format!(
-            " Image {}/{} | {} {}..{} / {} ",
-            idx + 1,
-            count,
-            window.label(),
-            window.start,
-            window.end().saturating_sub(1),
-            window.total.saturating_sub(1)
-        ),
-        (Some((idx, count)), None) => format!(" Image {}/{} ", idx + 1, count),
-        (None, Some(window)) => format!(
-            " Image | {} {}..{} / {} ",
-            window.label(),
-            window.start,
-            window.end().saturating_sub(1),
-            window.total.saturating_sub(1)
-        ),
-        (None, None) => " Image ".to_string(),
+    let areas_split = Layout::horizontal(vec![
+        Constraint::Min(1),
+        Constraint::Length(IMAGE_CHROME_SCROLL_WIDTH),
+    ])
+    .split(*area);
+    let chrome_height = if window.is_some() {
+        IMAGE_CHROME_WINDOW_HEIGHT
+    } else {
+        IMAGE_CHROME_STACK_HEIGHT
     };
+    let content_areas =
+        Layout::vertical(vec![Constraint::Length(chrome_height), Constraint::Min(2)])
+            .split(areas_split[0]);
 
     if let Some(window) = window {
         render_position_scroll(f, &areas_split[1], window.total, window.start, window.len)?;
@@ -235,14 +244,82 @@ fn render_image_chrome(
         render_position_scroll(f, &areas_split[1], count as usize, idx as usize, 1)?;
     }
 
-    let block = ratatui::widgets::Block::default()
-        .title(title)
-        .title_alignment(ratatui::layout::Alignment::Center)
-        .borders(ratatui::widgets::Borders::TOP)
-        .border_type(ratatui::widgets::BorderType::Plain)
-        .style(Style::default().fg(ratatui::style::Color::DarkGray));
+    if let Some(window) = window {
+        let title = match stack {
+            Some((idx, count)) => format!(
+                " Viewport {} | image {}/{} ",
+                window.label(),
+                idx + 1,
+                count
+            ),
+            None => format!(" Viewport {} ", window.label()),
+        };
+        let block = Block::default()
+            .title(title)
+            .title_style(Style::default().fg(crate::color_consts::TITLE).bold())
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(crate::color_consts::BREAK_COLOR))
+            .style(Style::default().bg(crate::color_consts::BG_VAL3_COLOR));
+        let inner = block.inner(content_areas[0]);
+        f.render_widget(block, content_areas[0]);
 
-    f.render_widget(block, content_areas[0]);
+        let split = Layout::horizontal([Constraint::Min(1), Constraint::Length(2)]).split(inner);
+        let [text_area, _scroll_area] = split.as_ref() else {
+            return Ok(content_areas[1]);
+        };
+        let pan_step = (window.len / 4).max(1);
+        let start = window.start;
+        let end = window.end().saturating_sub(1);
+        let total_end = window.total.saturating_sub(1);
+        let visible = window.len;
+        let start_pct = if window.total == 0 {
+            0.0
+        } else {
+            (start as f64 / window.total as f64) * 100.0
+        };
+        let end_pct = if window.total == 0 {
+            0.0
+        } else {
+            (window.end() as f64 / window.total as f64) * 100.0
+        };
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "range ",
+                    Style::default().fg(crate::color_consts::TYPE_DESC_COLOR),
+                ),
+                Span::raw(format!(
+                    "{start}..{end} of 0..{total_end} {}",
+                    window.label()
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "cover ",
+                    Style::default().fg(crate::color_consts::TYPE_DESC_COLOR),
+                ),
+                Span::raw(format!(
+                    "{start_pct:.1}-{end_pct:.1}% | {visible} visible | arrows move {pan_step} {}",
+                    window.label()
+                )),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), *text_area);
+    } else {
+        let title = match stack {
+            Some((idx, count)) => format!(" Image {}/{} ", idx + 1, count),
+            None => " Image ".to_string(),
+        };
+        let block = Block::default()
+            .title(title)
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(Borders::TOP)
+            .border_type(BorderType::Plain)
+            .style(Style::default().fg(ratatui::style::Color::DarkGray));
+        f.render_widget(block, content_areas[0]);
+    }
     Ok(content_areas[1])
 }
 
@@ -337,31 +414,32 @@ fn render_ds_img(
         state.segment_state.idx = 0;
         state.img_state.idx_to_load = 0;
     }
-    let preliminary_window = compute_image_window(
+    let has_stack = frame_count > 1;
+    let stack_content_area = image_content_area(*area, has_stack, false);
+    let stack_window = compute_image_window(
         &ds_path,
         &img_type,
         ds,
-        area,
+        &stack_content_area,
         state.image_cell_size,
-        false,
         state.img_state.window.as_ref(),
     );
+    let final_content_area = image_content_area(*area, has_stack, stack_window.is_some());
     let desired_window = compute_image_window(
         &ds_path,
         &img_type,
         ds,
-        area,
+        &final_content_area,
         state.image_cell_size,
-        frame_count > 1 || preliminary_window.is_some(),
         state.img_state.window.as_ref(),
     )
-    .or(preliminary_window);
+    .or(stack_window);
     state.img_state.window = desired_window.clone();
 
     let render_area = render_image_chrome(
         f,
         area,
-        (frame_count > 1).then_some((state.segment_state.idx, state.segment_state.segment_count)),
+        has_stack.then_some((state.segment_state.idx, state.segment_state.segment_count)),
         desired_window.as_ref(),
     )?;
     if state.should_debounce_preview(selected_node) {
