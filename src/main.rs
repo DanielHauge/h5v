@@ -2,7 +2,7 @@
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
 // #![deny(clippy::unreachable)]
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use ratatui::crossterm::style::{Attribute, Color, Stylize};
 use std::{
     ffi::OsString,
@@ -32,7 +32,7 @@ pub const GIT_VERSION: &str =
 #[derive(Parser, Debug)]
 #[clap(
     author = "Daniel F. Hauge animcuil@gmail.com",
-    about = "HDF5 terminal viewer with previews, compound schema browsing, and scripting",
+    about = "HDF5 Viewer - TUI for inspecting, visualizing and manipulating HDF5 files",
     version = GIT_VERSION
 )]
 struct Args {
@@ -69,9 +69,14 @@ fn main() -> Result<(), AppError> {
     }
 
     match &args.files[..] {
-        [] => Err(AppError::FileError(String::from(
-            "No files given.\n Usage: h5v /path/to/file.h5",
-        ))),
+        // [] => Err(AppError::FileError(String::from(
+        //     "No files given.\n Usage: h5v /path/to/file.h5",
+        // ))),
+        [] => {
+            eprintln!("{}", "Error: No files given.\n".with(Color::Red));
+            Args::command().print_long_help()?;
+            std::process::exit(1);
+        }
         [single] => ui::app::init(single.clone(), false, args.write, &startup.commands),
         multiple => ui::app::init(
             linking::link(multiple)?,
