@@ -24,7 +24,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame, Terminal,
 };
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::{
     color_consts,
@@ -570,6 +570,7 @@ fn main_recover_loop(
         pending_chord: None,
         show_tree_view: true,
         stacked_tree_layout: false,
+        image_protocol_enabled: picker.protocol_type() != ProtocolType::Halfblocks,
         image_cell_size,
         preview_debounce_generation: 0,
         preview_debounce_until: None,

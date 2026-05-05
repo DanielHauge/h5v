@@ -18,7 +18,6 @@ mod search;
 mod sprint_attributes;
 mod sprint_typedesc;
 mod ui;
-mod utils;
 use git_version::git_version;
 
 use crate::error::AppError;

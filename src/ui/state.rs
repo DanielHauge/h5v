@@ -431,6 +431,7 @@ pub struct AppState<'a> {
     pub pending_chord: Option<PendingChord>,
     pub show_tree_view: bool,
     pub stacked_tree_layout: bool,
+    pub image_protocol_enabled: bool,
     pub image_cell_size: (u16, u16),
     pub preview_debounce_generation: u64,
     pub preview_debounce_until: Option<Instant>,

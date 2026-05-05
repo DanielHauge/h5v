@@ -30,7 +30,6 @@ use crate::{
         state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs, SegmentType},
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
-    utils::image_capable_terminal,
 };
 
 use super::state::AppState;
@@ -53,7 +52,7 @@ pub fn render_precomputed_chart_preview(
         index: vec![],
         slice: SliceSelection::All,
     };
-    let image_capable = image_capable_terminal();
+    let image_capable = state.image_protocol_enabled;
     let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
 
     if image_capable && state.should_debounce_preview(&node.node) {
@@ -348,7 +347,7 @@ pub fn render_chart_preview(
         (chart_area, data_preview_selection)
     };
 
-    let image_capable = image_capable_terminal();
+    let image_capable = state.image_protocol_enabled;
     let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
 
     if image_capable && state.should_debounce_preview(&node.node) {
@@ -623,7 +622,7 @@ fn render_projected_chart_preview(
             return Ok(());
         }
     };
-    let image_capable = image_capable_terminal();
+    let image_capable = state.image_protocol_enabled;
     let loaded_preview_selection = state.chart_preview_state.ds_selection.clone();
     if image_capable && state.should_debounce_preview(&node.node) {
         render_string(
