@@ -1,7 +1,9 @@
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
 use keymap::{normal_action, window_action, Direction, NormalAction, WindowAction};
-use ratatui::crossterm::event::{Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+};
 use tree::handle_normal_tree_event;
 
 use crate::{
@@ -31,6 +33,10 @@ pub enum EventResult {
     Toast(AppToast, bool),
 }
 
+fn is_handled_key_press(key_event: &KeyEvent) -> bool {
+    matches!(key_event.kind, KeyEventKind::Press)
+}
+
 pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {
     if let Event::Resize(_, __) = event {
         return Ok(EventResult::Redraw);
@@ -45,6 +51,10 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
         Mode::FixedStringResizeDialog => handle_fixed_string_resize_dialog(state, event),
         Mode::Normal => match event {
             Event::Key(key_event) => {
+                if !is_handled_key_press(&key_event) {
+                    return Ok(EventResult::Continue);
+                }
+
                 if state.pending_chord == Some(PendingChord::CtrlW) {
                     state.pending_chord = None;
                     if let Some(action) = window_action(&key_event) {
@@ -155,6 +165,9 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
         },
         Mode::Search => {
             if let Event::Key(key_event) = event {
+                if !is_handled_key_press(&key_event) {
+                    return Ok(EventResult::Continue);
+                }
                 match key_event.code {
                     KeyCode::Char('q') => return Ok(EventResult::Quit),
                     KeyCode::Esc => {
@@ -168,6 +181,9 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
         }
         Mode::Help => {
             if let Event::Key(key_event) = event {
+                if !is_handled_key_press(&key_event) {
+                    return Ok(EventResult::Continue);
+                }
                 if key_event.code == KeyCode::Esc {
                     state.mode = Mode::Normal;
                     return Ok(EventResult::Redraw);
@@ -312,6 +328,9 @@ fn handle_fixed_string_overflow_dialog(
     let Event::Key(key_event) = event else {
         return Ok(EventResult::Continue);
     };
+    if !is_handled_key_press(&key_event) {
+        return Ok(EventResult::Continue);
+    }
     let Some(dialog) = state.fixed_string_overflow_dialog.as_mut() else {
         state.mode = Mode::Normal;
         return Ok(EventResult::Redraw);
@@ -382,6 +401,9 @@ fn handle_attribute_create_dialog(
     let Event::Key(key_event) = event else {
         return Ok(EventResult::Continue);
     };
+    if !is_handled_key_press(&key_event) {
+        return Ok(EventResult::Continue);
+    }
     let Some(dialog) = state.attribute_create_dialog.as_mut() else {
         state.mode = Mode::Normal;
         return Ok(EventResult::Toast(AppToast::Empty, true));
@@ -541,6 +563,9 @@ fn handle_attribute_delete_dialog(
     let Event::Key(key_event) = event else {
         return Ok(EventResult::Continue);
     };
+    if !is_handled_key_press(&key_event) {
+        return Ok(EventResult::Continue);
+    }
     let Some(dialog) = state.attribute_delete_dialog.as_ref() else {
         state.mode = Mode::Normal;
         return Ok(EventResult::Toast(AppToast::Empty, true));
@@ -576,6 +601,9 @@ fn handle_fixed_string_resize_dialog(
     let Event::Key(key_event) = event else {
         return Ok(EventResult::Continue);
     };
+    if !is_handled_key_press(&key_event) {
+        return Ok(EventResult::Continue);
+    }
     let Some(dialog) = state.fixed_string_overflow_dialog.as_mut() else {
         state.mode = Mode::Normal;
         return Ok(EventResult::Redraw);
