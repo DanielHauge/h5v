@@ -54,10 +54,9 @@ fn copy_text_to_clipboard(
     text: String,
     success_message: &str,
 ) -> Result<EventResult, AppError> {
-    state
-        .clipboard
-        .set_text(text)
-        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview text: {e}")))?;
+    if let Err(error) = state.set_clipboard_text(text) {
+        return Ok(EventResult::Toast(AppToast::Warning(error), false));
+    }
     Ok(EventResult::Toast(
         AppToast::Info(success_message.to_string()),
         false,
@@ -76,22 +75,112 @@ fn copy_image_to_clipboard(
         height,
         bytes: Cow::Owned(bytes),
     };
+    let Some(clipboard) = state.clipboard.as_mut() else {
+        return Ok(EventResult::Toast(
+            AppToast::Warning(state.clipboard_unavailable_message()),
+            false,
+        ));
+    };
     #[cfg(target_os = "linux")]
-    state
-        .clipboard
+    let copy_result = clipboard
         .set()
         .wait_until(Instant::now() + Duration::from_millis(300))
-        .image(image)
-        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview image: {e}")))?;
+        .image(image);
     #[cfg(not(target_os = "linux"))]
-    state
-        .clipboard
-        .set_image(image)
-        .map_err(|e| AppError::ClipboardError(format!("Failed to copy preview image: {e}")))?;
+    let copy_result = clipboard.set_image(image);
+
+    if let Err(error) = copy_result {
+        return Ok(EventResult::Toast(
+            AppToast::Warning(format!("Failed to copy preview image: {error}")),
+            false,
+        ));
+    }
     Ok(EventResult::Toast(
         AppToast::Info(success_message.to_string()),
         false,
     ))
+}
+
+fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventResult> {
+    let tree_item = state.treeview[state.tree_view_cursor].node.clone();
+    let mut node = tree_item.borrow_mut();
+    let (dataset, meta) = match &node.node {
+        Node::Dataset(dataset, meta) => (dataset.clone(), meta.clone()),
+        _ => {
+            return Err(EventResult::Toast(
+                AppToast::Warning("Only datasets can be copied from content view".to_string()),
+                false,
+            ))
+        }
+    };
+
+    if meta.matrixable.is_none() {
+        return Err(EventResult::Toast(
+            AppToast::Warning("Current matrix content cannot be copied".to_string()),
+            false,
+        ));
+    }
+
+    let shape = dataset.shape();
+    let rank = shape.len();
+    node.sync_selection_rank(rank);
+    let mut indices = node.selected_indexes.clone();
+    indices.resize(rank, 0);
+
+    let selection = if rank == 0 {
+        None
+    } else if rank == 1 {
+        let visible_rows = state
+            .matrix_view_state
+            .rows_currently_available
+            .max(1)
+            .min(shape[0]);
+        let base_row = state
+            .matrix_view_state
+            .row_offset
+            .min(shape[0].saturating_sub(visible_rows));
+        indices[0] = base_row
+            + state
+                .matrix_view_state
+                .cursor_row
+                .min(visible_rows.saturating_sub(1));
+        Some(exact_element_selection(&indices))
+    } else {
+        let row_dim = node.selected_row.min(rank.saturating_sub(1));
+        let col_dim = node.selected_col.min(rank.saturating_sub(1));
+        let visible_rows = state
+            .matrix_view_state
+            .rows_currently_available
+            .max(1)
+            .min(shape[row_dim]);
+        let visible_cols = state
+            .matrix_view_state
+            .cols_currently_available
+            .max(1)
+            .min(shape[col_dim]);
+        let base_row = state
+            .matrix_view_state
+            .row_offset
+            .min(shape[row_dim].saturating_sub(visible_rows));
+        let base_col = state
+            .matrix_view_state
+            .col_offset
+            .min(shape[col_dim].saturating_sub(visible_cols));
+        indices[row_dim] = base_row
+            + state
+                .matrix_view_state
+                .cursor_row
+                .min(visible_rows.saturating_sub(1));
+        indices[col_dim] = base_col
+            + state
+                .matrix_view_state
+                .cursor_col
+                .min(visible_cols.saturating_sub(1));
+        Some(exact_element_selection(&indices))
+    };
+
+    format_dataset_value_for_edit(&dataset, &meta, selection.as_ref())
+        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))
 }
 
 fn enum_value_to_string(enum_type: &EnumType, value: u64) -> String {
@@ -599,7 +688,11 @@ pub fn handle_normal_content_event(
                         copy_preview_content(state)
                     }
                     (Some(ContentAction::Copy), ContentShowMode::Matrix) => {
-                        Ok(EventResult::Copying)
+                        let text = match selected_matrix_copy_text(state) {
+                            Ok(text) => text,
+                            Err(event_result) => return Ok(event_result),
+                        };
+                        copy_text_to_clipboard(state, text, "Copied matrix value to clipboard")
                     }
                     _ => Ok(EventResult::Continue),
                 }

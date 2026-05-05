@@ -281,9 +281,6 @@ fn render_matrix_with_reader<T: Display>(
             let val_bg_color = if row_idx == state.matrix_view_state.cursor_row {
                 let copying = state.copying;
                 if let (true, Focus::Content) = (copying, &state.focus) {
-                    state.clipboard.set_text(format!("{d}")).map_err(|_| {
-                        AppError::ClipboardError("Could not copy data as text".to_string())
-                    })?;
                     color_consts::HIGHLIGHT_BG_COLOR_COPY
                 } else {
                     color_consts::HIGHLIGHT_BG_COLOR
@@ -371,10 +368,7 @@ fn render_matrix_with_reader<T: Display>(
                 {
                     let copying = state.copying;
                     if let (true, Focus::Content) = (copying, &state.focus) {
-                        if let Some(v) = val {
-                            state.clipboard.set_text(format!("{v}")).map_err(|_| {
-                                AppError::ClipboardError("Could not copy data as text".to_string())
-                            })?;
+                        if val.is_some() {
                             color_consts::HIGHLIGHT_BG_COLOR_COPY
                         } else {
                             color_consts::ERROR_COLOR

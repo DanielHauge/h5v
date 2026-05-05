@@ -525,8 +525,10 @@ fn main_recover_loop(
         cursor_row: 0,
         cursor_col: 0,
     };
-    let clipboard = Clipboard::new()
-        .map_err(|e| AppError::ClipboardError(format!("Failed to initialize clipboard: {}", e)))?;
+    let (clipboard, clipboard_init_error) = match Clipboard::new() {
+        Ok(clipboard) => (Some(clipboard), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
 
     let segment_state = state::SegmentState {
         idx: 0,
@@ -569,6 +571,7 @@ fn main_recover_loop(
         tree_view_cursor: 0,
         focus: Focus::Tree(LastFocused::Attributes),
         clipboard,
+        clipboard_init_error,
         mode: Mode::Normal,
         command_return_mode: Mode::Normal,
         copying: false,

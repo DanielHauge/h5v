@@ -514,32 +514,26 @@ pub fn handle_normal_attributes(
                     let selected_rendered_attribute = attributes
                         .rendered_attributes
                         .get(node_attributes_view_cursor.attribute_index);
-
-                    match node_attributes_view_cursor.attribute_view_selection {
-                        Name => {
-                            if let Some(attribute) = selected_rendered_attribute {
+                    let copy_request = match node_attributes_view_cursor.attribute_view_selection {
+                        Name => selected_rendered_attribute
+                            .map(|attribute| {
                                 let attr_name = attribute.0.to_string();
-                                let name = attr_name
-                                    .trim_end_matches('=')
-                                    .trim_end_matches('─')
-                                    .trim_end()
-                                    .to_string();
-
-                                match state.clipboard.set_text(name.to_string()) {
-                                    Ok(()) => Ok(EventResult::Copying),
-                                    Err(e) => Err(AppError::ClipboardError(format!(
-                                        "Failed to copy attribute name to clipboard: {}",
-                                        e
-                                    ))),
-                                }
-                            } else {
-                                Err(AppError::ClipboardError(
+                                (
+                                    attr_name
+                                        .trim_end_matches('=')
+                                        .trim_end_matches('─')
+                                        .trim_end()
+                                        .to_string(),
+                                    "attribute name",
+                                )
+                            })
+                            .ok_or_else(|| {
+                                AppError::ClipboardError(
                                     "No attribute selected to copy".to_string(),
-                                ))
-                            }
-                        }
-                        Value => {
-                            if let Some(attribute) = selected_rendered_attribute {
+                                )
+                            }),
+                        Value => selected_rendered_attribute
+                            .map(|attribute| {
                                 let attr_name = rendered_attr_name(&attribute.0);
                                 let value_string = if let Some((_, attr)) = attributes
                                     .attributes
@@ -550,19 +544,25 @@ pub fn handle_normal_attributes(
                                 } else {
                                     attribute.1.to_string().trim_end().to_string()
                                 };
-                                match state.clipboard.set_text(value_string) {
-                                    Ok(()) => Ok(EventResult::Copying),
-                                    Err(e) => Err(AppError::ClipboardError(format!(
-                                        "Failed to copy attribute value to clipboard: {}",
-                                        e
-                                    ))),
-                                }
-                            } else {
+                                Ok((value_string, "attribute value"))
+                            })
+                            .unwrap_or_else(|| {
                                 Err(AppError::ClipboardError(
                                     "No attribute selected to copy".to_string(),
                                 ))
-                            }
-                        }
+                            }),
+                    }?;
+                    drop(node);
+
+                    match state.set_clipboard_text(copy_request.0) {
+                        Ok(()) => Ok(EventResult::Copying),
+                        Err(error) => Ok(EventResult::Toast(
+                            AppToast::Warning(format!(
+                                "Failed to copy {} to clipboard: {error}",
+                                copy_request.1
+                            )),
+                            false,
+                        )),
                     }
                 }
                 Some(AttributesAction::Create) => {

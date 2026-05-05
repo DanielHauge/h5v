@@ -419,7 +419,8 @@ pub struct AppState<'a> {
     pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,
-    pub clipboard: Clipboard,
+    pub clipboard: Option<Clipboard>,
+    pub clipboard_init_error: Option<String>,
     pub copying: bool,
     pub toast: AppToast,
     pub file_watch: FileWatchState,
@@ -513,6 +514,20 @@ impl AppState<'_> {
         fs::metadata(&self.file_watch.path)
             .ok()
             .and_then(|metadata| metadata.modified().ok())
+    }
+
+    pub fn clipboard_unavailable_message(&self) -> String {
+        match &self.clipboard_init_error {
+            Some(error) => format!("Clipboard is unavailable on this system: {error}"),
+            None => "Clipboard is unavailable on this system".to_string(),
+        }
+    }
+
+    pub fn set_clipboard_text(&mut self, text: String) -> std::result::Result<(), String> {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            return Err(self.clipboard_unavailable_message());
+        };
+        clipboard.set_text(text).map_err(|error| error.to_string())
     }
 
     pub fn sync_file_watch(&mut self) {
