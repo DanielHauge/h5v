@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     io::stdout,
     rc::Rc,
     sync::{
@@ -90,6 +90,16 @@ pub struct IntendedMainLoopBreak {}
 
 const HEADER_HEIGHT: u16 = 1;
 const COMMAND_BAR_HEIGHT: u16 = 6;
+
+fn is_crostini_env(cros_container: Option<&str>) -> bool {
+    cros_container.map(str::trim).is_some_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
+fn should_use_alternate_screen(no_terminal_graphics: bool, cros_container: Option<&str>) -> bool {
+    !no_terminal_graphics || !is_crostini_env(cros_container)
+}
 
 #[derive(Clone)]
 struct SelectedNodeSnapshot {
@@ -383,7 +393,14 @@ pub fn init(
     no_terminal_graphics: bool,
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
-    stdout().execute(EnterAlternateScreen)?;
+    let use_alternate_screen = should_use_alternate_screen(
+        no_terminal_graphics,
+        env::var("CROS_CONTAINER").ok().as_deref(),
+    );
+
+    if use_alternate_screen {
+        stdout().execute(EnterAlternateScreen)?;
+    }
     stdout().execute(EnableMouseCapture)?;
     stdout().execute(Hide)?;
     enable_raw_mode()?;
@@ -458,7 +475,9 @@ pub fn init(
 
     stdout().execute(Show)?;
     stdout().execute(DisableMouseCapture)?;
-    stdout().execute(LeaveAlternateScreen)?;
+    if use_alternate_screen {
+        stdout().execute(LeaveAlternateScreen)?;
+    }
     disable_raw_mode()?;
     if let Some(message) = last_message {
         eprintln!("Unrecoverable AppError: {}", message);
@@ -567,6 +586,7 @@ fn main_recover_loop(
             last_known_modified: None,
             pending_external_change: false,
         },
+        compatibility_mode: no_terminal_graphics,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         edit_pause: edit_pause.clone(),
@@ -974,6 +994,35 @@ fn handle_file_watch_events(tx_events: Sender<AppEvent>, path: String) {
     });
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{is_crostini_env, should_use_alternate_screen};
+
+    #[test]
+    fn detects_crostini_from_cros_container() {
+        assert!(is_crostini_env(Some("1")));
+        assert!(is_crostini_env(Some("penguin")));
+    }
+
+    #[test]
+    fn ignores_empty_or_false_cros_container() {
+        assert!(!is_crostini_env(None));
+        assert!(!is_crostini_env(Some("")));
+        assert!(!is_crostini_env(Some("0")));
+        assert!(!is_crostini_env(Some("false")));
+    }
+
+    #[test]
+    fn keeps_alternate_screen_without_safe_flag() {
+        assert!(should_use_alternate_screen(false, Some("1")));
+    }
+
+    #[test]
+    fn disables_alternate_screen_for_crostini_safe_mode() {
+        assert!(!should_use_alternate_screen(true, Some("1")));
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum ImageLoadedResult {
     Success {
@@ -1034,6 +1083,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
         },
         if state.file_watch.linked {
             Span::styled(" linked ", Style::default().fg(Color::Cyan))
+        } else {
+            Span::raw("")
+        },
+        if state.compatibility_mode {
+            Span::styled(
+                " compatibility mode ",
+                Style::default().fg(Color::Magenta).bold(),
+            )
         } else {
             Span::raw("")
         },

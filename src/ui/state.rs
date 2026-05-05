@@ -424,6 +424,7 @@ pub struct AppState<'a> {
     pub copying: bool,
     pub toast: AppToast,
     pub file_watch: FileWatchState,
+    pub compatibility_mode: bool,
     pub focus: Focus,
     pub multi_chart: MultiChartState,
     pub mode: Mode,
