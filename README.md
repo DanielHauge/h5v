@@ -39,17 +39,24 @@ The shell installer works on Linux, macOS, and POSIX-style Windows shells such a
 
 ## Quick start
 
+If you do not have an h5 file, you can download an example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/examples/h5v-example.h5 -o h5v-example.h5
+``` 
+
 Open a file in read-only mode:
 
 ```bash
-h5v path/to/file.h5
+h5v h5v-example.h5
 ```
 
 Open the same file in write mode so edits are allowed:
 
 ```bash
-h5v -w path/to/file.h5
+h5v -w h5v-example.h5
 ```
+
 
 Start with scripted commands:
 
