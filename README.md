@@ -11,7 +11,7 @@
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
 
-The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin. It defaults to the first writable directory already on `PATH`, falling back to `~/.local/bin` on Linux and `~/bin` elsewhere.
+The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin. It now prefers conventional install locations: `/usr/local/bin` when writable, `~/.local/bin` on Unix-like systems without a writable system prefix, and `%LOCALAPPDATA%\Programs\h5v\bin` on Windows shells. On Windows, the PowerShell installer or Scoop is usually the more natural choice.
 
 `h5v` is a Rust TUI for inspecting HDF5 files without leaving the terminal. It is built for fast data exploration: browse the tree, switch between chart and matrix views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows for repeatable sessions.
 
@@ -88,6 +88,8 @@ python scripts/generate_example_h5.py
 | Scoop | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v` |
 | cargo-binstall | `cargo binstall h5v` |
 | Cargo source build | `cargo install h5v` |
+
+On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
 
 On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
 

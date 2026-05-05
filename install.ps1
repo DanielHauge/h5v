@@ -7,32 +7,55 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $InstallDir) {
-    function Test-DirectoryWritable([string]$Path) {
-        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
-            return $false
-        }
+function Get-DefaultInstallDir() {
+    if ($env:LOCALAPPDATA) {
+        return (Join-Path $env:LOCALAPPDATA "Programs\h5v\bin")
+    }
 
-        $probe = Join-Path $Path (".h5v-write-test-" + [guid]::NewGuid().ToString("N"))
-        try {
-            [System.IO.File]::WriteAllText($probe, "")
-            Remove-Item -LiteralPath $probe -Force
+    if ($env:USERPROFILE) {
+        return (Join-Path $env:USERPROFILE "AppData\Local\Programs\h5v\bin")
+    }
+
+    return (Join-Path $HOME "AppData\Local\Programs\h5v\bin")
+}
+
+function Test-PathEntry([string]$Candidate, [string[]]$Entries) {
+    $normalizedCandidate = $Candidate.TrimEnd('\')
+    foreach ($entry in $Entries) {
+        if ($entry.TrimEnd('\') -ieq $normalizedCandidate) {
             return $true
-        } catch {
-            return $false
         }
     }
 
-    foreach ($pathEntry in ($env:PATH -split ';') | Where-Object { $_ }) {
-        if (Test-DirectoryWritable $pathEntry) {
-            $InstallDir = $pathEntry
-            break
-        }
+    return $false
+}
+
+function Add-UserPathEntry([string]$PathEntry) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $userEntries = if ($userPath) {
+        ($userPath -split ';') | Where-Object { $_ }
+    } else {
+        @()
     }
 
-    if (-not $InstallDir) {
-        $InstallDir = Join-Path $HOME "bin"
+    if (-not (Test-PathEntry $PathEntry $userEntries)) {
+        $newUserPath = if ($userEntries.Count -gt 0) {
+            ($userEntries + $PathEntry) -join ';'
+        } else {
+            $PathEntry
+        }
+        [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+        Write-Host "Added $PathEntry to your user PATH."
     }
+
+    $sessionEntries = ($env:PATH -split ';') | Where-Object { $_ }
+    if (-not (Test-PathEntry $PathEntry $sessionEntries)) {
+        $env:PATH = if ($env:PATH) { "$env:PATH;$PathEntry" } else { $PathEntry }
+    }
+}
+
+if (-not $InstallDir) {
+    $InstallDir = Get-DefaultInstallDir
 }
 
 function Normalize-Version([string]$Value) {
@@ -97,13 +120,9 @@ try {
 
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item (Join-Path $sourceDir "h5v.exe") (Join-Path $InstallDir "h5v.exe") -Force
+    Add-UserPathEntry $InstallDir
 
     Write-Host "Installed h5v to $InstallDir\h5v.exe"
-
-    $pathEntries = ($env:PATH -split ';') | Where-Object { $_ }
-    if ($pathEntries -notcontains $InstallDir) {
-        Write-Warning "$InstallDir is not currently on PATH."
-    }
 } finally {
     Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -16,8 +16,9 @@ Usage:
 
 Environment:
   H5V_REPO         Override the GitHub repository (default: DanielHauge/h5v)
-  H5V_INSTALL_DIR  Override the install directory (default: first writable PATH dir,
-                   otherwise ~/.local/bin on Linux or ~/bin elsewhere)
+  H5V_INSTALL_DIR  Override the install directory (default: /usr/local/bin when
+                   writable, otherwise ~/.local/bin on Unix or
+                   %LOCALAPPDATA%\Programs\h5v\bin on Windows shells)
 EOF
 }
 
@@ -65,26 +66,83 @@ normalize_version() {
     esac
 }
 
+to_shell_path() {
+    case "$1" in
+    [A-Za-z]:[\\/]*)
+        if command -v cygpath >/dev/null 2>&1; then
+            cygpath -u "$1"
+        else
+            printf '%s\n' "$1" | sed 's|\\|/|g'
+        fi
+        ;;
+    *)
+        printf '%s\n' "$1"
+        ;;
+    esac
+}
+
+can_install_to() {
+    install_target="$1"
+
+    if [ -d "$install_target" ]; then
+        [ -w "$install_target" ]
+        return
+    fi
+
+    parent="$install_target"
+    while :; do
+        next_parent="$(dirname "$parent")"
+        if [ "$next_parent" = "$parent" ]; then
+            return 1
+        fi
+        parent="$next_parent"
+        if [ -d "$parent" ]; then
+            [ -w "$parent" ]
+            return
+        fi
+    done
+}
+
+default_windows_install_dir() {
+    if [ -n "${LOCALAPPDATA-}" ]; then
+        base_dir="$LOCALAPPDATA"
+    elif [ -n "${USERPROFILE-}" ]; then
+        base_dir="${USERPROFILE}\\AppData\\Local"
+    else
+        base_dir="$HOME/AppData/Local"
+    fi
+
+    base_dir="$(to_shell_path "$base_dir")"
+    printf '%s\n' "${base_dir}/Programs/h5v/bin"
+}
+
 default_install_dir() {
     platform="$1"
-    old_ifs=$IFS
-    IFS=:
-    for dir in $PATH; do
-        [ -n "$dir" ] || continue
-        [ -d "$dir" ] || continue
-        [ -w "$dir" ] || continue
-        printf '%s\n' "$dir"
-        IFS=$old_ifs
-        return
-    done
-    IFS=$old_ifs
 
     case "$platform" in
     linux)
+        for dir in /usr/local/bin "$HOME/.local/bin"; do
+            if can_install_to "$dir"; then
+                printf '%s\n' "$dir"
+                return
+            fi
+        done
         printf '%s\n' "$HOME/.local/bin"
         ;;
+    macos)
+        for dir in /usr/local/bin "$HOME/.local/bin"; do
+            if can_install_to "$dir"; then
+                printf '%s\n' "$dir"
+                return
+            fi
+        done
+        printf '%s\n' "$HOME/.local/bin"
+        ;;
+    windows)
+        printf '%s\n' "$(default_windows_install_dir)"
+        ;;
     *)
-        printf '%s\n' "$HOME/bin"
+        printf '%s\n' "$HOME/.local/bin"
         ;;
     esac
 }

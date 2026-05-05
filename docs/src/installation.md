@@ -8,7 +8,7 @@ Linux and macOS can install the latest release directly from GitHub:
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
 
-The shell installer also works in Git Bash, MSYS2, and Cygwin on Windows. By default it installs to the first writable directory already on `PATH`; if none is available, it falls back to `~/.local/bin` on Linux and `~/bin` elsewhere.
+The shell installer also works in Git Bash, MSYS2, and Cygwin on Windows. It prefers conventional install locations: `/usr/local/bin` when writable, `~/.local/bin` on Unix-like systems without a writable system prefix, and `%LOCALAPPDATA%\Programs\h5v\bin` on Windows shells. On Windows, the PowerShell installer or Scoop is usually the more natural choice.
 
 The installer also supports:
 
@@ -23,6 +23,8 @@ install.sh --version VERSION --install-dir PATH --repo OWNER/REPO --dry-run
 ```powershell
 irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex
 ```
+
+The PowerShell installer installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
 
 ### Homebrew
 
