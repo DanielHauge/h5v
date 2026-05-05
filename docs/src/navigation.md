@@ -27,7 +27,7 @@ The tree is the source of truth for what the rest of the UI shows.
 - `h` and `l` collapse or expand nodes
 - `Enter` or `Space` toggles the current node
 - `g` / `G` jump to the top or bottom
-- `Ctrl+U` / `Ctrl+D` move by larger chunks
+- `u` / `Ctrl+U` and `Ctrl+D` move by larger chunks
 
 When the current selection is previewable, `m` adds it to the multichart workspace immediately.
 

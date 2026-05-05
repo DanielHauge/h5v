@@ -51,7 +51,6 @@ syntect = { version = "5.3.0", default-features = false, features = [
 ] }
 tempfile = "3.20.0"
 time = { version = "0.3.44", features = ["formatting", "local-offset"] }
-uuid = { version = "1.23.1", features = ["v8"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.6.1", features = [

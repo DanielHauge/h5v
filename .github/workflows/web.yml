@@ -23,6 +23,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/oranda/releases/latest/download/oranda-installer.sh | sh
           oranda build
+          touch public/.nojekyll
       
       - name: Prepare HTML for link checking
         run: |

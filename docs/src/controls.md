@@ -21,7 +21,7 @@
 | `j`, `Down` | Move down |
 | `k`, `Up` | Move up |
 | `Ctrl+D` | Move down by a larger step |
-| `Ctrl+U` | Move up by a larger step |
+| `u`, `Ctrl+U` | Move up by a larger step |
 | `g`, `Home` | Jump to the top |
 | `G`, `End` | Jump to the bottom |
 | `h`, `Left` | Collapse |

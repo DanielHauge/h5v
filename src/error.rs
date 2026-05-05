@@ -104,8 +104,11 @@ pub fn log_error(str: impl Display) {
     // TODO: Maybe fallback logpath with "dirs"
     let log_path_opt = option_env!("H5V_LOGPATH");
     if let Some(log_path) = log_path_opt {
-        if let Ok(mut log_file) = std::fs::File::open(log_path) {
-            // write!(log_file, "{}", str);
+        if let Ok(mut log_file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+        {
             let _ = write!(log_file, "{}", str);
         }
     }
