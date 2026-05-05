@@ -7,6 +7,7 @@ use std::{
 };
 
 use ratatui::crossterm::{
+    cursor::{Hide, Show},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -15,6 +16,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::{error::AppError, ui::state::AppState};
 
 pub fn leave_h5v() -> Result<(), AppError> {
+    stdout().execute(Show)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     ratatui::restore();
@@ -23,6 +25,7 @@ pub fn leave_h5v() -> Result<(), AppError> {
 
 pub fn reenter_h5v() -> Result<(), AppError> {
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(Hide)?;
     enable_raw_mode()?;
     Ok(())
 }

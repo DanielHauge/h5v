@@ -11,8 +11,10 @@ use std::{
 };
 
 use arboard::Clipboard;
+use image::Rgba;
 use ratatui::{
     crossterm::{
+        cursor::{Hide, Show},
         event::{self, DisableMouseCapture, EnableMouseCapture},
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
@@ -382,6 +384,7 @@ pub fn init(
 ) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     stdout().execute(EnableMouseCapture)?;
+    stdout().execute(Hide)?;
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
@@ -451,6 +454,7 @@ pub fn init(
         }
     }
 
+    stdout().execute(Show)?;
     stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
@@ -476,7 +480,9 @@ fn main_recover_loop(
 
     let (tx_events, rx_events) = channel();
     #[allow(deprecated)]
-    let picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
+    let mut picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
+    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::BG_COLOR);
+    picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
     let image_cell_size = picker.font_size();
     let tx_events_2 = tx_events.clone();
     let tx_load_img = handle_image_resize(tx_events_2);
