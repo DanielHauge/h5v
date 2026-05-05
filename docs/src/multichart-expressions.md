@@ -38,6 +38,14 @@ The same syntax is also used by group preview expressions. In the bundled exampl
 (!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)
 ```
 
+Here is an example of a parametric x/y series using sine and cosine signals to form a circle:
+
+```text
+(!/signals/sine_wave, !/signals/cosine_wave)
+```
+
+![Parametric plot](./assets/parametric.png)
+
 ## Interactive prompt
 
 Open the expression prompt with:
