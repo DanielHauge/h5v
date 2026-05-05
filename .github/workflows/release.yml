@@ -361,8 +361,6 @@ jobs:
 
       - name: Generate latest changelog for site
         uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
-        with:
-          args: -vv --latest
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
