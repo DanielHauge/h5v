@@ -52,6 +52,10 @@ struct Args {
     /// Validate startup commands and print a summary without launching the UI.
     #[clap(long = "script-test")]
     script_test: bool,
+
+    /// Disable terminal graphics probing and force text-only preview rendering.
+    #[clap(long = "no-terminal-graphics")]
+    no_terminal_graphics: bool,
 }
 
 fn main() -> Result<(), AppError> {
@@ -76,11 +80,18 @@ fn main() -> Result<(), AppError> {
             Args::command().print_long_help()?;
             std::process::exit(1);
         }
-        [single] => ui::app::init(single.clone(), false, args.write, &startup.commands),
+        [single] => ui::app::init(
+            single.clone(),
+            false,
+            args.write,
+            args.no_terminal_graphics,
+            &startup.commands,
+        ),
         multiple => ui::app::init(
             linking::link(multiple)?,
             true,
             args.write,
+            args.no_terminal_graphics,
             &startup.commands,
         ),
     }
@@ -323,6 +334,7 @@ mod tests {
             commands: Vec::new(),
             scripts: Vec::new(),
             script_test: false,
+            no_terminal_graphics: false,
         }
     }
 

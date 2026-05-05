@@ -20,6 +20,18 @@ Check the HDF5 image metadata first:
 
 If those attributes are missing, h5v falls back to normal dataset handling.
 
+## The UI is blank or badly garbled
+
+Some terminals partially respond to graphics capability probes but do not render the resulting protocol correctly.
+
+Start h5v with:
+
+```bash
+h5v --no-terminal-graphics file.h5
+```
+
+That forces the safer text-only preview path and is a good first workaround on browser-backed or otherwise unusual terminal emulators.
+
 ## A compound dataset does not show in matrix mode
 
 That is expected for the compound container itself. The root compound node shows a recursive schema preview. Drill down to a projected leaf field if you want normal preview or matrix rendering.

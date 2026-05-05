@@ -63,6 +63,14 @@ h5v works in regular terminals, but **image previews and chart previews work bes
 
 h5v uses `ratatui-image` to detect and drive terminal image backends such as Kitty, Sixel, and iTerm2. If no graphics protocol is available, preview quality depends on the available fallback path and will usually be less crisp than in Kitty-class terminals.
 
+If your terminal shows a blank or badly garbled screen, start h5v with:
+
+```bash
+h5v --no-terminal-graphics path/to/file.h5
+```
+
+That disables terminal graphics probing and forces the safer text-only preview path. It is especially useful in browser-backed terminals and other xterm-like environments with partial graphics support.
+
 ## Write mode
 
 h5v opens files read-only unless you pass `-w`:

@@ -380,6 +380,7 @@ pub fn init(
     filename: String,
     link: bool,
     writable: bool,
+    no_terminal_graphics: bool,
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
@@ -397,6 +398,7 @@ pub fn init(
             filename.clone(),
             link,
             writable,
+            no_terminal_graphics,
             startup_commands,
         ) {
             Ok(_) => break,
@@ -469,6 +471,7 @@ fn main_recover_loop(
     filename: String,
     link: bool,
     writable: bool,
+    no_terminal_graphics: bool,
     startup_commands: &[StartupCommand],
 ) -> Result<IntendedMainLoopBreak> {
     let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
@@ -480,7 +483,11 @@ fn main_recover_loop(
 
     let (tx_events, rx_events) = channel();
     #[allow(deprecated)]
-    let mut picker = Picker::from_query_stdio().unwrap_or(Picker::from_fontsize((7, 14)));
+    let mut picker = if no_terminal_graphics {
+        Picker::halfblocks()
+    } else {
+        Picker::from_query_stdio().unwrap_or(Picker::halfblocks())
+    };
     let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::BG_COLOR);
     picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
     let image_cell_size = picker.font_size();
