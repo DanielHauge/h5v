@@ -16,7 +16,7 @@ The core matrix/preview pipeline supports these HDF5 type families:
 | Unsigned integers | Yes | Yes | Rendered as numeric data |
 | Floating point | Yes | Yes | Rendered as numeric data |
 | Boolean | Yes | Yes | Routed through unsigned rendering |
-| Enum | Yes | Yes | Matrix rendering uses colored symbols and labels |
+| Enum | Yes | Yes | Uses colored symbols and labels, with optional dataset-defined overrides |
 | Fixed strings | Text | Yes | Fixed strings are read with a 32768-byte limit |
 | Variable strings | Text | Yes | Good for inline string inspection |
 | Compound | Schema or projected preview | Projected fields only | Root compound matrix rendering is not implemented |
@@ -29,6 +29,17 @@ Matrix mode is only available when a dataset is matrixable and its shape has at 
 ## Strings and highlighting
 
 String datasets can carry a `HIGHLIGHT` attribute with an extension hint such as `json`, `py`, or `yml`. That hint takes precedence. If the attribute is absent, h5v falls back to the dataset name and uses the trailing extension instead, so datasets like `demo.py` or `pipeline.yml` can highlight automatically.
+
+## Enum styling overrides
+
+Enum datasets can override the default enum symbol/color cycle with dataset attributes:
+
+- `SYMBOLS`: a 1D string attribute, aligned with ascending numeric enum value order
+- `COLORS`: a 1D string attribute, aligned with ascending numeric enum value order
+
+Color values accept common names such as `green`, `amber`, and `red`, plus `#RRGGBB` hex values.
+
+These overrides apply to dataset enum preview and matrix rendering. Generic enum-valued HDF5 attributes still use the built-in fallback renderer.
 
 ## Group preview expressions
 

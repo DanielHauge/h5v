@@ -1,6 +1,6 @@
 use hdf5_metno::types::{CompoundField, CompoundType, TypeDescriptor};
 use ratatui::{
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
 };
 
@@ -45,6 +45,18 @@ pub struct CompoundFieldProjection {
     pub virtual_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumRenderOverrides {
+    pub colors: Vec<Option<Color>>,
+    pub symbols: Vec<Option<String>>,
+}
+
+impl EnumRenderOverrides {
+    pub fn is_empty(&self) -> bool {
+        self.colors.iter().all(Option::is_none) && self.symbols.iter().all(Option::is_none)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GroupMeta {
     pub is_link: bool,
@@ -70,6 +82,7 @@ pub struct DatasetMeta {
     pub matrixable: Option<MatrixRenderType>,
     pub encoding: Encoding,
     pub image: Option<ImageType>,
+    pub enum_render_overrides: Option<EnumRenderOverrides>,
     pub is_link: bool,
     pub filename: String,
     pub compound_projection: Option<CompoundFieldProjection>,

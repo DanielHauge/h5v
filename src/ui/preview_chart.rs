@@ -233,7 +233,8 @@ pub fn render_chart_preview(
                         );
                         return Ok(());
                     };
-                    let enum_rendere = EnumRenderer::new(et);
+                    let enum_rendere =
+                        EnumRenderer::with_overrides(et, ds_meta.enum_render_overrides.as_ref());
                     let scalar_value = read_single_value_dataset::<u64>(&ds)?;
                     let string = enum_rendere.render_as_line(&scalar_value);
                     f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
@@ -489,7 +490,10 @@ fn render_projected_chart_preview(
                     );
                     return Ok(());
                 };
-                let enum_renderer = EnumRenderer::new(et.clone());
+                let enum_renderer = EnumRenderer::with_overrides(
+                    et.clone(),
+                    ds_meta.enum_render_overrides.as_ref(),
+                );
                 let scalar_value = read_projected_scalar::<u64>(&ds, &ds_meta)?;
                 let string = enum_renderer.render_as_line(&scalar_value);
                 f.render_widget(ratatui::widgets::Paragraph::new(string), *area);

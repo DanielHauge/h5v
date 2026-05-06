@@ -105,6 +105,13 @@ pub fn render_info_attributes(
     let height = name_area.height as i32;
     let heightu = height as usize;
 
+    let clear_panel = Block::default().style(Style::default().bg(bg));
+    f.render_widget(clear_panel.clone(), *name_area);
+    f.render_widget(clear_panel.clone(), *value_area);
+    if scroll_area.height > 0 && scroll_area.width > 0 {
+        f.render_widget(clear_panel, *scroll_area);
+    }
+
     if scroll_area.height > 0 && scroll_area.width > 0 {
         let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
             .end_symbol(Some("v"))

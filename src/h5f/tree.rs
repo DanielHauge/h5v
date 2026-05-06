@@ -1,18 +1,22 @@
 use std::{cell::RefCell, rc::Rc};
 
 use hdf5_metno::{
-    plist::file_access::FileCloseDegree, types::VarLenUnicode, Dataset, File, Group, LinkType,
+    plist::file_access::FileCloseDegree,
+    types::{TypeDescriptor, VarLenUnicode},
+    Dataset, File, Group, LinkType,
 };
+use ratatui::style::Color;
 
 use crate::{
     error::AppError,
+    h5f::read_string_attr_values,
     sprint_typedesc::{encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor},
 };
 
 use super::{
     attrs::HasName,
     compound::root_compound_projection,
-    meta::{CompoundFieldProjection, DatasetMeta, GroupMeta},
+    meta::{CompoundFieldProjection, DatasetMeta, EnumRenderOverrides, GroupMeta},
     model::{H5FNode, Node, NodeType, H5F},
 };
 
@@ -43,6 +47,140 @@ fn resolve_highlight_hint(attr_hint: Option<String>, dataset_name: &str) -> Opti
         .map(|hint| hint.trim().to_ascii_lowercase())
         .filter(|hint| !hint.is_empty())
         .or_else(|| highlight_hint_from_name(dataset_name))
+}
+
+const ENUM_SYMBOLS_ATTR: &str = "SYMBOLS";
+const ENUM_COLORS_ATTR: &str = "COLORS";
+
+fn sanitize_attr_name_segment(segment: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut last_was_separator = false;
+    for ch in segment.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_uppercase());
+            last_was_separator = false;
+        } else if !last_was_separator {
+            out.push('_');
+            last_was_separator = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn enum_render_attr_names(
+    base_name: &str,
+    compound_projection: Option<&CompoundFieldProjection>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(prefix) = compound_projection.and_then(|projection| {
+        projection
+            .field_path
+            .iter()
+            .filter_map(|segment| sanitize_attr_name_segment(&segment.name))
+            .reduce(|acc, item| format!("{acc}_{item}"))
+    }) {
+        names.push(format!("{prefix}_{base_name}"));
+    }
+    names.push(base_name.to_string());
+    names
+}
+
+fn read_named_string_attr_values(dataset: &Dataset, attr_names: &[String]) -> Option<Vec<String>> {
+    attr_names.iter().find_map(|attr_name| {
+        dataset
+            .attr(attr_name)
+            .ok()
+            .and_then(|attr| read_string_attr_values(&attr).ok())
+    })
+}
+
+fn parse_enum_color(value: &str) -> Option<Color> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed.to_ascii_lowercase();
+    if let Some(hex) = normalized.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Color::Rgb(r, g, b));
+        }
+    }
+
+    match normalized.as_str() {
+        "black" => Some(Color::Black),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "yellow" => Some(Color::Yellow),
+        "blue" => Some(Color::Blue),
+        "magenta" | "purple" => Some(Color::Magenta),
+        "cyan" => Some(Color::Cyan),
+        "gray" | "grey" => Some(Color::Gray),
+        "darkgray" | "darkgrey" => Some(Color::DarkGray),
+        "lightred" | "pink" => Some(Color::LightRed),
+        "lightgreen" => Some(Color::LightGreen),
+        "lightyellow" => Some(Color::LightYellow),
+        "lightblue" => Some(Color::LightBlue),
+        "lightmagenta" => Some(Color::LightMagenta),
+        "lightcyan" => Some(Color::LightCyan),
+        "white" => Some(Color::White),
+        "amber" => Some(Color::Rgb(255, 191, 0)),
+        "orange" => Some(Color::Rgb(255, 165, 0)),
+        _ => None,
+    }
+}
+
+fn resolve_enum_render_overrides(
+    dataset: &Dataset,
+    compound_projection: Option<&CompoundFieldProjection>,
+    type_descriptor: &TypeDescriptor,
+) -> Option<EnumRenderOverrides> {
+    if !matches!(type_descriptor, TypeDescriptor::Enum(_)) {
+        return None;
+    }
+
+    let symbols = read_named_string_attr_values(
+        dataset,
+        &enum_render_attr_names(ENUM_SYMBOLS_ATTR, compound_projection),
+    )
+    .map(|values| {
+        values
+            .into_iter()
+            .map(|value| {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+
+    let colors = read_named_string_attr_values(
+        dataset,
+        &enum_render_attr_names(ENUM_COLORS_ATTR, compound_projection),
+    )
+    .map(|values| {
+        values
+            .into_iter()
+            .map(|value| parse_enum_color(&value))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+
+    let overrides = EnumRenderOverrides { colors, symbols };
+    (!overrides.is_empty()).then_some(overrides)
 }
 
 impl HasChildren for Group {
@@ -457,6 +595,8 @@ fn build_dataset_meta(
             &display_name,
         )
     };
+    let enum_render_overrides =
+        resolve_enum_render_overrides(dataset, compound_projection.as_ref(), &type_descriptor);
 
     Ok(DatasetMeta {
         hl,
@@ -479,6 +619,7 @@ fn build_dataset_meta(
         },
         encoding: encoding_from_dtype(&type_descriptor),
         image,
+        enum_render_overrides,
         is_link,
         filename,
         compound_projection,
@@ -513,7 +654,36 @@ impl H5F {
 
 #[cfg(test)]
 mod tests {
-    use super::{highlight_hint_from_name, resolve_highlight_hint};
+    use std::str::FromStr;
+
+    use hdf5_metno::types::{EnumMember, EnumType, IntSize, TypeDescriptor, VarLenUnicode};
+    use ratatui::style::Color;
+
+    use super::{
+        enum_render_attr_names, highlight_hint_from_name, parse_enum_color,
+        resolve_enum_render_overrides, resolve_highlight_hint,
+    };
+
+    fn sample_enum() -> EnumType {
+        EnumType {
+            size: IntSize::U1,
+            signed: false,
+            members: vec![
+                EnumMember {
+                    name: "Green".to_string(),
+                    value: 1,
+                },
+                EnumMember {
+                    name: "Amber".to_string(),
+                    value: 2,
+                },
+                EnumMember {
+                    name: "Red".to_string(),
+                    value: 3,
+                },
+            ],
+        }
+    }
 
     #[test]
     fn highlight_attribute_takes_precedence_over_extension() {
@@ -542,5 +712,94 @@ mod tests {
     #[test]
     fn names_without_extensions_do_not_get_highlighting() {
         assert_eq!(highlight_hint_from_name("messages"), None);
+    }
+
+    #[test]
+    fn field_scoped_enum_attr_names_fall_back_to_global_names() {
+        let names = enum_render_attr_names(
+            "SYMBOLS",
+            Some(&crate::h5f::CompoundFieldProjection {
+                field_path: vec![
+                    crate::h5f::CompoundFieldPathSegment {
+                        name: "status".to_string(),
+                        offset: 0,
+                    },
+                    crate::h5f::CompoundFieldPathSegment {
+                        name: "evaluation-level".to_string(),
+                        offset: 1,
+                    },
+                ],
+                field_type: TypeDescriptor::Enum(sample_enum()),
+                virtual_path: "/scan/status/evaluation-level".to_string(),
+            }),
+        );
+        assert_eq!(
+            names,
+            vec![
+                "STATUS_EVALUATION_LEVEL_SYMBOLS".to_string(),
+                "SYMBOLS".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_named_and_hex_enum_colors() {
+        assert_eq!(parse_enum_color("amber"), Some(Color::Rgb(255, 191, 0)));
+        assert_eq!(parse_enum_color("#00ff7f"), Some(Color::Rgb(0, 255, 127)));
+        assert_eq!(parse_enum_color(""), None);
+    }
+
+    #[test]
+    fn resolve_enum_overrides_reads_dataset_string_attrs() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[0_u8, 1_u8, 2_u8])
+            .create("values")
+            .expect("failed to create dataset");
+
+        let symbols = vec![
+            VarLenUnicode::from_str("✓").expect("failed to create unicode symbol"),
+            VarLenUnicode::from_str("⚠").expect("failed to create unicode symbol"),
+            VarLenUnicode::from_str("✗").expect("failed to create unicode symbol"),
+        ];
+        dataset
+            .new_attr_builder()
+            .with_data(&symbols)
+            .create("SYMBOLS")
+            .expect("failed to create symbols attr");
+
+        let colors = vec![
+            VarLenUnicode::from_str("green").expect("failed to create color"),
+            VarLenUnicode::from_str("amber").expect("failed to create color"),
+            VarLenUnicode::from_str("#ff0000").expect("failed to create color"),
+        ];
+        dataset
+            .new_attr_builder()
+            .with_data(&colors)
+            .create("COLORS")
+            .expect("failed to create colors attr");
+
+        let overrides =
+            resolve_enum_render_overrides(&dataset, None, &TypeDescriptor::Enum(sample_enum()))
+                .expect("expected enum render overrides");
+
+        assert_eq!(
+            overrides.symbols,
+            vec![
+                Some("✓".to_string()),
+                Some("⚠".to_string()),
+                Some("✗".to_string())
+            ]
+        );
+        assert_eq!(
+            overrides.colors,
+            vec![
+                Some(Color::Green),
+                Some(Color::Rgb(255, 191, 0)),
+                Some(Color::Rgb(255, 0, 0))
+            ]
+        );
     }
 }

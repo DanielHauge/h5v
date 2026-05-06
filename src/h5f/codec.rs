@@ -476,6 +476,72 @@ pub fn format_attr_for_edit(attr: &Attribute) -> Result<String, AppError> {
     )))
 }
 
+pub fn read_string_attr_values(attr: &Attribute) -> Result<Vec<String>, AppError> {
+    let type_desc = attr.dtype()?.to_descriptor()?;
+    match type_desc {
+        TypeDescriptor::FixedAscii(size) => {
+            if attr.is_scalar() {
+                Ok(vec![format_fixed_string_scalar(attr, size, true)?])
+            } else if attr.ndim() == 1 {
+                read_fixed_string_1d_values(attr, size, true)
+            } else {
+                Err(AppError::EditError(format!(
+                    "Expected scalar or 1D string attribute, got {}D attribute",
+                    attr.ndim()
+                )))
+            }
+        }
+        TypeDescriptor::FixedUnicode(size) => {
+            if attr.is_scalar() {
+                Ok(vec![format_fixed_string_scalar(attr, size, false)?])
+            } else if attr.ndim() == 1 {
+                read_fixed_string_1d_values(attr, size, false)
+            } else {
+                Err(AppError::EditError(format!(
+                    "Expected scalar or 1D string attribute, got {}D attribute",
+                    attr.ndim()
+                )))
+            }
+        }
+        TypeDescriptor::VarLenAscii => {
+            if attr.is_scalar() {
+                Ok(vec![attr.read_scalar::<VarLenAscii>()?.to_string()])
+            } else if attr.ndim() == 1 {
+                Ok(attr
+                    .read_1d::<VarLenAscii>()?
+                    .into_iter()
+                    .map(|value| value.to_string())
+                    .collect())
+            } else {
+                Err(AppError::EditError(format!(
+                    "Expected scalar or 1D string attribute, got {}D attribute",
+                    attr.ndim()
+                )))
+            }
+        }
+        TypeDescriptor::VarLenUnicode => {
+            if attr.is_scalar() {
+                Ok(vec![attr.read_scalar::<VarLenUnicode>()?.to_string()])
+            } else if attr.ndim() == 1 {
+                Ok(attr
+                    .read_1d::<VarLenUnicode>()?
+                    .into_iter()
+                    .map(|value| value.to_string())
+                    .collect())
+            } else {
+                Err(AppError::EditError(format!(
+                    "Expected scalar or 1D string attribute, got {}D attribute",
+                    attr.ndim()
+                )))
+            }
+        }
+        other => Err(AppError::EditError(format!(
+            "Expected string attribute values, got {}",
+            other
+        ))),
+    }
+}
+
 fn format_scalar_attr_for_edit(
     attr: &Attribute,
     type_desc: &TypeDescriptor,
@@ -896,12 +962,18 @@ fn format_fixed_string_1d(
     size: usize,
     is_ascii: bool,
 ) -> Result<String, AppError> {
+    read_fixed_string_1d_values(attr, size, is_ascii).map(|values| values.join("\n"))
+}
+
+fn read_fixed_string_1d_values(
+    attr: &Attribute,
+    size: usize,
+    is_ascii: bool,
+) -> Result<Vec<String>, AppError> {
     let data = read_attr_memory_bytes(attr)?;
     let len = expected_1d_len(attr);
     if size == 0 {
-        return Ok(std::iter::repeat_n(String::new(), len)
-            .collect::<Vec<_>>()
-            .join("\n"));
+        return Ok(std::iter::repeat_n(String::new(), len).collect());
     }
     if data.len() != len * size {
         return Err(AppError::EditError(format!(
@@ -914,7 +986,6 @@ fn format_fixed_string_1d(
     data.chunks_exact(size)
         .map(|chunk| decode_fixed_string_value(chunk, size, is_ascii))
         .collect::<Result<Vec<_>, _>>()
-        .map(|values| values.join("\n"))
 }
 
 fn decode_fixed_string_value(

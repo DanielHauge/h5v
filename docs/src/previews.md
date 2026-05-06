@@ -34,6 +34,8 @@ Scalar datasets render as text instead of chart or matrix views. This covers:
 
 That makes h5v useful for files that mix heavy numeric data with metadata-style datasets.
 
+Scalar enum datasets also render through the enum renderer, so they can show both a symbol and a color-coded label instead of only the raw numeric value. If the dataset defines `SYMBOLS` and `COLORS` string attributes, h5v uses those overrides in ascending numeric enum value order before falling back to the built-in defaults.
+
 String datasets can also carry syntax-highlighting hints. h5v resolves them in this order:
 
 - `HIGHLIGHT` attribute on the dataset
@@ -53,6 +55,7 @@ Projected compound leaves keep following their concrete field type. For example:
 
 - `/compound/nested_records/gain` previews like a numeric field
 - `/compound/nested_records/window` is matrixable and editable as one value per line
+- projected enum leaves can inherit custom symbol/color styling from dataset metadata
 - projected multi-value string arrays stay matrix-only instead of attempting chart preview
 
 ## Group preview

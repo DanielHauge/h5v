@@ -69,8 +69,11 @@ def build_example_file(output_path: Path) -> None:
         output_path.unlink()
 
     vlen_u8 = h5py.vlen_dtype(np.dtype("uint8"))
-    enum_dtype = h5py.special_dtype(
-        enum=(np.uint8, {"LOW": 0, "MEDIUM": 1, "HIGH": 2})
+    quality_enum_dtype = h5py.special_dtype(
+        enum=(np.uint8, {"GOOD": 0, "WARNING": 1, "BAD": 2})
+    )
+    evaluation_enum_dtype = h5py.special_dtype(
+        enum=(np.uint8, {"GREEN": 0, "AMBER": 1, "RED": 2})
     )
 
     with h5py.File(output_path, "w") as h5:
@@ -84,7 +87,9 @@ def build_example_file(output_path: Path) -> None:
         scalars.create_dataset("int_scalar", data=np.int32(42))
         scalars.create_dataset("float_scalar", data=np.float64(np.pi))
         scalars.create_dataset("bool_scalar", data=np.bool_(True))
-        scalars.create_dataset("unicode_text", data="hello from h5v", dtype=utf8_dtype())
+        scalars.create_dataset(
+            "unicode_text", data="hello from h5v", dtype=utf8_dtype()
+        )
 
         signals = h5.create_group("signals")
         sample_axis = np.linspace(0.0, 4.0 * np.pi, 128, dtype=np.float32)
@@ -208,7 +213,9 @@ They should still be useful as inline string/code examples in h5v.
         )
         image_attrs(bitmap, "IMAGE_BITMAP")
 
-        raw_frames = images.create_dataset("varlen_png_frames", shape=(2,), dtype=vlen_u8)
+        raw_frames = images.create_dataset(
+            "varlen_png_frames", shape=(2,), dtype=vlen_u8
+        )
         image_attrs(raw_frames, "IMAGE_PNG")
         raw_frames[0] = encode_image_bytes(make_rgb_image(20, 28, 0.0), "PNG")
         raw_frames[1] = encode_image_bytes(make_rgb_image(20, 28, 0.45), "PNG")
@@ -255,7 +262,22 @@ They should still be useful as inline string/code examples in h5v.
         enums.create_dataset(
             "quality",
             data=np.array([0, 1, 2, 1, 0, 2], dtype=np.uint8),
-            dtype=enum_dtype,
+            dtype=quality_enum_dtype,
+        )
+        evaluation = enums.create_dataset(
+            "evaluation",
+            data=np.array([0, 1, 2, 1, 0, 2], dtype=np.uint8),
+            dtype=evaluation_enum_dtype,
+        )
+        evaluation.attrs.create(
+            "SYMBOLS",
+            np.array(["✅", "👎️", "❌"], dtype=utf8_dtype()),
+            dtype=utf8_dtype(),
+        )
+        evaluation.attrs.create(
+            "COLORS",
+            np.array(["green", "amber", "red"], dtype=utf8_dtype()),
+            dtype=utf8_dtype(),
         )
 
         metadata = h5.create_group("metadata")
@@ -269,8 +291,12 @@ They should still be useful as inline string/code examples in h5v.
         attributes_demo.attrs["enabled"] = np.bool_(True)
         attributes_demo.attrs["bytes"] = np.bytes_(b"demo-bytes")
         attributes_demo.attrs["int_array"] = np.array([1, 2, 3], dtype=np.int32)
-        attributes_demo.attrs["float_array"] = np.array([0.5, 1.5, 2.5], dtype=np.float32)
-        attributes_demo.attrs["bool_array"] = np.array([True, False, True], dtype=np.bool_)
+        attributes_demo.attrs["float_array"] = np.array(
+            [0.5, 1.5, 2.5], dtype=np.float32
+        )
+        attributes_demo.attrs["bool_array"] = np.array(
+            [True, False, True], dtype=np.bool_
+        )
         attributes_demo.attrs["labels"] = np.array(
             ["alpha", "beta"], dtype=utf8_dtype()
         )

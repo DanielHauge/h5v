@@ -290,7 +290,8 @@ pub fn render_main_display(
                             return Ok(());
                         };
 
-                        let enum_mapper = EnumRenderer::new(et);
+                        let enum_mapper =
+                            EnumRenderer::with_overrides(et, attr.enum_render_overrides.as_ref());
                         if attr.is_compound_leaf() {
                             render_projected_matrix::<u64>(
                                 f,

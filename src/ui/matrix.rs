@@ -1,11 +1,15 @@
 use std::fmt::Display;
 
-use hdf5_metno::{types::EnumType, H5Type, Selection};
+use hdf5_metno::{
+    types::{EnumMember, EnumType, IntSize},
+    H5Type, Selection,
+};
 use ndarray::{Array1, Array2};
 use ratatui::{
     layout::{Constraint, Layout, Offset, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -13,7 +17,10 @@ use crate::{
     color_consts,
     data::{MatrixTable, MatrixValues},
     error::AppError,
-    h5f::{read_projected_values_1d, read_projected_values_2d, DatasetMeta, H5FNode},
+    h5f::{
+        read_projected_values_1d, read_projected_values_2d, DatasetMeta, EnumRenderOverrides,
+        H5FNode,
+    },
     ui::state::Focus,
 };
 
@@ -65,11 +72,15 @@ pub struct EnumRenderMember {
     pub value: u64,
     pub name: String,
     pub color: Color,
-    pub symbol: &'static str,
+    pub symbol: String,
 }
 
 impl EnumRenderer {
     pub fn new(enum_mapping: EnumType) -> Self {
+        Self::with_overrides(enum_mapping, None)
+    }
+
+    pub fn with_overrides(enum_mapping: EnumType, overrides: Option<&EnumRenderOverrides>) -> Self {
         const ENUM_COLORS: [Color; 8] = [
             Color::Rgb(255, 204, 0),
             Color::Rgb(38, 166, 154),
@@ -81,15 +92,26 @@ impl EnumRenderer {
             Color::Rgb(129, 199, 132),
         ];
         const ENUM_SYMBOLS: [&str; 8] = ["●", "■", "▲", "◆", "✦", "✚", "⬢", "◉"];
-        let enum_mapping = enum_mapping
-            .members
+        let EnumType {
+            size,
+            signed,
+            mut members,
+        } = enum_mapping;
+        members.sort_by_key(|member| enum_member_sort_key(signed, size, member));
+
+        let enum_mapping = members
             .into_iter()
             .enumerate()
             .map(|(idx, member)| EnumRenderMember {
                 value: member.value,
                 name: member.name,
-                color: ENUM_COLORS[idx % ENUM_COLORS.len()],
-                symbol: ENUM_SYMBOLS[idx % ENUM_SYMBOLS.len()],
+                color: overrides
+                    .and_then(|overrides| overrides.colors.get(idx).copied().flatten())
+                    .unwrap_or(ENUM_COLORS[idx % ENUM_COLORS.len()]),
+                symbol: overrides
+                    .and_then(|overrides| overrides.symbols.get(idx))
+                    .and_then(|symbol| symbol.clone())
+                    .unwrap_or_else(|| ENUM_SYMBOLS[idx % ENUM_SYMBOLS.len()].to_string()),
             })
             .collect();
         Self { enum_mapping }
@@ -99,6 +121,19 @@ impl EnumRenderer {
         self.enum_mapping
             .iter()
             .find(|member| &member.value == value)
+    }
+}
+
+fn enum_member_sort_key(signed: bool, size: IntSize, member: &EnumMember) -> i128 {
+    if signed {
+        match size {
+            IntSize::U1 => (member.value as u8 as i8) as i128,
+            IntSize::U2 => (member.value as u16 as i16) as i128,
+            IntSize::U4 => (member.value as u32 as i32) as i128,
+            IntSize::U8 => (member.value as i64) as i128,
+        }
+    } else {
+        member.value as i128
     }
 }
 
@@ -128,6 +163,15 @@ impl RenderIntercept<u64> for EnumRenderer {
             }
         }
     }
+}
+
+fn render_centered_matrix_cell(f: &mut Frame, area: Rect, line: Line<'static>, bg_color: Color) {
+    f.render_widget(
+        Paragraph::new(line)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().bg(bg_color)),
+        area,
+    );
 }
 
 pub fn render_matrix<T: H5Type + Display>(
@@ -289,12 +333,9 @@ fn render_matrix_with_reader<T: Display>(
                 val_bg_color
             };
             let idx_line = Line::from(format!("{i}")).left_aligned();
-            let value_line = result_render
-                .render_as_line(d)
-                .alignment(ratatui::layout::Alignment::Center)
-                .bg(val_bg_color);
+            let value_line = result_render.render_as_line(d);
             f.render_widget(idx_line, idx_area);
-            f.render_widget(value_line, value_area);
+            render_centered_matrix_cell(f, value_area, value_line, val_bg_color);
             i += 1;
         }
     } else {
@@ -381,11 +422,18 @@ fn render_matrix_with_reader<T: Display>(
                 };
 
                 match val {
-                    Some(v) => f.render_widget(
-                        result_render.render_as_line(v).bg(val_bg_color).centered(),
+                    Some(v) => render_centered_matrix_cell(
+                        f,
                         val_area,
+                        result_render.render_as_line(v),
+                        val_bg_color,
                     ),
-                    None => f.render_widget("None", val_area),
+                    None => render_centered_matrix_cell(
+                        f,
+                        val_area,
+                        Line::from("None").fg(color_consts::ERROR_COLOR),
+                        val_bg_color,
+                    ),
                 }
             }
         }
@@ -398,6 +446,7 @@ fn render_matrix_with_reader<T: Display>(
 mod tests {
     use super::*;
     use hdf5_metno::types::{EnumMember, EnumType, IntSize};
+    use ratatui::style::Color;
 
     fn sample_enum() -> EnumType {
         EnumType {
@@ -421,6 +470,53 @@ mod tests {
         let renderer = EnumRenderer::new(sample_enum());
         assert_eq!(renderer.render_as_line(&1).to_string(), "● Red");
         assert_eq!(renderer.render_as_span(&2).content, "■ Green");
+    }
+
+    #[test]
+    fn enum_renderer_uses_member_overrides_when_present() {
+        let overrides = EnumRenderOverrides {
+            colors: vec![Some(Color::Green), None],
+            symbols: vec![Some("✓".to_string()), None],
+        };
+        let renderer = EnumRenderer::with_overrides(sample_enum(), Some(&overrides));
+        assert_eq!(renderer.render_as_line(&1).to_string(), "✓ Red");
+        assert_eq!(renderer.render_as_span(&2).content, "■ Green");
+    }
+
+    #[test]
+    fn enum_renderer_applies_overrides_by_numeric_value_order() {
+        let overrides = EnumRenderOverrides {
+            colors: vec![Some(Color::Green), Some(Color::Yellow), Some(Color::Red)],
+            symbols: vec![
+                Some("✓".to_string()),
+                Some("⚠".to_string()),
+                Some("✗".to_string()),
+            ],
+        };
+        let renderer = EnumRenderer::with_overrides(
+            EnumType {
+                size: IntSize::U1,
+                signed: false,
+                members: vec![
+                    EnumMember {
+                        name: "AMBER".to_string(),
+                        value: 1,
+                    },
+                    EnumMember {
+                        name: "GREEN".to_string(),
+                        value: 0,
+                    },
+                    EnumMember {
+                        name: "RED".to_string(),
+                        value: 2,
+                    },
+                ],
+            },
+            Some(&overrides),
+        );
+        assert_eq!(renderer.render_as_line(&0).to_string(), "✓ GREEN");
+        assert_eq!(renderer.render_as_line(&1).to_string(), "⚠ AMBER");
+        assert_eq!(renderer.render_as_line(&2).to_string(), "✗ RED");
     }
 
     #[test]

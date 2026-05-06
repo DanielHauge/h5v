@@ -33,4 +33,6 @@ The bundled example is a good regression harness here:
 - `/compound/records/label` shows projected string handling
 - `/compound/nested_records/window` shows a projected fixed array that can be edited from matrix mode
 
+Projected enum leaves use the same enum renderer as normal enum datasets. They can inherit dataset-wide `SYMBOLS` and `COLORS` overrides, and they also check field-scoped variants first by prefixing the projected field path in uppercase with underscores. For example, a projected field like `status/evaluation` looks for `STATUS_EVALUATION_SYMBOLS` and `STATUS_EVALUATION_COLORS` before falling back to plain `SYMBOLS` and `COLORS`.
+
 This makes compound-heavy files much easier to inspect without exporting fields into standalone datasets first.

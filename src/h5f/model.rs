@@ -311,6 +311,7 @@ mod tests {
                 matrixable: Some(MatrixRenderType::Strings),
                 encoding: Encoding::AsciiFixed,
                 image: None,
+                enum_render_overrides: None,
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: Some(CompoundFieldProjection {
