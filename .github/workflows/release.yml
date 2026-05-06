@@ -26,6 +26,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install dependencies
         run: |
@@ -53,6 +56,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Generate a changelog
         uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de
@@ -114,6 +118,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install dependencies
         if: runner.os == 'Linux'
@@ -312,6 +319,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Download package manager artifacts
         uses: actions/download-artifact@v4
@@ -358,6 +366,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Generate latest changelog for site
         uses: orhun/git-cliff-action@07dda386992489f0a6151dee53f3a137713644de

@@ -32,7 +32,8 @@ pub const GIT_VERSION: &str =
 #[clap(
     author = "Daniel F. Hauge animcuil@gmail.com",
     about = "HDF5 Viewer - TUI for inspecting, visualizing and manipulating HDF5 files",
-    version = GIT_VERSION
+    version = GIT_VERSION,
+    help_template = "{about-with-newline}\nVersion: {version}\n\n{usage-heading} {usage}\n\n{all-args}"
 )]
 struct Args {
     /// Path to the HDF5 file to open
@@ -322,10 +323,13 @@ impl ScriptTestTheme {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::{
         build_script_test_summaries, collect_startup_commands_from_inputs,
         format_script_test_report, normalize_cli_args, Args, ScriptTestTheme,
     };
+    use crate::GIT_VERSION;
 
     fn test_args() -> Args {
         Args {
@@ -386,5 +390,14 @@ mod tests {
         assert!(report.contains("command seek 1"));
         assert!(report.contains("action  Jump to an absolute index in the current content view"));
         assert!(report.contains("[02] stdin:1[2]"));
+    }
+
+    #[test]
+    fn help_includes_resolved_version() {
+        let mut command = Args::command();
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).expect("write help");
+        let help = String::from_utf8(help).expect("utf8 help");
+        assert!(help.contains(&format!("Version: {GIT_VERSION}")));
     }
 }
