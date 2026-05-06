@@ -15,11 +15,11 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 use crate::{
     error::AppError,
     h5f::{
-        format_attr_for_edit, read_attr_memory_bytes, AttributeCreateType, HasPath,
-        SYSTEM_ATTRIBUTES,
+        format_attr_for_edit, read_attr_memory_bytes, AttributeCreateType, HasPath, MetadataRowKind,
     },
     sprint_attributes::{attribute_type_descriptor, AttributeEditable},
     ui::{
+        attributes::navigate_metadata_grid,
         edit::perform_edit,
         state::{
             AppState, AppToast, AttributeCreateDialogState, AttributeCreateField,
@@ -40,19 +40,65 @@ struct ReferenceNavigationTarget {
     attr_name: Option<String>,
 }
 
-fn rendered_attr_name(line: &ratatui::text::Line<'_>) -> String {
-    line.to_string()
-        .trim_end_matches('=')
-        .trim_end_matches('─')
-        .trim_end()
-        .to_string()
+fn selected_metadata_row(
+    state: &mut AppState<'_>,
+) -> Result<
+    (
+        crate::h5f::RenderedAttributeRow,
+        crate::ui::state::AttributeViewSelection,
+    ),
+    EventResult,
+> {
+    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+    let Some(row_index) = (match node.normalize_attribute_selection() {
+        Ok(index) => index,
+        Err(error) => {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!("Failed to read attributes: {}", error)),
+                true,
+            ))
+        }
+    }) else {
+        return Err(EventResult::Toast(
+            AppToast::Error("No metadata selected".to_string()),
+            true,
+        ));
+    };
+    let row = match node.read_attributes() {
+        Ok(attributes) => attributes.row(row_index).cloned(),
+        Err(error) => {
+            return Err(EventResult::Toast(
+                AppToast::Error(format!("Failed to read attributes: {}", error)),
+                true,
+            ))
+        }
+    };
+    let Some(row) = row else {
+        return Err(EventResult::Toast(
+            AppToast::Error("No metadata selected".to_string()),
+            true,
+        ));
+    };
+    Ok((row, selection))
 }
 
 fn selected_attribute(
     state: &mut AppState<'_>,
 ) -> Result<(String, Attribute, crate::ui::state::AttributeViewSelection), EventResult> {
+    let (row, selection) = selected_metadata_row(state)?;
+    if !matches!(row.kind, MetadataRowKind::Attribute) {
+        let row_name = row.key.unwrap_or_else(|| "selected row".to_string());
+        return Err(EventResult::Toast(
+            AppToast::Warning(format!(
+                "'{}' is a built-in h5v property and has no editable HDF5 attribute value",
+                row_name
+            )),
+            false,
+        ));
+    }
+    let attr_name = row.key.unwrap_or_else(|| "selected row".to_string());
     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
-    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
     let attributes = match node.read_attributes() {
         Ok(attributes) => attributes,
         Err(error) => {
@@ -62,16 +108,6 @@ fn selected_attribute(
             ))
         }
     };
-    let Some(rendered_attribute) = attributes
-        .rendered_attributes
-        .get(node_attributes_view_cursor.attribute_index)
-    else {
-        return Err(EventResult::Toast(
-            AppToast::Error("No attribute selected".to_string()),
-            true,
-        ));
-    };
-    let attr_name = rendered_attr_name(&rendered_attribute.0);
     let Some((_, attr)) = attributes
         .attributes
         .iter()
@@ -82,55 +118,24 @@ fn selected_attribute(
             true,
         ));
     };
-    Ok((
-        attr_name,
-        attr.clone(),
-        node_attributes_view_cursor.attribute_view_selection,
-    ))
-}
-
-fn selected_attribute_name_and_selection(
-    state: &mut AppState<'_>,
-) -> Result<(String, crate::ui::state::AttributeViewSelection), EventResult> {
-    let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
-    let node_attributes_view_cursor = node.attributes_view_cursor.clone();
-    let attributes = match node.read_attributes() {
-        Ok(attributes) => attributes,
-        Err(error) => {
-            return Err(EventResult::Toast(
-                AppToast::Error(format!("Failed to read attributes: {}", error)),
-                true,
-            ))
-        }
-    };
-    let Some(rendered_attribute) = attributes
-        .rendered_attributes
-        .get(node_attributes_view_cursor.attribute_index)
-    else {
-        return Err(EventResult::Toast(
-            AppToast::Error("No attribute selected".to_string()),
-            true,
-        ));
-    };
-
-    Ok((
-        rendered_attr_name(&rendered_attribute.0),
-        node_attributes_view_cursor.attribute_view_selection,
-    ))
+    Ok((attr_name, attr.clone(), selection))
 }
 
 fn selected_custom_attribute_name(state: &mut AppState<'_>) -> Result<String, EventResult> {
-    let (attr_name, _) = selected_attribute_name_and_selection(state)?;
-    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+    let (row, _) = selected_metadata_row(state)?;
+    if !matches!(row.kind, MetadataRowKind::Attribute) {
+        let attr_name = row.key.unwrap_or_else(|| "selected row".to_string());
         return Err(EventResult::Toast(
             AppToast::Warning(format!(
-                "'{}' is a built-in h5v metadata field and cannot be modified",
+                "'{}' is a built-in h5v property and cannot be modified",
                 attr_name
             )),
             false,
         ));
     }
-    Ok(attr_name)
+    row.key.ok_or_else(|| {
+        EventResult::Toast(AppToast::Error("No attribute selected".to_string()), true)
+    })
 }
 
 fn read_hdf5_name(
@@ -202,10 +207,14 @@ fn resolve_std_reference_target(attr: &Attribute) -> Result<ReferenceNavigationT
 fn navigate_reference_attribute_value(
     state: &mut AppState<'_>,
 ) -> Result<Option<EventResult>, EventResult> {
-    let (attr_name, selection) = selected_attribute_name_and_selection(state)?;
-    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) || !matches!(selection, Value) {
+    let (row, selection) = selected_metadata_row(state)?;
+    if !matches!(row.kind, MetadataRowKind::Attribute) || !matches!(selection, Value) {
         return Ok(None);
     }
+    let attr_name = row
+        .key
+        .clone()
+        .unwrap_or_else(|| "selected row".to_string());
     let (_, attr, _) = selected_attribute(state)?;
 
     let type_desc = attribute_type_descriptor(&attr)
@@ -292,12 +301,17 @@ fn navigate_reference_attribute_value(
 fn selected_attribute_edit_request(
     state: &mut AppState<'_>,
 ) -> Result<AttributeEditRequest, EventResult> {
-    let (attr_name, selection) = selected_attribute_name_and_selection(state)?;
-
-    if SYSTEM_ATTRIBUTES.contains(&attr_name.as_str()) {
+    let (row, selection) = selected_metadata_row(state)?;
+    let Some(attr_name) = row.key.clone() else {
+        return Err(EventResult::Toast(
+            AppToast::Error("No attribute selected".to_string()),
+            true,
+        ));
+    };
+    if !matches!(row.kind, MetadataRowKind::Attribute) {
         return Err(EventResult::Toast(
             AppToast::Warning(format!(
-                "'{}' is a built-in h5v metadata field and cannot be edited",
+                "'{}' is a built-in h5v property and cannot be edited",
                 attr_name
             )),
             false,
@@ -401,8 +415,11 @@ pub fn apply_attribute_edit_request(
     match selected_node.computed_attributes {
         Some(ref x) => {
             eprintln!("Computed attributes:");
-            for (ref key, ref value, ref t) in x.rendered_attributes.iter() {
-                eprintln!("  {} = {} ({})", key, value, t);
+            for row in &x.rendered_rows {
+                eprintln!(
+                    "  {} = {} ({})",
+                    row.name_line, row.value_line, row.type_line
+                );
             }
         }
         None => eprintln!("No computed attributes"),
@@ -427,62 +444,144 @@ pub fn handle_normal_attributes(
                 Some(AttributesAction::Move(Direction::Up, amount)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
-                    let attributes_count = node.read_attributes()?.rendered_attributes.len();
-                    if attributes_count == 0 {
-                        Ok(EventResult::Continue)
-                    } else {
-                        let max_index = attributes_count.saturating_sub(1);
-                        let current_index =
-                            node.attributes_view_cursor.attribute_index.min(max_index);
-                        let new_index = current_index.saturating_sub(amount);
-                        node.attributes_view_cursor.attribute_index = new_index;
-                        if new_index != current_index {
-                            Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
+                    let Some(current_index) = node.normalize_attribute_selection()? else {
+                        return Ok(EventResult::Continue);
+                    };
+                    let outer_width = state
+                        .ui_layout
+                        .attributes
+                        .as_ref()
+                        .map(|hitbox| hitbox.outer.width)
+                        .unwrap_or(0);
+                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let destination = {
+                        let attributes = node.read_attributes()?;
+                        let mut destination = None;
+                        for _ in 0..amount {
+                            let (row_index, next_selection) =
+                                destination.unwrap_or((current_index, selection.clone()));
+                            destination = navigate_metadata_grid(
+                                attributes,
+                                outer_width,
+                                row_index,
+                                next_selection,
+                                Direction::Up,
+                            );
+                            if destination.is_none() {
+                                break;
+                            }
                         }
+                        destination
+                    };
+                    if let Some((new_index, new_selection)) = destination {
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        node.attributes_view_cursor.attribute_view_selection = new_selection;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
                     }
                 }
                 Some(AttributesAction::Move(Direction::Down, amount)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
-                    let attributes_count = node.read_attributes()?.rendered_attributes.len();
-                    if attributes_count == 0 {
-                        Ok(EventResult::Continue)
-                    } else {
-                        let max_index = attributes_count.saturating_sub(1);
-                        let current_index =
-                            node.attributes_view_cursor.attribute_index.min(max_index);
-                        let new_index = current_index.saturating_add(amount).min(max_index);
-                        node.attributes_view_cursor.attribute_index = new_index;
-                        if new_index != current_index {
-                            Ok(EventResult::Redraw)
-                        } else {
-                            Ok(EventResult::Continue)
+                    let Some(current_index) = node.normalize_attribute_selection()? else {
+                        return Ok(EventResult::Continue);
+                    };
+                    let outer_width = state
+                        .ui_layout
+                        .attributes
+                        .as_ref()
+                        .map(|hitbox| hitbox.outer.width)
+                        .unwrap_or(0);
+                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let destination = {
+                        let attributes = node.read_attributes()?;
+                        let mut destination = None;
+                        for _ in 0..amount {
+                            let (row_index, next_selection) =
+                                destination.unwrap_or((current_index, selection.clone()));
+                            destination = navigate_metadata_grid(
+                                attributes,
+                                outer_width,
+                                row_index,
+                                next_selection,
+                                Direction::Down,
+                            );
+                            if destination.is_none() {
+                                break;
+                            }
                         }
+                        destination
+                    };
+                    if let Some((new_index, new_selection)) = destination {
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        node.attributes_view_cursor.attribute_view_selection = new_selection;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
                     }
                 }
                 Some(AttributesAction::Move(Direction::Left, _)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
-                    match node.attributes_view_cursor.attribute_view_selection {
-                        Name => {}
-                        Value => {
-                            node.attributes_view_cursor.attribute_view_selection = Name;
-                        }
+                    let Some(current_index) = node.normalize_attribute_selection()? else {
+                        return Ok(EventResult::Continue);
+                    };
+                    let outer_width = state
+                        .ui_layout
+                        .attributes
+                        .as_ref()
+                        .map(|hitbox| hitbox.outer.width)
+                        .unwrap_or(0);
+                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let destination = {
+                        let attributes = node.read_attributes()?;
+                        navigate_metadata_grid(
+                            attributes,
+                            outer_width,
+                            current_index,
+                            selection,
+                            Direction::Left,
+                        )
+                    };
+                    if let Some((new_index, new_selection)) = destination {
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        node.attributes_view_cursor.attribute_view_selection = new_selection;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
                     }
-                    Ok(EventResult::Redraw)
                 }
                 Some(AttributesAction::Move(Direction::Right, _)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
-                    match node.attributes_view_cursor.attribute_view_selection {
-                        Name => {
-                            node.attributes_view_cursor.attribute_view_selection = Value;
-                        }
-                        Value => {}
+                    let Some(current_index) = node.normalize_attribute_selection()? else {
+                        return Ok(EventResult::Continue);
+                    };
+                    let outer_width = state
+                        .ui_layout
+                        .attributes
+                        .as_ref()
+                        .map(|hitbox| hitbox.outer.width)
+                        .unwrap_or(0);
+                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let destination = {
+                        let attributes = node.read_attributes()?;
+                        navigate_metadata_grid(
+                            attributes,
+                            outer_width,
+                            current_index,
+                            selection,
+                            Direction::Right,
+                        )
+                    };
+                    if let Some((new_index, new_selection)) = destination {
+                        node.attributes_view_cursor.attribute_index = new_index;
+                        node.attributes_view_cursor.attribute_view_selection = new_selection;
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
                     }
-                    Ok(EventResult::Redraw)
                 }
                 Some(AttributesAction::Edit) => {
                     match navigate_reference_attribute_value(state) {
@@ -509,46 +608,46 @@ pub fn handle_normal_attributes(
                 }
                 Some(AttributesAction::Copy) => {
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let Some(row_index) = node.normalize_attribute_selection()? else {
+                        return Ok(EventResult::Toast(
+                            AppToast::Error("No metadata selected to copy".to_string()),
+                            true,
+                        ));
+                    };
                     let node_attributes_view_cursor = node.attributes_view_cursor.clone();
                     let attributes = node.read_attributes()?;
-                    let selected_rendered_attribute = attributes
-                        .rendered_attributes
-                        .get(node_attributes_view_cursor.attribute_index);
+                    let selected_rendered_attribute = attributes.row(row_index);
                     let copy_request = match node_attributes_view_cursor.attribute_view_selection {
                         Name => selected_rendered_attribute
-                            .map(|attribute| {
-                                let attr_name = attribute.0.to_string();
-                                (
-                                    attr_name
-                                        .trim_end_matches('=')
-                                        .trim_end_matches('─')
-                                        .trim_end()
-                                        .to_string(),
-                                    "attribute name",
-                                )
-                            })
+                            .and_then(|row| row.key.clone().map(|key| (key, "metadata name")))
                             .ok_or_else(|| {
-                                AppError::ClipboardError(
-                                    "No attribute selected to copy".to_string(),
-                                )
+                                AppError::ClipboardError("No metadata selected to copy".to_string())
                             }),
                         Value => selected_rendered_attribute
-                            .map(|attribute| {
-                                let attr_name = rendered_attr_name(&attribute.0);
-                                let value_string = if let Some((_, attr)) = attributes
-                                    .attributes
-                                    .iter()
-                                    .find(|(name, _)| name == &attr_name)
+                            .map(|row| {
+                                let value_string = if matches!(row.kind, MetadataRowKind::Attribute)
                                 {
-                                    format_attr_for_edit(&attr)?
+                                    let attr_name = row
+                                        .key
+                                        .clone()
+                                        .unwrap_or_else(|| "selected row".to_string());
+                                    if let Some((_, attr)) = attributes
+                                        .attributes
+                                        .iter()
+                                        .find(|(name, _)| name == &attr_name)
+                                    {
+                                        format_attr_for_edit(attr)?
+                                    } else {
+                                        row.value_line.to_string().trim_end().to_string()
+                                    }
                                 } else {
-                                    attribute.1.to_string().trim_end().to_string()
+                                    row.value_line.to_string().trim_end().to_string()
                                 };
-                                Ok((value_string, "attribute value"))
+                                Ok((value_string, "metadata value"))
                             })
                             .unwrap_or_else(|| {
                                 Err(AppError::ClipboardError(
-                                    "No attribute selected to copy".to_string(),
+                                    "No metadata selected to copy".to_string(),
                                 ))
                             }),
                     }?;

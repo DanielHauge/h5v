@@ -6,6 +6,8 @@ use ratatui::{
 
 use crate::{color_consts, sprint_typedesc::MatrixRenderType};
 
+use super::RenderedAttributeRow;
+
 #[derive(Debug, Clone)]
 pub enum Encoding {
     Unknown,
@@ -115,7 +117,7 @@ impl CompoundFieldProjection {
 }
 
 impl GroupMeta {
-    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
+    pub fn render(&self, longest_name: u16) -> Vec<RenderedAttributeRow> {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
@@ -123,24 +125,25 @@ impl GroupMeta {
         let mut data_set_attrs = vec![];
 
         if self.is_link {
-            let external_filename = Span::styled(
-                "link",
-                Style::default()
-                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                    .bold(),
-            );
+            let name = "link";
             let external_value = Span::styled(
                 self.filename.clone(),
                 Style::default()
                     .fg(color_consts::BUILT_IN_VALUE_COLOR)
                     .bold(),
             );
-            data_set_attrs.push((external_filename, external_value));
+            data_set_attrs.push((name, external_value));
         }
 
-        let mut lines: Vec<(Line<'static>, Line<'static>, Line<'static>)> = vec![];
+        let mut lines = vec![];
         for (name, value) in data_set_attrs {
-            let name_len = name.width();
+            let name_len = name.len();
+            let name_span = Span::styled(
+                name,
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
             let extra_name_space = match min_first_panel as usize - name_len {
                 0..=1 => 1,
                 _ => min_first_panel as usize - name_len,
@@ -151,18 +154,23 @@ impl GroupMeta {
             );
             let equals_sign =
                 Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
-            let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
+            let name_line = Line::from(vec![name_span, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
             let empty_line = Line::from(vec![Span::raw("")]);
-            lines.push((name_line, value_line, empty_line));
+            lines.push(RenderedAttributeRow::property(
+                name,
+                (name_line, value_line, empty_line),
+            ));
         }
 
         lines
     }
 }
 
-pub static SYSTEM_ATTRIBUTES: [&str; 6] = ["type", "size", "shape", "chunk", "link", "path"];
+pub static SYSTEM_PROPERTIES: [&str; 8] = [
+    "type", "size", "shape", "chunk", "link", "path", "origin", "field",
+];
 
 impl DatasetMeta {
     pub fn virtual_path(&self) -> Option<&str> {
@@ -182,117 +190,81 @@ impl DatasetMeta {
         self.compound_projection.is_some() && !self.is_compound_container()
     }
 
-    pub fn render(&self, longest_name: u16) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
+    pub fn render(&self, longest_name: u16) -> Vec<RenderedAttributeRow> {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
         };
         let mut data_set_attrs = vec![];
-        let type_name = Span::styled(
-            "type",
-            Style::default()
-                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                .bold(),
-        );
         let type_value = Span::styled(
             self.data_type_string(),
             Style::default()
                 .fg(color_consts::BUILT_IN_VALUE_COLOR)
                 .bold(),
         );
-        data_set_attrs.push((type_name, type_value));
+        data_set_attrs.push(("type", type_value));
 
-        let size_name = Span::styled(
-            "size",
-            Style::default()
-                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                .bold(),
-        );
         let size_value = Span::styled(
             self.size_string(),
             Style::default()
                 .fg(color_consts::BUILT_IN_VALUE_COLOR)
                 .bold(),
         );
-        data_set_attrs.push((size_name, size_value));
-        let shape_name = Span::styled(
-            "shape",
-            Style::default()
-                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                .bold(),
-        );
+        data_set_attrs.push(("size", size_value));
         let shape_value = Span::styled(
             self.shape_string(),
             Style::default()
                 .fg(color_consts::BUILT_IN_VALUE_COLOR)
                 .bold(),
         );
-        data_set_attrs.push((shape_name, shape_value));
+        data_set_attrs.push(("shape", shape_value));
         if let Some(chunk_shape) = &self.chunk_shape_string() {
-            let chunk_name = Span::styled(
-                "chunk",
-                Style::default()
-                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                    .bold(),
-            );
             let chunk_value = Span::styled(
                 chunk_shape.to_string(),
                 Style::default()
                     .fg(color_consts::BUILT_IN_VALUE_COLOR)
                     .bold(),
             );
-            data_set_attrs.push((chunk_name, chunk_value));
+            data_set_attrs.push(("chunk", chunk_value));
         }
 
         if self.is_link {
-            let external_filename = Span::styled(
-                "link",
-                Style::default()
-                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                    .bold(),
-            );
             let external_value = Span::styled(
                 self.filename.clone(),
                 Style::default()
                     .fg(color_consts::BUILT_IN_VALUE_COLOR)
                     .bold(),
             );
-            data_set_attrs.push((external_filename, external_value));
+            data_set_attrs.push(("link", external_value));
         }
         if let Some(l_name) = &self.link_name {
-            let link_name_span = Span::styled(
-                "origin",
-                Style::default()
-                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                    .bold(),
-            );
             let link_value_span = Span::styled(
                 l_name.clone(),
                 Style::default()
                     .fg(color_consts::BUILT_IN_VALUE_COLOR)
                     .bold(),
             );
-            data_set_attrs.push((link_name_span, link_value_span));
+            data_set_attrs.push(("origin", link_value_span));
         }
         if let Some(virtual_path) = self.virtual_path() {
-            let field_name = Span::styled(
-                "field",
-                Style::default()
-                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
-                    .bold(),
-            );
             let field_value = Span::styled(
                 virtual_path.to_string(),
                 Style::default()
                     .fg(color_consts::BUILT_IN_VALUE_COLOR)
                     .bold(),
             );
-            data_set_attrs.push((field_name, field_value));
+            data_set_attrs.push(("field", field_value));
         }
 
-        let mut lines: Vec<(Line<'static>, Line<'static>, Line<'static>)> = vec![];
+        let mut lines = vec![];
         for (name, value) in data_set_attrs {
-            let name_len = name.width();
+            let name_len = name.len();
+            let name_span = Span::styled(
+                name,
+                Style::default()
+                    .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    .bold(),
+            );
             let extra_name_space = match min_first_panel as usize - name_len {
                 0..=1 => 1,
                 _ => min_first_panel as usize - name_len,
@@ -303,11 +275,14 @@ impl DatasetMeta {
             );
             let equals_sign =
                 Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
-            let name_line = Line::from(vec![name, name_helper_line, equals_sign]);
+            let name_line = Line::from(vec![name_span, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
             let empty_line = Line::from(vec![Span::raw("")]);
-            lines.push((name_line, value_line, empty_line));
+            lines.push(RenderedAttributeRow::property(
+                name,
+                (name_line, value_line, empty_line),
+            ));
         }
 
         lines

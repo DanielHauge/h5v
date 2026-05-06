@@ -16,7 +16,7 @@ use super::{
         copy_attr_to_group, create_scalar_attr_from_text, rewrite_fixed_string_attr,
         write_attr_from_text, AttributeCreateType, FixedStringRewrite,
     },
-    meta::SYSTEM_ATTRIBUTES,
+    meta::SYSTEM_PROPERTIES,
     model::{H5FNode, Node},
 };
 
@@ -191,13 +191,76 @@ pub fn validate_user_attribute_name(name: &str) -> Result<String, AppError> {
             "Attribute name cannot be empty".to_string(),
         ));
     }
-    if SYSTEM_ATTRIBUTES.contains(&trimmed) {
+    if SYSTEM_PROPERTIES.contains(&trimmed) {
         return Err(AppError::EditError(format!(
-            "'{}' is a built-in h5v metadata field and cannot be used as an attribute name",
+            "'{}' is a built-in h5v property and cannot be used as an attribute name",
             trimmed
         )));
     }
     Ok(trimmed.to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataRowKind {
+    SectionHeader,
+    Property,
+    Attribute,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderedAttributeRow {
+    pub kind: MetadataRowKind,
+    pub key: Option<String>,
+    pub name_line: Line<'static>,
+    pub value_line: Line<'static>,
+    pub type_line: Line<'static>,
+}
+
+impl RenderedAttributeRow {
+    pub fn section(title: &str) -> Self {
+        Self {
+            kind: MetadataRowKind::SectionHeader,
+            key: None,
+            name_line: Line::styled(
+                title.to_string(),
+                Style::default().fg(color_consts::TITLE).bold(),
+            ),
+            value_line: Line::from(vec![Span::raw("")]),
+            type_line: Line::from(vec![Span::raw("")]),
+        }
+    }
+
+    pub fn property(
+        key: impl Into<String>,
+        cells: (Line<'static>, Line<'static>, Line<'static>),
+    ) -> Self {
+        let (name_line, value_line, type_line) = cells;
+        Self {
+            kind: MetadataRowKind::Property,
+            key: Some(key.into()),
+            name_line,
+            value_line,
+            type_line,
+        }
+    }
+
+    pub fn attribute(
+        key: impl Into<String>,
+        cells: (Line<'static>, Line<'static>, Line<'static>),
+    ) -> Self {
+        let (name_line, value_line, type_line) = cells;
+        Self {
+            kind: MetadataRowKind::Attribute,
+            key: Some(key.into()),
+            name_line,
+            value_line,
+            type_line,
+        }
+    }
+
+    pub fn is_selectable(&self) -> bool {
+        !matches!(self.kind, MetadataRowKind::SectionHeader)
+    }
 }
 
 #[derive(Debug)]
@@ -205,7 +268,7 @@ pub struct ComputedAttributes {
     pub longest_name_length: u16,
     #[allow(dead_code)]
     pub attributes: Vec<(String, Attribute)>,
-    pub rendered_attributes: Vec<(Line<'static>, Line<'static>, Line<'static>)>,
+    pub rendered_rows: Vec<RenderedAttributeRow>,
 }
 
 impl ComputedAttributes {
@@ -215,42 +278,50 @@ impl ComputedAttributes {
             .iter()
             .map(|(name, _)| name.len())
             .max()
-            .unwrap_or(0) as u16;
+            .unwrap_or(0)
+            .max(
+                SYSTEM_PROPERTIES
+                    .iter()
+                    .map(|name| name.len())
+                    .max()
+                    .unwrap_or(0),
+            ) as u16;
 
         let name_area_width = longest_name_length + 3;
-        let path_attr = node.render(name_area_width);
-
-        let rendered_ds_attributes = match node {
-            Node::Dataset(_, ds) => ds.render(name_area_width),
-            Node::Group(_, grp_meta) => grp_meta.render(name_area_width),
-            _ => vec![],
-        };
+        let property_rows = std::iter::once(node.render(name_area_width))
+            .chain(match node {
+                Node::Dataset(_, ds) => ds.render(name_area_width),
+                Node::Group(_, grp_meta) => grp_meta.render(name_area_width),
+                _ => vec![],
+            })
+            .collect::<Vec<_>>();
 
         let rendered_custom_attributes =
             Self::render_attributes(&attributes, name_area_width as usize);
-        let rendered_attributes = vec![path_attr]
-            .into_iter()
-            .chain(rendered_ds_attributes)
-            .chain(rendered_custom_attributes)
-            .collect::<Vec<(Line<'static>, Line<'static>, Line<'static>)>>();
+        let mut rendered_rows = vec![RenderedAttributeRow::section("Properties")];
+        rendered_rows.extend(property_rows);
+        if !rendered_custom_attributes.is_empty() {
+            rendered_rows.push(RenderedAttributeRow::section("Attributes"));
+            rendered_rows.extend(rendered_custom_attributes);
+        }
 
         Ok(Self {
             longest_name_length,
             attributes,
-            rendered_attributes,
+            rendered_rows,
         })
     }
 
     fn render_attributes(
         attributes: &Vec<(String, Attribute)>,
         name_area_width: usize,
-    ) -> Vec<(Line<'static>, Line<'static>, Line<'static>)> {
+    ) -> Vec<RenderedAttributeRow> {
         let mut rendered_attributes = vec![];
         for (name, attr) in attributes {
             let name = name.to_string();
             let name_len = name.len();
             let name_styled = Span::styled(
-                name,
+                name.clone(),
                 Style::default().fg(color_consts::VARIABLE_BLUE).bold(),
             );
             let extra_name_space = name_area_width - name_len;
@@ -278,25 +349,66 @@ impl ComputedAttributes {
                 Style::default().fg(color_consts::TYPE_DESC_COLOR),
             );
 
-            rendered_attributes.push((name_line, value_line, type_desc));
+            rendered_attributes.push(RenderedAttributeRow::attribute(
+                name,
+                (name_line, value_line, type_desc),
+            ));
         }
         rendered_attributes
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.rendered_rows.len()
+    }
+
+    pub fn row(&self, row_index: usize) -> Option<&RenderedAttributeRow> {
+        self.rendered_rows.get(row_index)
+    }
+
+    pub fn normalize_row_index(&self, row_index: usize) -> Option<usize> {
+        let capped_index = row_index.min(self.rendered_rows.len().saturating_sub(1));
+        self.rendered_rows
+            .get(capped_index)
+            .filter(|row| row.is_selectable())
+            .map(|_| capped_index)
+            .or_else(|| {
+                self.rendered_rows
+                    .iter()
+                    .enumerate()
+                    .skip(capped_index.saturating_add(1))
+                    .find(|(_, row)| row.is_selectable())
+                    .map(|(index, _)| index)
+            })
+            .or_else(|| {
+                self.rendered_rows
+                    .iter()
+                    .enumerate()
+                    .take(capped_index)
+                    .rev()
+                    .find(|(_, row)| row.is_selectable())
+                    .map(|(index, _)| index)
+            })
     }
 }
 
 impl H5FNode {
+    pub fn normalize_attribute_selection(&mut self) -> Result<Option<usize>, hdf5_metno::Error> {
+        let current_index = self.attributes_view_cursor.attribute_index;
+        let normalized_index = self.read_attributes()?.normalize_row_index(current_index);
+        if let Some(index) = normalized_index {
+            self.attributes_view_cursor.attribute_index = index;
+        } else {
+            self.attributes_view_cursor.attribute_index = 0;
+        }
+        Ok(normalized_index)
+    }
+
     fn rendered_attribute_index(&mut self, attr_name: &str) -> Result<usize, AppError> {
         let attributes = self.read_attributes()?;
         attributes
-            .rendered_attributes
+            .rendered_rows
             .iter()
-            .position(|(name, _, _)| {
-                name.to_string()
-                    .trim_end_matches('=')
-                    .trim_end_matches('─')
-                    .trim_end()
-                    == attr_name
-            })
+            .position(|row| row.key.as_deref() == Some(attr_name))
             .ok_or_else(|| AppError::EditError(format!("Attribute '{}' not found", attr_name)))
     }
 
@@ -320,7 +432,7 @@ impl H5FNode {
         let deleted_index = self.rendered_attribute_index(&attr_name)?;
         self.node.delete_attr(&attr_name)?;
         self.recompute_attributes()?;
-        let len = self.read_attributes()?.rendered_attributes.len();
+        let len = self.read_attributes()?.row_count();
         self.attributes_view_cursor.attribute_index = if len == 0 {
             0
         } else if deleted_index < current_index {
@@ -328,6 +440,7 @@ impl H5FNode {
         } else {
             current_index.min(len - 1)
         };
+        self.normalize_attribute_selection()?;
         Ok(())
     }
 
@@ -382,5 +495,37 @@ impl H5FNode {
     pub fn recompute_attributes(&mut self) -> Result<(), hdf5_metno::Error> {
         self.computed_attributes = Some(ComputedAttributes::new(&self.node)?);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ComputedAttributes, RenderedAttributeRow};
+    use ratatui::text::Line;
+
+    fn line(text: &str) -> Line<'static> {
+        Line::from(text.to_string())
+    }
+
+    fn test_rows() -> ComputedAttributes {
+        ComputedAttributes {
+            longest_name_length: 8,
+            attributes: vec![],
+            rendered_rows: vec![
+                RenderedAttributeRow::section("Properties"),
+                RenderedAttributeRow::property("path", (line("path"), line("/"), line(""))),
+                RenderedAttributeRow::section("Attributes"),
+                RenderedAttributeRow::attribute("units", (line("units"), line("m"), line("(str)"))),
+            ],
+        }
+    }
+
+    #[test]
+    fn normalize_row_index_skips_section_headers() {
+        let rows = test_rows();
+
+        assert_eq!(rows.normalize_row_index(0), Some(1));
+        assert_eq!(rows.normalize_row_index(2), Some(3));
+        assert_eq!(rows.normalize_row_index(3), Some(3));
     }
 }

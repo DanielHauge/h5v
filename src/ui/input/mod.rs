@@ -279,23 +279,22 @@ fn handle_left_click(
         }
     }
 
-    if let Some(attributes) = state.ui_layout.attributes {
+    if let Some(attributes) = state.ui_layout.attributes.clone() {
         if point_in_rect(attributes.outer, column, row) {
             state.focus = Focus::Attributes;
             if point_in_rect(attributes.inner, column, row) {
-                let clicked_row = row.saturating_sub(attributes.inner.y) as usize;
-                let clicked_index = attributes.row_offset.saturating_add(clicked_row);
-                if clicked_row < attributes.visible_rows && clicked_index < attributes.total_rows {
-                    let selection = if point_in_rect(attributes.name_area, column, row) {
+                if let Some(cell) = attributes.cells.iter().find(|cell| {
+                    point_in_rect(cell.name_area, column, row)
+                        || point_in_rect(cell.value_area, column, row)
+                }) {
+                    let selection = if point_in_rect(cell.name_area, column, row) {
                         AttributeViewSelection::Name
-                    } else if point_in_rect(attributes.value_area, column, row) {
-                        AttributeViewSelection::Value
                     } else {
                         AttributeViewSelection::Value
                     };
                     if let Some(tree_item) = state.treeview.get(state.tree_view_cursor) {
                         let mut node = tree_item.node.borrow_mut();
-                        node.attributes_view_cursor.attribute_index = clicked_index;
+                        node.attributes_view_cursor.attribute_index = cell.row_index;
                         node.attributes_view_cursor.attribute_view_selection = selection;
                     }
                 }

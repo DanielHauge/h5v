@@ -2,6 +2,7 @@ use ratatui::prelude::Color;
 pub const SELECTED_INDEX: Color = Color::Cyan;
 pub const SELECTED_DIM: Color = Color::Yellow;
 pub const TITLE: Color = Color::Yellow;
+pub const META_SECTION_COLOR: Color = Color::Rgb(214, 190, 110);
 pub const COLOR_WHITE: Color = Color::White;
 
 pub const NUMBER_COLOR: Color = Color::Rgb(181, 206, 168);

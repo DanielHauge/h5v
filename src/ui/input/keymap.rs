@@ -236,6 +236,8 @@ pub fn attributes_action(key: &KeyEvent) -> Option<AttributesAction> {
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             Some(AttributesAction::Move(Direction::Down, 10))
         }
+        (KeyCode::PageUp, _) => Some(AttributesAction::Move(Direction::Up, 10)),
+        (KeyCode::PageDown, _) => Some(AttributesAction::Move(Direction::Down, 10)),
         (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
             Some(AttributesAction::Move(Direction::Left, 1))
         }

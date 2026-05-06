@@ -87,14 +87,17 @@ pub struct TreeHitbox {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct MetadataCellHitbox {
+    pub row_index: usize,
+    pub name_area: Rect,
+    pub value_area: Rect,
+}
+
+#[derive(Debug, Clone)]
 pub struct AttributesHitbox {
     pub outer: Rect,
     pub inner: Rect,
-    pub name_area: Rect,
-    pub value_area: Rect,
-    pub row_offset: usize,
-    pub visible_rows: usize,
-    pub total_rows: usize,
+    pub cells: Vec<MetadataCellHitbox>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -613,15 +616,9 @@ impl AppState<'_> {
         let mut node = tree_item.node.borrow_mut();
         let attributes = node.read_attributes()?;
         let Some(index) = attributes
-            .rendered_attributes
+            .rendered_rows
             .iter()
-            .position(|(name, _, _)| {
-                name.to_string()
-                    .trim_end_matches('=')
-                    .trim_end_matches('─')
-                    .trim_end()
-                    == attr_name
-            })
+            .position(|row| row.key.as_deref() == Some(attr_name))
         else {
             return Err(AppError::ChildNotFound(attr_name.to_string()));
         };

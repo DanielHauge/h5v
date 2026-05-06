@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    attrs::{ComputedAttributes, HasPath},
+    attrs::{ComputedAttributes, HasPath, RenderedAttributeRow},
     meta::{DatasetMeta, GroupMeta},
 };
 
@@ -33,7 +33,7 @@ pub enum Node {
 }
 
 impl Node {
-    pub fn render(&self, longest_name: u16) -> (Line<'static>, Line<'static>, Line<'static>) {
+    pub fn render(&self, longest_name: u16) -> RenderedAttributeRow {
         let min_first_panel = match longest_name {
             0..8 => 8,
             8..=u16::MAX => longest_name,
@@ -60,7 +60,7 @@ impl Node {
         );
         let path_line = Line::from(vec![path_styled]);
         let empty_line = Line::from(vec![Span::raw("")]);
-        (name_line, path_line, empty_line)
+        RenderedAttributeRow::property("path", (name_line, path_line, empty_line))
     }
 }
 

@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::{
-    attributes::render_info_attributes,
+    attributes::{metadata_display_row_count, render_info_attributes},
     matrix::{render_matrix, render_not_yet_implemented, render_projected_matrix},
     preview::render_preview,
     state::{AppState, ContentShowMode},
@@ -46,7 +46,7 @@ pub fn render_main_display(
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
     let mut node = selected_node_no.borrow_mut();
-    let attr_count = node.read_attributes()?.rendered_attributes.len();
+    let attr_count = metadata_display_row_count(&mut node, area.width)?;
 
     let content_area = if state.show_tree_view {
         let (attr_area, content_area) = split_main_display(*area, attr_count);
