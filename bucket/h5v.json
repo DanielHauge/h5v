@@ -1,15 +1,15 @@
 {
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Terminal HDF5 viewer with matrix/chart/image previews, attributes, and scripting.",
   "homepage": "https://github.com/DanielHauge/h5v",
   "license": "Apache-2.0",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/DanielHauge/h5v/releases/download/v0.7.0/h5v-x86_64-pc-windows-msvc-v0.7.0.zip",
-      "hash": "6630ab2a4c2918175c4fac63e98ccc030ea8b1939341dd014bcbc70551ea0d3f"
+      "url": "https://github.com/DanielHauge/h5v/releases/download/v0.7.1/h5v-x86_64-pc-windows-msvc-v0.7.1.zip",
+      "hash": "cf3efe92fbd1e14e5661c9182a0540695b56635603811c3dda69d17aeaeabc67"
     }
   },
-  "extract_dir": "h5v-x86_64-pc-windows-msvc-v0.7.0",
+  "extract_dir": "h5v-x86_64-pc-windows-msvc-v0.7.1",
   "bin": "h5v.exe",
   "checkver": "github",
   "autoupdate": {
