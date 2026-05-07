@@ -661,7 +661,7 @@ impl H5F {
         let member_count = file.member_names()?.len();
         let mut h5node = H5FNode::new(Node::File(file.clone()));
         if linked {
-            h5node.display_name = Some(format!(" ({member_count}) linked ").to_string());
+            h5node.display_name = Some(crate::compat::linked_root_suffix(member_count));
         }
 
         let root = Rc::new(RefCell::new(h5node));

@@ -172,6 +172,137 @@ pub fn readonly_badge(readonly: bool) -> &'static str {
     }
 }
 
+pub fn linked_badge() -> &'static str {
+    if current().compatibility_mode {
+        " linked "
+    } else {
+        " 🔗 linked "
+    }
+}
+
+pub fn linked_root_suffix(member_count: usize) -> String {
+    if current().compatibility_mode {
+        format!(" ({member_count}) linked ")
+    } else {
+        format!(" ({member_count}) 🔗 linked ")
+    }
+}
+
+pub fn app_brand() -> &'static str {
+    if current().compatibility_mode {
+        " h5v "
+    } else {
+        " 🔬 h5v "
+    }
+}
+
+pub fn load_more_label() -> &'static str {
+    if current().compatibility_mode {
+        "Load more"
+    } else {
+        "⤵ Load more"
+    }
+}
+
+pub fn section_title(title: &str) -> String {
+    if current().compatibility_mode {
+        return title.to_string();
+    }
+    match title {
+        "Properties" => "󰜉 Properties".to_string(),
+        "Attributes" => "󰠱 Attributes".to_string(),
+        other => other.to_string(),
+    }
+}
+
+pub fn tree_title() -> &'static str {
+    if current().compatibility_mode {
+        "Tree"
+    } else {
+        " 🔍 Tree "
+    }
+}
+
+pub fn meta_title() -> &'static str {
+    if current().compatibility_mode {
+        "Meta"
+    } else {
+        " 🧾 Meta "
+    }
+}
+
+pub fn file_metadata_title() -> &'static str {
+    if current().compatibility_mode {
+        " File metadata "
+    } else {
+        " 📄 File metadata "
+    }
+}
+
+pub fn empty_group_title() -> &'static str {
+    if current().compatibility_mode {
+        " Empty group preview "
+    } else {
+        " 📁 Empty group preview "
+    }
+}
+
+pub fn empty_dataset_title() -> &'static str {
+    if current().compatibility_mode {
+        " Empty dataset "
+    } else {
+        " 🧮 Empty dataset "
+    }
+}
+
+pub fn error_title() -> &'static str {
+    if current().compatibility_mode {
+        "Error"
+    } else {
+        " ⚠ Error "
+    }
+}
+
+pub fn create_attribute_title() -> &'static str {
+    if current().compatibility_mode {
+        " Create attribute "
+    } else {
+        " ✨ Create attribute "
+    }
+}
+
+pub fn delete_attribute_title() -> &'static str {
+    if current().compatibility_mode {
+        " Delete attribute "
+    } else {
+        " 🗑 Delete attribute "
+    }
+}
+
+pub fn fixed_string_overflow_title() -> &'static str {
+    if current().compatibility_mode {
+        " Fixed string overflow "
+    } else {
+        " 🧵 Fixed string overflow "
+    }
+}
+
+pub fn fixed_string_resize_title() -> &'static str {
+    if current().compatibility_mode {
+        " Change fixed string size "
+    } else {
+        " 📏 Change fixed string size "
+    }
+}
+
+pub fn help_title() -> &'static str {
+    if current().compatibility_mode {
+        " Help "
+    } else {
+        " ❔ Help "
+    }
+}
+
 pub fn chart_membership_marker() -> &'static str {
     if current().compatibility_mode {
         "*"

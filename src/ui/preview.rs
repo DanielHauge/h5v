@@ -12,6 +12,8 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
+use crate::compat;
+
 use super::{
     image_preview::render_img,
     preview_chart::{render_chart_preview, render_precomputed_chart_preview},
@@ -103,7 +105,7 @@ fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-                .title(" Empty group preview ")
+                .title(compat::empty_group_title())
                 .title_alignment(Alignment::Center),
         );
     f.render_widget(paragraph, *area);
@@ -195,7 +197,7 @@ fn render_file_preview(
     }
 
     let outer = Block::default()
-        .title(" File metadata ")
+        .title(compat::file_metadata_title())
         .title_style(
             Style::default()
                 .fg(color_consts::TITLE)

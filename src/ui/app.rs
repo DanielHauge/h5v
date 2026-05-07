@@ -1098,7 +1098,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
                 .bold(),
         ),
         if state.file_watch.linked {
-            Span::styled(" linked ", Style::default().fg(Color::Cyan))
+            Span::styled(compat::linked_badge(), Style::default().fg(Color::Cyan))
         } else {
             Span::raw("")
         },
@@ -1115,7 +1115,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
 
     let center = Line::from(vec![
         Span::styled(
-            " h5v ",
+            compat::app_brand(),
             Style::default()
                 .fg(color_consts::title_color())
                 .bg(color_consts::BREAK_COLOR)
@@ -1225,7 +1225,7 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red))
                 .border_type(ratatui::widgets::BorderType::Rounded)
-                .title("Error")
+                .title(compat::error_title())
                 .title_style(Style::default().fg(Color::Yellow).bold())
                 .title_alignment(Alignment::Center),
         )
@@ -1249,7 +1249,7 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Create attribute ")
+        .title(compat::create_attribute_title())
         .title_alignment(Alignment::Center)
         .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
     frame.render_widget(block, popup);
@@ -1357,7 +1357,7 @@ fn render_attribute_delete_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Delete attribute ")
+        .title(compat::delete_attribute_title())
         .title_alignment(Alignment::Center)
         .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
     frame.render_widget(block, popup);
@@ -1393,7 +1393,7 @@ fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state:
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Fixed string overflow ")
+        .title(compat::fixed_string_overflow_title())
         .title_alignment(Alignment::Center)
         .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
     let inner = popup.inner(Margin {
@@ -1455,7 +1455,7 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Change fixed string size ")
+        .title(compat::fixed_string_resize_title())
         .title_alignment(Alignment::Center)
         .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
     frame.render_widget(block, popup);
@@ -1497,7 +1497,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(color_consts::BREAK_COLOR))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Help ")
+        .title(compat::help_title())
         .title_style(Style::default().fg(color_consts::TITLE).bold())
         .title_bottom(Line::from(vec![
             Span::styled(" Esc ", help_key_style()),

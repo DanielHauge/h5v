@@ -10,7 +10,7 @@ use syntect::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     h5f::{H5FNode, Node},
 };
 
@@ -215,7 +215,7 @@ pub fn render_empty_dataset(f: &mut Frame, area: &Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(ratatui::style::Style::default().fg(color_consts::BREAK_COLOR))
-                .title(" Empty dataset ")
+                .title(compat::empty_dataset_title())
                 .title_alignment(Alignment::Center),
         );
     f.render_widget(paragraph, *area);

@@ -222,7 +222,7 @@ impl RenderedAttributeRow {
             kind: MetadataRowKind::SectionHeader,
             key: None,
             name_line: Line::styled(
-                title.to_string(),
+                compat::section_title(title),
                 Style::default().fg(color_consts::title_color()).bold(),
             ),
             value_line: Line::from(vec![Span::raw("")]),

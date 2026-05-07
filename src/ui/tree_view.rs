@@ -84,7 +84,7 @@ fn compute_tree_view_rec<'a>(
                 ),
                 Span::raw("... "),
                 Span::styled(
-                    "Load more",
+                    compat::load_more_label(),
                     Style::default().fg(color_consts::load_more_color()),
                 ),
             ];
@@ -233,7 +233,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title("Tree".to_string())
+        .title(compat::tree_title().to_string())
         .bg(bg)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);

@@ -414,7 +414,7 @@ pub fn render_info_attributes(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title("Meta".to_string())
+        .title(compat::meta_title().to_string())
         .bg(bg)
         .title_style(Style::default().fg(Color::Yellow).bold())
         .title_alignment(Alignment::Center);
