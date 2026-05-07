@@ -32,6 +32,14 @@ h5v --no-terminal-graphics file.h5
 
 That forces the safer text-only preview path and is a good first workaround on browser-backed or otherwise unusual terminal emulators.
 
+If the problem is broader than image previews and the terminal also struggles with the richer symbols or line drawing, use:
+
+```bash
+h5v --compatibility file.h5
+```
+
+That enables the full compatibility fallback mode: simpler symbols plus text-only previews. If you need that every time, set `H5V_COMPATIBILITY_MODE=true` in your shell rc file such as `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`.
+
 ## A compound dataset does not show in matrix mode
 
 That is expected for the compound container itself. The root compound node shows a recursive schema preview. Drill down to a projected leaf field if you want normal preview or matrix rendering.

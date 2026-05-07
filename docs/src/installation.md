@@ -71,6 +71,46 @@ h5v --no-terminal-graphics path/to/file.h5
 
 That disables terminal graphics probing and forces the safer text-only preview path. It is especially useful in browser-backed terminals and other xterm-like environments with partial graphics support.
 
+## Compatibility mode
+
+If your terminal does not render the richer UI symbols reliably, or if you want a safer all-text startup path, use:
+
+```bash
+h5v --compatibility path/to/file.h5
+```
+
+Compatibility mode does two things:
+
+- replaces the richer icon and line-drawing UI with simpler fallback symbols
+- disables terminal graphics probing, so previews use the text-only path
+
+This is stronger than `--no-terminal-graphics`, which only disables graphics probing and leaves the richer symbols enabled.
+
+You can also enable compatibility mode persistently with `H5V_COMPATIBILITY_MODE`. Accepted true values are `1`, `true`, `yes`, and `on`. Accepted false values are `0`, `false`, `no`, and `off`.
+
+Examples:
+
+```bash
+H5V_COMPATIBILITY_MODE=true h5v path/to/file.h5
+H5V_COMPATIBILITY_MODE=off h5v path/to/file.h5
+```
+
+The environment variable and `--compatibility` flag are combined with OR semantics, so either one can enable compatibility mode. Setting the environment variable to `false` does not cancel out `--compatibility`.
+
+To make the environment variable permanent, add it to your shell rc file:
+
+```bash
+# ~/.bashrc or ~/.zshrc
+export H5V_COMPATIBILITY_MODE=true
+```
+
+```fish
+# ~/.config/fish/config.fish
+set -gx H5V_COMPATIBILITY_MODE true
+```
+
+After editing your rc file, start a new shell or reload it before launching `h5v`. If the variable is set to any other value, h5v exits with an error instead of guessing.
+
 ## Write mode
 
 h5v opens files read-only unless you pass `-w`:

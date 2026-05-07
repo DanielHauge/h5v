@@ -55,11 +55,11 @@ struct Args {
     #[clap(long = "script-test")]
     script_test: bool,
 
-    /// Enable compatibility fallbacks for terminals without rich icon/graphics support.
+    /// Enable compatibility mode: plain fallback symbols plus text-only previews.
     #[clap(long = "compatibility")]
     compatibility: bool,
 
-    /// Disable terminal graphics probing and force text-only preview rendering.
+    /// Disable terminal graphics probing without enabling other compatibility fallbacks.
     #[clap(long = "no-terminal-graphics")]
     no_terminal_graphics: bool,
 }

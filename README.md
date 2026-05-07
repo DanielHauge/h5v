@@ -51,6 +51,14 @@ Open a file in read-only mode:
 h5v h5v-example.h5
 ```
 
+If your terminal renders icons, line drawing, or graphics previews badly, start in compatibility mode:
+
+```bash
+h5v --compatibility h5v-example.h5
+```
+
+That switches the UI to simpler fallback symbols and disables terminal graphics previews. To make that the default for your shell sessions, set `H5V_COMPATIBILITY_MODE=true` in your rc file such as `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`.
+
 Open the same file in write mode so edits are allowed:
 
 ```bash
