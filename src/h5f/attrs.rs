@@ -346,7 +346,11 @@ impl ComputedAttributes {
             };
             let type_desc = Line::styled(
                 format!(" ({})", type_desc_str),
-                Style::default().fg(color_consts::TYPE_DESC_COLOR),
+                Style::default().fg(if type_desc_str.starts_with("opaque[") {
+                    color_consts::OPAQUE_COLOR
+                } else {
+                    color_consts::TYPE_DESC_COLOR
+                }),
             );
 
             rendered_attributes.push(RenderedAttributeRow::attribute(

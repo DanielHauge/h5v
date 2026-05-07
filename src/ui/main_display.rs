@@ -22,7 +22,9 @@ use crate::{
 
 use super::{
     attributes::{metadata_display_row_count, render_info_attributes},
-    matrix::{render_matrix, render_not_yet_implemented, render_projected_matrix},
+    matrix::{
+        render_matrix, render_not_yet_implemented, render_opaque_matrix, render_projected_matrix,
+    },
     preview::render_preview,
     state::{AppState, ContentShowMode},
     std_comp_render::render_empty_dataset,
@@ -180,6 +182,10 @@ pub fn render_main_display(
                 render_empty_dataset(f, &content_area);
                 return Ok(());
             }
+            if attr.is_opaque() {
+                render_opaque_matrix(f, &content_area, &ds, &attr, &mut node, state)?;
+                return Ok(());
+            }
             match attr.matrixable {
                 None => {
                     return Ok(());
@@ -253,6 +259,9 @@ pub fn render_main_display(
                                 DefaultMatrixResultRenderIntercept,
                             )?
                         }
+                    }
+                    MatrixRenderType::Opaque => {
+                        render_opaque_matrix(f, &content_area, &ds, &attr, &mut node, state)?
                     }
                     MatrixRenderType::Compound => {
                         render_not_yet_implemented(f, &content_area, "Compound matrix")

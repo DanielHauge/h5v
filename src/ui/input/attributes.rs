@@ -217,8 +217,16 @@ fn navigate_reference_attribute_value(
         .unwrap_or_else(|| "selected row".to_string());
     let (_, attr, _) = selected_attribute(state)?;
 
-    let type_desc = attribute_type_descriptor(&attr)
-        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+    let type_desc = match attribute_type_descriptor(&attr) {
+        Ok(type_desc) => type_desc,
+        Err(error) if error.to_string() == "Unsupported datatype class" => return Ok(None),
+        Err(error) => {
+            return Err(EventResult::Toast(
+                AppToast::Error(error.to_string()),
+                false,
+            ))
+        }
+    };
     let target = match type_desc {
         hdf5_metno::types::TypeDescriptor::Reference(Reference::Object) => {
             if attr.size() != 1 {

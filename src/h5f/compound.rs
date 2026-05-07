@@ -195,6 +195,70 @@ pub fn read_selected_element_bytes(
     Ok(buffer)
 }
 
+pub fn read_dataset_raw_bytes(dataset: &Dataset) -> Result<Vec<u8>, AppError> {
+    let dtype = dataset.dtype()?;
+    let item_size = dtype.size();
+    let total_elems = dataset.size();
+    let total_bytes = item_size
+        .checked_mul(total_elems)
+        .ok_or_else(|| AppError::DrawingError("Dataset byte size overflowed usize".to_string()))?;
+    let mut buffer = vec![0_u8; total_bytes];
+
+    let status = unsafe {
+        H5Dread(
+            dataset.id(),
+            dtype.id(),
+            H5_DEFAULT_ID,
+            H5_DEFAULT_ID,
+            H5_DEFAULT_ID,
+            buffer.as_mut_ptr().cast(),
+        )
+    };
+    if status < 0 {
+        return Err(AppError::DrawingError(
+            "Failed reading raw dataset bytes".to_string(),
+        ));
+    }
+
+    Ok(buffer)
+}
+
+pub fn read_selected_values_bytes(
+    dataset: &Dataset,
+    selection: Selection,
+) -> Result<(Vec<u8>, Vec<usize>), AppError> {
+    let dtype = dataset.dtype()?;
+    let item_size = dtype.size();
+    let out_shape = selection_to_shape(&selection, dataset)?;
+    let total_elems = out_shape.iter().product::<usize>();
+
+    let file_space = dataset.space()?.copy();
+    let raw_selection = selection.into_raw(dataset.shape())?;
+    unsafe {
+        raw_selection.apply_to_dataspace(file_space.id())?;
+    }
+    let mem_space = Dataspace::try_new(selection_mem_shape(&out_shape))?;
+
+    let mut buffer = vec![0_u8; total_elems * item_size];
+    let status = unsafe {
+        H5Dread(
+            dataset.id(),
+            dtype.id(),
+            mem_space.id(),
+            file_space.id(),
+            H5_DEFAULT_ID,
+            buffer.as_mut_ptr().cast(),
+        )
+    };
+    if status < 0 {
+        return Err(AppError::DrawingError(
+            "Failed reading selected raw dataset bytes".to_string(),
+        ));
+    }
+
+    Ok((buffer, out_shape))
+}
+
 pub fn write_selected_element_bytes(
     dataset: &Dataset,
     selection: Option<&Selection>,

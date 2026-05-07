@@ -190,6 +190,15 @@ impl H5FNode {
                     result.push(ContentShowMode::Preview);
                 }
             }
+            Node::Dataset(_, dataset_meta)
+                if matches!(dataset_meta.matrixable, Some(MatrixRenderType::Opaque)) =>
+            {
+                if dataset_meta.shape.iter().any(|x| *x > 1) {
+                    result.push(ContentShowMode::Matrix);
+                } else {
+                    result.push(ContentShowMode::Preview);
+                }
+            }
             Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
                 result.push(ContentShowMode::Preview);
             }
@@ -212,6 +221,13 @@ impl H5FNode {
                         }
                         result.push(ContentShowMode::Preview);
                     }
+                    MatrixRenderType::Opaque => {
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        } else {
+                            result.push(ContentShowMode::Preview);
+                        }
+                    }
                     MatrixRenderType::Uint64 => {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
@@ -227,8 +243,9 @@ impl H5FNode {
                     MatrixRenderType::Strings => {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
+                        } else {
+                            result.push(ContentShowMode::Preview);
                         }
-                        result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Enum => {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
@@ -301,6 +318,7 @@ mod tests {
                 display_name: "labels".to_string(),
                 shape: vec![2],
                 data_type: "[2]string (len 8)".to_string(),
+                unsupported_reason: None,
                 type_descriptor: TypeDescriptor::FixedAscii(8),
                 data_bytesize: 16,
                 storage_required: 16,
@@ -319,6 +337,80 @@ mod tests {
                     field_type: TypeDescriptor::FixedAscii(8),
                     virtual_path: "/values/labels".to_string(),
                 }),
+            },
+        ));
+
+        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+    }
+
+    #[test]
+    fn multi_value_string_datasets_are_matrix_only() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "labels".to_string(),
+                shape: vec![2],
+                data_type: "string".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::VarLenUnicode,
+                data_bytesize: 8,
+                storage_required: 16,
+                total_bytes: 16,
+                total_elems: 2,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::Strings),
+                encoding: Encoding::UTF8,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: None,
+            },
+        ));
+
+        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+    }
+
+    #[test]
+    fn multi_value_opaque_datasets_are_matrix_only() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "opaque".to_string(),
+                shape: vec![16],
+                data_type: "opaque[32 bytes]".to_string(),
+                unsupported_reason: Some("Unsupported datatype class".to_string()),
+                type_descriptor: TypeDescriptor::VarLenAscii,
+                data_bytesize: 32,
+                storage_required: 512,
+                total_bytes: 512,
+                total_elems: 16,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::Opaque),
+                encoding: Encoding::Unknown,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: None,
             },
         ));
 

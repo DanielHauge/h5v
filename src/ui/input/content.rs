@@ -14,9 +14,9 @@ use crate::{
     data::{PreviewSelection, Previewable, SliceSelection},
     error::AppError,
     h5f::{
-        format_dataset_value_for_edit, plot_projected, read_projected_scalar,
-        read_scalar_string_dataset, read_single_value_dataset, write_dataset_value_from_text,
-        DatasetMeta, H5FNode, Node,
+        format_dataset_value_for_edit, plot_projected, read_opaque_dataset_preview,
+        read_projected_scalar, read_scalar_string_dataset, read_single_value_dataset,
+        write_dataset_value_from_text, DatasetMeta, H5FNode, Node,
     },
     ui::{
         edit::perform_edit,
@@ -205,6 +205,10 @@ fn preview_text_value(
     dataset: &Dataset,
     meta: &DatasetMeta,
 ) -> Result<Option<String>, AppError> {
+    if meta.is_opaque() {
+        return Ok(Some(read_opaque_dataset_preview(dataset, meta)?));
+    }
+
     if meta.image.is_some() {
         return Ok(None);
     }
@@ -245,6 +249,9 @@ fn preview_text_value(
                 } else {
                     Ok(Some(read_single_value_dataset::<i64>(dataset)?.to_string()))
                 }
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Opaque) => {
+                Ok(Some(format_dataset_value_for_edit(dataset, meta, None)?))
             }
             Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
                 if meta.is_compound_leaf() {

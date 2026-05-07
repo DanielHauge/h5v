@@ -266,6 +266,7 @@ pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum MatrixRenderType {
     Float64,
+    Opaque,
     Uint64,
     Int64,
     Compound,

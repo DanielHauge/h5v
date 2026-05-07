@@ -484,7 +484,10 @@ impl H5FNode {
             let d = d.to_owned();
             let dtype = d.dtype()?;
             let data_bytesize = dtype.size();
-            let dtype_desc = dtype.to_descriptor()?;
+            let (dtype_desc, unsupported_reason) = match dtype.to_descriptor() {
+                Ok(dtype_desc) => (dtype_desc, None),
+                Err(err) => (TypeDescriptor::VarLenAscii, Some(err.to_string())),
+            };
 
             let mut shape = d.shape();
             let total_elems = d.size();
@@ -492,8 +495,9 @@ impl H5FNode {
                 shape.push(total_elems);
                 shape.push(1);
             }
-            let compound_projection = match &dtype_desc {
-                hdf5_metno::types::TypeDescriptor::Compound(compound) => {
+            let compound_projection = match (&dtype_desc, unsupported_reason.as_ref()) {
+                (_, Some(_)) => None,
+                (hdf5_metno::types::TypeDescriptor::Compound(compound), None) => {
                     Some(root_compound_projection(&d.name(), compound.clone()))
                 }
                 _ => None,
@@ -508,6 +512,7 @@ impl H5FNode {
                 shape,
                 data_bytesize,
                 total_elems,
+                unsupported_reason,
             )?;
             children.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(d, meta)))));
         }
@@ -540,6 +545,7 @@ fn synthetic_compound_children(
             meta.shape.clone(),
             meta.data_bytesize,
             meta.total_elems,
+            None,
         )?;
         out.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(
             dataset.clone(),
@@ -559,6 +565,7 @@ fn build_dataset_meta(
     shape: Vec<usize>,
     data_bytesize: usize,
     total_elems: usize,
+    unsupported_reason: Option<String>,
 ) -> Result<DatasetMeta, hdf5_metno::Error> {
     fn projected_matrixable(
         type_descriptor: &hdf5_metno::types::TypeDescriptor,
@@ -575,16 +582,17 @@ fn build_dataset_meta(
         .as_ref()
         .and_then(|projection| projection.current_compound_type())
         .is_some();
+    let is_unsupported = unsupported_reason.is_some();
     let total_bytes = data_bytesize * total_elems;
     let storage_required = dataset.storage_size();
     let chunk_shape = dataset.chunk();
-    let image = if compound_projection.is_some() {
+    let image = if is_unsupported || compound_projection.is_some() {
         None
     } else {
         is_image(dataset)
     };
     let filename = dataset.filename().to_string();
-    let hl = if compound_projection.is_some() {
+    let hl = if is_unsupported || compound_projection.is_some() {
         None
     } else {
         resolve_highlight_hint(
@@ -595,13 +603,20 @@ fn build_dataset_meta(
             &display_name,
         )
     };
-    let enum_render_overrides =
-        resolve_enum_render_overrides(dataset, compound_projection.as_ref(), &type_descriptor);
+    let enum_render_overrides = if is_unsupported {
+        None
+    } else {
+        resolve_enum_render_overrides(dataset, compound_projection.as_ref(), &type_descriptor)
+    };
 
     Ok(DatasetMeta {
         hl,
         shape,
-        data_type: sprint_typedescriptor(&type_descriptor),
+        data_type: unsupported_reason
+            .as_ref()
+            .map(|_| format!("opaque[{data_bytesize} bytes]"))
+            .unwrap_or_else(|| sprint_typedescriptor(&type_descriptor)),
+        unsupported_reason,
         type_descriptor: type_descriptor.clone(),
         display_name,
         data_bytesize,
@@ -610,14 +625,20 @@ fn build_dataset_meta(
         total_elems,
         link_name,
         chunk_shape,
-        matrixable: if is_compound_container {
+        matrixable: if is_unsupported {
+            Some(crate::sprint_typedesc::MatrixRenderType::Opaque)
+        } else if is_compound_container {
             None
         } else if compound_projection.is_some() {
             projected_matrixable(&type_descriptor)
         } else {
             is_type_matrixable(&type_descriptor)
         },
-        encoding: encoding_from_dtype(&type_descriptor),
+        encoding: if is_unsupported {
+            super::meta::Encoding::Unknown
+        } else {
+            encoding_from_dtype(&type_descriptor)
+        },
         image,
         enum_render_overrides,
         is_link,
@@ -660,7 +681,7 @@ mod tests {
     use ratatui::style::Color;
 
     use super::{
-        enum_render_attr_names, highlight_hint_from_name, parse_enum_color,
+        build_dataset_meta, enum_render_attr_names, highlight_hint_from_name, parse_enum_color,
         resolve_enum_render_overrides, resolve_highlight_hint,
     };
 
@@ -801,5 +822,42 @@ mod tests {
                 Some(Color::Rgb(255, 0, 0))
             ]
         );
+    }
+
+    #[test]
+    fn unsupported_dataset_meta_disables_preview_features() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_u8, 2_u8, 3_u8])
+            .create("values")
+            .expect("failed to create dataset");
+
+        let meta = build_dataset_meta(
+            &dataset,
+            "values".to_string(),
+            false,
+            None,
+            TypeDescriptor::VarLenAscii,
+            None,
+            dataset.shape(),
+            1,
+            dataset.size(),
+            Some("Unsupported datatype class".to_string()),
+        )
+        .expect("failed to build dataset meta");
+
+        assert_eq!(meta.data_type, "opaque[1 bytes]".to_string());
+        assert_eq!(
+            meta.unsupported_reason.as_deref(),
+            Some("Unsupported datatype class")
+        );
+        assert_eq!(
+            meta.matrixable,
+            Some(crate::sprint_typedesc::MatrixRenderType::Opaque)
+        );
+        assert!(meta.image.is_none());
+        assert!(meta.enum_render_overrides.is_none());
     }
 }

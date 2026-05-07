@@ -23,7 +23,7 @@ use super::{
 use crate::{
     color_consts,
     error::AppError,
-    h5f::{read_string_dataset_preview, Encoding, H5FNode, Node},
+    h5f::{read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, Node},
     sprint_typedesc::sprint_type_schema,
 };
 
@@ -316,7 +316,7 @@ pub fn render_preview(
         return;
     }
 
-    if let Node::Dataset(_, attr) = node {
+    if let Node::Dataset(dataset, attr) = node {
         if attr.is_empty() {
             render_empty_dataset(f, &area_inner);
             return;
@@ -329,6 +329,13 @@ pub fn render_preview(
                 compound_schema_preview_text(&attr),
                 None,
             );
+            return;
+        }
+        if attr.is_opaque() {
+            match read_opaque_dataset_preview(&dataset, &attr) {
+                Ok(text) => render_string(f, &area_inner, selected_node, text, None),
+                Err(e) => render_error(f, &area_inner, format!("Render opaque error: {}", e)),
+            }
             return;
         }
         match &attr.image {
@@ -379,6 +386,14 @@ pub fn render_string_preview(
             return Ok(());
         }
     };
+
+    if meta.is_opaque() {
+        match read_opaque_dataset_preview(dataset, meta) {
+            Ok(text) => render_string(f, area, node, text, None),
+            Err(e) => render_error(f, area, format!("Error: {}", e)),
+        }
+        return Ok(());
+    }
 
     match meta.encoding {
         Encoding::LittleEndian => {

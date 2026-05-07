@@ -18,8 +18,8 @@ use crate::{
     data::{MatrixTable, MatrixValues},
     error::AppError,
     h5f::{
-        read_projected_values_1d, read_projected_values_2d, DatasetMeta, EnumRenderOverrides,
-        H5FNode,
+        read_opaque_values_1d, read_opaque_values_2d, read_projected_values_1d,
+        read_projected_values_2d, DatasetMeta, EnumRenderOverrides, H5FNode,
     },
     ui::state::Focus,
 };
@@ -59,6 +59,24 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
 
     fn render_as_span(&self, value: &T) -> Span<'static> {
         Span::from(format!("{value}"))
+    }
+}
+
+pub struct OpaqueHexRenderIntercept;
+
+impl RenderIntercept<String> for OpaqueHexRenderIntercept {
+    fn render_as_line(&self, value: &String) -> Line<'static> {
+        Line::from(Span::styled(
+            value.clone(),
+            Style::default().fg(color_consts::OPAQUE_COLOR),
+        ))
+    }
+
+    fn render_as_span(&self, value: &String) -> Span<'static> {
+        Span::styled(
+            value.clone(),
+            Style::default().fg(color_consts::OPAQUE_COLOR),
+        )
     }
 }
 
@@ -213,6 +231,26 @@ pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
         |selection| read_projected_values_1d::<T>(ds, attr, selection),
         |selection| read_projected_values_2d::<T>(ds, attr, selection),
         result_render,
+    )
+}
+
+pub fn render_opaque_matrix(
+    f: &mut Frame,
+    area: &Rect,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+) -> Result<(), AppError> {
+    render_matrix_with_reader(
+        f,
+        area,
+        attr,
+        node,
+        state,
+        |selection| read_opaque_values_1d(ds, selection),
+        |selection| read_opaque_values_2d(ds, selection),
+        OpaqueHexRenderIntercept,
     )
 }
 

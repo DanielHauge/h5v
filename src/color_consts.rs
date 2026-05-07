@@ -11,6 +11,7 @@ pub const INT_COLOR: Color = NUMBER_COLOR;
 pub const FLOAT_COLOR: Color = NUMBER_COLOR;
 
 pub const STRING_COLOR: Color = Color::Rgb(206, 145, 120);
+pub const OPAQUE_COLOR: Color = Color::Rgb(198, 160, 255);
 pub const BOOL_COLOR: Color = Color::Rgb(255, 204, 0);
 pub const ERROR_COLOR: Color = Color::Rgb(255, 0, 0);
 

@@ -73,6 +73,7 @@ pub struct DatasetMeta {
     pub display_name: String,
     pub shape: Vec<usize>,
     pub data_type: String,
+    pub unsupported_reason: Option<String>,
     pub type_descriptor: TypeDescriptor,
     #[allow(dead_code)]
     pub(crate) data_bytesize: usize,
@@ -173,6 +174,10 @@ pub static SYSTEM_PROPERTIES: [&str; 8] = [
 ];
 
 impl DatasetMeta {
+    pub fn is_opaque(&self) -> bool {
+        self.unsupported_reason.is_some()
+    }
+
     pub fn virtual_path(&self) -> Option<&str> {
         self.compound_projection
             .as_ref()

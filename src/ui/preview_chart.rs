@@ -210,6 +210,10 @@ pub fn render_chart_preview(
                     };
                     render_string(f, area, node, ds, None);
                 }
+                crate::sprint_typedesc::MatrixRenderType::Opaque => {
+                    render_string_preview(f, area, node)?;
+                    return Ok(());
+                }
                 crate::sprint_typedesc::MatrixRenderType::Compound => {
                     render_unsupported_rendering(
                         f,
@@ -479,6 +483,9 @@ fn render_projected_chart_preview(
                     read_projected_scalar::<i64>(&ds, &ds_meta)?,
                     None,
                 );
+            }
+            Some(crate::sprint_typedesc::MatrixRenderType::Opaque) => {
+                render_string_preview(f, area, node)?;
             }
             Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
                 let hdf5_metno::types::TypeDescriptor::Enum(et) = &ds_meta.type_descriptor else {

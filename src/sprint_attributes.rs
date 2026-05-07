@@ -21,7 +21,7 @@ use ratatui::{
 
 use crate::{
     color_consts,
-    h5f::{ensure_attr_editable, read_attr_memory_bytes},
+    h5f::{ensure_attr_editable, format_opaque_bytes_for_edit, read_attr_memory_bytes},
     sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
@@ -352,7 +352,13 @@ pub fn attribute_type_descriptor(attr: &Attribute) -> Result<TypeDescriptor, Err
 }
 
 pub fn attribute_type_description(attr: &Attribute) -> Result<String, Error> {
-    attribute_type_descriptor(attr).map(|type_desc| type_desc.to_string())
+    match attribute_type_descriptor(attr) {
+        Ok(type_desc) => Ok(type_desc.to_string()),
+        Err(err) if err.to_string() == "Unsupported datatype class" => {
+            Ok(format!("opaque[{} bytes]", attr.dtype()?.size()))
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn to_array<const N: usize>(bytes: &[u8]) -> Result<[u8; N], Error> {
@@ -783,6 +789,39 @@ fn render_unsupported_type(type_name: impl Into<String>) -> Span<'static> {
     Span::from(s).style(color_consts::ERROR_COLOR)
 }
 
+fn render_opaque_scalar(attr: &Attribute) -> Result<Line<'static>, Error> {
+    let bytes = read_attr_memory_bytes(attr).map_err(|err| Error::from(err.to_string()))?;
+    Ok(Line::from(Span::styled(
+        format_opaque_bytes_for_edit(&bytes),
+        Style::default().fg(color_consts::OPAQUE_COLOR),
+    )))
+}
+
+fn render_opaque_array(attr: &Attribute) -> Result<Line<'static>, Error> {
+    let dtype = attr.dtype()?;
+    let item_size = dtype.size();
+    let bytes = read_attr_memory_bytes(attr).map_err(|err| Error::from(err.to_string()))?;
+    let spans = if item_size == 0 {
+        vec![Span::styled(
+            "<zero-sized opaque values>",
+            Style::default().fg(color_consts::OPAQUE_COLOR),
+        )]
+    } else {
+        comma_separated_groups(
+            bytes
+                .chunks_exact(item_size)
+                .map(|chunk| {
+                    vec![Span::styled(
+                        format_opaque_bytes_for_edit(chunk),
+                        Style::default().fg(color_consts::OPAQUE_COLOR),
+                    )]
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    Ok(Line::from(bracketed_spans(spans)))
+}
+
 fn spring_attribute_array(
     attr: &hdf5_metno::Attribute,
     type_desc: TypeDescriptor,
@@ -842,12 +881,24 @@ fn spring_attribute_array(
 pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, Error> {
     if attr.is_valid() {
         if attr.is_scalar() {
-            let attr_type = attribute_type_descriptor(attr)?;
+            let attr_type = match attribute_type_descriptor(attr) {
+                Ok(attr_type) => attr_type,
+                Err(err) if err.to_string() == "Unsupported datatype class" => {
+                    return render_opaque_scalar(attr);
+                }
+                Err(err) => return Err(err),
+            };
             let spans = sprint_attribute_scalar(attr, attr_type)?;
             let line = Line::from(spans);
             Ok(line)
         } else {
-            let attr_type = attribute_type_descriptor(attr)?;
+            let attr_type = match attribute_type_descriptor(attr) {
+                Ok(attr_type) => attr_type,
+                Err(err) if err.to_string() == "Unsupported datatype class" => {
+                    return render_opaque_array(attr);
+                }
+                Err(err) => return Err(err),
+            };
             let spans = bracketed_spans(spring_attribute_array(attr, attr_type)?);
             let line = Line::from(spans);
             Ok(line)
