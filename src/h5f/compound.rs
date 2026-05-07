@@ -1,7 +1,11 @@
+use std::{ffi::CStr, mem::size_of};
+
 use hdf5_metno::{
+    h5check,
     types::{CompoundType, FloatSize, IntSize, TypeDescriptor},
-    Dataset, Dataspace, Selection,
+    Dataset, Dataspace, Datatype, Selection,
 };
+use hdf5_metno_sys::{h5p::H5P_DEFAULT, h5t::H5Treclaim};
 use ndarray::{Array1, Array2};
 
 use crate::{
@@ -307,6 +311,37 @@ pub fn write_projected_selection_bytes(
 
 pub trait ProjectionDecode: Sized {
     fn decode(field_type: &TypeDescriptor, bytes: &[u8]) -> Result<Self, AppError>;
+
+    fn decode_scalar_buffer(
+        field_type: &TypeDescriptor,
+        bytes: &mut [u8],
+    ) -> Result<Self, AppError> {
+        let result = Self::decode(field_type, bytes);
+        let reclaim_result = reclaim_projected_varlen_if_needed(field_type, &[], bytes);
+        match (result, reclaim_result) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(err), _) => Err(err),
+            (_, Err(err)) => Err(err),
+        }
+    }
+
+    fn decode_value_buffer(
+        field_type: &TypeDescriptor,
+        out_shape: &[usize],
+        bytes: &mut [u8],
+    ) -> Result<Vec<Self>, AppError> {
+        let field_size = field_type.size();
+        let result = bytes
+            .chunks_exact(field_size)
+            .map(|chunk| Self::decode(field_type, chunk))
+            .collect::<Result<Vec<_>, _>>();
+        let reclaim_result = reclaim_projected_varlen_if_needed(field_type, out_shape, bytes);
+        match (result, reclaim_result) {
+            (Ok(values), Ok(())) => Ok(values),
+            (Err(err), _) => Err(err),
+            (_, Err(err)) => Err(err),
+        }
+    }
 }
 
 impl ProjectionDecode for f64 {
@@ -365,11 +400,8 @@ impl ProjectionDecode for String {
                 let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
                 Ok(String::from_utf8_lossy(&bytes[..end]).to_string())
             }
-            TypeDescriptor::VarLenAscii | TypeDescriptor::VarLenUnicode => {
-                Err(AppError::DrawingError(
-                    "Varlen strings inside compound fields are not supported yet".to_string(),
-                ))
-            }
+            TypeDescriptor::VarLenAscii => decode_projected_varlen_ascii(bytes),
+            TypeDescriptor::VarLenUnicode => decode_projected_varlen_unicode(bytes),
             _ => Err(AppError::DrawingError(format!(
                 "Unsupported projected string type: {field_type}"
             ))),
@@ -384,8 +416,8 @@ pub fn read_projected_scalar<T: ProjectionDecode>(
     let projection = meta.compound_projection.as_ref().ok_or_else(|| {
         AppError::DrawingError("Projected scalar requested for non-compound dataset".to_string())
     })?;
-    let bytes = read_projected_scalar_bytes(dataset, projection)?;
-    T::decode(&projection.field_type, &bytes)
+    let mut bytes = read_projected_scalar_bytes(dataset, projection)?;
+    T::decode_scalar_buffer(&projection.field_type, &mut bytes)
 }
 
 pub fn read_projected_values_1d<T: ProjectionDecode>(
@@ -396,18 +428,14 @@ pub fn read_projected_values_1d<T: ProjectionDecode>(
     let projection = meta.compound_projection.as_ref().ok_or_else(|| {
         AppError::DrawingError("Projected values requested for non-compound dataset".to_string())
     })?;
-    let field_size = projection.field_type.size();
-    let (bytes, out_shape) = read_projected_bytes(dataset, projection, selection)?;
+    let (mut bytes, out_shape) = read_projected_bytes(dataset, projection, selection)?;
     if out_shape.len() != 1 {
         return Err(AppError::DrawingError(format!(
             "Expected 1D projected shape, got {:?}",
             out_shape
         )));
     }
-    let values = bytes
-        .chunks_exact(field_size)
-        .map(|chunk| T::decode(&projection.field_type, chunk))
-        .collect::<Result<Vec<_>, _>>()?;
+    let values = T::decode_value_buffer(&projection.field_type, &out_shape, &mut bytes)?;
     Ok(Array1::from(values))
 }
 
@@ -419,18 +447,14 @@ pub fn read_projected_values_2d<T: ProjectionDecode>(
     let projection = meta.compound_projection.as_ref().ok_or_else(|| {
         AppError::DrawingError("Projected values requested for non-compound dataset".to_string())
     })?;
-    let field_size = projection.field_type.size();
-    let (bytes, out_shape) = read_projected_bytes(dataset, projection, selection)?;
+    let (mut bytes, out_shape) = read_projected_bytes(dataset, projection, selection)?;
     if out_shape.len() != 2 {
         return Err(AppError::DrawingError(format!(
             "Expected 2D projected shape, got {:?}",
             out_shape
         )));
     }
-    let values = bytes
-        .chunks_exact(field_size)
-        .map(|chunk| T::decode(&projection.field_type, chunk))
-        .collect::<Result<Vec<_>, _>>()?;
+    let values = T::decode_value_buffer(&projection.field_type, &out_shape, &mut bytes)?;
     Array2::from_shape_vec((out_shape[0], out_shape[1]), values).map_err(|e| {
         AppError::DrawingError(format!("Failed shaping projected 2D field values: {e}"))
     })
@@ -523,6 +547,76 @@ fn to_array<const N: usize>(bytes: &[u8]) -> Result<[u8; N], AppError> {
     })
 }
 
+fn decode_projected_varlen_ptr(bytes: &[u8]) -> Result<*mut u8, AppError> {
+    if bytes.len() != size_of::<*mut u8>() {
+        return Err(AppError::DrawingError(format!(
+            "Failed decoding projected varlen string pointer: expected {} bytes, got {}",
+            size_of::<*mut u8>(),
+            bytes.len()
+        )));
+    }
+    Ok(usize::from_ne_bytes(to_array::<{ size_of::<usize>() }>(bytes)?) as *mut u8)
+}
+
+fn decode_projected_varlen_ascii(bytes: &[u8]) -> Result<String, AppError> {
+    let ptr = decode_projected_varlen_ptr(bytes)?;
+    if ptr.is_null() {
+        return Ok(String::new());
+    }
+    let bytes = unsafe { CStr::from_ptr(ptr.cast()) }.to_bytes();
+    if !bytes.is_ascii() {
+        return Err(AppError::DrawingError(
+            "Projected ASCII string contained non-ASCII data".to_string(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(bytes).to_string())
+}
+
+fn decode_projected_varlen_unicode(bytes: &[u8]) -> Result<String, AppError> {
+    let ptr = decode_projected_varlen_ptr(bytes)?;
+    if ptr.is_null() {
+        return Ok(String::new());
+    }
+    let bytes = unsafe { CStr::from_ptr(ptr.cast()) }.to_bytes();
+    String::from_utf8(bytes.to_vec()).map_err(|e| {
+        AppError::DrawingError(format!(
+            "Projected UTF-8 string contained invalid data: {e}"
+        ))
+    })
+}
+
+fn projected_type_contains_varlen(type_desc: &TypeDescriptor) -> bool {
+    match type_desc {
+        TypeDescriptor::VarLenAscii
+        | TypeDescriptor::VarLenUnicode
+        | TypeDescriptor::VarLenArray(_) => true,
+        TypeDescriptor::FixedArray(inner, _) => projected_type_contains_varlen(inner),
+        _ => false,
+    }
+}
+
+fn reclaim_projected_varlen_if_needed(
+    field_type: &TypeDescriptor,
+    out_shape: &[usize],
+    bytes: &mut [u8],
+) -> Result<(), AppError> {
+    if !projected_type_contains_varlen(field_type) {
+        return Ok(());
+    }
+    let dtype = Datatype::from_descriptor(field_type)?;
+    let space = Dataspace::try_new(selection_mem_shape(out_shape))?;
+    h5check(unsafe {
+        H5Treclaim(
+            dtype.id(),
+            space.id(),
+            H5P_DEFAULT,
+            bytes.as_mut_ptr().cast(),
+        )
+    })
+    .map(|_| ())
+    .map_err(|e| AppError::DrawingError(format!("Failed to reclaim projected varlen data: {e}")))
+}
+
 pub fn root_compound_projection(
     dataset_path: &str,
     compound_type: CompoundType,
@@ -531,5 +625,48 @@ pub fn root_compound_projection(
         field_path: vec![],
         field_type: TypeDescriptor::Compound(compound_type),
         virtual_path: dataset_path.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{mem::ManuallyDrop, str::FromStr};
+
+    use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
+
+    use super::ProjectionDecode;
+
+    #[test]
+    fn projected_scalar_varlen_unicode_strings_are_supported() {
+        let value = ManuallyDrop::new(
+            VarLenUnicode::from_str("hello compound").expect("failed to allocate varlen string"),
+        );
+        let mut bytes = (value.as_ptr() as usize).to_ne_bytes().to_vec();
+
+        let decoded = <String as ProjectionDecode>::decode_scalar_buffer(
+            &TypeDescriptor::VarLenUnicode,
+            &mut bytes,
+        )
+        .expect("decode projected string");
+        assert_eq!(decoded, "hello compound");
+    }
+
+    #[test]
+    fn projected_vector_varlen_unicode_strings_are_supported() {
+        let alpha =
+            ManuallyDrop::new(VarLenUnicode::from_str("alpha").expect("failed to allocate alpha"));
+        let beta =
+            ManuallyDrop::new(VarLenUnicode::from_str("beta").expect("failed to allocate beta"));
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(alpha.as_ptr() as usize).to_ne_bytes());
+        bytes.extend_from_slice(&(beta.as_ptr() as usize).to_ne_bytes());
+
+        let decoded = <String as ProjectionDecode>::decode_value_buffer(
+            &TypeDescriptor::VarLenUnicode,
+            &[2],
+            &mut bytes,
+        )
+        .expect("decode projected strings");
+        assert_eq!(decoded, vec!["alpha".to_string(), "beta".to_string()]);
     }
 }
