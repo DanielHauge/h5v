@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     error::AppError,
     h5f::{H5FNode, Node},
     sprint_typedesc::MatrixRenderType,
@@ -102,7 +102,7 @@ pub fn render_main_display(
     for (i, x) in supported_display_modes.iter().enumerate() {
         let title = match x {
             ContentShowMode::Preview => "Preview📈",
-            ContentShowMode::Matrix => "Matrix",
+            ContentShowMode::Matrix => compat::matrix_tab_title(),
         };
         tab_layout.push((*x, title, Line::from(title).width() as u16));
 

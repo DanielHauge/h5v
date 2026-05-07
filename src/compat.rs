@@ -303,6 +303,14 @@ pub fn help_title() -> &'static str {
     }
 }
 
+pub fn matrix_tab_title() -> &'static str {
+    if current().compatibility_mode {
+        "Matrix"
+    } else {
+        "Matrix🧮"
+    }
+}
+
 pub fn chart_membership_marker() -> &'static str {
     if current().compatibility_mode {
         "*"
