@@ -9,6 +9,7 @@ use std::{
     thread,
     time::Duration,
 };
+use update_informer::{registry, Check};
 
 use arboard::Clipboard;
 use image::Rgba;
@@ -39,7 +40,7 @@ use crate::{
         mchart::MultiChartState,
         state::{AppToast, ChartPreviwState, FileWatchState},
     },
-    GIT_VERSION,
+    GIT_VERSION, GIT_VERSION_SHORT,
 };
 
 use super::state::{ChartPreviewKey, ImageLoadKey};
@@ -409,6 +410,14 @@ pub fn init(
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
 
+    let informer = update_informer::new(registry::Crates, "h5v", GIT_VERSION_SHORT);
+
+    let new_ver = informer
+        .check_version()
+        .ok()
+        .flatten()
+        .map(|version| version.to_string());
+
     let mut last_message = None;
 
     loop {
@@ -419,6 +428,7 @@ pub fn init(
             writable,
             runtime_config,
             startup_commands,
+            new_ver.as_deref(),
         ) {
             Ok(_) => break,
             Err(e) => match e {
@@ -494,6 +504,7 @@ fn main_recover_loop(
     writable: bool,
     runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
+    new_version: Option<&str>,
 ) -> Result<IntendedMainLoopBreak> {
     let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
@@ -636,7 +647,7 @@ fn main_recover_loop(
                 split_render_toast(frame, state)
             }
         };
-        let content_area = render_header(frame, frame_area, state);
+        let content_area = render_header(frame, frame_area, state, new_version);
         let (content_area, command_area) = match state.mode {
             Mode::Command => split_command_bar(content_area),
             _ => (content_area, Rect::new(0, 0, 0, 0)),
@@ -1060,7 +1071,12 @@ pub enum ChartPreviewLoadedResult {
     },
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rect {
+fn render_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState<'_>,
+    new_version: Option<&str>,
+) -> Rect {
     if area.height <= HEADER_HEIGHT {
         return area;
     }
@@ -1113,7 +1129,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
     ]);
     frame.render_widget(Paragraph::new(left), columns[0]);
 
-    let center = Line::from(vec![
+    let mut center = vec![
         Span::styled(
             compat::app_brand(),
             Style::default()
@@ -1128,9 +1144,16 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
                 .fg(color_consts::BUILT_IN_VALUE_COLOR)
                 .bold(),
         ),
-    ]);
+    ];
+    if let Some(new_version) = new_version {
+        center.push(Span::raw("  "));
+        center.push(Span::styled(
+            format!("update available: {new_version}"),
+            Style::default().fg(Color::Yellow).bold(),
+        ));
+    }
     frame.render_widget(
-        Paragraph::new(center).alignment(Alignment::Center),
+        Paragraph::new(Line::from(center)).alignment(Alignment::Center),
         columns[1],
     );
 

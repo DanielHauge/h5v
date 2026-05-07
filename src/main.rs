@@ -28,6 +28,8 @@ use crate::ui::command::{
 };
 pub const GIT_VERSION: &str =
     git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
+// only major.minor.patch without commit hash or dirty state, for more concise display in the UI
+pub const GIT_VERSION_SHORT: &str = git_version!(args = ["--tags", "--abbrev=0"]);
 
 #[derive(Parser, Debug)]
 #[clap(
