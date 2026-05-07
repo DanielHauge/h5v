@@ -14,7 +14,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     data::{MatrixTable, MatrixValues},
     error::AppError,
     h5f::{
@@ -109,7 +109,6 @@ impl EnumRenderer {
             Color::Rgb(240, 98, 146),
             Color::Rgb(129, 199, 132),
         ];
-        const ENUM_SYMBOLS: [&str; 8] = ["●", "■", "▲", "◆", "✦", "✚", "⬢", "◉"];
         let EnumType {
             size,
             signed,
@@ -129,7 +128,7 @@ impl EnumRenderer {
                 symbol: overrides
                     .and_then(|overrides| overrides.symbols.get(idx))
                     .and_then(|symbol| symbol.clone())
-                    .unwrap_or_else(|| ENUM_SYMBOLS[idx % ENUM_SYMBOLS.len()].to_string()),
+                    .unwrap_or_else(|| compat::enum_symbol(idx).to_string()),
             })
             .collect();
         Self { enum_mapping }

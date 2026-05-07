@@ -1,3 +1,5 @@
+use crate::compat;
+
 use ratatui::prelude::Color;
 pub const SELECTED_INDEX: Color = Color::Cyan;
 pub const SELECTED_DIM: Color = Color::Yellow;
@@ -72,7 +74,93 @@ pub const CHART_SERIES_COLORS: [Color; 8] = [
 ];
 
 pub fn chart_series_color(slot: usize) -> Color {
-    CHART_SERIES_COLORS[slot % CHART_SERIES_COLORS.len()]
+    if compat::current().compatibility_mode {
+        const COMPAT_CHART_SERIES_COLORS: [Color; 8] = [
+            Color::Blue,
+            Color::Green,
+            Color::Yellow,
+            Color::Magenta,
+            Color::Red,
+            Color::Cyan,
+            Color::White,
+            Color::DarkGray,
+        ];
+        COMPAT_CHART_SERIES_COLORS[slot % COMPAT_CHART_SERIES_COLORS.len()]
+    } else {
+        CHART_SERIES_COLORS[slot % CHART_SERIES_COLORS.len()]
+    }
+}
+
+fn compat_color(rich: Color, fallback: Color) -> Color {
+    if compat::current().compatibility_mode {
+        fallback
+    } else {
+        rich
+    }
+}
+
+pub fn title_color() -> Color {
+    compat_color(TITLE, Color::Yellow)
+}
+
+pub fn meta_section_color() -> Color {
+    compat_color(META_SECTION_COLOR, Color::Yellow)
+}
+
+pub fn lines_color() -> Color {
+    compat_color(LINES_COLOR, Color::DarkGray)
+}
+
+pub fn root_file_color() -> Color {
+    compat_color(ROOT_FILE_COLOR, Color::Cyan)
+}
+
+pub fn variable_blue_color() -> Color {
+    compat_color(VARIABLE_BLUE, Color::Cyan)
+}
+
+pub fn variable_blue_builtin_color() -> Color {
+    compat_color(VARIABLE_BLUE_BUILTIN, Color::Blue)
+}
+
+pub fn equal_sign_color() -> Color {
+    compat_color(EQUAL_SIGN_COLOR, Color::Blue)
+}
+
+pub fn symbol_color() -> Color {
+    compat_color(SYMBOL_COLOR, Color::Yellow)
+}
+
+pub fn file_color() -> Color {
+    compat_color(FILE_COLOR, Color::Blue)
+}
+
+pub fn group_color() -> Color {
+    compat_color(GROUP_COLOR, Color::Yellow)
+}
+
+pub fn compound_color() -> Color {
+    compat_color(COMPOUND_COLOR, Color::Magenta)
+}
+
+pub fn compound_name_color() -> Color {
+    compat_color(COMPOUND_NAME_COLOR, Color::Yellow)
+}
+
+pub fn dataset_color() -> Color {
+    compat_color(DATASET_COLOR, Color::White)
+}
+
+pub fn dataset_file_color() -> Color {
+    compat_color(DATASET_FILE_COLOR, Color::Green)
+}
+
+pub fn load_more_color() -> Color {
+    compat_color(LOAD_MORE_COLOR, Color::Yellow)
+}
+
+pub fn built_in_value_color() -> Color {
+    compat_color(BUILT_IN_VALUE_COLOR, Color::White)
 }
 
 pub fn rgb_channels(color: Color) -> (u8, u8, u8) {

@@ -30,6 +30,7 @@ use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::{
     color_consts,
+    compat::{self, RuntimeConfig},
     error::{log_error, AppError},
     h5f::{self, HasPath, Node, NodeType},
     ui::{
@@ -97,8 +98,11 @@ fn is_crostini_env(cros_container: Option<&str>) -> bool {
     })
 }
 
-fn should_use_alternate_screen(no_terminal_graphics: bool, cros_container: Option<&str>) -> bool {
-    !no_terminal_graphics || !is_crostini_env(cros_container)
+fn should_use_alternate_screen(
+    runtime_config: RuntimeConfig,
+    cros_container: Option<&str>,
+) -> bool {
+    runtime_config.terminal_graphics || !is_crostini_env(cros_container)
 }
 
 #[derive(Clone)]
@@ -390,13 +394,11 @@ pub fn init(
     filename: String,
     link: bool,
     writable: bool,
-    no_terminal_graphics: bool,
+    runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
-    let use_alternate_screen = should_use_alternate_screen(
-        no_terminal_graphics,
-        env::var("CROS_CONTAINER").ok().as_deref(),
-    );
+    let use_alternate_screen =
+        should_use_alternate_screen(runtime_config, env::var("CROS_CONTAINER").ok().as_deref());
 
     if use_alternate_screen {
         stdout().execute(EnterAlternateScreen)?;
@@ -415,7 +417,7 @@ pub fn init(
             filename.clone(),
             link,
             writable,
-            no_terminal_graphics,
+            runtime_config,
             startup_commands,
         ) {
             Ok(_) => break,
@@ -490,7 +492,7 @@ fn main_recover_loop(
     filename: String,
     link: bool,
     writable: bool,
-    no_terminal_graphics: bool,
+    runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
 ) -> Result<IntendedMainLoopBreak> {
     let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
@@ -502,10 +504,10 @@ fn main_recover_loop(
 
     let (tx_events, rx_events) = channel();
     #[allow(deprecated)]
-    let mut picker = if no_terminal_graphics {
-        Picker::halfblocks()
-    } else {
+    let mut picker = if runtime_config.terminal_graphics {
         Picker::from_query_stdio().unwrap_or(Picker::halfblocks())
+    } else {
+        Picker::halfblocks()
     };
     let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::BG_COLOR);
     picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
@@ -586,7 +588,7 @@ fn main_recover_loop(
             last_known_modified: None,
             pending_external_change: false,
         },
-        compatibility_mode: no_terminal_graphics,
+        compatibility_mode: runtime_config.compatibility_mode,
         multi_chart: MultiChartState::new(picker.clone()),
         segment_state,
         edit_pause: edit_pause.clone(),
@@ -996,7 +998,7 @@ fn handle_file_watch_events(tx_events: Sender<AppEvent>, path: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_crostini_env, should_use_alternate_screen};
+    use super::{is_crostini_env, should_use_alternate_screen, RuntimeConfig};
 
     #[test]
     fn detects_crostini_from_cros_container() {
@@ -1014,12 +1016,21 @@ mod tests {
 
     #[test]
     fn keeps_alternate_screen_without_safe_flag() {
-        assert!(should_use_alternate_screen(false, Some("1")));
+        assert!(should_use_alternate_screen(
+            RuntimeConfig::default(),
+            Some("1")
+        ));
     }
 
     #[test]
     fn disables_alternate_screen_for_crostini_safe_mode() {
-        assert!(!should_use_alternate_screen(true, Some("1")));
+        assert!(!should_use_alternate_screen(
+            RuntimeConfig {
+                compatibility_mode: true,
+                terminal_graphics: false,
+            },
+            Some("1"),
+        ));
     }
 }
 
@@ -1076,11 +1087,16 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
     );
 
     let left = Line::from(vec![
-        if state.readonly {
-            Span::styled(" 🔒 read-only ", Style::default().fg(Color::Yellow).bold())
-        } else {
-            Span::styled(" ✏ write ", Style::default().fg(Color::LightGreen).bold())
-        },
+        Span::styled(
+            compat::readonly_badge(state.readonly),
+            Style::default()
+                .fg(if state.readonly {
+                    Color::Yellow
+                } else {
+                    Color::LightGreen
+                })
+                .bold(),
+        ),
         if state.file_watch.linked {
             Span::styled(" linked ", Style::default().fg(Color::Cyan))
         } else {
@@ -1101,7 +1117,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) -> Rec
         Span::styled(
             " h5v ",
             Style::default()
-                .fg(color_consts::TITLE)
+                .fg(color_consts::title_color())
                 .bg(color_consts::BREAK_COLOR)
                 .bold(),
         ),

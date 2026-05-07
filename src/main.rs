@@ -10,6 +10,7 @@ use std::{
 };
 
 mod color_consts;
+mod compat;
 mod data;
 mod error;
 mod h5f;
@@ -54,6 +55,10 @@ struct Args {
     #[clap(long = "script-test")]
     script_test: bool,
 
+    /// Enable compatibility fallbacks for terminals without rich icon/graphics support.
+    #[clap(long = "compatibility")]
+    compatibility: bool,
+
     /// Disable terminal graphics probing and force text-only preview rendering.
     #[clap(long = "no-terminal-graphics")]
     no_terminal_graphics: bool,
@@ -61,6 +66,12 @@ struct Args {
 
 fn main() -> Result<(), AppError> {
     let args = Args::parse_from(normalize_cli_args(std::env::args_os()));
+    let runtime_config = compat::resolve_runtime_config(
+        args.compatibility,
+        args.no_terminal_graphics,
+        std::env::var_os("H5V_COMPATIBILITY_MODE").as_deref(),
+    )?;
+    compat::install_runtime_config(runtime_config)?;
     let startup = collect_startup_commands(&args)?;
 
     for warning in &startup.warnings {
@@ -85,14 +96,14 @@ fn main() -> Result<(), AppError> {
             single.clone(),
             false,
             args.write,
-            args.no_terminal_graphics,
+            runtime_config,
             &startup.commands,
         ),
         multiple => ui::app::init(
             linking::link(multiple)?,
             true,
             args.write,
-            args.no_terminal_graphics,
+            runtime_config,
             &startup.commands,
         ),
     }
@@ -189,7 +200,7 @@ fn run_script_test(startup_commands: &[StartupCommand]) -> Result<(), AppError> 
     let report = format_script_test_report(
         &summaries,
         ScriptTestTheme {
-            colors: io::stdout().is_terminal(),
+            colors: io::stdout().is_terminal() && !compat::current().compatibility_mode,
         },
     );
     io::stdout().write_all(report.as_bytes())?;
@@ -302,7 +313,12 @@ impl ScriptTestTheme {
     }
 
     fn rule(&self, width: usize) -> String {
-        self.paint(&"─".repeat(width), Color::DarkGrey, false, true)
+        self.paint(
+            &compat::horizontal_rule(width),
+            Color::DarkGrey,
+            false,
+            true,
+        )
     }
 
     fn paint(&self, text: &str, color: Color, bold: bool, dim: bool) -> String {
@@ -338,6 +354,7 @@ mod tests {
             commands: Vec::new(),
             scripts: Vec::new(),
             script_test: false,
+            compatibility: false,
             no_terminal_graphics: false,
         }
     }
@@ -399,5 +416,6 @@ mod tests {
         command.write_long_help(&mut help).expect("write help");
         let help = String::from_utf8(help).expect("utf8 help");
         assert!(help.contains(&format!("Version: {GIT_VERSION}")));
+        assert!(help.contains("--compatibility"));
     }
 }

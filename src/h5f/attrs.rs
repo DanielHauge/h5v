@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     error::AppError,
     sprint_attributes::{attribute_type_description, sprint_attribute},
     ui::state::AttributeViewSelection,
@@ -185,7 +185,7 @@ fn node_attribute_group(node: &Node) -> Result<Group, AppError> {
 }
 
 pub fn validate_user_attribute_name(name: &str) -> Result<String, AppError> {
-    let trimmed = name.trim_matches('=').trim_matches('─').trim();
+    let trimmed = name.trim_matches(|ch| matches!(ch, '=' | '─' | '-')).trim();
     if trimmed.is_empty() {
         return Err(AppError::EditError(
             "Attribute name cannot be empty".to_string(),
@@ -223,7 +223,7 @@ impl RenderedAttributeRow {
             key: None,
             name_line: Line::styled(
                 title.to_string(),
-                Style::default().fg(color_consts::TITLE).bold(),
+                Style::default().fg(color_consts::title_color()).bold(),
             ),
             value_line: Line::from(vec![Span::raw("")]),
             type_line: Line::from(vec![Span::raw("")]),
@@ -322,15 +322,17 @@ impl ComputedAttributes {
             let name_len = name.len();
             let name_styled = Span::styled(
                 name.clone(),
-                Style::default().fg(color_consts::VARIABLE_BLUE).bold(),
+                Style::default()
+                    .fg(color_consts::variable_blue_color())
+                    .bold(),
             );
             let extra_name_space = name_area_width - name_len;
             let name_helper_line = Span::styled(
-                "─".repeat(extra_name_space - 1),
-                Style::default().fg(color_consts::LINES_COLOR),
+                compat::horizontal_rule(extra_name_space - 1),
+                Style::default().fg(color_consts::lines_color()),
             );
             let equals_sign =
-                Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+                Span::styled("=", Style::default().fg(color_consts::equal_sign_color()));
             let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
 
             let value_line = match sprint_attribute(attr) {

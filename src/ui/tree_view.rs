@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     h5f::{H5FNode, HasPath},
     ui::{mchart::MultiChartState, std_comp_render::render_error},
 };
@@ -26,11 +26,11 @@ pub struct TreeItem<'a> {
 impl AppState<'_> {
     pub fn compute_tree_view(&mut self) {
         let mut tree_view = Vec::new();
-        let file_icon = Text::from("󰈚 ");
+        let file_icon = Text::from(compat::root_file_icon());
         let filenode = self.root.borrow().full_path();
         let text = Line::styled(
             format!("{} {}", file_icon, filenode),
-            Style::default().fg(color_consts::ROOT_FILE_COLOR),
+            Style::default().fg(color_consts::root_file_color()),
         );
         let root_tree_item = TreeItem {
             node: self.root.clone(),
@@ -72,20 +72,20 @@ fn compute_tree_view_rec<'a>(
     while let Some(child) = groups.next() {
         let c = child.borrow();
         let is_last_child = groups.peek().is_none();
-        let connector = if is_last_child { "└─" } else { "├─" };
+        let connector = compat::tree_connector(is_last_child);
         loading += 1;
         if loading > node_binding.view_loaded {
             // If we have more than 50 children, we stop rendering to avoid performance issues.
             // This is a simple way to handle large datasets.
             let adds = vec![
                 Span::styled(
-                    format!("{} ", "└─"),
-                    Style::default().fg(color_consts::LOAD_MORE_COLOR),
+                    format!("{} ", compat::tree_connector(true)),
+                    Style::default().fg(color_consts::load_more_color()),
                 ),
                 Span::raw("... "),
                 Span::styled(
                     "Load more",
-                    Style::default().fg(color_consts::LOAD_MORE_COLOR),
+                    Style::default().fg(color_consts::load_more_color()),
                 ),
             ];
             let mut spans = prefix.clone();
@@ -100,15 +100,10 @@ fn compute_tree_view_rec<'a>(
             break;
         }
         let connector_span =
-            Span::styled(connector, Style::default().fg(color_consts::LINES_COLOR));
-        let collapse_icon = if c.expanded { " " } else { " " };
+            Span::styled(connector, Style::default().fg(color_consts::lines_color()));
+        let collapse_icon = compat::collapse_icon(c.expanded);
 
-        let folder_icon_base = match (c.expanded, !c.children.is_empty()) {
-            (true, true) => "",
-            (true, false) => "",
-            (false, true) => "",
-            (false, false) => "",
-        };
+        let folder_icon_base = compat::folder_icon(c.expanded, !c.children.is_empty());
         let folder_icon_link = c.icon();
         let folder_icon = format!("{}{}", folder_icon_base, folder_icon_link);
 
@@ -123,18 +118,21 @@ fn compute_tree_view_rec<'a>(
             child.borrow().is_compound_container(),
             child.borrow().is_compound_leaf(),
         ) {
-            (true, _, _) => color_consts::GROUP_COLOR,
-            (false, true, _) => color_consts::COMPOUND_COLOR,
-            (false, _, true) => color_consts::DATASET_FILE_COLOR,
-            (false, false, false) => color_consts::DATASET_FILE_COLOR,
+            (true, _, _) => color_consts::group_color(),
+            (false, true, _) => color_consts::compound_color(),
+            (false, _, true) => color_consts::dataset_file_color(),
+            (false, false, false) => color_consts::dataset_file_color(),
         };
 
         let icon_span = Span::styled(icon, Style::default().fg(icon_color));
         let collapse_icon_span = match child.borrow().expanded {
-            true => Span::styled(collapse_icon, Style::default().fg(color_consts::FILE_COLOR)),
+            true => Span::styled(
+                collapse_icon,
+                Style::default().fg(color_consts::file_color()),
+            ),
             false => Span::styled(
                 collapse_icon,
-                Style::default().fg(color_consts::LINES_COLOR),
+                Style::default().fg(color_consts::lines_color()),
             ),
         };
 
@@ -152,10 +150,10 @@ fn compute_tree_view_rec<'a>(
             child.borrow().is_compound_container(),
             child.borrow().is_compound_leaf(),
         ) {
-            (true, _, _) => color_consts::VARIABLE_BLUE,
-            (false, true, _) => color_consts::COMPOUND_NAME_COLOR,
-            (false, _, true) => color_consts::DATASET_COLOR,
-            (false, false, false) => color_consts::DATASET_COLOR,
+            (true, _, _) => color_consts::variable_blue_color(),
+            (false, true, _) => color_consts::compound_name_color(),
+            (false, _, true) => color_consts::dataset_color(),
+            (false, false, false) => color_consts::dataset_color(),
         };
         line_vec.push(Span::styled(
             child.borrow().name(),
@@ -176,14 +174,14 @@ fn compute_tree_view_rec<'a>(
                 }
                 let rgb = item.rgb_color();
                 line_vec.push(Span::styled(
-                    "●",
+                    compat::chart_membership_marker(),
                     Style::default().fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2)),
                 ));
             }
             if memberships.len() > 3 {
                 line_vec.push(Span::styled(
                     format!("+{}", memberships.len() - 3),
-                    Style::default().fg(color_consts::TITLE),
+                    Style::default().fg(color_consts::title_color()),
                 ));
             }
         }
@@ -203,8 +201,10 @@ fn compute_tree_view_rec<'a>(
             indent += 3;
             prefix_clone.push(Span::raw("   "));
         } else {
-            prefix_clone
-                .push(Span::raw("│   ").style(Style::default().fg(color_consts::LINES_COLOR)));
+            prefix_clone.push(
+                Span::raw(compat::tree_vertical_guide())
+                    .style(Style::default().fg(color_consts::lines_color())),
+            );
         };
 
         if child.borrow().is_expandable() {

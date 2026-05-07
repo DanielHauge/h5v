@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     sprint_typedesc::MatrixRenderType,
     ui::state::{AttributeCursor, ContentShowMode},
 };
@@ -42,20 +42,20 @@ impl Node {
         let name_styled = Span::styled(
             "path",
             Style::default()
-                .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                .fg(color_consts::variable_blue_builtin_color())
                 .bold(),
         );
         let extra_name_space = min_first_panel as usize - "path".len();
         let name_helper_line = Span::styled(
-            "─".repeat(extra_name_space - 1),
-            Style::default().fg(color_consts::LINES_COLOR),
+            compat::horizontal_rule(extra_name_space - 1),
+            Style::default().fg(color_consts::lines_color()),
         );
-        let equals_sign = Span::styled("=", Style::default().fg(color_consts::EQUAL_SIGN_COLOR));
+        let equals_sign = Span::styled("=", Style::default().fg(color_consts::equal_sign_color()));
         let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
         let path_styled = Span::styled(
             path,
             Style::default()
-                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .fg(color_consts::built_in_value_color())
                 .bold(),
         );
         let path_line = Line::from(vec![path_styled]);
@@ -140,10 +140,10 @@ impl H5FNode {
             return "*- ".to_string();
         }
         if self.is_compound_container() {
-            return "󰆼 ".to_string();
+            return compat::compound_container_icon().to_string();
         }
         if self.is_compound_leaf() {
-            return "󰈚 ".to_string();
+            return compat::compound_leaf_icon().to_string();
         }
         match self.is_group() {
             true => {
@@ -151,7 +151,7 @@ impl H5FNode {
                     return "?".to_string();
                 };
                 if meta.is_link {
-                    "🔗".to_string()
+                    compat::link_marker().to_string()
                 } else {
                     " ".to_string()
                 }
@@ -161,9 +161,9 @@ impl H5FNode {
                     return "? ".to_string();
                 };
                 if meta.is_link {
-                    "󰈚🔗".to_string()
+                    compat::dataset_link_icon().to_string()
                 } else {
-                    "󰈚 ".to_string()
+                    compat::dataset_icon().to_string()
                 }
             }
         }

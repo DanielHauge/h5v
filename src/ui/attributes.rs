@@ -7,7 +7,8 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts::{self, BG_COLOR, FOCUS_BG_COLOR, LINES_COLOR},
+    color_consts::{self, BG_COLOR, FOCUS_BG_COLOR},
+    compat,
     h5f::{ComputedAttributes, H5FNode, MetadataRowKind},
 };
 
@@ -242,12 +243,20 @@ fn render_section_header(f: &mut Frame, area: Rect, title: &str) {
     let left_width = line_width / 2;
     let right_width = line_width.saturating_sub(left_width);
     let rendered = Line::from(vec![
-        Span::styled("─".repeat(left_width), Style::default().fg(LINES_COLOR)),
+        Span::styled(
+            compat::horizontal_rule(left_width),
+            Style::default().fg(color_consts::lines_color()),
+        ),
         Span::styled(
             title.chars().take(total_width).collect::<String>(),
-            Style::default().fg(color_consts::META_SECTION_COLOR).bold(),
+            Style::default()
+                .fg(color_consts::meta_section_color())
+                .bold(),
         ),
-        Span::styled("─".repeat(right_width), Style::default().fg(LINES_COLOR)),
+        Span::styled(
+            compat::horizontal_rule(right_width),
+            Style::default().fg(color_consts::lines_color()),
+        ),
     ]);
     render_text_overflow_handled(f, area, &rendered);
 }
@@ -349,7 +358,7 @@ fn render_property_grid_row(
         .split(rows_area);
     let cell_areas = [split[0], split[2]];
 
-    let separator = Line::styled(" | ", Style::default().fg(LINES_COLOR));
+    let separator = Line::styled(" | ", Style::default().fg(color_consts::lines_color()));
     render_text_overflow_handled(f, split[1], &separator);
 
     for (slot, row_index) in row_indices.iter().enumerate() {

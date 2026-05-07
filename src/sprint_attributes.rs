@@ -54,7 +54,7 @@ fn string_span(value: impl std::fmt::Display) -> Span<'static> {
 }
 
 fn symbol_span(value: &'static str) -> Span<'static> {
-    Span::raw(value).style(color_consts::SYMBOL_COLOR)
+    Span::raw(value).style(color_consts::symbol_color())
 }
 
 fn comma_separated<I>(spans: I) -> Vec<Span<'static>>

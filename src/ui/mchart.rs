@@ -16,7 +16,7 @@ use ratatui::{
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, StatefulImage};
 
 use crate::{
-    color_consts,
+    color_consts, compat,
     data::{
         validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
     },
@@ -1680,7 +1680,7 @@ impl MultiChartState {
                 let absolute_idx = start + offset;
                 let (r, g, b) =
                     color_consts::rgb_channels(color_consts::chart_series_color(item.color_slot));
-                let marker = if item.visible { "●" } else { "○" };
+                let marker = compat::chart_visibility_marker(item.visible);
                 let prefix = if absolute_idx == self.idx { "> " } else { "  " };
                 let is_selected = absolute_idx == self.idx;
                 let is_base = self.marked_base_item == Some(item.id);
