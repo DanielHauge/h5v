@@ -337,6 +337,7 @@ fn render_metadata_cell(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_property_grid_row(
     f: &mut Frame,
     rows_area: Rect,

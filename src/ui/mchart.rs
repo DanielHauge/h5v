@@ -2213,7 +2213,7 @@ fn parse_expression_series_ref(
         chars.next();
         let mut spec = String::new();
         let mut closed = false;
-        while let Some(next) = chars.next() {
+        for next in chars.by_ref() {
             if next == ']' {
                 closed = true;
                 break;
@@ -3159,6 +3159,9 @@ fn read_expression_numeric_scalar_dataset(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use std::{

@@ -11,6 +11,7 @@ use std::{
 
 mod color_consts;
 mod compat;
+mod configure;
 mod data;
 mod error;
 mod h5f;
@@ -340,6 +341,8 @@ impl ScriptTestTheme {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use clap::CommandFactory;
 

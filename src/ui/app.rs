@@ -32,6 +32,7 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use crate::{
     color_consts,
     compat::{self, RuntimeConfig},
+    configure::run_lua_engine,
     error::{log_error, AppError},
     h5f::{self, HasPath, Node, NodeType},
     ui::{
@@ -481,6 +482,10 @@ pub fn init(
                     last_message = Some(format!("Drawing error: - {e}"));
                     break;
                 }
+                AppError::LuaError(e) => {
+                    last_message = Some(format!("Lua error: - {e}"));
+                    break;
+                }
             },
         }
     }
@@ -722,6 +727,8 @@ fn main_recover_loop(
     handle_term_events(tx_events.clone(), edit_pause);
     handle_file_watch_events(tx_events.clone(), state.file_watch.path.clone());
 
+    run_lua_engine(tx_events.clone())?;
+
     loop {
         let event = rx_events.recv();
         let event = match event {
@@ -739,6 +746,12 @@ fn main_recover_loop(
         }
 
         match event {
+            AppEvent::Toast(toast) => {
+                state.toast = toast;
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
+            }
             AppEvent::TermEvent(event) => {
                 let selected_before = state.selected_tree_path();
                 let event_result = handle_input_event(&mut state, event)
@@ -976,6 +989,7 @@ pub enum AppEvent {
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
     PreviewDebounceExpired(u64),
+    Toast(AppToast),
     FileChanged,
 }
 
@@ -1005,44 +1019,6 @@ fn handle_file_watch_events(tx_events: Sender<AppEvent>, path: String) {
             }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{is_crostini_env, should_use_alternate_screen, RuntimeConfig};
-
-    #[test]
-    fn detects_crostini_from_cros_container() {
-        assert!(is_crostini_env(Some("1")));
-        assert!(is_crostini_env(Some("penguin")));
-    }
-
-    #[test]
-    fn ignores_empty_or_false_cros_container() {
-        assert!(!is_crostini_env(None));
-        assert!(!is_crostini_env(Some("")));
-        assert!(!is_crostini_env(Some("0")));
-        assert!(!is_crostini_env(Some("false")));
-    }
-
-    #[test]
-    fn keeps_alternate_screen_without_safe_flag() {
-        assert!(should_use_alternate_screen(
-            RuntimeConfig::default(),
-            Some("1")
-        ));
-    }
-
-    #[test]
-    fn disables_alternate_screen_for_crostini_safe_mode() {
-        assert!(!should_use_alternate_screen(
-            RuntimeConfig {
-                compatibility_mode: true,
-                terminal_graphics: false,
-            },
-            Some("1"),
-        ));
-    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1743,10 +1719,9 @@ fn help_section(
     lines
 }
 
-fn render_help_column_text(
-    title: &'static str,
-    sections: &[(&'static str, &[(&[&'static str], &'static str)])],
-) -> Text<'static> {
+type HelpSection<'a> = (&'static str, &'a [(&'a [&'static str], &'static str)]);
+
+fn render_help_column_text(title: &'static str, sections: &[HelpSection]) -> Text<'static> {
     let mut lines = vec![
         Line::from(vec![Span::styled(
             title.to_string(),
@@ -1764,4 +1739,42 @@ fn render_help_column_text(
     }
 
     Text::from(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_crostini_env, should_use_alternate_screen, RuntimeConfig};
+
+    #[test]
+    fn detects_crostini_from_cros_container() {
+        assert!(is_crostini_env(Some("1")));
+        assert!(is_crostini_env(Some("penguin")));
+    }
+
+    #[test]
+    fn ignores_empty_or_false_cros_container() {
+        assert!(!is_crostini_env(None));
+        assert!(!is_crostini_env(Some("")));
+        assert!(!is_crostini_env(Some("0")));
+        assert!(!is_crostini_env(Some("false")));
+    }
+
+    #[test]
+    fn keeps_alternate_screen_without_safe_flag() {
+        assert!(should_use_alternate_screen(
+            RuntimeConfig::default(),
+            Some("1")
+        ));
+    }
+
+    #[test]
+    fn disables_alternate_screen_for_crostini_safe_mode() {
+        assert!(!should_use_alternate_screen(
+            RuntimeConfig {
+                compatibility_mode: true,
+                terminal_graphics: false,
+            },
+            Some("1"),
+        ));
+    }
 }

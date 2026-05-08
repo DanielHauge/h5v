@@ -211,6 +211,7 @@ impl Previewable for Dataset {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
         validate_preview_selection_shape, DatasetTableData, PreviewSelection, SliceSelection,

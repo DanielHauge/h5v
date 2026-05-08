@@ -260,6 +260,7 @@ fn visible_matrix_capacity(matrix_area: Rect, row_len: usize, col_len: usize) ->
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_matrix_with_reader<T: Display>(
     f: &mut Frame,
     area: &Rect,

@@ -176,7 +176,7 @@ pub fn rgb_channels(color: Color) -> (u8, u8, u8) {
             if fallback == "Reset" {
                 (255, 255, 255)
             } else {
-                (255, 255, 255)
+                (200, 200, 200)
             }
         }
     }

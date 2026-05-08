@@ -631,7 +631,14 @@ fn format_1d_attr_for_edit(
             .map(|value| format_enum_value_for_edit(value, enum_type))
             .collect::<Vec<_>>()
             .join("\n")),
-        _ => Err(validate_attr_edit_support(type_desc, 1).unwrap_err()),
+        _ => Err(validate_attr_edit_support(type_desc, 1)
+            .err()
+            .unwrap_or_else(|| {
+                AppError::EditError(format!(
+                    "Attribute type {} is not supported for editing",
+                    type_desc
+                ))
+            })),
     }
 }
 
@@ -790,7 +797,14 @@ fn write_1d_attr_from_text(
         TypeDescriptor::VarLenAscii => write_ascii_1d_array(attr, new_value),
         TypeDescriptor::VarLenUnicode => write_unicode_1d_array(attr, new_value),
         TypeDescriptor::Enum(enum_type) => write_enum_1d_attr_from_text(attr, new_value, enum_type),
-        _ => Err(validate_attr_edit_support(type_desc, 1).unwrap_err()),
+        _ => Err(validate_attr_edit_support(type_desc, 1)
+            .err()
+            .unwrap_or_else(|| {
+                AppError::EditError(format!(
+                    "Attribute type {} is not supported for editing",
+                    type_desc
+                ))
+            })),
     }
 }
 
@@ -985,7 +999,7 @@ fn read_enum_values_as<T: H5Type + Clone>(attr: &Attribute) -> Result<Vec<T>, Ap
     }
 }
 
-fn parse_1d_lines<'a>(new_value: &'a str, expected_len: usize) -> Result<Vec<&'a str>, AppError> {
+fn parse_1d_lines(new_value: &str, expected_len: usize) -> Result<Vec<&str>, AppError> {
     if new_value.is_empty() {
         return match expected_len {
             0 => Ok(vec![]),
@@ -2118,6 +2132,8 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -25,6 +25,7 @@ pub enum NodeType {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Node {
     File(File),
     Group(Group, GroupMeta),
@@ -284,6 +285,8 @@ pub struct H5F {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{H5FNode, Node};
     use crate::{

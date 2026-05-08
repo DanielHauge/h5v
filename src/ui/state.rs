@@ -28,7 +28,6 @@ use super::{
     tree_view::TreeItem,
 };
 
-/// Convert internal HDF5 paths (always using /) to platform-appropriate display paths.
 #[allow(dead_code)]
 #[cfg(target_os = "windows")]
 pub fn display_path(path: &str) -> String {
@@ -478,9 +477,7 @@ pub(crate) fn preview_selection_for_node(
     }
 
     if !x_selectable_dims.contains(&node.selected_x) {
-        let Some(first_selectable_dim) = x_selectable_dims.first().copied() else {
-            return None;
-        };
+        let first_selectable_dim = x_selectable_dims.first().copied()?;
         node.selected_x = first_selectable_dim;
     }
     if node.selected_dim == node.selected_x {
@@ -866,11 +863,9 @@ impl AppState<'_> {
                     .multi_chart
                     .capture_expression_chart_item(expression, self.file.as_ref())
                     .map_err(AppError::InvalidCommand)?;
-                return Ok(Some(item));
+                Ok(Some(item))
             }
-            Node::Dataset(_, dsattr) if dsattr.is_compound_container() => {
-                return Ok(None);
-            }
+            Node::Dataset(_, dsattr) if dsattr.is_compound_container() => Ok(None),
             Node::Dataset(ds, dsattr) => {
                 let ds = ds.clone();
                 let meta = dsattr.clone();

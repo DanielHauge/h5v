@@ -555,6 +555,7 @@ fn synthetic_compound_children(
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_dataset_meta(
     dataset: &Dataset,
     display_name: String,
@@ -674,6 +675,8 @@ impl H5F {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use std::str::FromStr;
 

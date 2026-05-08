@@ -3,6 +3,8 @@ use std::io::Write;
 use std::sync::mpsc::SendError;
 use std::sync::PoisonError;
 
+use crate::configure::errors::ConfigureErrors;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixedStringKind {
     Ascii,
@@ -38,6 +40,7 @@ impl Display for FixedStringOverflow {
 #[derive(Debug)]
 pub enum AppError {
     FileError(String),
+    LuaError(ConfigureErrors),
     Io(std::io::Error),
     Hdf5(hdf5_metno::Error),
     ChannelError(String),
@@ -49,6 +52,12 @@ pub enum AppError {
     ChildNotFound(String),
     PoisionedLockError(String),
     DrawingError(String),
+}
+
+impl From<ConfigureErrors> for AppError {
+    fn from(value: ConfigureErrors) -> Self {
+        AppError::LuaError(value)
+    }
 }
 
 impl Display for AppError {
@@ -66,6 +75,7 @@ impl Display for AppError {
             AppError::EditWarning(x) => write!(f, "Edit warning: {x}"),
             AppError::FixedStringOverflow(x) => write!(f, "Edit error: {x}"),
             AppError::DrawingError(x) => write!(f, "Drawing error: {x}"),
+            AppError::LuaError(x) => write!(f, "Lua error: {x}"),
         }
     }
 }

@@ -920,6 +920,8 @@ impl AttributeEditable for Attribute {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use hdf5_metno::{
         h5check,
@@ -1000,7 +1002,7 @@ mod tests {
             size: 16,
         };
 
-        let mut bytes = vec![0_u8; 16];
+        let mut bytes = [0_u8; 16];
         bytes[0..4].copy_from_slice(&7_i32.to_le_bytes());
         bytes[8..16].copy_from_slice(&9.81_f64.to_le_bytes());
 
@@ -1057,7 +1059,7 @@ mod tests {
             ],
             size: 16,
         };
-        let mut bytes = vec![0_u8; 16];
+        let mut bytes = [0_u8; 16];
         bytes[0..4].copy_from_slice(&7_i32.to_le_bytes());
         bytes[8..16].copy_from_slice(&9.81_f64.to_le_bytes());
         let entry = RawVarLen {

@@ -693,6 +693,8 @@ pub fn root_compound_projection(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use std::{mem::ManuallyDrop, str::FromStr};
 

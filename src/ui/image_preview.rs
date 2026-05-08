@@ -366,7 +366,7 @@ pub fn render_img(
         }
         ImageType::Grayscale => render_ds_img(f, area, node, state, ImageType::Grayscale),
         ImageType::Bitmap => render_ds_img(f, area, node, state, ImageType::Bitmap),
-        _ => render_unsupported_image_format(f, &area, node),
+        _ => render_unsupported_image_format(f, area, node),
     }
 }
 
