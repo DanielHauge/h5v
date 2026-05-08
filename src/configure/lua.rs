@@ -171,6 +171,8 @@ fn apply_color_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Conf
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{apply_theme_config, build_theme_table};
     use crate::color_consts::{self, title_bg_color, title_color, ThemeName};
