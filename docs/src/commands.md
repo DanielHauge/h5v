@@ -36,6 +36,8 @@ mode preview
 mode matrix
 toggle-tree
 reload
+configure
+configure reset
 ```
 
 ### Selection control
@@ -123,5 +125,7 @@ Try these against the bundled example file:
 ```bash
 h5v examples/h5v-example.h5
 ```
+
+For the Lua config file, theme overrides, and the `configure` / `configure reset` workflow, continue with [Configuration and theming](./configuration.md).
 
 For startup usage, continue with [Startup scripting](./startup-scripting.md).

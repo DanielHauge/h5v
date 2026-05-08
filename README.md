@@ -65,6 +65,8 @@ Open the same file in write mode so edits are allowed:
 h5v -w h5v-example.h5
 ```
 
+Persistent themes and color overrides can be configured in Lua. Inside `h5v`, run `:configure` to open `init.lua`, or `:configure reset` to regenerate the default scaffold.
+
 
 Start with scripted commands:
 
@@ -121,6 +123,7 @@ The full manual is published as an mdBook at [danielhauge.github.io/h5v/book](ht
 | HDF5 support and previews | [HDF5 support](https://danielhauge.github.io/h5v/book/hdf5-support.html) |
 | Images and conventions | [Images](https://danielhauge.github.io/h5v/book/images.html) |
 | Commands and scripting | [Commands](https://danielhauge.github.io/h5v/book/commands.html) |
+| Configuration and theming | [Configuration](https://danielhauge.github.io/h5v/book/configuration.html) |
 | Multichart guide | [Multichart](https://danielhauge.github.io/h5v/book/multichart.html) |
 | Bundled example workflow | [`examples/h5v-example.h5`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5) and [`examples/h5v-example.h5v`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5v) |
 

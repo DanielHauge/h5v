@@ -13,6 +13,7 @@
 - [Compound datasets](./compound-datasets.md)
 - [Commands](./commands.md)
   - [Startup scripting](./startup-scripting.md)
+- [Configuration and theming](./configuration.md)
 - [Multichart](./multichart.md)
   - [Multichart expressions](./multichart-expressions.md)
 - [Troubleshooting and limits](./troubleshooting.md)
