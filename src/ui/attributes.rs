@@ -7,8 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts::{self, BG_COLOR, FOCUS_BG_COLOR},
-    compat,
+    color_consts, compat,
     h5f::{ComputedAttributes, H5FNode, MetadataRowKind},
 };
 
@@ -407,17 +406,21 @@ pub fn render_info_attributes(
             | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog,
-        ) => FOCUS_BG_COLOR,
-        _ => BG_COLOR,
+        ) => color_consts::focus_bg_color(),
+        _ => color_consts::bg_color(),
     };
 
     let attr_header_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
+        .border_style(Style::default().fg(color_consts::panel_border_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::meta_title().to_string())
         .bg(bg)
-        .title_style(Style::default().fg(Color::Yellow).bold())
+        .title_style(
+            Style::default()
+                .fg(color_consts::panel_title_color())
+                .bold(),
+        )
         .title_alignment(Alignment::Center);
     f.render_widget(attr_header_block, outer_area);
 
@@ -474,12 +477,12 @@ pub fn render_info_attributes(
 
     let highlighted_bg_color = if let Focus::Attributes = state.focus {
         if state.copying {
-            color_consts::HIGHLIGHT_BG_COLOR_COPY
+            color_consts::highlight_bg_copy_color()
         } else {
-            color_consts::HIGHLIGHT_BG_COLOR
+            color_consts::highlight_bg_color()
         }
     } else {
-        color_consts::HIGHLIGHT_BG_COLOR
+        color_consts::highlight_bg_color()
     };
 
     let mut hitboxes = Vec::new();

@@ -256,12 +256,16 @@ fn render_image_chrome(
         };
         let block = Block::default()
             .title(title)
-            .title_style(Style::default().fg(crate::color_consts::TITLE).bold())
+            .title_style(
+                Style::default()
+                    .fg(crate::color_consts::title_color())
+                    .bold(),
+            )
             .title_alignment(ratatui::layout::Alignment::Center)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(crate::color_consts::BREAK_COLOR))
-            .style(Style::default().bg(crate::color_consts::BG_VAL3_COLOR));
+            .border_style(Style::default().fg(crate::color_consts::break_color()))
+            .style(Style::default().bg(crate::color_consts::bg_val3_color()));
         let inner = block.inner(content_areas[0]);
         f.render_widget(block, content_areas[0]);
 
@@ -288,7 +292,7 @@ fn render_image_chrome(
             Line::from(vec![
                 Span::styled(
                     "range ",
-                    Style::default().fg(crate::color_consts::TYPE_DESC_COLOR),
+                    Style::default().fg(crate::color_consts::type_desc_color()),
                 ),
                 Span::raw(format!(
                     "{start}..{end} of 0..{total_end} {}",
@@ -298,7 +302,7 @@ fn render_image_chrome(
             Line::from(vec![
                 Span::styled(
                     "cover ",
-                    Style::default().fg(crate::color_consts::TYPE_DESC_COLOR),
+                    Style::default().fg(crate::color_consts::type_desc_color()),
                 ),
                 Span::raw(format!(
                     "{start_pct:.1}-{end_pct:.1}% | {visible} visible | arrows move {pan_step} {}",
@@ -317,7 +321,7 @@ fn render_image_chrome(
             .title_alignment(ratatui::layout::Alignment::Center)
             .borders(Borders::TOP)
             .border_type(BorderType::Plain)
-            .style(Style::default().fg(ratatui::style::Color::DarkGray));
+            .style(Style::default().fg(crate::color_consts::image_border_color()));
         f.render_widget(block, content_areas[0]);
     }
     Ok(content_areas[1])

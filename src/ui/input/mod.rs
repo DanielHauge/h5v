@@ -28,6 +28,7 @@ pub enum EventResult {
     Redraw,
     Copying,
     ReloadFile { write: bool },
+    Configure { reset: bool },
     Continue,
     Error(String),
     Toast(AppToast, bool),

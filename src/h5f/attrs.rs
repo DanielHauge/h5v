@@ -339,7 +339,7 @@ impl ComputedAttributes {
                 Ok(l) => l,
                 Err(e) => Line::styled(
                     format!("Error: {}", e),
-                    Style::default().fg(color_consts::ERROR_COLOR),
+                    Style::default().fg(color_consts::error_color()),
                 ),
             };
             let type_desc_str = match attribute_type_description(attr) {
@@ -349,9 +349,9 @@ impl ComputedAttributes {
             let type_desc = Line::styled(
                 format!(" ({})", type_desc_str),
                 Style::default().fg(if type_desc_str.starts_with("opaque[") {
-                    color_consts::OPAQUE_COLOR
+                    color_consts::opaque_color()
                 } else {
-                    color_consts::TYPE_DESC_COLOR
+                    color_consts::type_desc_color()
                 }),
             );
 

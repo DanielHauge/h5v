@@ -49,11 +49,11 @@ pub fn render_segment_panel(
             info.current.saturating_add(1),
             info.total.max(1)
         ))
-        .title_style(Style::default().fg(color_consts::TITLE).bold())
+        .title_style(Style::default().fg(color_consts::title_color()).bold())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-        .style(Style::default().bg(color_consts::BG_VAL3_COLOR));
+        .border_style(Style::default().fg(color_consts::break_color()))
+        .style(Style::default().bg(color_consts::bg_val3_color()));
     let inner = block.inner(*area);
     f.render_widget(block, *area);
 
@@ -75,7 +75,10 @@ pub fn render_segment_panel(
     };
     let lines = vec![
         Line::from(vec![
-            Span::styled("range ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "range ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::raw(format!(
                 "{}..{}",
                 compact_count(info.range_start),
@@ -83,23 +86,44 @@ pub fn render_segment_panel(
             )),
         ]),
         Line::from(vec![
-            Span::styled("size  ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "size  ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::raw(format!("{} {}", compact_count(size), info.unit)),
         ]),
         Line::from(vec![
-            Span::styled("total ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "total ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::raw(format!("{} {}", compact_count(info.total_items), info.unit)),
         ]),
         Line::from(vec![
-            Span::styled("cover ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "cover ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::raw(format!("{start_pct:.1}-{end_pct:.1}%")),
         ]),
         Line::from(vec![
-            Span::styled("nav   ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "nav   ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::raw("j/k PgUp/Dn"),
         ]),
     ];
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), *text_area);
+    let mut text_style = Style::default().fg(color_consts::primary_text_color());
+    if color_consts::prefers_strong_text() {
+        text_style = text_style.bold();
+    }
+    f.render_widget(
+        Paragraph::new(lines)
+            .style(text_style)
+            .wrap(Wrap { trim: false }),
+        *text_area,
+    );
     render_position_scroll(f, scroll_area, info.total, info.current, 1)
 }
 

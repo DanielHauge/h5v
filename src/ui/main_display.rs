@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Paragraph, Wrap},
     Frame,
@@ -73,8 +73,8 @@ pub fn render_main_display(
             .alignment(Alignment::Center)
             .style(
                 Style::default()
-                    .bg(color_consts::BG_COLOR)
-                    .fg(color_consts::TITLE),
+                    .bg(color_consts::bg_color())
+                    .fg(color_consts::title_color()),
             )
             .wrap(Wrap { trim: true });
         f.render_widget(paragraph, content_area);
@@ -101,18 +101,22 @@ pub fn render_main_display(
     let mut tab_layout = Vec::new();
     for (i, x) in supported_display_modes.iter().enumerate() {
         let title = match x {
-            ContentShowMode::Preview => "Preview📈",
+            ContentShowMode::Preview => "📈 Preview",
             ContentShowMode::Matrix => compat::matrix_tab_title(),
         };
         tab_layout.push((*x, title, Line::from(title).width() as u16));
 
         if i == display_index {
-            tab_titles.push(Span::styled(title, color_consts::TITLE).bold().underlined());
+            tab_titles.push(
+                Span::styled(title, color_consts::title_color())
+                    .bold()
+                    .underlined(),
+            );
         } else {
-            tab_titles.push(Span::styled(title, color_consts::TITLE));
+            tab_titles.push(Span::styled(title, color_consts::title_color()));
         }
         if i != supported_modes_count - 1 {
-            tab_titles.push(Span::styled(" | ", ui::main_display::Color::Green));
+            tab_titles.push(Span::styled(" | ", color_consts::panel_border_color()));
         }
     }
 
@@ -150,15 +154,15 @@ pub fn render_main_display(
             | ui::state::Mode::AttributeDeleteDialog
             | ui::state::Mode::FixedStringOverflowDialog
             | ui::state::Mode::FixedStringResizeDialog,
-        ) => color_consts::FOCUS_BG_COLOR,
-        _ => color_consts::BG_COLOR,
+        ) => color_consts::focus_bg_color(),
+        _ => color_consts::bg_color(),
     };
     let break_line = Block::default()
         .title(title)
         .borders(ratatui::widgets::Borders::TOP)
-        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+        .border_style(Style::default().fg(color_consts::break_color()))
         .title_alignment(Alignment::Center)
-        .title_style(Style::default().fg(color_consts::TITLE))
+        .title_style(Style::default().fg(color_consts::title_color()))
         .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
     let available = node.content_show_modes();

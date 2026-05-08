@@ -307,7 +307,7 @@ pub fn matrix_tab_title() -> &'static str {
     if current().compatibility_mode {
         "Matrix"
     } else {
-        "Matrix🧮"
+        "🧮 Matrix"
     }
 }
 

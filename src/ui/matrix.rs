@@ -34,10 +34,17 @@ pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
         vertical: 1,
     });
     let unsupported_msg = "Not yet implemented:".to_string();
-    f.render_widget(unsupported_msg, inner_area);
+    let mut text_style = Style::default().fg(color_consts::primary_text_color());
+    if color_consts::prefers_strong_text() {
+        text_style = text_style.bold();
+    }
+    f.render_widget(
+        Paragraph::new(unsupported_msg).style(text_style),
+        inner_area,
+    );
     let why = desc.to_string();
     f.render_widget(
-        why,
+        Paragraph::new(why).style(text_style),
         inner_area.inner(ratatui::layout::Margin {
             horizontal: 2,
             vertical: 1,
@@ -54,11 +61,25 @@ pub struct DefaultMatrixResultRenderIntercept;
 
 impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
-        Line::from(format!("{value}"))
+        let mut span = Span::styled(
+            format!("{value}"),
+            Style::default().fg(color_consts::primary_text_color()),
+        );
+        if color_consts::prefers_strong_text() {
+            span = span.bold();
+        }
+        Line::from(span)
     }
 
     fn render_as_span(&self, value: &T) -> Span<'static> {
-        Span::from(format!("{value}"))
+        let mut span = Span::styled(
+            format!("{value}"),
+            Style::default().fg(color_consts::primary_text_color()),
+        );
+        if color_consts::prefers_strong_text() {
+            span = span.bold();
+        }
+        span
     }
 }
 
@@ -68,14 +89,14 @@ impl RenderIntercept<String> for OpaqueHexRenderIntercept {
     fn render_as_line(&self, value: &String) -> Line<'static> {
         Line::from(Span::styled(
             value.clone(),
-            Style::default().fg(color_consts::OPAQUE_COLOR),
+            Style::default().fg(color_consts::opaque_color()),
         ))
     }
 
     fn render_as_span(&self, value: &String) -> Span<'static> {
         Span::styled(
             value.clone(),
-            Style::default().fg(color_consts::OPAQUE_COLOR),
+            Style::default().fg(color_consts::opaque_color()),
         )
     }
 }
@@ -99,16 +120,6 @@ impl EnumRenderer {
     }
 
     pub fn with_overrides(enum_mapping: EnumType, overrides: Option<&EnumRenderOverrides>) -> Self {
-        const ENUM_COLORS: [Color; 8] = [
-            Color::Rgb(255, 204, 0),
-            Color::Rgb(38, 166, 154),
-            Color::Rgb(66, 165, 245),
-            Color::Rgb(200, 140, 255),
-            Color::Rgb(255, 112, 67),
-            Color::Rgb(181, 206, 168),
-            Color::Rgb(240, 98, 146),
-            Color::Rgb(129, 199, 132),
-        ];
         let EnumType {
             size,
             signed,
@@ -124,7 +135,7 @@ impl EnumRenderer {
                 name: member.name,
                 color: overrides
                     .and_then(|overrides| overrides.colors.get(idx).copied().flatten())
-                    .unwrap_or(ENUM_COLORS[idx % ENUM_COLORS.len()]),
+                    .unwrap_or(crate::color_consts::enum_series_color(idx)),
                 symbol: overrides
                     .and_then(|overrides| overrides.symbols.get(idx))
                     .and_then(|symbol| symbol.clone())
@@ -165,7 +176,7 @@ impl RenderIntercept<u64> for EnumRenderer {
                 Span::styled(member.name.clone(), Style::default().fg(member.color)),
             ]),
             None => {
-                Line::from(format!("Unknown enum value: {value}")).fg(color_consts::ERROR_COLOR)
+                Line::from(format!("Unknown enum value: {value}")).fg(color_consts::error_color())
             }
         }
     }
@@ -176,17 +187,23 @@ impl RenderIntercept<u64> for EnumRenderer {
                 Style::default().fg(member.color).bold(),
             ),
             None => {
-                Span::from(format!("Unknown enum value: {value}")).fg(color_consts::ERROR_COLOR)
+                Span::from(format!("Unknown enum value: {value}")).fg(color_consts::error_color())
             }
         }
     }
 }
 
 fn render_centered_matrix_cell(f: &mut Frame, area: Rect, line: Line<'static>, bg_color: Color) {
+    let mut style = Style::default()
+        .bg(bg_color)
+        .fg(color_consts::primary_text_color());
+    if color_consts::prefers_strong_text() {
+        style = style.bold();
+    }
     f.render_widget(
         Paragraph::new(line)
             .alignment(ratatui::layout::Alignment::Center)
-            .style(Style::default().bg(bg_color)),
+            .style(style),
         area,
     );
 }
@@ -352,25 +369,30 @@ fn render_matrix_with_reader<T: Display>(
             });
             let val_bg_color = match (row_idx % 2) == 0 {
                 true => match state.matrix_view_state.row_offset.is_multiple_of(2) {
-                    true => color_consts::BG_VAL3_COLOR,
-                    false => color_consts::BG_VAL4_COLOR,
+                    true => color_consts::bg_val3_color(),
+                    false => color_consts::bg_val4_color(),
                 },
                 false => match state.matrix_view_state.row_offset.is_multiple_of(2) {
-                    true => color_consts::BG_VAL4_COLOR,
-                    false => color_consts::BG_VAL3_COLOR,
+                    true => color_consts::bg_val4_color(),
+                    false => color_consts::bg_val3_color(),
                 },
             };
             let val_bg_color = if row_idx == state.matrix_view_state.cursor_row {
                 let copying = state.copying;
                 if let (true, Focus::Content) = (copying, &state.focus) {
-                    color_consts::HIGHLIGHT_BG_COLOR_COPY
+                    color_consts::highlight_bg_copy_color()
                 } else {
-                    color_consts::HIGHLIGHT_BG_COLOR
+                    color_consts::highlight_bg_color()
                 }
             } else {
                 val_bg_color
             };
-            let idx_line = Line::from(format!("{i}")).left_aligned();
+            let mut idx_line = Line::from(format!("{i}"))
+                .style(Style::default().fg(color_consts::type_desc_color()))
+                .left_aligned();
+            if color_consts::prefers_strong_text() {
+                idx_line = idx_line.bold();
+            }
             let value_line = result_render.render_as_line(d);
             f.render_widget(idx_line, idx_area);
             render_centered_matrix_cell(f, value_area, value_line, val_bg_color);
@@ -392,9 +414,14 @@ fn render_matrix_with_reader<T: Display>(
                 .min(attr.shape[node.selected_col].saturating_sub(max_cols))
                 + col;
             f.render_widget(
-                Line::from(format!("{col_idx}"))
-                    // .bg(color_consts::NUMBER_COLOR)
-                    .centered(),
+                Line::from(Span::styled(format!("{col_idx}"), {
+                    let mut style = Style::default().fg(color_consts::type_desc_color());
+                    if color_consts::prefers_strong_text() {
+                        style = style.bold();
+                    }
+                    style
+                }))
+                .centered(),
                 col_area.offset(Offset { x: 0, y: -1 }),
             );
         }
@@ -416,7 +443,12 @@ fn render_matrix_with_reader<T: Display>(
                 attr.shape[node.selected_row]
                     .saturating_sub(state.matrix_view_state.rows_currently_available),
             ) + i;
-            let idx_line = Line::from(format!("{idx}")).left_aligned();
+            let mut idx_line = Line::from(format!("{idx}"))
+                .style(Style::default().fg(color_consts::type_desc_color()))
+                .left_aligned();
+            if color_consts::prefers_strong_text() {
+                idx_line = idx_line.bold();
+            }
             f.render_widget(idx_line, idx_area);
             for j in 0..max_cols {
                 let val_area = col_areas[j + 1];
@@ -430,10 +462,10 @@ fn render_matrix_with_reader<T: Display>(
                     (i + state.matrix_view_state.row_offset).is_multiple_of(2),
                     (j + state.matrix_view_state.col_offset).is_multiple_of(2),
                 ) {
-                    (true, true) => color_consts::BG_VAL3_COLOR,
-                    (true, false) => color_consts::BG_VAL4_COLOR,
-                    (false, true) => color_consts::BG_VAL1_COLOR,
-                    (false, false) => color_consts::BG_VAL2_COLOR,
+                    (true, true) => color_consts::bg_val3_color(),
+                    (true, false) => color_consts::bg_val4_color(),
+                    (false, true) => color_consts::bg_val1_color(),
+                    (false, false) => color_consts::bg_val2_color(),
                 };
                 let idx = if node.selected_row > node.selected_col {
                     (j, i)
@@ -448,12 +480,12 @@ fn render_matrix_with_reader<T: Display>(
                     let copying = state.copying;
                     if let (true, Focus::Content) = (copying, &state.focus) {
                         if val.is_some() {
-                            color_consts::HIGHLIGHT_BG_COLOR_COPY
+                            color_consts::highlight_bg_copy_color()
                         } else {
-                            color_consts::ERROR_COLOR
+                            color_consts::error_color()
                         }
                     } else {
-                        color_consts::HIGHLIGHT_BG_COLOR
+                        color_consts::highlight_bg_color()
                     }
                 } else {
                     val_bg_color
@@ -469,7 +501,7 @@ fn render_matrix_with_reader<T: Display>(
                     None => render_centered_matrix_cell(
                         f,
                         val_area,
-                        Line::from("None").fg(color_consts::ERROR_COLOR),
+                        Line::from("None").fg(color_consts::error_color()),
                         val_bg_color,
                     ),
                 }

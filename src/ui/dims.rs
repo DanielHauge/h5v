@@ -1,6 +1,7 @@
 use hdf5_metno::{Error, Hyperslab, Selection, SliceOrIndex};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Offset, Rect},
+    prelude::Stylize,
     style::Style,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
@@ -26,9 +27,14 @@ pub fn render_dim_selector(
     let index_selection = &node.selected_indexes;
     let block = Block::default()
         .title("Slice selection")
+        .title_style(
+            Style::default()
+                .fg(color_consts::panel_title_color())
+                .bold(),
+        )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN));
+        .border_style(Style::default().fg(color_consts::panel_border_color()));
     f.render_widget(block, *area);
 
     let inner_area = area.inner(Margin {
@@ -44,11 +50,15 @@ pub fn render_dim_selector(
         (chunks[0], chunks[1])
     };
     // Print Shape: and View: on each line
-    let shape_line = Line::from("Shape: ").alignment(Alignment::Right);
+    let mut label_style = Style::default().fg(color_consts::type_desc_color());
+    if color_consts::prefers_strong_text() {
+        label_style = label_style.bold();
+    }
+    let shape_line = Line::from(Span::styled("Shape: ", label_style)).alignment(Alignment::Right);
     let view_line = if !row_columns {
-        Line::from(" y = ").alignment(Alignment::Right)
+        Line::from(Span::styled(" y = ", label_style)).alignment(Alignment::Right)
     } else {
-        Line::from(" view = ").alignment(Alignment::Right)
+        Line::from(Span::styled(" view = ", label_style)).alignment(Alignment::Right)
     };
     f.render_widget(shape_line, labels_area);
     f.render_widget(view_line, labels_area.offset(Offset { x: 0, y: 1 }));
@@ -72,45 +82,68 @@ pub fn render_dim_selector(
             break;
         }
         let spacer = Paragraph::new(" | ")
-            // .style(Style::default().bg(color_consts::BG_COLOR))
+            .style(Style::default().fg(color_consts::break_color()))
             .block(Block::default().borders(Borders::NONE));
         f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
         f.render_widget(spacer, *spacer_area);
     }
 
     for (i, dim) in shape_strings.iter().enumerate() {
-        let dim_line = Line::from(dim.as_str()).alignment(Alignment::Left);
+        let mut dim_span = Span::styled(
+            dim.clone(),
+            Style::default().fg(color_consts::primary_text_color()),
+        );
+        if color_consts::prefers_strong_text() {
+            dim_span = dim_span.bold();
+        }
+        let dim_line = Line::from(dim_span).alignment(Alignment::Left);
         f.render_widget(dim_line, segments[i]);
         if i == col_selection && row_columns {
-            let y_span =
-                Span::from("Col").style(Style::default().bold().fg(color_consts::SELECTED_DIM));
+            let y_span = Span::from("Col").style(
+                Style::default()
+                    .bold()
+                    .fg(color_consts::selected_dim_color()),
+            );
             let y_line = Line::from(y_span).alignment(Alignment::Center);
             f.render_widget(y_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == row_selection && row_columns {
             let x_text = "Row";
-            let x_span =
-                Span::from(x_text).style(Style::default().bold().fg(color_consts::SELECTED_DIM));
+            let x_span = Span::from(x_text).style(
+                Style::default()
+                    .bold()
+                    .fg(color_consts::selected_dim_color()),
+            );
             let x_line = Line::from(x_span).alignment(Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == x_selection && !row_columns {
-            let x_span =
-                Span::from("X").style(Style::default().bold().fg(color_consts::SELECTED_DIM));
+            let x_span = Span::from("X").style(
+                Style::default()
+                    .bold()
+                    .fg(color_consts::selected_dim_color()),
+            );
             let x_line = Line::from(x_span).alignment(Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else if i == selected_dim {
             let selected_index = index_selection.get(i).copied().unwrap_or_default();
             let span = Span::from(format!("{}", selected_index)).style(
                 Style::default()
+                    .fg(color_consts::primary_text_color())
                     .bold()
                     .underlined()
-                    .underline_color(color_consts::SELECTED_INDEX),
+                    .underline_color(color_consts::selected_index_color()),
             );
             let selected_line = Line::from(span).alignment(Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
         } else {
             let selected_index = index_selection.get(i).copied().unwrap_or_default();
-            let selected_line =
-                Line::from(format!("{}", selected_index)).alignment(Alignment::Center);
+            let mut span = Span::styled(
+                format!("{}", selected_index),
+                Style::default().fg(color_consts::primary_text_color()),
+            );
+            if color_consts::prefers_strong_text() {
+                span = span.bold();
+            }
+            let selected_line = Line::from(span).alignment(Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
         }
     }

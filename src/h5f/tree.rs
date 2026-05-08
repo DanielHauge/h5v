@@ -101,42 +101,7 @@ fn read_named_string_attr_values(dataset: &Dataset, attr_names: &[String]) -> Op
 }
 
 fn parse_enum_color(value: &str) -> Option<Color> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let normalized = trimmed.to_ascii_lowercase();
-    if let Some(hex) = normalized.strip_prefix('#') {
-        if hex.len() == 6 {
-            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            return Some(Color::Rgb(r, g, b));
-        }
-    }
-
-    match normalized.as_str() {
-        "black" => Some(Color::Black),
-        "red" => Some(Color::Red),
-        "green" => Some(Color::Green),
-        "yellow" => Some(Color::Yellow),
-        "blue" => Some(Color::Blue),
-        "magenta" | "purple" => Some(Color::Magenta),
-        "cyan" => Some(Color::Cyan),
-        "gray" | "grey" => Some(Color::Gray),
-        "darkgray" | "darkgrey" => Some(Color::DarkGray),
-        "lightred" | "pink" => Some(Color::LightRed),
-        "lightgreen" => Some(Color::LightGreen),
-        "lightyellow" => Some(Color::LightYellow),
-        "lightblue" => Some(Color::LightBlue),
-        "lightmagenta" => Some(Color::LightMagenta),
-        "lightcyan" => Some(Color::LightCyan),
-        "white" => Some(Color::White),
-        "amber" => Some(Color::Rgb(255, 191, 0)),
-        "orange" => Some(Color::Rgb(255, 165, 0)),
-        _ => None,
-    }
+    crate::color_consts::parse_color(value)
 }
 
 fn resolve_enum_render_overrides(

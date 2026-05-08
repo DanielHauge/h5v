@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Position, Rect},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
@@ -23,14 +23,17 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     };
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(Color::Yellow))
+        .title_style(Style::default().fg(color_consts::panel_title_color()))
         .borders(Borders::ALL)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR))
+        .style(Style::default().bg(color_consts::focus_bg_color()))
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Green));
+        .border_style(Style::default().fg(color_consts::panel_border_color()));
 
     let command_line = Line::from(vec![
-        Span::styled(":", Style::default().fg(Color::Yellow).bold()),
+        Span::styled(
+            ":",
+            Style::default().fg(color_consts::key_hint_color()).bold(),
+        ),
         Span::raw(" "),
         Span::raw(state.command_state.command_buffer.clone()),
     ]);
@@ -45,12 +48,14 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         let mut spans = vec![
             Span::styled(
                 command_usage(descriptor),
-                Style::default().fg(Color::Cyan).bold(),
+                Style::default()
+                    .fg(color_consts::command_usage_color())
+                    .bold(),
             ),
             Span::raw(" "),
             Span::styled(
                 format!("- {}", descriptor.description),
-                Style::default().fg(color_consts::TYPE_DESC_COLOR),
+                Style::default().fg(color_consts::type_desc_color()),
             ),
         ];
         let keys = command_keybindings(descriptor);
@@ -58,7 +63,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 format!("[{}]", keys),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(color_consts::key_hint_color()),
             ));
         }
         Line::from(spans)
@@ -68,12 +73,12 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     let suggestions_line = if matches.is_empty() {
         Line::from(Span::styled(
             "No matching commands",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(color_consts::command_no_match_color()),
         ))
     } else {
         let mut spans = vec![Span::styled(
             "Suggestions: ",
-            Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            Style::default().fg(color_consts::type_desc_color()),
         )];
         for (index, descriptor) in matches.iter().take(5).enumerate() {
             if index > 0 {
@@ -82,11 +87,11 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             let is_selected = Some(descriptor.id) == selected_descriptor.map(|d| d.id);
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightGreen)
+                    .fg(color_consts::selection_fg_color())
+                    .bg(color_consts::selection_bg_color())
                     .bold()
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(color_consts::primary_text_color())
             };
             spans.push(Span::styled(descriptor.name, style));
         }
@@ -96,27 +101,33 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     let history_hint = Line::from(vec![
         Span::styled(
             "History: ",
-            Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            Style::default().fg(color_consts::type_desc_color()),
         ),
-        Span::styled("Ctrl+p", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "Ctrl+p",
+            Style::default().fg(color_consts::key_hint_color()),
+        ),
         Span::raw(" / "),
-        Span::styled("Ctrl+n", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "Ctrl+n",
+            Style::default().fg(color_consts::key_hint_color()),
+        ),
         Span::raw("   "),
         Span::styled(
             "Complete: ",
-            Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            Style::default().fg(color_consts::type_desc_color()),
         ),
-        Span::styled("Tab", Style::default().fg(Color::Yellow)),
+        Span::styled("Tab", Style::default().fg(color_consts::key_hint_color())),
         Span::raw("   "),
         Span::styled(
             "Legacy: ",
-            Style::default().fg(color_consts::TYPE_DESC_COLOR),
+            Style::default().fg(color_consts::type_desc_color()),
         ),
-        Span::styled("42", Style::default().fg(Color::Yellow)),
+        Span::styled("42", Style::default().fg(color_consts::key_hint_color())),
         Span::raw(" / "),
-        Span::styled("+7", Style::default().fg(Color::Yellow)),
+        Span::styled("+7", Style::default().fg(color_consts::key_hint_color())),
         Span::raw(" / "),
-        Span::styled("-3", Style::default().fg(Color::Yellow)),
+        Span::styled("-3", Style::default().fg(color_consts::key_hint_color())),
     ]);
 
     let command_text_widget = Paragraph::new(Text::from(vec![
@@ -126,7 +137,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         history_hint,
     ]))
     .block(block)
-    .style(Style::default().fg(Color::White))
+    .style(Style::default().fg(color_consts::primary_text_color()))
     .wrap(Wrap { trim: true });
 
     f.render_widget(command_text_widget, area);

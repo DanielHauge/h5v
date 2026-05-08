@@ -160,6 +160,30 @@ pub fn perform_edit(
     edit_result
 }
 
+pub fn edit_existing_file(state: &mut AppState<'_>, path: &Path) -> Result<(), AppError> {
+    leave_h5v()?;
+    let edit_pause = state.edit_pause.write()?;
+    let edit_result = (|| -> Result<(), AppError> {
+        let editor = env::var("VISUAL")
+            .or_else(|_| env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+        let status = launch_editor(&editor, path)?;
+        if !status.success() {
+            let status_label = status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string());
+            return Err(AppError::EditError(format!(
+                "Editor exited unsuccessfully with status {status_label}"
+            )));
+        }
+        Ok(())
+    })();
+    drop(edit_pause);
+    reenter_h5v()?;
+    edit_result
+}
+
 fn normalize_edited_content(mut content: String) -> String {
     if content.ends_with('\n') {
         content.pop();

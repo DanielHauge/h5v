@@ -22,7 +22,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame, Terminal,
@@ -32,10 +32,11 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use crate::{
     color_consts,
     compat::{self, RuntimeConfig},
-    configure::run_lua_engine,
+    configure::{ensure_config_path, reset_config_path, run_lua_engine},
     error::{log_error, AppError},
     h5f::{self, HasPath, Node, NodeType},
     ui::{
+        edit::edit_existing_file,
         image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
         input::EventResult,
         mchart::MultiChartState,
@@ -392,6 +393,32 @@ fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> 
     })
 }
 
+fn open_configuration_and_reload(
+    state: &mut AppState<'_>,
+    tx_events: Sender<AppEvent>,
+    reset: bool,
+) -> Result<String> {
+    let config_path = if reset {
+        reset_config_path()?
+    } else {
+        let config_path = ensure_config_path()?;
+        state.editing = true;
+        let edit_result = edit_existing_file(state, &config_path);
+        state.editing = false;
+        edit_result?;
+        config_path
+    };
+
+    run_lua_engine(tx_events)?;
+    state.compute_tree_view();
+    let config_path = config_path.display();
+    if reset {
+        Ok(format!("Reset configuration to default at {config_path}"))
+    } else {
+        Ok(format!("Reloaded configuration from {config_path}"))
+    }
+}
+
 pub fn init(
     filename: String,
     link: bool,
@@ -519,13 +546,15 @@ fn main_recover_loop(
     })?;
 
     let (tx_events, rx_events) = channel();
+    run_lua_engine(tx_events.clone())?;
+
     #[allow(deprecated)]
     let mut picker = if runtime_config.terminal_graphics {
         Picker::from_query_stdio().unwrap_or(Picker::halfblocks())
     } else {
         Picker::halfblocks()
     };
-    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::BG_COLOR);
+    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::bg_color());
     picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
     let image_cell_size = picker.font_size();
     let tx_events_2 = tx_events.clone();
@@ -727,8 +756,6 @@ fn main_recover_loop(
     handle_term_events(tx_events.clone(), edit_pause);
     handle_file_watch_events(tx_events.clone(), state.file_watch.path.clone());
 
-    run_lua_engine(tx_events.clone())?;
-
     loop {
         let event = rx_events.recv();
         let event = match event {
@@ -788,6 +815,21 @@ fn main_recover_loop(
                     }
                     EventResult::ReloadFile { write } => {
                         match reload_current_file(&mut state, write) {
+                            Ok(message) => {
+                                terminal.clear()?;
+                                terminal.flush()?;
+                                state.toast = AppToast::Info(message);
+                            }
+                            Err(error) => {
+                                state.toast = AppToast::Error(error.to_string());
+                            }
+                        }
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                    EventResult::Configure { reset } => {
+                        match open_configuration_and_reload(&mut state, tx_events.clone(), reset) {
                             Ok(message) => {
                                 terminal.clear()?;
                                 terminal.flush()?;
@@ -948,6 +990,12 @@ fn apply_startup_event_result(state: &mut AppState<'_>, event_result: EventResul
             }
             Ok(false)
         }
+        EventResult::Configure { .. } => {
+            state.toast = AppToast::Info(
+                "The configure command is only available after startup completes".to_string(),
+            );
+            Ok(false)
+        }
         EventResult::Error(error) => {
             state.toast = AppToast::Error(error);
             Ok(false)
@@ -1072,8 +1120,8 @@ fn render_header(
     frame.render_widget(
         Paragraph::new(Line::raw("")).style(
             Style::default()
-                .bg(color_consts::BG_VAL3_COLOR)
-                .fg(color_consts::COLOR_WHITE),
+                .bg(color_consts::bg_val3_color())
+                .fg(color_consts::primary_text_color()),
         ),
         header_area,
     );
@@ -1083,21 +1131,26 @@ fn render_header(
             compat::readonly_badge(state.readonly),
             Style::default()
                 .fg(if state.readonly {
-                    Color::Yellow
+                    color_consts::status_readonly_color()
                 } else {
-                    Color::LightGreen
+                    color_consts::status_writable_color()
                 })
                 .bold(),
         ),
         if state.file_watch.linked {
-            Span::styled(compat::linked_badge(), Style::default().fg(Color::Cyan))
+            Span::styled(
+                compat::linked_badge(),
+                Style::default().fg(color_consts::status_linked_color()),
+            )
         } else {
             Span::raw("")
         },
         if state.compatibility_mode {
             Span::styled(
                 " compatibility mode ",
-                Style::default().fg(Color::Magenta).bold(),
+                Style::default()
+                    .fg(color_consts::status_compatibility_color())
+                    .bold(),
             )
         } else {
             Span::raw("")
@@ -1110,14 +1163,14 @@ fn render_header(
             compat::app_brand(),
             Style::default()
                 .fg(color_consts::title_color())
-                .bg(color_consts::BREAK_COLOR)
+                .bg(color_consts::title_bg_color())
                 .bold(),
         ),
         Span::raw(" "),
         Span::styled(
             GIT_VERSION,
             Style::default()
-                .fg(color_consts::BUILT_IN_VALUE_COLOR)
+                .fg(color_consts::built_in_value_color())
                 .bold(),
         ),
     ];
@@ -1125,7 +1178,9 @@ fn render_header(
         center.push(Span::raw("  "));
         center.push(Span::styled(
             format!("update available: {new_version}"),
-            Style::default().fg(Color::Yellow).bold(),
+            Style::default()
+                .fg(color_consts::status_update_available_color())
+                .bold(),
         ));
     }
     frame.render_widget(
@@ -1135,7 +1190,7 @@ fn render_header(
 
     let right = Line::from(vec![Span::styled(
         "(type ? for help)",
-        Style::default().fg(color_consts::TYPE_DESC_COLOR),
+        Style::default().fg(color_consts::type_desc_color()),
     )]);
     frame.render_widget(
         Paragraph::new(right).alignment(Alignment::Right),
@@ -1170,13 +1225,13 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
             let toast_paragraph = Paragraph::new(toast_text)
                 .block(
                     Block::default()
-                        .bg(color_consts::BG_COLOR)
+                        .bg(color_consts::bg_color())
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(match state.toast {
-                            AppToast::Info(_) => Color::LightGreen,
-                            AppToast::Error(_) => Color::Red,
-                            AppToast::Warning(_) => Color::Yellow,
-                            _ => Color::White,
+                            AppToast::Info(_) => color_consts::toast_info_color(),
+                            AppToast::Error(_) => color_consts::error_color(),
+                            AppToast::Warning(_) => color_consts::toast_warning_color(),
+                            _ => color_consts::toast_neutral_color(),
                         }))
                         .border_type(ratatui::widgets::BorderType::Rounded)
                         .title(match state.toast {
@@ -1185,7 +1240,11 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
                             AppToast::Warning(_) => "Warning",
                             _ => "",
                         })
-                        .title_style(Style::default().fg(Color::Yellow).bold())
+                        .title_style(
+                            Style::default()
+                                .fg(color_consts::panel_title_color())
+                                .bold(),
+                        )
                         .title_alignment(Alignment::Center),
                 )
                 .wrap(Wrap { trim: true });
@@ -1222,10 +1281,14 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red))
+                .border_style(Style::default().fg(color_consts::error_color()))
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .title(compat::error_title())
-                .title_style(Style::default().fg(Color::Yellow).bold())
+                .title_style(
+                    Style::default()
+                        .fg(color_consts::panel_title_color())
+                        .bold(),
+                )
                 .title_alignment(Alignment::Center),
         )
         .wrap(Wrap { trim: true });
@@ -1240,17 +1303,17 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
     let popup = centered_rect(area, 84, 13);
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
         popup,
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(color_consts::panel_title_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::create_attribute_title())
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+        .style(Style::default().bg(color_consts::focus_bg_color()));
     frame.render_widget(block, popup);
 
     let inner = popup.inner(Margin {
@@ -1269,12 +1332,15 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
 
     frame.render_widget(
         Paragraph::new("Tab/Shift-Tab switch fields, Left/Right changes type, Enter creates")
-            .style(Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            .style(Style::default().fg(color_consts::type_desc_color())),
         rows[0],
     );
 
-    let active_style = Style::default().fg(Color::Black).bg(Color::Yellow).bold();
-    let idle_style = Style::default().fg(Color::White);
+    let active_style = Style::default()
+        .fg(color_consts::selection_fg_color())
+        .bg(color_consts::selection_bg_color())
+        .bold();
+    let idle_style = Style::default().fg(color_consts::primary_text_color());
     let name_style = if dialog.active_field == state::AttributeCreateField::Name {
         active_style
     } else {
@@ -1293,14 +1359,20 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Name: ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "Name: ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::styled(dialog.name.clone(), name_style),
         ])),
         rows[1],
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Type: ", Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            Span::styled(
+                "Type: ",
+                Style::default().fg(color_consts::type_desc_color()),
+            ),
             Span::styled(
                 format!(
                     "< {} >  ({})",
@@ -1316,7 +1388,7 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
         Paragraph::new(Line::from(vec![
             Span::styled(
                 "Value: ",
-                Style::default().fg(color_consts::TYPE_DESC_COLOR),
+                Style::default().fg(color_consts::type_desc_color()),
             ),
             Span::styled(dialog.value.clone(), value_style),
         ]))
@@ -1325,7 +1397,7 @@ fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
     );
     frame.render_widget(
         Paragraph::new("Types: bool, i64, u64, f64, string, ascii")
-            .style(Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            .style(Style::default().fg(color_consts::type_desc_color())),
         rows[5],
     );
 
@@ -1348,17 +1420,17 @@ fn render_attribute_delete_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
     let popup = centered_rect(area, 64, 9);
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
         popup,
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(color_consts::panel_title_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::delete_attribute_title())
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+        .style(Style::default().bg(color_consts::focus_bg_color()));
     frame.render_widget(block, popup);
 
     let inner = popup.inner(Margin {
@@ -1384,17 +1456,17 @@ fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state:
     let popup = centered_rect(area, 72, 12);
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
         popup,
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(color_consts::panel_title_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::fixed_string_overflow_title())
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+        .style(Style::default().bg(color_consts::focus_bg_color()));
     let inner = popup.inner(Margin {
         horizontal: 2,
         vertical: 1,
@@ -1423,9 +1495,12 @@ fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state:
     .into_iter()
     .map(|(choice, label)| {
         let style = if dialog.selected_choice == choice {
-            Style::default().fg(Color::Black).bg(Color::Yellow).bold()
+            Style::default()
+                .fg(color_consts::selection_fg_color())
+                .bg(color_consts::selection_bg_color())
+                .bold()
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(color_consts::primary_text_color())
         };
         Span::styled(format!(" {label} "), style)
     })
@@ -1446,17 +1521,17 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
     let popup = centered_rect(area, 56, 10);
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
         popup,
     );
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(color_consts::panel_title_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::fixed_string_resize_title())
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+        .style(Style::default().bg(color_consts::focus_bg_color()));
     frame.render_widget(block, popup);
 
     let inner = popup.inner(Margin {
@@ -1473,8 +1548,11 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
         rows[0],
     );
     frame.render_widget(
-        Paragraph::new(format!("> {}", dialog.size_input))
-            .style(Style::default().fg(Color::White).bold()),
+        Paragraph::new(format!("> {}", dialog.size_input)).style(
+            Style::default()
+                .fg(color_consts::primary_text_color())
+                .bold(),
+        ),
         rows[1],
     );
     frame.set_cursor_position(ratatui::layout::Position::new(
@@ -1487,23 +1565,23 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
     let popup = centered_rect(area, 140, 31);
 
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::BG_VAL3_COLOR)),
+        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
         area,
     );
     frame.render_widget(Clear, popup);
 
     let help_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+        .border_style(Style::default().fg(color_consts::break_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::help_title())
-        .title_style(Style::default().fg(color_consts::TITLE).bold())
+        .title_style(Style::default().fg(color_consts::title_color()).bold())
         .title_bottom(Line::from(vec![
             Span::styled(" Esc ", help_key_style()),
             Span::styled(" close ", help_desc_style()),
         ]))
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::FOCUS_BG_COLOR));
+        .style(Style::default().bg(color_consts::focus_bg_color()));
     frame.render_widget(help_block, popup);
 
     let inner = popup.inner(Margin {
@@ -1517,7 +1595,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
     ])
     .split(inner);
 
-    let column_style = Style::default().bg(color_consts::FOCUS_BG_COLOR);
+    let column_style = Style::default().bg(color_consts::focus_bg_color());
     frame.render_widget(
         Paragraph::new(render_help_column_text(
             "General",
@@ -1601,6 +1679,14 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
                             "delete attribute from the selected node",
                         ),
                         (
+                            &["configure"],
+                            "open init.lua in $VISUAL/$EDITOR and reload it on return",
+                        ),
+                        (
+                            &["configure reset"],
+                            "overwrite init.lua with the default scaffold and reload it",
+                        ),
+                        (
                             &["mchart add /group/dataset[..,0]"],
                             "add a dataset to multichart from anywhere",
                         ),
@@ -1674,22 +1760,25 @@ fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
 
 fn help_key_style() -> Style {
     Style::default()
-        .fg(color_consts::COLOR_WHITE)
-        .bg(Color::Rgb(60, 90, 120))
+        .fg(color_consts::primary_text_color())
+        .bg(color_consts::help_key_bg_color())
         .underlined()
         .bold()
 }
 
 fn help_section_style() -> Style {
-    Style::default().fg(color_consts::TITLE).bold().underlined()
+    Style::default()
+        .fg(color_consts::title_color())
+        .bold()
+        .underlined()
 }
 
 fn help_desc_style() -> Style {
-    Style::default().fg(color_consts::BUILT_IN_VALUE_COLOR)
+    Style::default().fg(color_consts::built_in_value_color())
 }
 
 fn help_muted_style() -> Style {
-    Style::default().fg(color_consts::TYPE_DESC_COLOR)
+    Style::default().fg(color_consts::type_desc_color())
 }
 
 fn help_keys(keys: &[&'static str], desc: &'static str) -> Line<'static> {
@@ -1725,7 +1814,7 @@ fn render_help_column_text(title: &'static str, sections: &[HelpSection]) -> Tex
     let mut lines = vec![
         Line::from(vec![Span::styled(
             title.to_string(),
-            Style::default().fg(color_consts::TITLE).bold(),
+            Style::default().fg(color_consts::title_color()).bold(),
         )])
         .centered(),
         Line::raw(""),

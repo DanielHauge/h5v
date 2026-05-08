@@ -99,12 +99,19 @@ fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
         Line::from("   (for now it is a cozy little folder void)"),
     ]);
     let paragraph = Paragraph::new(text)
+        .style({
+            let mut style = Style::default().fg(color_consts::primary_text_color());
+            if color_consts::prefers_strong_text() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            style
+        })
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(color_consts::BREAK_COLOR))
+                .border_style(Style::default().fg(color_consts::break_color()))
                 .title(compat::empty_group_title())
                 .title_alignment(Alignment::Center),
         );
@@ -200,12 +207,12 @@ fn render_file_preview(
         .title(compat::file_metadata_title())
         .title_style(
             Style::default()
-                .fg(color_consts::TITLE)
+                .fg(color_consts::title_color())
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-        .style(Style::default().bg(color_consts::BG_COLOR));
+        .border_style(Style::default().fg(color_consts::break_color()))
+        .style(Style::default().bg(color_consts::bg_color()));
     let inner = outer.inner(*area);
     f.render_widget(outer, *area);
 
@@ -232,18 +239,23 @@ fn render_file_preview(
         .enumerate()
         .map(|(index, (label, value))| {
             let bg = if index % 2 == 0 {
-                color_consts::BG_COLOR
+                color_consts::bg_color()
             } else {
-                color_consts::BG_VAL1_COLOR
+                color_consts::bg_val1_color()
             };
             Row::new(vec![
                 Cell::from(label).style(
                     Style::default()
-                        .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                        .fg(color_consts::variable_blue_builtin_color())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Cell::from(truncate_left(&value, col_offset))
-                    .style(Style::default().fg(color_consts::BUILT_IN_VALUE_COLOR)),
+                Cell::from(truncate_left(&value, col_offset)).style({
+                    let mut style = Style::default().fg(color_consts::built_in_value_color());
+                    if color_consts::prefers_strong_text() {
+                        style = style.add_modifier(Modifier::BOLD);
+                    }
+                    style
+                }),
             ])
             .style(Style::default().bg(bg))
         });
@@ -256,7 +268,7 @@ fn render_file_preview(
     .block(
         Block::default()
             .title(" paths, timestamps, ownership, and access ")
-            .title_style(Style::default().fg(color_consts::TYPE_DESC_COLOR)),
+            .title_style(Style::default().fg(color_consts::type_desc_color())),
     );
     f.render_widget(table, inner);
 }

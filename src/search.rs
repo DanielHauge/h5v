@@ -103,7 +103,7 @@ fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
         }
         spans.push(Span::styled(
             &path[span.start..span.end],
-            ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+            ratatui::style::Style::default().fg(crate::color_consts::search_highlight_color()),
         ));
         last_end = span.end;
     }

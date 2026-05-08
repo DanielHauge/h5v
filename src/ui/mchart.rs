@@ -1417,9 +1417,9 @@ impl MultiChartState {
         self.plot_buffer = vec![0; (width * height * 3) as usize];
         let root =
             BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
-        let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::CHART_PLOT_BG_COLOR);
-        let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::CHART_GRID_COLOR);
-        let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::CHART_AXIS_COLOR);
+        let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::chart_plot_bg_color());
+        let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::chart_grid_color());
+        let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::chart_axis_color());
         let plot_bg = RGBColor(bg_r, bg_g, bg_b);
         let grid = RGBColor(grid_r, grid_g, grid_b);
         let axis = RGBColor(axis_r, axis_g, axis_b);
@@ -1578,11 +1578,11 @@ impl MultiChartState {
     pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let header_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
+            .border_style(Style::default().fg(color_consts::panel_border_color()))
             .border_type(BorderType::Rounded)
             .title("Multi-Chart Comparison Workspace")
-            .bg(color_consts::BG_COLOR)
-            .title_style(Style::default().fg(color_consts::TITLE).bold())
+            .bg(color_consts::bg_color())
+            .title_style(Style::default().fg(color_consts::title_color()).bold())
             .title_alignment(Alignment::Center);
         f.render_widget(header_block, area);
 
@@ -1644,7 +1644,7 @@ impl MultiChartState {
         );
         let paragraph = Paragraph::new(no_data_message)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(color_consts::TITLE))
+            .style(Style::default().fg(color_consts::title_color()))
             .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
@@ -1658,8 +1658,8 @@ impl MultiChartState {
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-            .title_style(Style::default().fg(color_consts::TITLE).bold());
+            .border_style(Style::default().fg(color_consts::break_color()))
+            .title_style(Style::default().fg(color_consts::title_color()).bold());
         let inner = block.inner(area);
         f.render_widget(block, area);
 
@@ -1686,16 +1686,19 @@ impl MultiChartState {
                 let is_base = self.marked_base_item == Some(item.id);
                 let id_style = if is_selected {
                     Style::default()
-                        .fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                        .fg(color_consts::variable_blue_builtin_color())
                         .bold()
                 } else {
-                    Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)
+                    Style::default().fg(color_consts::variable_blue_builtin_color())
                 };
                 let label_style = match (is_selected, item.visible) {
-                    (true, true) => Style::default().fg(color_consts::TITLE).bold(),
-                    (true, false) => Style::default().fg(color_consts::TITLE).bold().dim(),
-                    (false, true) => Style::default().fg(color_consts::BUILT_IN_VALUE_COLOR),
-                    (false, false) => Style::default().fg(color_consts::TYPE_DESC_COLOR).dim(),
+                    (true, true) => Style::default().fg(color_consts::title_color()).bold(),
+                    (true, false) => Style::default()
+                        .fg(color_consts::title_color())
+                        .bold()
+                        .dim(),
+                    (false, true) => Style::default().fg(color_consts::built_in_value_color()),
+                    (false, false) => Style::default().fg(color_consts::type_desc_color()).dim(),
                 };
                 let label_style = if is_base {
                     label_style.underlined()
@@ -1706,9 +1709,9 @@ impl MultiChartState {
                     Span::styled(
                         prefix,
                         if is_selected {
-                            Style::default().fg(color_consts::TITLE).bold()
+                            Style::default().fg(color_consts::title_color()).bold()
                         } else {
-                            Style::default().fg(color_consts::BREAK_COLOR)
+                            Style::default().fg(color_consts::break_color())
                         },
                     ),
                     Span::styled(marker, Style::default().fg(Color::Rgb(r, g, b)).bold()),
@@ -1729,8 +1732,8 @@ impl MultiChartState {
             .title("Active item")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN))
-            .title_style(Style::default().fg(color_consts::TITLE).bold());
+            .border_style(Style::default().fg(color_consts::variable_blue_builtin_color()))
+            .title_style(Style::default().fg(color_consts::title_color()).bold());
         let inner = block.inner(area);
         f.render_widget(block, area);
 
@@ -1754,53 +1757,53 @@ impl MultiChartState {
                 Line::from(vec![
                     Span::styled(
                         "base ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(base_line),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "path ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.display_path.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "type ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.kind_label()),
                     Span::raw("  "),
                     Span::styled(
                         "shape ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.shape_summary()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "view ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.selection_summary()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "stats ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(item.stats_summary()),
                     Span::raw("  "),
                     Span::styled(
                         "align ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(self.x_axis_policy.label()),
                     Span::raw("  "),
                     Span::styled(
                         "zoom ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(viewport),
                 ]),
@@ -1809,34 +1812,34 @@ impl MultiChartState {
                 Line::from(vec![
                     Span::styled(
                         "expr ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.expression()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "lhs ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.lhs_view.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "rhs ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.rhs_view.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "align ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(source.alignment_summary()),
                     Span::raw("  "),
                     Span::styled(
                         "zoom ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(viewport),
                 ]),
@@ -1845,41 +1848,41 @@ impl MultiChartState {
                 Line::from(vec![
                     Span::styled(
                         "expr ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(expression.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "base ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(base_line),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "type ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(item.source.source_kind_label()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "stats ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(item.stats_summary()),
                     Span::raw("  "),
                     Span::styled(
                         "align ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(self.x_axis_policy.label()),
                 ]),
                 Line::from(vec![
                     Span::styled(
                         "zoom ",
-                        Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                        Style::default().fg(color_consts::variable_blue_builtin_color()),
                     ),
                     Span::raw(viewport),
                 ]),
@@ -1897,8 +1900,8 @@ impl MultiChartState {
             .title(format!("Overlay chart [{}]", self.x_axis_policy.label()))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-            .title_style(Style::default().fg(color_consts::TITLE).bold());
+            .border_style(Style::default().fg(color_consts::break_color()))
+            .title_style(Style::default().fg(color_consts::title_color()).bold());
         let chart_area = block.inner(area);
         self.last_chart_area =
             (chart_area.width > 0 && chart_area.height > 0).then_some(chart_area);
@@ -1969,24 +1972,24 @@ impl MultiChartState {
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(color_consts::BREAK_COLOR))
-            .title_style(Style::default().fg(color_consts::TITLE).bold());
+            .border_style(Style::default().fg(color_consts::break_color()))
+            .title_style(Style::default().fg(color_consts::title_color()).bold());
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("= ", Style::default().fg(color_consts::TITLE).bold()),
+                Span::styled("= ", Style::default().fg(color_consts::title_color()).bold()),
                 Span::raw(prompt.buffer.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Syntax ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
+                Span::styled("Syntax ", Style::default().fg(color_consts::variable_blue_builtin_color())),
                 Span::raw(
                     "$1 + !/ds[..,0] * #/cal:scale   or   (!/x_ticks, $2 + #/cal/offset)",
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Rules ", Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN)),
+                Span::styled("Rules ", Style::default().fg(color_consts::variable_blue_builtin_color())),
                 Span::raw(
                     "single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series, #/path for scalar datasets, and :ATTR on ! or # for explicit attributes",
                 ),
@@ -1996,7 +1999,7 @@ impl MultiChartState {
             lines.push(Line::from(vec![
                 Span::styled(
                     "Error ",
-                    Style::default().fg(color_consts::ERROR_COLOR).bold(),
+                    Style::default().fg(color_consts::error_color()).bold(),
                 ),
                 Span::raw(error.clone()),
             ]));
@@ -2004,7 +2007,7 @@ impl MultiChartState {
             lines.push(Line::from(vec![
                 Span::styled(
                     "Keys ",
-                    Style::default().fg(color_consts::VARIABLE_BLUE_BUILTIN),
+                    Style::default().fg(color_consts::variable_blue_builtin_color()),
                 ),
                 Span::raw("Enter create  Esc cancel"),
             ]));

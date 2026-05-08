@@ -34,6 +34,7 @@ pub enum CommandId {
     Mode,
     ToggleTree,
     Reload,
+    Configure,
     X,
     Row,
     Col,
@@ -312,6 +313,16 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         keybindings: &["Ctrl+r"],
         args: &[],
         handler: handle_reload,
+    },
+    CommandDescriptor {
+        id: CommandId::Configure,
+        name: "configure",
+        aliases: &["config"],
+        description: "Open the Lua config, or `configure reset` to recreate the default scaffold",
+        category: CommandCategory::App,
+        keybindings: &[],
+        args: &[OPTIONAL_WORD_ARG],
+        handler: handle_configure,
     },
     CommandDescriptor {
         id: CommandId::X,
@@ -1158,6 +1169,22 @@ fn handle_reload(
     })
 }
 
+fn handle_configure(
+    _state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    let reset = match command.word_arg_optional(0)? {
+        None => false,
+        Some(action) if action.eq_ignore_ascii_case("reset") => true,
+        Some(action) => {
+            return Err(AppError::InvalidCommand(format!(
+                "Unknown configure action '{action}'. Supported actions: reset"
+            )));
+        }
+    };
+    Ok(EventResult::Configure { reset })
+}
+
 fn handle_x(
     state: &mut AppState<'_>,
     command: &CommandInvocation,
@@ -1496,6 +1523,7 @@ fn handle_press(
         match result {
             EventResult::Continue => {}
             EventResult::Quit
+            | EventResult::Configure { .. }
             | EventResult::ReloadFile { .. }
             | EventResult::Error(_)
             | EventResult::Toast(_, _)
@@ -1975,6 +2003,23 @@ mod tests {
         assert!(description.contains("reload"));
         assert!(description.contains("refresh"));
         assert!(description.contains("Ctrl+r"));
+    }
+
+    #[test]
+    fn parses_configure_command() {
+        let command = parse_command_text("configure").expect("configure command");
+        assert_eq!(command.id, CommandId::Configure);
+        assert!(command.args.is_empty());
+    }
+
+    #[test]
+    fn parses_configure_reset_command() {
+        let command = parse_command_text("configure reset").expect("configure reset command");
+        assert_eq!(command.id, CommandId::Configure);
+        assert_eq!(
+            command.args,
+            vec![CommandArgValue::Word("reset".to_string())]
+        );
     }
 
     #[test]

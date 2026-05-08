@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
     layout::{Alignment, Margin, Offset, Rect},
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders},
     Frame,
@@ -226,16 +226,20 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog,
-        ) => color_consts::FOCUS_BG_COLOR,
-        _ => color_consts::BG_COLOR,
+        ) => color_consts::focus_bg_color(),
+        _ => color_consts::bg_color(),
     };
     let header_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
+        .border_style(Style::default().fg(color_consts::panel_border_color()))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(compat::tree_title().to_string())
         .bg(bg)
-        .title_style(Style::default().fg(Color::Yellow).bold())
+        .title_style(
+            Style::default()
+                .fg(color_consts::panel_title_color())
+                .bold(),
+        )
         .title_alignment(Alignment::Center);
     f.render_widget(header_block, outer_area);
 
@@ -286,7 +290,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 }
                 let text = tree_item.line.clone();
                 if highlight_index == i && matches!(state.focus, Focus::Tree(_)) {
-                    f.render_widget(text.bg(color_consts::HIGHLIGHT_BG_COLOR), area);
+                    f.render_widget(text.bg(color_consts::highlight_bg_color()), area);
                 } else {
                     f.render_widget(text, area);
                 }
@@ -324,10 +328,11 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             let results_count = search_results.len();
 
             // render search title with a search symbol:
-            let search_icon_span = Span::styled(" ", Style::default().fg(Color::LightYellow));
+            let search_icon_span =
+                Span::styled(" ", Style::default().fg(color_consts::search_icon_color()));
             let search_text_span = Span::styled(
                 format!(" {}", search_query),
-                Style::default().fg(color_consts::SEARCH_TEXT_COLOR),
+                Style::default().fg(color_consts::search_text_color()),
             );
             let results_str = match results_count {
                 0 => " (No results)".to_string(),
@@ -336,7 +341,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             };
             let search_count_span = Span::styled(
                 results_str,
-                Style::default().fg(color_consts::SEARCH_COUNT_COLOR),
+                Style::default().fg(color_consts::search_count_color()),
             );
             let search_line =
                 Line::from(vec![search_icon_span, search_text_span, search_count_span]);
@@ -352,7 +357,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 }
                 if i == highlight_index {
                     f.render_widget(
-                        result.clone().bg(color_consts::HIGHLIGHT_BG_COLOR).bold(),
+                        result.clone().bg(color_consts::highlight_bg_color()).bold(),
                         area.offset(Offset { x: 3, y: offset }),
                     );
                 } else {

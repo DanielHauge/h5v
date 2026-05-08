@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -76,6 +77,14 @@ fn syntect_to_ratatui_style(style: syntect::highlighting::Style) -> ratatui::sty
         )
 }
 
+fn primary_text_style() -> Style {
+    let mut style = Style::default().fg(color_consts::primary_text_color());
+    if color_consts::prefers_strong_text() {
+        style = style.bold();
+    }
+    style
+}
+
 pub fn render_hl_string<T: ToString>(
     f: &mut Frame,
     area: &Rect,
@@ -90,7 +99,12 @@ pub fn render_hl_string<T: ToString>(
         Some(s) => s,
         None => return render_raw_string(f, area, node, string),
     };
-    let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+    let theme_name = if color_consts::prefers_strong_text() {
+        "base16-ocean.light"
+    } else {
+        "base16-ocean.dark"
+    };
+    let mut h = HighlightLines::new(syntax, &ts.themes[theme_name]);
     let string = string.to_string();
     let string = if hl == "json" {
         match serde_json::from_str::<serde_json::Value>(&string) {
@@ -139,7 +153,12 @@ pub fn render_hl_string<T: ToString>(
     let (line_num_area, text_area) = split_string_linenumber(*area, line_num);
     render_linenums(f, &line_num_area, line_offset, visible_line_count);
     let string = Text::from(escaped_lines);
-    f.render_widget(string, text_area);
+    f.render_widget(
+        Paragraph::new(string)
+            .style(primary_text_style())
+            .wrap(Wrap { trim: false }),
+        text_area,
+    );
 }
 
 fn split_string_linenumber(area: Rect, max: u16) -> (Rect, Rect) {
@@ -159,7 +178,7 @@ fn render_linenums(f: &mut Frame, area: &Rect, line_offset: usize, visible_lines
     let lines = Text::from(line_nums.join("\n"));
     f.render_widget(
         Paragraph::new(lines)
-            .style(ratatui::style::Style::default().fg(color_consts::LINE_NUM_COLOR))
+            .style(ratatui::style::Style::default().fg(color_consts::line_num_color()))
             .alignment(Alignment::Right)
             .wrap(Wrap { trim: false }),
         *area,
@@ -189,13 +208,18 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
     render_linenums(f, &line_num_area, line_offset, visible_line_count);
     let string = Text::from(visible_lines);
 
-    f.render_widget(string, text_area);
+    f.render_widget(
+        Paragraph::new(string)
+            .style(primary_text_style())
+            .wrap(Wrap { trim: false }),
+        text_area,
+    );
 }
 
 pub fn render_error<T: ToString>(f: &mut Frame, area: &Rect, error: T) {
     f.render_widget(
         Paragraph::new(error.to_string())
-            .style(ratatui::style::Style::default().fg(color_consts::ERROR_COLOR)),
+            .style(ratatui::style::Style::default().fg(color_consts::error_color())),
         *area,
     );
 }
@@ -209,12 +233,13 @@ pub fn render_empty_dataset(f: &mut Frame, area: &Rect) {
         Line::from("   (a tiny void is vibing here)"),
     ]);
     let paragraph = Paragraph::new(text)
+        .style(primary_text_style())
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(ratatui::style::Style::default().fg(color_consts::BREAK_COLOR))
+                .border_style(ratatui::style::Style::default().fg(color_consts::break_color()))
                 .title(compat::empty_dataset_title())
                 .title_alignment(Alignment::Center),
         );
@@ -232,10 +257,13 @@ pub fn render_unsupported_rendering(f: &mut Frame, area: &Rect, selected_node: &
         vertical: 1,
     });
     let unsupported_msg = format!("Unsupported preview for dataset: {}", ds.name());
-    f.render_widget(unsupported_msg, inner_area);
+    f.render_widget(
+        Paragraph::new(unsupported_msg).style(primary_text_style()),
+        inner_area,
+    );
     let why = format!("Reason: {}", desc);
     f.render_widget(
-        why,
+        Paragraph::new(why).style(primary_text_style()),
         inner_area.inner(ratatui::layout::Margin {
             horizontal: 2,
             vertical: 1,

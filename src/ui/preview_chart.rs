@@ -718,7 +718,7 @@ fn render_chart_widget(
     let x_labels = (0..=x_label_count)
         .map(|i| {
             let x = x_axis_max * (i as f64) / (x_label_count as f64);
-            Span::styled(format!("{:.1}", x), color_consts::CHART_LABEL_COLOR)
+            Span::styled(format!("{:.1}", x), color_consts::chart_label_color())
         })
         .collect::<Vec<_>>();
 
@@ -731,7 +731,7 @@ fn render_chart_widget(
         .map(|i| {
             let y = data_preview.min
                 + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
-            Span::styled(format!("{:.1}", y), color_consts::CHART_LABEL_COLOR)
+            Span::styled(format!("{:.1}", y), color_consts::chart_label_color())
         })
         .collect::<Vec<_>>();
 
@@ -741,7 +741,7 @@ fn render_chart_widget(
         .graph_type(GraphType::Line)
         .style(
             Style::default()
-                .fg(color_consts::CHART_PREVIEW_LINE_COLOR)
+                .fg(color_consts::chart_preview_line_color())
                 .bold(),
         )
         .data(data);
@@ -753,22 +753,22 @@ fn render_chart_widget(
             | super::state::Mode::AttributeDeleteDialog
             | super::state::Mode::FixedStringOverflowDialog
             | super::state::Mode::FixedStringResizeDialog,
-        ) => color_consts::FOCUS_BG_COLOR,
-        _ => color_consts::BG_COLOR,
+        ) => color_consts::focus_bg_color(),
+        _ => color_consts::bg_color(),
     };
     let chart = Chart::new(vec![ds])
         .style(Style::default().bg(bg))
         .x_axis(
             Axis::default()
                 .title("X axis")
-                .style(Style::default().fg(color_consts::CHART_AXIS_COLOR))
+                .style(Style::default().fg(color_consts::chart_axis_color()))
                 .labels(x_labels)
                 .bounds((0.0, x_axis_max).into()),
         )
         .y_axis(
             Axis::default()
                 .title("Y axis")
-                .style(Style::default().fg(color_consts::CHART_AXIS_COLOR))
+                .style(Style::default().fg(color_consts::chart_axis_color()))
                 .labels(y_labels)
                 .bounds((data_preview.min, data_preview.max).into()),
         );
@@ -782,11 +782,11 @@ pub fn render_image_chart(
     x_min: f64,
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
-    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::CHART_PLOT_BG_COLOR);
-    let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::CHART_GRID_COLOR);
-    let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::CHART_AXIS_COLOR);
+    let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::chart_plot_bg_color());
+    let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::chart_grid_color());
+    let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::chart_axis_color());
     let (line_r, line_g, line_b) =
-        color_consts::rgb_channels(color_consts::CHART_PREVIEW_LINE_COLOR);
+        color_consts::rgb_channels(color_consts::chart_preview_line_color());
     let plot_bg = RGBColor(bg_r, bg_g, bg_b);
     let grid = RGBColor(grid_r, grid_g, grid_b);
     let axis = RGBColor(axis_r, axis_g, axis_b);
