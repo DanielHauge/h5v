@@ -126,16 +126,36 @@ impl Searcher {
     }
 
     pub fn count_results(&self) -> usize {
-        let results = self.search(&self.query);
-        results.len()
+        self.result_paths(&self.query).len()
+    }
+
+    pub fn result_paths(&self, query: &str) -> Vec<&str> {
+        fuzzy_search(&self.paths, query)
     }
 
     pub fn search(&self, query: &str) -> Vec<Line<'_>> {
-        let results = fuzzy_search(&self.paths, query);
-        let rendered_lines = results
+        let rendered_lines = self
+            .result_paths(query)
             .into_iter()
             .map(|p| render_line_with_highlight(p, query))
             .collect();
         rendered_lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Searcher;
+
+    #[test]
+    fn returns_raw_result_paths() {
+        let searcher = Searcher::new(vec![
+            "/alpha".to_string(),
+            "/group/dataset".to_string(),
+            "/other".to_string(),
+        ]);
+
+        assert_eq!(searcher.result_paths("alph"), vec!["/alpha"]);
+        assert_eq!(searcher.search("alph")[0].to_string(), "/alpha");
     }
 }

@@ -2,7 +2,6 @@ use ratatui::crossterm::event::Event;
 
 use crate::{
     error::AppError,
-    h5f::HasPath,
     ui::state::{AppState, Focus, LastFocused, Mode},
 };
 
@@ -112,7 +111,7 @@ pub fn handle_search_event(
                         return Ok(EventResult::Error("No searcher available".into()));
                     };
 
-                    let results = searcher.search(&searcher.query);
+                    let results = searcher.result_paths(&searcher.query);
 
                     let selected_node = searcher.select_cursor;
                     if results.is_empty() {
@@ -127,23 +126,11 @@ pub fn handle_search_event(
                     };
 
                     let selected_result = results[selected_index_corrected].to_string();
-                    let mut root = state.root.borrow_mut();
-                    root.collapse();
-                    let selected_result = selected_result
-                        .strip_prefix("/")
-                        .unwrap_or(&selected_result);
-                    root.expand_path(selected_result)?;
-                    drop(root);
+                    state.root.borrow_mut().collapse();
+                    state.select_tree_node_by_path(&selected_result)?;
 
                     state.mode = Mode::Normal;
                     state.focus = Focus::Tree(LastFocused::Attributes);
-                    state.compute_tree_view();
-                    for (i, tree_item) in state.treeview.iter().enumerate() {
-                        if tree_item.node.borrow().node.path() == selected_result {
-                            state.tree_view_cursor = i;
-                            break;
-                        }
-                    }
                     Ok(EventResult::Redraw)
                 }
                 _ => Ok(EventResult::Continue),
