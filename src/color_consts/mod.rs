@@ -26,6 +26,7 @@ pub use accessors::{
 };
 #[allow(unused_imports)]
 pub use catalog::{available_color_names, available_theme_names, theme_named_colors};
+pub use palette::ThemeName;
 #[allow(unused_imports)]
 pub use parsing::{color_to_lua_string, parse_color, rgb_channels};
 #[allow(unused_imports)]
@@ -34,4 +35,4 @@ pub use state::{
     snapshot_theme,
 };
 #[allow(unused_imports)]
-pub use types::{ThemeName, ThemeSnapshot};
+pub use types::ThemeSnapshot;

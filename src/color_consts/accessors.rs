@@ -172,23 +172,23 @@ pub fn line_num_color() -> Color {
 }
 
 pub fn chart_axis_color() -> Color {
-    themed_color(|colors| colors.chart.chart_axis)
+    themed_color(|colors| colors.chart.axis)
 }
 
 pub fn chart_grid_color() -> Color {
-    themed_color(|colors| colors.chart.chart_grid)
+    themed_color(|colors| colors.chart.grid)
 }
 
 pub fn chart_label_color() -> Color {
-    themed_color(|colors| colors.chart.chart_label)
+    themed_color(|colors| colors.chart.label)
 }
 
 pub fn chart_preview_line_color() -> Color {
-    themed_color(|colors| colors.chart.chart_preview_line)
+    themed_color(|colors| colors.chart.preview_line)
 }
 
 pub fn chart_plot_bg_color() -> Color {
-    themed_color(|colors| colors.chart.chart_plot_bg)
+    themed_color(|colors| colors.chart.plot_bg)
 }
 
 pub fn chart_series_color(slot: usize) -> Color {
@@ -205,12 +205,12 @@ pub fn chart_series_color(slot: usize) -> Color {
         ];
         COMPAT_CHART_SERIES_COLORS[slot % COMPAT_CHART_SERIES_COLORS.len()]
     } else {
-        themed_color(|colors| colors.chart.chart_series[slot % colors.chart.chart_series.len()])
+        themed_color(|colors| colors.chart.series[slot % colors.chart.series.len()])
     }
 }
 
 pub fn enum_series_color(slot: usize) -> Color {
-    themed_color(|colors| colors.chart.enum_series[slot % colors.chart.enum_series.len()])
+    themed_color(|colors| colors.chart.r#enum[slot % colors.chart.r#enum.len()])
 }
 
 pub fn panel_border_color() -> Color {
@@ -222,35 +222,35 @@ pub fn panel_title_color() -> Color {
 }
 
 pub fn status_readonly_color() -> Color {
-    themed_color(|colors| colors.status.status_readonly)
+    themed_color(|colors| colors.status.readonly)
 }
 
 pub fn status_writable_color() -> Color {
-    themed_color(|colors| colors.status.status_writable)
+    themed_color(|colors| colors.status.writable)
 }
 
 pub fn status_linked_color() -> Color {
-    themed_color(|colors| colors.status.status_linked)
+    themed_color(|colors| colors.status.linked)
 }
 
 pub fn status_compatibility_color() -> Color {
-    themed_color(|colors| colors.status.status_compatibility)
+    themed_color(|colors| colors.status.compability)
 }
 
 pub fn status_update_available_color() -> Color {
-    themed_color(|colors| colors.status.status_update_available)
+    themed_color(|colors| colors.status.update_available)
 }
 
 pub fn toast_info_color() -> Color {
-    themed_color(|colors| colors.status.toast_info)
+    themed_color(|colors| colors.toast.info)
 }
 
 pub fn toast_warning_color() -> Color {
-    themed_color(|colors| colors.status.toast_warning)
+    themed_color(|colors| colors.toast.warning)
 }
 
 pub fn toast_neutral_color() -> Color {
-    themed_color(|colors| colors.status.toast_neutral)
+    themed_color(|colors| colors.toast.neutral)
 }
 
 pub fn selection_fg_color() -> Color {

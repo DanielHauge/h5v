@@ -1359,6 +1359,7 @@ dependencies = [
  "hdf5-metno-sys",
  "image 0.25.10",
  "itertools",
+ "macros",
  "mlua",
  "ndarray",
  "plotters",
@@ -2123,6 +2124,15 @@ checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
 dependencies = [
  "nix",
  "winapi",
+]
+
+[[package]]
+name = "macros"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

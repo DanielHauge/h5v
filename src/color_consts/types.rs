@@ -1,12 +1,9 @@
+use macros::{ColorGroup, ThemeColorCatalog};
 use ratatui::prelude::Color;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThemeName {
-    Dark,
-    Light,
-}
+use crate::color_consts::ThemeName;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct TextColors {
     pub(crate) title: Color,
     pub(crate) meta_section: Color,
@@ -26,7 +23,7 @@ pub(crate) struct TextColors {
     pub(crate) command_no_match: Color,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct SurfaceColors {
     pub(crate) title_bg: Color,
     pub(crate) focus_bg: Color,
@@ -44,7 +41,7 @@ pub(crate) struct SurfaceColors {
     pub(crate) image_border: Color,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct TreeColors {
     pub(crate) lines: Color,
     pub(crate) root_file: Color,
@@ -59,7 +56,7 @@ pub(crate) struct TreeColors {
     pub(crate) load_more: Color,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct AccentColors {
     pub(crate) selected_index: Color,
     pub(crate) selected_dim: Color,
@@ -71,30 +68,34 @@ pub(crate) struct AccentColors {
     pub(crate) search_icon: Color,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct ChartColors {
-    pub(crate) chart_axis: Color,
-    pub(crate) chart_grid: Color,
-    pub(crate) chart_label: Color,
-    pub(crate) chart_preview_line: Color,
-    pub(crate) chart_plot_bg: Color,
-    pub(crate) chart_series: [Color; 8],
-    pub(crate) enum_series: [Color; 8],
+    pub(crate) axis: Color,
+    pub(crate) grid: Color,
+    pub(crate) label: Color,
+    pub(crate) preview_line: Color,
+    pub(crate) plot_bg: Color,
+    pub(crate) series: [Color; 8],
+    pub(crate) r#enum: [Color; 8],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct StatusColors {
-    pub(crate) status_readonly: Color,
-    pub(crate) status_writable: Color,
-    pub(crate) status_linked: Color,
-    pub(crate) status_compatibility: Color,
-    pub(crate) status_update_available: Color,
-    pub(crate) toast_info: Color,
-    pub(crate) toast_warning: Color,
-    pub(crate) toast_neutral: Color,
+    pub(crate) readonly: Color,
+    pub(crate) writable: Color,
+    pub(crate) linked: Color,
+    pub(crate) compability: Color,
+    pub(crate) update_available: Color,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
+pub(crate) struct ToastColors {
+    pub(crate) info: Color,
+    pub(crate) warning: Color,
+    pub(crate) neutral: Color,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, ThemeColorCatalog)]
 pub(crate) struct ThemeColors {
     pub(crate) text: TextColors,
     pub(crate) surface: SurfaceColors,
@@ -102,16 +103,17 @@ pub(crate) struct ThemeColors {
     pub(crate) accent: AccentColors,
     pub(crate) chart: ChartColors,
     pub(crate) status: StatusColors,
+    pub(crate) toast: ToastColors,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ThemeState {
+pub struct ThemeSnapshot {
     pub(crate) active_theme: ThemeName,
     pub(crate) colors: ThemeColors,
 }
 
 #[derive(Clone, Debug)]
-pub struct ThemeSnapshot {
+pub(crate) struct ThemeState {
     pub(crate) active_theme: ThemeName,
     pub(crate) colors: ThemeColors,
 }

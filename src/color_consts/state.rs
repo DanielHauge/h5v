@@ -2,11 +2,11 @@ use std::sync::{LazyLock, RwLock};
 
 use ratatui::prelude::Color;
 
-use crate::compat;
+use crate::{color_consts::palette::ThemeName, compat};
 
 use super::{
     catalog::available_color_names,
-    types::{ThemeColors, ThemeName, ThemeSnapshot, ThemeState},
+    types::{ThemeColors, ThemeSnapshot, ThemeState},
 };
 
 static THEME_STATE: LazyLock<RwLock<ThemeState>> = LazyLock::new(|| {

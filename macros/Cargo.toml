@@ -1,0 +1,11 @@
+[package]
+name = "macros"
+edition = "2021"
+
+[lib]
+proc-macro = true # This is what makes it a proc-macro crate
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
