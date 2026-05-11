@@ -398,7 +398,10 @@ fn slice_bytes<'a>(
 }
 
 fn render_field_name(name: &str) -> Span<'static> {
-    styled_span(name, configure::themed_color(|colors| colors.tree.variable))
+    styled_span(
+        name,
+        configure::themed_color(|colors| colors.tree.group_name),
+    )
 }
 
 fn render_compound_bytes(

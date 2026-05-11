@@ -149,8 +149,7 @@ impl ThemeColors {
             tree: TreeColors {
                 lines: Color::Rgb(83, 86, 89),
                 root_file: Color::Rgb(186, 230, 250),
-                variable: Color::Rgb(136, 200, 230),
-                variable_builtin: Color::Rgb(66, 165, 245),
+                group_name: Color::Rgb(136, 200, 230),
                 file: Color::Rgb(66, 165, 245),
                 group: Color::Rgb(255, 204, 0),
                 compound_name: Color::Rgb(214, 170, 0),
@@ -185,7 +184,7 @@ impl ThemeColors {
                     Color::Rgb(186, 230, 250),
                     Color::Rgb(129, 199, 132),
                 ],
-                r#enum: [
+                enums: [
                     Color::Rgb(255, 204, 0),
                     Color::Rgb(38, 166, 154),
                     Color::Rgb(66, 165, 245),
@@ -214,7 +213,7 @@ impl ThemeColors {
     fn light() -> Self {
         Self {
             text: TextColors {
-                primary: Color::Rgb(26, 26, 26),
+                primary: Color::Rgb(0, 0, 0),
                 number: Color::Rgb(14, 124, 58),
                 string: Color::Rgb(168, 41, 14),
                 opaque: Color::Rgb(124, 58, 237),
@@ -271,8 +270,8 @@ impl ThemeColors {
                 prompt_prefix: Color::Rgb(30, 58, 95),
             },
             surface: SurfaceColors {
-                title_bg: Color::Rgb(30, 58, 95),
-                focus_bg: Color::Rgb(228, 235, 245),
+                title_bg: Color::Rgb(235, 225, 235),
+                focus_bg: Color::Rgb(245, 245, 245),
                 bg: Color::Rgb(255, 255, 255),
                 bg_val1: Color::Rgb(242, 244, 247),
                 bg_val2: Color::Rgb(237, 242, 237),
@@ -289,13 +288,12 @@ impl ThemeColors {
             tree: TreeColors {
                 lines: Color::Rgb(180, 185, 195),
                 root_file: Color::Rgb(0, 80, 200),
-                variable: Color::Rgb(0, 100, 225),
-                variable_builtin: Color::Rgb(0, 80, 200),
-                file: Color::Rgb(0, 80, 200),
-                group: Color::Rgb(180, 90, 0),
-                compound_name: Color::Rgb(100, 55, 0),
-                dataset: Color::Rgb(26, 26, 26),
-                dataset_file: Color::Rgb(0, 128, 80),
+                group_name: Color::Rgb(00, 90, 245),
+                file: Color::Rgb(20, 100, 230),
+                group: Color::Rgb(220, 130, 0),
+                compound_name: Color::Rgb(190, 155, 30),
+                dataset: Color::Rgb(0, 0, 0),
+                dataset_file: Color::Rgb(0, 188, 120),
                 compound: Color::Rgb(110, 45, 210),
                 load_more: Color::Rgb(0, 90, 190),
             },
@@ -325,7 +323,7 @@ impl ThemeColors {
                     Color::Rgb(25, 60, 140),
                     Color::Rgb(0, 110, 85),
                 ],
-                r#enum: [
+                enums: [
                     Color::Rgb(180, 90, 0),
                     Color::Rgb(14, 124, 58),
                     Color::Rgb(0, 90, 190),
@@ -429,8 +427,7 @@ impl ThemeColors {
             tree: TreeColors {
                 lines: Color::Rgb(160, 175, 200),
                 root_file: Color::Rgb(0, 103, 192),
-                variable: Color::Rgb(0, 88, 175),
-                variable_builtin: Color::Rgb(0, 103, 192),
+                group_name: Color::Rgb(0, 88, 175),
                 file: Color::Rgb(0, 103, 192),
                 group: Color::Rgb(136, 23, 152),
                 compound_name: Color::Rgb(100, 15, 115),
@@ -465,7 +462,7 @@ impl ThemeColors {
                     Color::Rgb(0, 56, 117),
                     Color::Rgb(100, 15, 115),
                 ],
-                r#enum: [
+                enums: [
                     Color::Rgb(136, 23, 152),
                     Color::Rgb(9, 134, 88),
                     Color::Rgb(0, 103, 192),

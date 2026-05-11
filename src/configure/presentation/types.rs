@@ -98,8 +98,7 @@ pub(crate) struct SurfaceColors {
 pub(crate) struct TreeColors {
     pub(crate) lines: Color,
     pub(crate) root_file: Color,
-    pub(crate) variable: Color,
-    pub(crate) variable_builtin: Color,
+    pub(crate) group_name: Color,
     pub(crate) file: Color,
     pub(crate) group: Color,
     pub(crate) compound_name: Color,
@@ -129,7 +128,7 @@ pub(crate) struct ChartColors {
     pub(crate) preview_line: Color,
     pub(crate) plot_bg: Color,
     pub(crate) series: [Color; 8],
-    pub(crate) r#enum: [Color; 8],
+    pub(crate) enums: [Color; 8],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]

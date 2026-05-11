@@ -174,7 +174,7 @@ fn compute_tree_view_rec<'a>(
             child.borrow().is_compound_container(),
             child.borrow().is_compound_leaf(),
         ) {
-            (true, _, _) => configure::themed_color(|colors| colors.tree.variable),
+            (true, _, _) => configure::themed_color(|colors| colors.tree.group_name),
             (false, true, _) => configure::themed_color(|colors| colors.tree.compound_name),
             (false, _, true) => configure::themed_color(|colors| colors.tree.dataset),
             (false, false, false) => configure::themed_color(|colors| colors.tree.dataset),
