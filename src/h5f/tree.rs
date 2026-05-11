@@ -101,7 +101,7 @@ fn read_named_string_attr_values(dataset: &Dataset, attr_names: &[String]) -> Op
 }
 
 fn parse_enum_color(value: &str) -> Option<Color> {
-    crate::color_consts::parse_color(value)
+    crate::configure::parse_color(value)
 }
 
 fn resolve_enum_render_overrides(
@@ -627,7 +627,10 @@ impl H5F {
         let member_count = file.member_names()?.len();
         let mut h5node = H5FNode::new(Node::File(file.clone()));
         if linked {
-            h5node.display_name = Some(crate::compat::linked_root_suffix(member_count));
+            h5node.display_name = Some(
+                crate::configure::configured_symbol(|symbols| symbols.badge.linked_root_suffix)
+                    .replace("{count}", &member_count.to_string()),
+            );
         }
 
         let root = Rc::new(RefCell::new(h5node));

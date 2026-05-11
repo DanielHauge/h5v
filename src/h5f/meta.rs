@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::{color_consts, compat, sprint_typedesc::MatrixRenderType};
+use crate::{configure, sprint_typedesc::MatrixRenderType};
 
 use super::RenderedAttributeRow;
 
@@ -130,7 +130,9 @@ impl GroupMeta {
             let external_value = Span::styled(
                 self.filename.clone(),
                 Style::default()
-                    .fg(color_consts::built_in_value_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_value
+                    }))
                     .bold(),
             );
             data_set_attrs.push((name, external_value));
@@ -142,7 +144,9 @@ impl GroupMeta {
             let name_span = Span::styled(
                 name,
                 Style::default()
-                    .fg(color_consts::variable_blue_builtin_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_name
+                    }))
                     .bold(),
             );
             let extra_name_space = match min_first_panel as usize - name_len {
@@ -150,11 +154,14 @@ impl GroupMeta {
                 _ => min_first_panel as usize - name_len,
             };
             let name_helper_line = Span::styled(
-                compat::horizontal_rule(extra_name_space - 1),
-                Style::default().fg(color_consts::lines_color()),
+                configure::configured_symbol(|symbols| symbols.tree.horizontal_rule)
+                    .repeat(extra_name_space - 1),
+                Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
             );
-            let equals_sign =
-                Span::styled("=", Style::default().fg(color_consts::equal_sign_color()));
+            let equals_sign = Span::styled(
+                "=",
+                Style::default().fg(configure::themed_color(|colors| colors.accent.equal_sign)),
+            );
             let name_line = Line::from(vec![name_span, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);
@@ -204,7 +211,9 @@ impl DatasetMeta {
         let type_value = Span::styled(
             self.data_type_string(),
             Style::default()
-                .fg(color_consts::built_in_value_color())
+                .fg(configure::themed_color(|colors| {
+                    colors.metadata.property_value
+                }))
                 .bold(),
         );
         data_set_attrs.push(("type", type_value));
@@ -212,14 +221,18 @@ impl DatasetMeta {
         let size_value = Span::styled(
             self.size_string(),
             Style::default()
-                .fg(color_consts::built_in_value_color())
+                .fg(configure::themed_color(|colors| {
+                    colors.metadata.property_value
+                }))
                 .bold(),
         );
         data_set_attrs.push(("size", size_value));
         let shape_value = Span::styled(
             self.shape_string(),
             Style::default()
-                .fg(color_consts::built_in_value_color())
+                .fg(configure::themed_color(|colors| {
+                    colors.metadata.property_value
+                }))
                 .bold(),
         );
         data_set_attrs.push(("shape", shape_value));
@@ -227,7 +240,9 @@ impl DatasetMeta {
             let chunk_value = Span::styled(
                 chunk_shape.to_string(),
                 Style::default()
-                    .fg(color_consts::built_in_value_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_value
+                    }))
                     .bold(),
             );
             data_set_attrs.push(("chunk", chunk_value));
@@ -237,7 +252,9 @@ impl DatasetMeta {
             let external_value = Span::styled(
                 self.filename.clone(),
                 Style::default()
-                    .fg(color_consts::built_in_value_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_value
+                    }))
                     .bold(),
             );
             data_set_attrs.push(("link", external_value));
@@ -246,7 +263,9 @@ impl DatasetMeta {
             let link_value_span = Span::styled(
                 l_name.clone(),
                 Style::default()
-                    .fg(color_consts::built_in_value_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_value
+                    }))
                     .bold(),
             );
             data_set_attrs.push(("origin", link_value_span));
@@ -255,7 +274,9 @@ impl DatasetMeta {
             let field_value = Span::styled(
                 virtual_path.to_string(),
                 Style::default()
-                    .fg(color_consts::built_in_value_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_value
+                    }))
                     .bold(),
             );
             data_set_attrs.push(("field", field_value));
@@ -267,7 +288,9 @@ impl DatasetMeta {
             let name_span = Span::styled(
                 name,
                 Style::default()
-                    .fg(color_consts::variable_blue_builtin_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.property_name
+                    }))
                     .bold(),
             );
             let extra_name_space = match min_first_panel as usize - name_len {
@@ -275,11 +298,14 @@ impl DatasetMeta {
                 _ => min_first_panel as usize - name_len,
             };
             let name_helper_line = Span::styled(
-                compat::horizontal_rule(extra_name_space - 1),
-                Style::default().fg(color_consts::lines_color()),
+                configure::configured_symbol(|symbols| symbols.tree.horizontal_rule)
+                    .repeat(extra_name_space - 1),
+                Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
             );
-            let equals_sign =
-                Span::styled("=", Style::default().fg(color_consts::equal_sign_color()));
+            let equals_sign = Span::styled(
+                "=",
+                Style::default().fg(configure::themed_color(|colors| colors.accent.equal_sign)),
+            );
             let name_line = Line::from(vec![name_span, name_helper_line, equals_sign]);
 
             let value_line = Line::from(vec![value]);

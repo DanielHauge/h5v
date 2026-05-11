@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     h5f::{H5FNode, HasPath},
     ui::{mchart::MultiChartState, std_comp_render::render_error},
 };
@@ -26,11 +26,13 @@ pub struct TreeItem<'a> {
 impl AppState<'_> {
     pub fn compute_tree_view(&mut self) {
         let mut tree_view = Vec::new();
-        let file_icon = Text::from(compat::root_file_icon());
+        let file_icon = Text::from(configure::configured_symbol(|symbols| {
+            symbols.tree.root_file_icon
+        }));
         let filenode = self.root.borrow().full_path();
         let text = Line::styled(
             format!("{} {}", file_icon, filenode),
-            Style::default().fg(color_consts::root_file_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.tree.root_file)),
         );
         let root_tree_item = TreeItem {
             node: self.root.clone(),
@@ -72,20 +74,27 @@ fn compute_tree_view_rec<'a>(
     while let Some(child) = groups.next() {
         let c = child.borrow();
         let is_last_child = groups.peek().is_none();
-        let connector = compat::tree_connector(is_last_child);
+        let connector = if is_last_child {
+            configure::configured_symbol(|symbols| symbols.tree.connector_last)
+        } else {
+            configure::configured_symbol(|symbols| symbols.tree.connector_middle)
+        };
         loading += 1;
         if loading > node_binding.view_loaded {
             // If we have more than 50 children, we stop rendering to avoid performance issues.
             // This is a simple way to handle large datasets.
             let adds = vec![
                 Span::styled(
-                    format!("{} ", compat::tree_connector(true)),
-                    Style::default().fg(color_consts::load_more_color()),
+                    format!(
+                        "{} ",
+                        configure::configured_symbol(|symbols| symbols.tree.connector_last)
+                    ),
+                    Style::default().fg(configure::themed_color(|colors| colors.tree.load_more)),
                 ),
                 Span::raw("... "),
                 Span::styled(
-                    compat::load_more_label(),
-                    Style::default().fg(color_consts::load_more_color()),
+                    configure::configured_symbol(|symbols| symbols.tree.load_more_label),
+                    Style::default().fg(configure::themed_color(|colors| colors.tree.load_more)),
                 ),
             ];
             let mut spans = prefix.clone();
@@ -99,11 +108,26 @@ fn compute_tree_view_rec<'a>(
             tree_view.push(tree_item);
             break;
         }
-        let connector_span =
-            Span::styled(connector, Style::default().fg(color_consts::lines_color()));
-        let collapse_icon = compat::collapse_icon(c.expanded);
+        let connector_span = Span::styled(
+            connector,
+            Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
+        );
+        let collapse_icon = if c.expanded {
+            configure::configured_symbol(|symbols| symbols.tree.collapse_expanded)
+        } else {
+            configure::configured_symbol(|symbols| symbols.tree.collapse_collapsed)
+        };
 
-        let folder_icon_base = compat::folder_icon(c.expanded, !c.children.is_empty());
+        let folder_icon_base = match (c.expanded, !c.children.is_empty()) {
+            (true, true) => configure::configured_symbol(|symbols| symbols.tree.folder_open_branch),
+            (true, false) => configure::configured_symbol(|symbols| symbols.tree.folder_open_leaf),
+            (false, true) => {
+                configure::configured_symbol(|symbols| symbols.tree.folder_closed_branch)
+            }
+            (false, false) => {
+                configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
+            }
+        };
         let folder_icon_link = c.icon();
         let folder_icon = format!("{}{}", folder_icon_base, folder_icon_link);
 
@@ -118,21 +142,21 @@ fn compute_tree_view_rec<'a>(
             child.borrow().is_compound_container(),
             child.borrow().is_compound_leaf(),
         ) {
-            (true, _, _) => color_consts::group_color(),
-            (false, true, _) => color_consts::compound_color(),
-            (false, _, true) => color_consts::dataset_file_color(),
-            (false, false, false) => color_consts::dataset_file_color(),
+            (true, _, _) => configure::themed_color(|colors| colors.tree.group),
+            (false, true, _) => configure::themed_color(|colors| colors.tree.compound),
+            (false, _, true) => configure::themed_color(|colors| colors.tree.dataset_file),
+            (false, false, false) => configure::themed_color(|colors| colors.tree.dataset_file),
         };
 
         let icon_span = Span::styled(icon, Style::default().fg(icon_color));
         let collapse_icon_span = match child.borrow().expanded {
             true => Span::styled(
                 collapse_icon,
-                Style::default().fg(color_consts::file_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.tree.file)),
             ),
             false => Span::styled(
                 collapse_icon,
-                Style::default().fg(color_consts::lines_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
             ),
         };
 
@@ -150,10 +174,10 @@ fn compute_tree_view_rec<'a>(
             child.borrow().is_compound_container(),
             child.borrow().is_compound_leaf(),
         ) {
-            (true, _, _) => color_consts::variable_blue_color(),
-            (false, true, _) => color_consts::compound_name_color(),
-            (false, _, true) => color_consts::dataset_color(),
-            (false, false, false) => color_consts::dataset_color(),
+            (true, _, _) => configure::themed_color(|colors| colors.tree.variable),
+            (false, true, _) => configure::themed_color(|colors| colors.tree.compound_name),
+            (false, _, true) => configure::themed_color(|colors| colors.tree.dataset),
+            (false, false, false) => configure::themed_color(|colors| colors.tree.dataset),
         };
         line_vec.push(Span::styled(
             child.borrow().name(),
@@ -172,16 +196,19 @@ fn compute_tree_view_rec<'a>(
                 if dot_idx > 0 {
                     line_vec.push(Span::raw(""));
                 }
-                let rgb = item.rgb_color();
                 line_vec.push(Span::styled(
-                    compat::chart_membership_marker(),
-                    Style::default().fg(ratatui::style::Color::Rgb(rgb.0, rgb.1, rgb.2)),
+                    configure::configured_symbol(|symbols| symbols.chart.membership_marker),
+                    Style::default().fg(configure::themed_color(|colors| {
+                        colors.chart.series[item.color_slot % colors.chart.series.len()]
+                    })),
                 ));
             }
             if memberships.len() > 3 {
                 line_vec.push(Span::styled(
                     format!("+{}", memberships.len() - 3),
-                    Style::default().fg(color_consts::title_color()),
+                    Style::default().fg(configure::themed_color(|colors| {
+                        colors.content.tree_membership_more
+                    })),
                 ));
             }
         }
@@ -202,8 +229,10 @@ fn compute_tree_view_rec<'a>(
             prefix_clone.push(Span::raw("   "));
         } else {
             prefix_clone.push(
-                Span::raw(compat::tree_vertical_guide())
-                    .style(Style::default().fg(color_consts::lines_color())),
+                Span::raw(configure::configured_symbol(|symbols| {
+                    symbols.tree.vertical_guide
+                }))
+                .style(Style::default().fg(configure::themed_color(|colors| colors.tree.lines))),
             );
         };
 
@@ -226,18 +255,20 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog,
-        ) => color_consts::focus_bg_color(),
-        _ => color_consts::bg_color(),
+        ) => configure::themed_color(|colors| colors.surface.focus_bg),
+        _ => configure::themed_color(|colors| colors.surface.bg),
     };
     let header_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::panel_border_color()))
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(compat::tree_title().to_string())
+        .title(configure::configured_symbol(|symbols| symbols.title.tree).to_string())
         .bg(bg)
         .title_style(
             Style::default()
-                .fg(color_consts::panel_title_color())
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
                 .bold(),
         )
         .title_alignment(Alignment::Center);
@@ -290,7 +321,12 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 }
                 let text = tree_item.line.clone();
                 if highlight_index == i && matches!(state.focus, Focus::Tree(_)) {
-                    f.render_widget(text.bg(color_consts::highlight_bg_color()), area);
+                    f.render_widget(
+                        text.bg(configure::themed_color(|colors| {
+                            colors.surface.highlight_bg
+                        })),
+                        area,
+                    );
                 } else {
                     f.render_widget(text, area);
                 }
@@ -328,11 +364,13 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             let results_count = search_results.len();
 
             // render search title with a search symbol:
-            let search_icon_span =
-                Span::styled(" ", Style::default().fg(color_consts::search_icon_color()));
+            let search_icon_span = Span::styled(
+                " ",
+                Style::default().fg(configure::themed_color(|colors| colors.accent.search_icon)),
+            );
             let search_text_span = Span::styled(
                 format!(" {}", search_query),
-                Style::default().fg(color_consts::search_text_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.search_text)),
             );
             let results_str = match results_count {
                 0 => " (No results)".to_string(),
@@ -341,7 +379,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             };
             let search_count_span = Span::styled(
                 results_str,
-                Style::default().fg(color_consts::search_count_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.search_count)),
             );
             let search_line =
                 Line::from(vec![search_icon_span, search_text_span, search_count_span]);
@@ -357,7 +395,12 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 }
                 if i == highlight_index {
                     f.render_widget(
-                        result.clone().bg(color_consts::highlight_bg_color()).bold(),
+                        result
+                            .clone()
+                            .bg(configure::themed_color(|colors| {
+                                colors.surface.highlight_bg
+                            }))
+                            .bold(),
                         area.offset(Offset { x: 3, y: offset }),
                     );
                 } else {

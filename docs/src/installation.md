@@ -82,11 +82,11 @@ h5v --compatibility path/to/file.h5
 Compatibility mode does two things:
 
 - replaces the richer icon and line-drawing UI with simpler fallback symbols
-- disables terminal graphics probing, so previews use the text-only path
+- disables terminal graphics probing, so previews use the text/braille fallback path
 
 This is stronger than `--no-terminal-graphics`, which only disables graphics probing and leaves the richer symbols enabled.
 
-You can also enable compatibility mode persistently with `H5V_COMPATIBILITY_MODE`. Accepted true values are `1`, `true`, `yes`, and `on`. Accepted false values are `0`, `false`, `no`, and `off`.
+You can also enable compatibility mode persistently with `H5V_COMPATIBILITY_MODE` or set it in `init.lua` with `h5v.compatibility = true`. Accepted true values are `1`, `true`, `yes`, and `on`. Accepted false values are `0`, `false`, `no`, and `off`.
 
 Examples:
 
@@ -95,7 +95,12 @@ H5V_COMPATIBILITY_MODE=true h5v path/to/file.h5
 H5V_COMPATIBILITY_MODE=off h5v path/to/file.h5
 ```
 
-The environment variable and `--compatibility` flag are combined with OR semantics, so either one can enable compatibility mode. Setting the environment variable to `false` does not cancel out `--compatibility`.
+Compatibility precedence is:
+
+1. `--compatibility`
+2. `h5v.compatibility`
+3. `H5V_COMPATIBILITY_MODE`
+4. default `false`
 
 To make the environment variable permanent, add it to your shell rc file:
 

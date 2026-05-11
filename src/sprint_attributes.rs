@@ -20,7 +20,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts,
+    configure,
     h5f::{ensure_attr_editable, format_opaque_bytes_for_edit, read_attr_memory_bytes},
     sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
@@ -50,11 +50,14 @@ fn link_span(value: impl std::fmt::Display, color: ratatui::style::Color) -> Spa
 }
 
 fn string_span(value: impl std::fmt::Display) -> Span<'static> {
-    styled_span(format_args!("\"{value}\""), color_consts::string_color())
+    styled_span(
+        format_args!("\"{value}\""),
+        configure::themed_color(|colors| colors.text.string),
+    )
 }
 
 fn symbol_span(value: &'static str) -> Span<'static> {
-    Span::raw(value).style(color_consts::symbol_color())
+    Span::raw(value).style(configure::themed_color(|colors| colors.accent.symbol))
 }
 
 fn comma_separated<I>(spans: I) -> Vec<Span<'static>>
@@ -116,7 +119,7 @@ macro_rules! impl_uint_renderable {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    styled_span(self, color_consts::number_color())
+                    styled_span(self, configure::themed_color(|colors| colors.text.number))
                 }
             }
         )*
@@ -129,7 +132,7 @@ macro_rules! impl_int_renderable {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    styled_span(self, color_consts::number_color())
+                    styled_span(self, configure::themed_color(|colors| colors.text.number))
                 }
             }
         )*
@@ -143,7 +146,7 @@ macro_rules! impl_float_renderable {
         $(
             impl Renderable for $t {
                 fn render(self) -> Span<'static> {
-                    styled_span(self, color_consts::number_color())
+                    styled_span(self, configure::themed_color(|colors| colors.text.number))
                 }
             }
         )*
@@ -153,7 +156,10 @@ impl_float_renderable!(f32, f64);
 
 impl Renderable for bool {
     fn render(self) -> Span<'static> {
-        styled_span(self, color_consts::bool_color())
+        styled_span(
+            self,
+            configure::themed_color(|colors| colors.text.bool_value),
+        )
     }
 }
 
@@ -263,13 +269,16 @@ fn render_reference_target(
 
 fn render_referenced_object(object: ReferencedObject) -> Vec<Span<'static>> {
     match object {
-        ReferencedObject::Group(group) => {
-            render_reference_target("group", group.name(), color_consts::group_color(), true)
-        }
+        ReferencedObject::Group(group) => render_reference_target(
+            "group",
+            group.name(),
+            configure::themed_color(|colors| colors.tree.group),
+            true,
+        ),
         ReferencedObject::Dataset(dataset) => render_reference_target(
             "dataset",
             dataset.name(),
-            color_consts::dataset_color(),
+            configure::themed_color(|colors| colors.tree.dataset),
             true,
         ),
         ReferencedObject::Datatype(datatype) => render_reference_target(
@@ -278,7 +287,7 @@ fn render_referenced_object(object: ReferencedObject) -> Vec<Span<'static>> {
                 .as_location()
                 .map(|location| location.name())
                 .unwrap_or_else(|_| datatype.to_string()),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
             false,
         ),
     }
@@ -389,7 +398,7 @@ fn slice_bytes<'a>(
 }
 
 fn render_field_name(name: &str) -> Span<'static> {
-    styled_span(name, color_consts::variable_blue_color())
+    styled_span(name, configure::themed_color(|colors| colors.tree.variable))
 }
 
 fn render_compound_bytes(
@@ -508,15 +517,15 @@ fn render_value_from_bytes(
         }
         TypeDescriptor::VarLenArray(inner) => Ok(bracketed_spans(vec![styled_span(
             format!("varlen {}", sprint_typedescriptor(inner)),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )])),
         TypeDescriptor::VarLenAscii | TypeDescriptor::VarLenUnicode => Ok(vec![styled_span(
             sprint_typedescriptor(type_desc),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )]),
         TypeDescriptor::Reference(reference_type) => Ok(vec![styled_span(
             sprint_typedescriptor(&TypeDescriptor::Reference(*reference_type)),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )]),
     }
 }
@@ -581,13 +590,13 @@ fn render_varlen_entry(
         }
         TypeDescriptor::Reference(Reference::Region) => Ok(bracketed_spans(vec![styled_span(
             format!("{} region references", entry.len),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )])),
         TypeDescriptor::VarLenAscii
         | TypeDescriptor::VarLenUnicode
         | TypeDescriptor::VarLenArray(_) => Ok(bracketed_spans(vec![styled_span(
             sprint_typedescriptor(&TypeDescriptor::VarLenArray(Box::new(element_type.clone()))),
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )])),
         _ => {
             let element_size = element_type.size();
@@ -702,20 +711,23 @@ fn render_scalar_varlen_array(
             Ok(bracketed_spans(comma_separated_groups(rendered)))
         }
         TypeDescriptor::FixedArray(inner, size) => Ok(bracketed_spans(vec![
-            styled_span("fixed elements", color_consts::type_desc_color()),
+            styled_span(
+                "fixed elements",
+                configure::themed_color(|colors| colors.text.type_desc),
+            ),
             symbol_span(": "),
             styled_span(
                 format!("[{size}]{}", sprint_typedescriptor(inner)),
-                color_consts::type_desc_color(),
+                configure::themed_color(|colors| colors.text.type_desc),
             ),
         ])),
         TypeDescriptor::Reference(Reference::Region) => Ok(bracketed_spans(vec![styled_span(
             "region references",
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )])),
         TypeDescriptor::Reference(Reference::Std) => Ok(bracketed_spans(vec![styled_span(
             "standard references",
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )])),
         TypeDescriptor::Compound(_)
         | TypeDescriptor::VarLenArray(_)
@@ -768,7 +780,7 @@ fn sprint_attribute_scalar(
         }
         types::TypeDescriptor::Reference(Reference::Region) => single_span(styled_span(
             "region reference",
-            color_consts::type_desc_color(),
+            configure::themed_color(|colors| colors.text.type_desc),
         )),
         types::TypeDescriptor::Reference(Reference::Std) => {
             render_reference_scalar::<ObjectReference2>(attr)?
@@ -789,14 +801,14 @@ fn sprint_attribute_scalar(
 fn render_unsupported_type(type_name: impl Into<String>) -> Span<'static> {
     let type_name = type_name.into();
     let s = format!("Unsupported type: {type_name}");
-    Span::from(s).style(color_consts::error_color())
+    Span::from(s).style(configure::themed_color(|colors| colors.text.error))
 }
 
 fn render_opaque_scalar(attr: &Attribute) -> Result<Line<'static>, Error> {
     let bytes = read_attr_memory_bytes(attr).map_err(|err| Error::from(err.to_string()))?;
     Ok(Line::from(Span::styled(
         format_opaque_bytes_for_edit(&bytes),
-        Style::default().fg(color_consts::opaque_color()),
+        Style::default().fg(configure::themed_color(|colors| colors.text.opaque)),
     )))
 }
 
@@ -807,7 +819,7 @@ fn render_opaque_array(attr: &Attribute) -> Result<Line<'static>, Error> {
     let spans = if item_size == 0 {
         vec![Span::styled(
             "<zero-sized opaque values>",
-            Style::default().fg(color_consts::opaque_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.opaque)),
         )]
     } else {
         comma_separated_groups(
@@ -816,7 +828,7 @@ fn render_opaque_array(attr: &Attribute) -> Result<Line<'static>, Error> {
                 .map(|chunk| {
                     vec![Span::styled(
                         format_opaque_bytes_for_edit(chunk),
-                        Style::default().fg(color_consts::opaque_color()),
+                        Style::default().fg(configure::themed_color(|colors| colors.text.opaque)),
                     )]
                 })
                 .collect::<Vec<_>>(),
@@ -907,7 +919,8 @@ pub fn sprint_attribute(attr: &hdf5_metno::Attribute) -> Result<Line<'static>, E
             Ok(line)
         }
     } else {
-        let line = Line::from("Invalid attribute").style(color_consts::error_color());
+        let line = Line::from("Invalid attribute")
+            .style(configure::themed_color(|colors| colors.text.error));
         Ok(line)
     }
 }

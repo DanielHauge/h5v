@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     error::AppError,
     h5f::{H5FNode, Node},
     sprint_typedesc::MatrixRenderType,
@@ -73,8 +73,8 @@ pub fn render_main_display(
             .alignment(Alignment::Center)
             .style(
                 Style::default()
-                    .bg(color_consts::bg_color())
-                    .fg(color_consts::title_color()),
+                    .bg(configure::themed_color(|colors| colors.surface.bg))
+                    .fg(configure::themed_color(|colors| colors.content.empty_state)),
             )
             .wrap(Wrap { trim: true });
         f.render_widget(paragraph, content_area);
@@ -101,22 +101,35 @@ pub fn render_main_display(
     let mut tab_layout = Vec::new();
     for (i, x) in supported_display_modes.iter().enumerate() {
         let title = match x {
-            ContentShowMode::Preview => "📈 Preview",
-            ContentShowMode::Matrix => compat::matrix_tab_title(),
+            ContentShowMode::Preview => {
+                configure::configured_symbol(|symbols| symbols.title.preview)
+            }
+            ContentShowMode::Matrix => {
+                configure::configured_symbol(|symbols| symbols.title.matrix_tab)
+            }
         };
         tab_layout.push((*x, title, Line::from(title).width() as u16));
 
         if i == display_index {
             tab_titles.push(
-                Span::styled(title, color_consts::title_color())
-                    .bold()
-                    .underlined(),
+                Span::styled(
+                    title,
+                    configure::themed_color(|colors| colors.content.tab_active),
+                )
+                .bold()
+                .underlined(),
             );
         } else {
-            tab_titles.push(Span::styled(title, color_consts::title_color()));
+            tab_titles.push(Span::styled(
+                title,
+                configure::themed_color(|colors| colors.content.tab_inactive),
+            ));
         }
         if i != supported_modes_count - 1 {
-            tab_titles.push(Span::styled(" | ", color_consts::panel_border_color()));
+            tab_titles.push(Span::styled(
+                " | ",
+                configure::themed_color(|colors| colors.surface.panel_border),
+            ));
         }
     }
 
@@ -154,15 +167,19 @@ pub fn render_main_display(
             | ui::state::Mode::AttributeDeleteDialog
             | ui::state::Mode::FixedStringOverflowDialog
             | ui::state::Mode::FixedStringResizeDialog,
-        ) => color_consts::focus_bg_color(),
-        _ => color_consts::bg_color(),
+        ) => configure::themed_color(|colors| colors.surface.focus_bg),
+        _ => configure::themed_color(|colors| colors.surface.bg),
     };
     let break_line = Block::default()
         .title(title)
         .borders(ratatui::widgets::Borders::TOP)
-        .border_style(Style::default().fg(color_consts::break_color()))
+        .border_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+        )
         .title_alignment(Alignment::Center)
-        .title_style(Style::default().fg(color_consts::title_color()))
+        .title_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
+        )
         .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
     let available = node.content_show_modes();

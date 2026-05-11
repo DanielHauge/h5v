@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    compat,
+    compat, configure,
     error::AppError,
     ui::command::{
         describe_command_invocation, format_command_invocation, parse_command_text,
@@ -255,7 +255,7 @@ impl ScriptTestTheme {
 
     fn rule(&self, width: usize) -> String {
         self.paint(
-            &compat::horizontal_rule(width),
+            &configure::configured_symbol(|symbols| symbols.tree.horizontal_rule).repeat(width),
             Color::DarkGrey,
             false,
             true,

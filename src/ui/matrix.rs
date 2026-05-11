@@ -14,7 +14,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     data::{MatrixTable, MatrixValues},
     error::AppError,
     h5f::{
@@ -34,8 +34,8 @@ pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
         vertical: 1,
     });
     let unsupported_msg = "Not yet implemented:".to_string();
-    let mut text_style = Style::default().fg(color_consts::primary_text_color());
-    if color_consts::prefers_strong_text() {
+    let mut text_style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
         text_style = text_style.bold();
     }
     f.render_widget(
@@ -63,9 +63,9 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
         let mut span = Span::styled(
             format!("{value}"),
-            Style::default().fg(color_consts::primary_text_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
         );
-        if color_consts::prefers_strong_text() {
+        if configure::prefers_strong_text() {
             span = span.bold();
         }
         Line::from(span)
@@ -74,9 +74,9 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_span(&self, value: &T) -> Span<'static> {
         let mut span = Span::styled(
             format!("{value}"),
-            Style::default().fg(color_consts::primary_text_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
         );
-        if color_consts::prefers_strong_text() {
+        if configure::prefers_strong_text() {
             span = span.bold();
         }
         span
@@ -89,14 +89,14 @@ impl RenderIntercept<String> for OpaqueHexRenderIntercept {
     fn render_as_line(&self, value: &String) -> Line<'static> {
         Line::from(Span::styled(
             value.clone(),
-            Style::default().fg(color_consts::opaque_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.opaque)),
         ))
     }
 
     fn render_as_span(&self, value: &String) -> Span<'static> {
         Span::styled(
             value.clone(),
-            Style::default().fg(color_consts::opaque_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.opaque)),
         )
     }
 }
@@ -135,11 +135,18 @@ impl EnumRenderer {
                 name: member.name,
                 color: overrides
                     .and_then(|overrides| overrides.colors.get(idx).copied().flatten())
-                    .unwrap_or(crate::color_consts::enum_series_color(idx)),
+                    .unwrap_or(crate::configure::themed_color(|colors| {
+                        colors.chart.r#enum[idx % colors.chart.r#enum.len()]
+                    })),
                 symbol: overrides
                     .and_then(|overrides| overrides.symbols.get(idx))
                     .and_then(|symbol| symbol.clone())
-                    .unwrap_or_else(|| compat::enum_symbol(idx).to_string()),
+                    .unwrap_or_else(|| {
+                        configure::configured_symbol(|symbols| {
+                            symbols.chart.r#enum[idx % symbols.chart.r#enum.len()]
+                        })
+                        .to_string()
+                    }),
             })
             .collect();
         Self { enum_mapping }
@@ -175,9 +182,8 @@ impl RenderIntercept<u64> for EnumRenderer {
                 ),
                 Span::styled(member.name.clone(), Style::default().fg(member.color)),
             ]),
-            None => {
-                Line::from(format!("Unknown enum value: {value}")).fg(color_consts::error_color())
-            }
+            None => Line::from(format!("Unknown enum value: {value}"))
+                .fg(configure::themed_color(|colors| colors.text.error)),
         }
     }
     fn render_as_span(&self, value: &u64) -> Span<'static> {
@@ -186,9 +192,8 @@ impl RenderIntercept<u64> for EnumRenderer {
                 format!("{} {}", member.symbol, member.name),
                 Style::default().fg(member.color).bold(),
             ),
-            None => {
-                Span::from(format!("Unknown enum value: {value}")).fg(color_consts::error_color())
-            }
+            None => Span::from(format!("Unknown enum value: {value}"))
+                .fg(configure::themed_color(|colors| colors.text.error)),
         }
     }
 }
@@ -196,8 +201,8 @@ impl RenderIntercept<u64> for EnumRenderer {
 fn render_centered_matrix_cell(f: &mut Frame, area: Rect, line: Line<'static>, bg_color: Color) {
     let mut style = Style::default()
         .bg(bg_color)
-        .fg(color_consts::primary_text_color());
-    if color_consts::prefers_strong_text() {
+        .fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
         style = style.bold();
     }
     f.render_widget(
@@ -369,28 +374,28 @@ fn render_matrix_with_reader<T: Display>(
             });
             let val_bg_color = match (row_idx % 2) == 0 {
                 true => match state.matrix_view_state.row_offset.is_multiple_of(2) {
-                    true => color_consts::bg_val3_color(),
-                    false => color_consts::bg_val4_color(),
+                    true => configure::themed_color(|colors| colors.surface.bg_val3),
+                    false => configure::themed_color(|colors| colors.surface.bg_val4),
                 },
                 false => match state.matrix_view_state.row_offset.is_multiple_of(2) {
-                    true => color_consts::bg_val4_color(),
-                    false => color_consts::bg_val3_color(),
+                    true => configure::themed_color(|colors| colors.surface.bg_val4),
+                    false => configure::themed_color(|colors| colors.surface.bg_val3),
                 },
             };
             let val_bg_color = if row_idx == state.matrix_view_state.cursor_row {
                 let copying = state.copying;
                 if let (true, Focus::Content) = (copying, &state.focus) {
-                    color_consts::highlight_bg_copy_color()
+                    configure::themed_color(|colors| colors.surface.highlight_bg_copy)
                 } else {
-                    color_consts::highlight_bg_color()
+                    configure::themed_color(|colors| colors.surface.highlight_bg)
                 }
             } else {
                 val_bg_color
             };
             let mut idx_line = Line::from(format!("{i}"))
-                .style(Style::default().fg(color_consts::type_desc_color()))
+                .style(Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)))
                 .left_aligned();
-            if color_consts::prefers_strong_text() {
+            if configure::prefers_strong_text() {
                 idx_line = idx_line.bold();
             }
             let value_line = result_render.render_as_line(d);
@@ -415,8 +420,9 @@ fn render_matrix_with_reader<T: Display>(
                 + col;
             f.render_widget(
                 Line::from(Span::styled(format!("{col_idx}"), {
-                    let mut style = Style::default().fg(color_consts::type_desc_color());
-                    if color_consts::prefers_strong_text() {
+                    let mut style = Style::default()
+                        .fg(configure::themed_color(|colors| colors.text.type_desc));
+                    if configure::prefers_strong_text() {
                         style = style.bold();
                     }
                     style
@@ -444,9 +450,9 @@ fn render_matrix_with_reader<T: Display>(
                     .saturating_sub(state.matrix_view_state.rows_currently_available),
             ) + i;
             let mut idx_line = Line::from(format!("{idx}"))
-                .style(Style::default().fg(color_consts::type_desc_color()))
+                .style(Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)))
                 .left_aligned();
-            if color_consts::prefers_strong_text() {
+            if configure::prefers_strong_text() {
                 idx_line = idx_line.bold();
             }
             f.render_widget(idx_line, idx_area);
@@ -462,10 +468,10 @@ fn render_matrix_with_reader<T: Display>(
                     (i + state.matrix_view_state.row_offset).is_multiple_of(2),
                     (j + state.matrix_view_state.col_offset).is_multiple_of(2),
                 ) {
-                    (true, true) => color_consts::bg_val3_color(),
-                    (true, false) => color_consts::bg_val4_color(),
-                    (false, true) => color_consts::bg_val1_color(),
-                    (false, false) => color_consts::bg_val2_color(),
+                    (true, true) => configure::themed_color(|colors| colors.surface.bg_val3),
+                    (true, false) => configure::themed_color(|colors| colors.surface.bg_val4),
+                    (false, true) => configure::themed_color(|colors| colors.surface.bg_val1),
+                    (false, false) => configure::themed_color(|colors| colors.surface.bg_val2),
                 };
                 let idx = if node.selected_row > node.selected_col {
                     (j, i)
@@ -480,12 +486,12 @@ fn render_matrix_with_reader<T: Display>(
                     let copying = state.copying;
                     if let (true, Focus::Content) = (copying, &state.focus) {
                         if val.is_some() {
-                            color_consts::highlight_bg_copy_color()
+                            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
                         } else {
-                            color_consts::error_color()
+                            configure::themed_color(|colors| colors.text.error)
                         }
                     } else {
-                        color_consts::highlight_bg_color()
+                        configure::themed_color(|colors| colors.surface.highlight_bg)
                     }
                 } else {
                     val_bg_color
@@ -501,7 +507,7 @@ fn render_matrix_with_reader<T: Display>(
                     None => render_centered_matrix_cell(
                         f,
                         val_area,
-                        Line::from("None").fg(color_consts::error_color()),
+                        Line::from("None").fg(configure::themed_color(|colors| colors.text.error)),
                         val_bg_color,
                     ),
                 }

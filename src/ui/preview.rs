@@ -12,8 +12,6 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-use crate::compat;
-
 use super::{
     image_preview::render_img,
     preview_chart::{render_chart_preview, render_precomputed_chart_preview},
@@ -23,7 +21,7 @@ use super::{
     },
 };
 use crate::{
-    color_consts,
+    configure,
     error::AppError,
     h5f::{read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, Node},
     sprint_typedesc::sprint_type_schema,
@@ -100,8 +98,9 @@ fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
     ]);
     let paragraph = Paragraph::new(text)
         .style({
-            let mut style = Style::default().fg(color_consts::primary_text_color());
-            if color_consts::prefers_strong_text() {
+            let mut style =
+                Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+            if configure::prefers_strong_text() {
                 style = style.add_modifier(Modifier::BOLD);
             }
             style
@@ -111,8 +110,13 @@ fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(color_consts::break_color()))
-                .title(compat::empty_group_title())
+                .border_style(
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.surface.break_line)),
+                )
+                .title(configure::configured_symbol(|symbols| {
+                    symbols.title.empty_group
+                }))
                 .title_alignment(Alignment::Center),
         );
     f.render_widget(paragraph, *area);
@@ -204,15 +208,19 @@ fn render_file_preview(
     }
 
     let outer = Block::default()
-        .title(compat::file_metadata_title())
+        .title(configure::configured_symbol(|symbols| {
+            symbols.title.file_metadata
+        }))
         .title_style(
             Style::default()
-                .fg(color_consts::title_color())
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::break_color()))
-        .style(Style::default().bg(color_consts::bg_color()));
+        .border_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+        )
+        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg)));
     let inner = outer.inner(*area);
     f.render_widget(outer, *area);
 
@@ -239,19 +247,20 @@ fn render_file_preview(
         .enumerate()
         .map(|(index, (label, value))| {
             let bg = if index % 2 == 0 {
-                color_consts::bg_color()
+                configure::themed_color(|colors| colors.surface.bg)
             } else {
-                color_consts::bg_val1_color()
+                configure::themed_color(|colors| colors.surface.bg_val1)
             };
             Row::new(vec![
                 Cell::from(label).style(
                     Style::default()
-                        .fg(color_consts::variable_blue_builtin_color())
+                        .fg(configure::themed_color(|colors| colors.file.label))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Cell::from(truncate_left(&value, col_offset)).style({
-                    let mut style = Style::default().fg(color_consts::built_in_value_color());
-                    if color_consts::prefers_strong_text() {
+                    let mut style =
+                        Style::default().fg(configure::themed_color(|colors| colors.file.value));
+                    if configure::prefers_strong_text() {
                         style = style.add_modifier(Modifier::BOLD);
                     }
                     style
@@ -268,7 +277,9 @@ fn render_file_preview(
     .block(
         Block::default()
             .title(" paths, timestamps, ownership, and access ")
-            .title_style(Style::default().fg(color_consts::type_desc_color())),
+            .title_style(
+                Style::default().fg(configure::themed_color(|colors| colors.file.section_title)),
+            ),
     );
     f.render_widget(table, inner);
 }

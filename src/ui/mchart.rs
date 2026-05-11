@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::{
-    color_consts,
+    configure,
     data::{
         validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
     },
@@ -497,10 +497,6 @@ impl ChartItem {
         self.source.matches_path(path)
     }
 
-    pub fn rgb_color(&self) -> (u8, u8, u8) {
-        color_consts::rgb_channels(color_consts::chart_series_color(self.color_slot))
-    }
-
     pub fn reference_label(&self) -> String {
         format!("${} {}", self.id.0, self.list_label())
     }
@@ -525,6 +521,24 @@ impl ChartItem {
             self.series.y_max
         )
     }
+}
+
+#[derive(Debug, Clone)]
+struct PreparedChartSeries {
+    label: String,
+    color_slot: usize,
+    points: Vec<Point>,
+    is_selected: bool,
+    is_base: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedChartData {
+    plot_x_min: f64,
+    plot_x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    series: Vec<PreparedChartSeries>,
 }
 
 pub struct MultiChartState {
@@ -1390,63 +1404,69 @@ impl MultiChartState {
         self.modified = true;
     }
 
-    fn render_chart(&mut self) -> bool {
-        if !self.modified {
-            return false;
-        }
-        self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
-        self.modified = false;
-
+    fn prepared_chart_data(&self) -> Option<PreparedChartData> {
         let visible_items = self
             .items
             .iter()
             .filter(|item| item.visible)
             .collect::<Vec<_>>();
         if visible_items.is_empty() {
-            return false;
+            return None;
         }
+
         let (global_x_min, global_x_max) = self.global_x_bounds().unwrap_or((0, 1));
-
-        let width = self.width;
-        let height = self.height;
-        let selected_item_id = self.selected_item().map(|item| item.id);
-        self.plot_buffer = vec![0; (width * height * 3) as usize];
-        let root =
-            BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
-        let (bg_r, bg_g, bg_b) = color_consts::rgb_channels(color_consts::chart_plot_bg_color());
-        let (grid_r, grid_g, grid_b) = color_consts::rgb_channels(color_consts::chart_grid_color());
-        let (axis_r, axis_g, axis_b) = color_consts::rgb_channels(color_consts::chart_axis_color());
-        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
-        let grid = RGBColor(grid_r, grid_g, grid_b);
-        let axis = RGBColor(axis_r, axis_g, axis_b);
-        if let Err(e) = root.fill(&plot_bg) {
-            log_error(e);
-            return false;
-        }
-
         let (x_min, x_max) = match (self.aoi_from, self.aoi_to) {
             (None, None) => (global_x_min, global_x_max),
             (Some(from), None) => (from, global_x_max.max(from)),
             (None, Some(to)) => (global_x_min.min(to), to),
             (Some(from), Some(to)) if from < to => (from, to),
-            _ => return false,
+            _ => return None,
         };
 
+        let selected_item_id = self.selected_item().map(|item| item.id);
         let mut global_y_max = f64::MIN;
         let mut global_y_min = f64::MAX;
-        for item in &visible_items {
+        let mut plot_x_min = f64::MAX;
+        let mut plot_x_max = f64::MIN;
+        let mut series = Vec::new();
+
+        for item in visible_items {
             if x_max <= item.series.sample_min || x_min >= item.series.sample_max {
                 continue;
             }
-            let from = item.series.sample_min.max(x_min);
-            let to = item.series.sample_max.min(x_max);
-            for &(_, y) in &item.series.points[from..to] {
+            let local_x_min = item
+                .series
+                .sample_min
+                .max(x_min)
+                .clamp(item.series.sample_min, item.series.sample_max);
+            let local_x_max = item
+                .series
+                .sample_max
+                .min(x_max)
+                .clamp(item.series.sample_min, item.series.sample_max);
+            let points = item.series.points[local_x_min..local_x_max].to_vec();
+            if points.is_empty() {
+                continue;
+            }
+
+            for &(x, y) in &points {
                 global_y_max = global_y_max.max(y);
                 global_y_min = global_y_min.min(y);
+                plot_x_min = plot_x_min.min(x);
+                plot_x_max = plot_x_max.max(x);
             }
+
+            series.push(PreparedChartSeries {
+                label: item.label.clone(),
+                color_slot: item.color_slot,
+                points,
+                is_selected: selected_item_id == Some(item.id),
+                is_base: self.marked_base_item == Some(item.id),
+            });
         }
-        if !global_y_min.is_finite() || !global_y_max.is_finite() {
-            return false;
+
+        if series.is_empty() || !global_y_min.is_finite() || !global_y_max.is_finite() {
+            return None;
         }
         let (y_min, y_max) = if (global_y_max - global_y_min).abs() < f64::EPSILON {
             let pad = if global_y_min == 0.0 {
@@ -1458,22 +1478,8 @@ impl MultiChartState {
         } else {
             (global_y_min, global_y_max)
         };
-
-        let mut plot_x_min = f64::MAX;
-        let mut plot_x_max = f64::MIN;
-        for item in &visible_items {
-            if x_max <= item.series.sample_min || x_min >= item.series.sample_max {
-                continue;
-            }
-            let from = item.series.sample_min.max(x_min);
-            let to = item.series.sample_max.min(x_max);
-            for &(x, _) in &item.series.points[from..to] {
-                plot_x_min = plot_x_min.min(x);
-                plot_x_max = plot_x_max.max(x);
-            }
-        }
         if !plot_x_min.is_finite() || !plot_x_max.is_finite() {
-            return false;
+            return None;
         }
         let (plot_x_min, plot_x_max) = if (plot_x_max - plot_x_min).abs() < f64::EPSILON {
             let pad = if plot_x_min == 0.0 {
@@ -1486,29 +1492,52 @@ impl MultiChartState {
             (plot_x_min, plot_x_max)
         };
 
-        let data_series = visible_items.iter().map(|item| {
-            let local_x_min = item
-                .series
-                .sample_min
-                .max(x_min)
-                .clamp(item.series.sample_min, item.series.sample_max);
-            let local_x_max = item
-                .series
-                .sample_max
-                .min(x_max)
-                .clamp(item.series.sample_min, item.series.sample_max);
-            let data_points = item.series.points[local_x_min..local_x_max]
-                .iter()
-                .map(|(x, y)| (*x, *y));
-            (item.id, item.label.clone(), item.color_slot, data_points)
-        });
+        Some(PreparedChartData {
+            plot_x_min,
+            plot_x_max,
+            y_min,
+            y_max,
+            series,
+        })
+    }
 
-        let y_label_area_size = format!("{y_max:.4}").len() as u32 * 3 + 30;
+    fn render_chart(&mut self) -> bool {
+        if !self.modified {
+            return false;
+        }
+        self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
+        self.modified = false;
+        let Some(prepared) = self.prepared_chart_data() else {
+            return false;
+        };
+
+        let width = self.width;
+        let height = self.height;
+        self.plot_buffer = vec![0; (width * height * 3) as usize];
+        let root =
+            BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(e) = root.fill(&plot_bg) {
+            log_error(e);
+            return false;
+        }
+        let y_label_area_size = format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30;
         let chart = plotters::prelude::ChartBuilder::on(&root)
             .margin(10)
             .x_label_area_size(30)
             .y_label_area_size(y_label_area_size)
-            .build_cartesian_2d(plot_x_min..plot_x_max, y_min..y_max);
+            .build_cartesian_2d(
+                prepared.plot_x_min..prepared.plot_x_max,
+                prepared.y_min..prepared.y_max,
+            );
 
         let mut chart = match chart {
             Ok(chart) => chart,
@@ -1531,28 +1560,29 @@ impl MultiChartState {
             log_error(e);
         }
 
-        for (item_id, label, color_slot, data) in data_series {
-            let (r, g, b) =
-                color_consts::rgb_channels(color_consts::chart_series_color(color_slot));
+        for series in prepared.series {
+            let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+                colors.chart.series[series.color_slot % colors.chart.series.len()]
+            }));
             let color = RGBColor(r, g, b);
-            let stroke_width =
-                if self.marked_base_item == Some(item_id) || selected_item_id == Some(item_id) {
-                    4
-                } else {
-                    3
-                };
+            let stroke_width = if series.is_base || series.is_selected {
+                4
+            } else {
+                3
+            };
             let line_series = plotters::prelude::LineSeries::new(
-                data,
+                series.points.iter().copied(),
                 ShapeStyle::from(&color).stroke_width(stroke_width),
             );
-            let series = match chart.draw_series(line_series) {
+            let series_label = series.label.clone();
+            let drawn_series = match chart.draw_series(line_series) {
                 Ok(series) => series,
                 Err(e) => {
                     log_error(e);
                     continue;
                 }
             };
-            series.label(label).legend(move |(x, y)| {
+            drawn_series.label(series_label).legend(move |(x, y)| {
                 plotters::prelude::PathElement::new(
                     vec![(x, y), (x + 20, y)],
                     plotters::prelude::ShapeStyle {
@@ -3568,5 +3598,37 @@ mod tests {
         assert!(state.finish_drag_at_position(15));
         assert_eq!(state.aoi_from, Some(36));
         assert_eq!(state.aoi_to, Some(96));
+    }
+
+    #[test]
+    fn prepared_chart_data_respects_visibility_and_viewport() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            (0..6).map(|i| (i as f64, i as f64)).collect(),
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            (0..6).map(|i| (i as f64, (i * 10) as f64)).collect(),
+        );
+        state.items[1].visible = false;
+        state.aoi_from = Some(1);
+        state.aoi_to = Some(4);
+
+        let prepared = state.prepared_chart_data().expect("prepared chart data");
+        assert_eq!(prepared.series.len(), 1);
+        assert_eq!(
+            prepared.series[0].points,
+            vec![(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+        );
+        assert_eq!(prepared.plot_x_min, 1.0);
+        assert_eq!(prepared.plot_x_max, 3.0);
+        assert_eq!(prepared.y_min, 1.0);
+        assert_eq!(prepared.y_max, 3.0);
     }
 }

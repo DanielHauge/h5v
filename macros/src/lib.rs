@@ -22,6 +22,28 @@ fn array_color_len(ty: &Type) -> Option<usize> {
     None
 }
 
+fn is_symbol(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Reference(tr)
+            if matches!(tr.elem.as_ref(), Type::Path(tp)
+                if tp.path.segments.last().map(|s| s.ident == "str").unwrap_or(false))
+    )
+}
+
+fn array_symbol_len(ty: &Type) -> Option<usize> {
+    if let Type::Array(arr) = ty {
+        if is_symbol(&arr.elem) {
+            if let syn::Expr::Lit(el) = &arr.len {
+                if let syn::Lit::Int(li) = &el.lit {
+                    return li.base10_parse().ok();
+                }
+            }
+        }
+    }
+    None
+}
+
 // ─── #[derive(ColorGroup)] ────────────────────────────────────────────────────
 
 #[proc_macro_derive(ColorGroup)]
@@ -193,6 +215,156 @@ pub fn derive_color_group(input: TokenStream) -> TokenStream {
     .into()
 }
 
+// ─── #[derive(SymbolGroup)] ───────────────────────────────────────────────────
+
+#[proc_macro_derive(SymbolGroup)]
+pub fn derive_symbol_group(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let name = &ast.ident;
+
+    let fields = match &ast.data {
+        Data::Struct(ds) => match &ds.fields {
+            Fields::Named(f) => &f.named,
+            _ => panic!("SymbolGroup requires named fields"),
+        },
+        _ => panic!("SymbolGroup requires a struct"),
+    };
+
+    let mut entries_stmts = Vec::<TokenStream2>::new();
+    let mut get_stmts = Vec::<TokenStream2>::new();
+    let mut set_stmts = Vec::<TokenStream2>::new();
+    let mut names_stmts = Vec::<TokenStream2>::new();
+
+    for field in fields {
+        let ident = field.ident.as_ref().unwrap();
+        let raw = ident.to_string();
+        let ty = &field.ty;
+
+        if is_symbol(ty) {
+            entries_stmts.push(quote! {
+                {
+                    let key = Self::lua_key(group, #raw);
+                    out.push((key, self.#ident));
+                }
+            });
+            get_stmts.push(quote! {
+                {
+                    let suffix = Self::key_suffix(group, #raw);
+                    if key == suffix || key == #raw {
+                        return Some(self.#ident);
+                    }
+                }
+            });
+            set_stmts.push(quote! {
+                {
+                    let suffix = Self::key_suffix(group, #raw);
+                    if key == suffix || key == #raw {
+                        self.#ident = Self::static_str(value.to_string());
+                        return true;
+                    }
+                }
+            });
+            names_stmts.push(quote! {
+                out.push(Self::lua_key(group, #raw));
+            });
+        } else if let Some(n) = array_symbol_len(ty) {
+            let indices: Vec<usize> = (0..n).collect();
+            let one_idx: Vec<usize> = (1..=n).collect();
+
+            entries_stmts.push(quote! {
+                {
+                    let base = Self::key_suffix(group, #raw);
+                    #(
+                        {
+                            let key = Self::static_str(format!("{}.{}_{}", group, base, #one_idx));
+                            out.push((key, self.#ident[#indices]));
+                        }
+                    )*
+                }
+            });
+            get_stmts.push(quote! {
+                {
+                    let base = Self::key_suffix(group, #raw);
+                    #(
+                        if key == format!("{}_{}", base, #one_idx).as_str() {
+                            return Some(self.#ident[#indices]);
+                        }
+                    )*
+                }
+            });
+            set_stmts.push(quote! {
+                {
+                    let base = Self::key_suffix(group, #raw);
+                    #(
+                        if key == format!("{}_{}", base, #one_idx).as_str() {
+                            self.#ident[#indices] = Self::static_str(value.to_string());
+                            return true;
+                        }
+                    )*
+                }
+            });
+            names_stmts.push(quote! {
+                {
+                    let base = Self::key_suffix(group, #raw);
+                    #(
+                        out.push(Self::static_str(format!("{}.{}_{}", group, base, #one_idx)));
+                    )*
+                }
+            });
+        } else {
+            panic!(
+                "SymbolGroup: `{}::{}` is neither &'static str nor [&'static str; N]",
+                name, raw
+            );
+        }
+    }
+
+    quote! {
+        impl #name {
+            fn key_suffix<'a>(group: &str, raw: &'a str) -> &'a str {
+                let prefix_len = group.len() + 1;
+                if raw.len() > prefix_len && raw.starts_with(group) && raw.as_bytes()[group.len()] == b'_' {
+                    &raw[prefix_len..]
+                } else {
+                    raw
+                }
+            }
+
+            fn lua_key(group: &str, raw: &str) -> &'static str {
+                let suffix = Self::key_suffix(group, raw);
+                Self::static_str(format!("{}.{}", group, suffix))
+            }
+
+            fn static_str(s: String) -> &'static str {
+                Box::leak(s.into_boxed_str())
+            }
+
+            pub(crate) fn symbol_entries(&self, group: &str) -> Vec<(&'static str, &'static str)> {
+                let mut out = Vec::new();
+                #( #entries_stmts )*
+                out
+            }
+
+            pub(crate) fn get_symbol(&self, group: &str, key: &str) -> Option<&'static str> {
+                #( #get_stmts )*
+                None
+            }
+
+            pub(crate) fn set_symbol(&mut self, group: &str, key: &str, value: &str) -> bool {
+                #( #set_stmts )*
+                false
+            }
+
+            pub(crate) fn key_names(group: &str) -> Vec<&'static str> {
+                let mut out: Vec<&'static str> = Vec::new();
+                #( #names_stmts )*
+                out
+            }
+        }
+    }
+    .into()
+}
+
 // ─── #[derive(ThemeColorCatalog)] ────────────────────────────────────────────
 
 #[proc_macro_derive(ThemeColorCatalog)]
@@ -327,6 +499,135 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
             /// All (dotted_name, color) pairs for the current theme values.
             /// Used by `theme_named_colors()` and `build_theme_table()`.
             pub(crate) fn all_color_entries(&self) -> Vec<(&'static str, ratatui::prelude::Color)> {
+                let mut out = Vec::new();
+                #( #entries_stmts )*
+                out
+            }
+        }
+    }
+    .into()
+}
+
+// ─── #[derive(ThemeSymbolCatalog)] ───────────────────────────────────────────
+
+#[proc_macro_derive(ThemeSymbolCatalog)]
+pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let name = &ast.ident;
+
+    let fields = match &ast.data {
+        Data::Struct(ds) => match &ds.fields {
+            Fields::Named(f) => &f.named,
+            _ => panic!("ThemeSymbolCatalog requires named fields"),
+        },
+        _ => panic!("ThemeSymbolCatalog requires a struct"),
+    };
+
+    let groups: Vec<(syn::Ident, String)> = fields
+        .iter()
+        .map(|f| {
+            let id = f.ident.as_ref().unwrap().clone();
+            let g = id.to_string();
+            (id, g)
+        })
+        .collect();
+
+    let named_arms: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            quote! {
+                k if k.starts_with(concat!(#g, ".")) => {
+                    self.#id.get_symbol(#g, &k[#g.len() + 1..])
+                }
+            }
+        })
+        .collect();
+
+    let set_arms: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            quote! {
+                k if k.starts_with(concat!(#g, ".")) => {
+                    self.#id.set_symbol(#g, &k[#g.len() + 1..], value)
+                }
+            }
+        })
+        .collect();
+
+    let fallback_get: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            quote! {
+                if let Some(symbol) = self.#id.get_symbol(#g, bare) { return Some(symbol); }
+            }
+        })
+        .collect();
+
+    let fallback_set: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            quote! {
+                if self.#id.set_symbol(#g, bare, value) { return true; }
+            }
+        })
+        .collect();
+
+    let names_stmts: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            let ty = &fields
+                .iter()
+                .find(|f| f.ident.as_ref().unwrap() == id)
+                .unwrap()
+                .ty;
+            quote! {
+                out.extend(#ty::key_names(#g));
+            }
+        })
+        .collect();
+
+    let entries_stmts: Vec<TokenStream2> = groups
+        .iter()
+        .map(|(id, g)| {
+            quote! {
+                out.extend(self.#id.symbol_entries(#g));
+            }
+        })
+        .collect();
+
+    quote! {
+        impl #name {
+            pub(crate) fn named_symbol(&self, name: &str) -> Option<&'static str> {
+                let norm = super::catalog::normalize_symbol_name(name);
+                let k = norm.as_str();
+                match k {
+                    #( #named_arms )*
+                    bare => {
+                        #( #fallback_get )*
+                        None
+                    }
+                }
+            }
+
+            pub(crate) fn set_named_symbol(&mut self, name: &str, value: &str) -> bool {
+                let norm = super::catalog::normalize_symbol_name(name);
+                let k = norm.as_str();
+                match k {
+                    #( #set_arms )*
+                    bare => {
+                        #( #fallback_set )*
+                        false
+                    }
+                }
+            }
+
+            pub(crate) fn all_symbol_names(&self) -> Vec<&'static str> {
+                let mut out: Vec<&'static str> = Vec::new();
+                #( #names_stmts )*
+                out
+            }
+
+            pub(crate) fn all_symbol_entries(&self) -> Vec<(&'static str, &'static str)> {
                 let mut out = Vec::new();
                 #( #entries_stmts )*
                 out

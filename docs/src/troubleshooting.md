@@ -38,7 +38,7 @@ If the problem is broader than image previews and the terminal also struggles wi
 h5v --compatibility file.h5
 ```
 
-That enables the full compatibility fallback mode: simpler symbols plus text-only previews. If you need that every time, set `H5V_COMPATIBILITY_MODE=true` in your shell rc file such as `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`.
+That enables the full compatibility fallback mode: simpler symbols plus text/braille previews. In particular, multi-chart falls back to a terminal-native braille overlay plot when image rendering is unavailable. If you need that every time, set `H5V_COMPATIBILITY_MODE=true` in your shell rc file such as `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`.
 
 ## A compound dataset does not show in matrix mode
 

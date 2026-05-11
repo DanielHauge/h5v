@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::color_consts;
+use crate::configure;
 use crate::error::AppError;
 
 pub struct SegmentDisplayInfo<'a> {
@@ -49,11 +49,17 @@ pub fn render_segment_panel(
             info.current.saturating_add(1),
             info.total.max(1)
         ))
-        .title_style(Style::default().fg(color_consts::title_color()).bold())
+        .title_style(
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
+                .bold(),
+        )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_consts::break_color()))
-        .style(Style::default().bg(color_consts::bg_val3_color()));
+        .border_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+        )
+        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3)));
     let inner = block.inner(*area);
     f.render_widget(block, *area);
 
@@ -77,7 +83,7 @@ pub fn render_segment_panel(
         Line::from(vec![
             Span::styled(
                 "range ",
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
             Span::raw(format!(
                 "{}..{}",
@@ -88,34 +94,34 @@ pub fn render_segment_panel(
         Line::from(vec![
             Span::styled(
                 "size  ",
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
             Span::raw(format!("{} {}", compact_count(size), info.unit)),
         ]),
         Line::from(vec![
             Span::styled(
                 "total ",
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
             Span::raw(format!("{} {}", compact_count(info.total_items), info.unit)),
         ]),
         Line::from(vec![
             Span::styled(
                 "cover ",
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
             Span::raw(format!("{start_pct:.1}-{end_pct:.1}%")),
         ]),
         Line::from(vec![
             Span::styled(
                 "nav   ",
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
             Span::raw("j/k PgUp/Dn"),
         ]),
     ];
-    let mut text_style = Style::default().fg(color_consts::primary_text_color());
-    if color_consts::prefers_strong_text() {
+    let mut text_style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
         text_style = text_style.bold();
     }
     f.render_widget(

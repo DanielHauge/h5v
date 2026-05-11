@@ -258,14 +258,24 @@ fn render_image_chrome(
             .title(title)
             .title_style(
                 Style::default()
-                    .fg(crate::color_consts::title_color())
+                    .fg(crate::configure::themed_color(|colors| {
+                        colors.surface.panel_title
+                    }))
                     .bold(),
             )
             .title_alignment(ratatui::layout::Alignment::Center)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(crate::color_consts::break_color()))
-            .style(Style::default().bg(crate::color_consts::bg_val3_color()));
+            .border_style(
+                Style::default().fg(crate::configure::themed_color(|colors| {
+                    colors.surface.break_line
+                })),
+            )
+            .style(
+                Style::default().bg(crate::configure::themed_color(|colors| {
+                    colors.surface.bg_val3
+                })),
+            );
         let inner = block.inner(content_areas[0]);
         f.render_widget(block, content_areas[0]);
 
@@ -292,7 +302,9 @@ fn render_image_chrome(
             Line::from(vec![
                 Span::styled(
                     "range ",
-                    Style::default().fg(crate::color_consts::type_desc_color()),
+                    Style::default().fg(crate::configure::themed_color(|colors| {
+                        colors.text.type_desc
+                    })),
                 ),
                 Span::raw(format!(
                     "{start}..{end} of 0..{total_end} {}",
@@ -302,7 +314,9 @@ fn render_image_chrome(
             Line::from(vec![
                 Span::styled(
                     "cover ",
-                    Style::default().fg(crate::color_consts::type_desc_color()),
+                    Style::default().fg(crate::configure::themed_color(|colors| {
+                        colors.text.type_desc
+                    })),
                 ),
                 Span::raw(format!(
                     "{start_pct:.1}-{end_pct:.1}% | {visible} visible | arrows move {pan_step} {}",
@@ -321,7 +335,11 @@ fn render_image_chrome(
             .title_alignment(ratatui::layout::Alignment::Center)
             .borders(Borders::TOP)
             .border_type(BorderType::Plain)
-            .style(Style::default().fg(crate::color_consts::image_border_color()));
+            .style(
+                Style::default().fg(crate::configure::themed_color(|colors| {
+                    colors.surface.image_border
+                })),
+            );
         f.render_widget(block, content_areas[0]);
     }
     Ok(content_areas[1])

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::color_consts;
+use crate::configure;
 
 use super::{
     command::{
@@ -23,16 +23,22 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     };
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(color_consts::panel_title_color()))
+        .title_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
+        )
         .borders(Borders::ALL)
-        .style(Style::default().bg(color_consts::focus_bg_color()))
+        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)))
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_consts::panel_border_color()));
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })));
 
     let command_line = Line::from(vec![
         Span::styled(
             ":",
-            Style::default().fg(color_consts::key_hint_color()).bold(),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.command.key_hint))
+                .bold(),
         ),
         Span::raw(" "),
         Span::raw(state.command_state.command_buffer.clone()),
@@ -49,13 +55,13 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             Span::styled(
                 command_usage(descriptor),
                 Style::default()
-                    .fg(color_consts::command_usage_color())
+                    .fg(configure::themed_color(|colors| colors.command.usage))
                     .bold(),
             ),
             Span::raw(" "),
             Span::styled(
                 format!("- {}", descriptor.description),
-                Style::default().fg(color_consts::type_desc_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.command.description)),
             ),
         ];
         let keys = command_keybindings(descriptor);
@@ -63,7 +69,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 format!("[{}]", keys),
-                Style::default().fg(color_consts::key_hint_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
             ));
         }
         Line::from(spans)
@@ -73,12 +79,14 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     let suggestions_line = if matches.is_empty() {
         Line::from(Span::styled(
             "No matching commands",
-            Style::default().fg(color_consts::command_no_match_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.command.no_match)),
         ))
     } else {
         let mut spans = vec![Span::styled(
             "Suggestions: ",
-            Style::default().fg(color_consts::type_desc_color()),
+            Style::default().fg(configure::themed_color(|colors| {
+                colors.command.suggestion_label
+            })),
         )];
         for (index, descriptor) in matches.iter().take(5).enumerate() {
             if index > 0 {
@@ -87,11 +95,11 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             let is_selected = Some(descriptor.id) == selected_descriptor.map(|d| d.id);
             let style = if is_selected {
                 Style::default()
-                    .fg(color_consts::selection_fg_color())
-                    .bg(color_consts::selection_bg_color())
+                    .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+                    .bg(configure::themed_color(|colors| colors.accent.selection_bg))
                     .bold()
             } else {
-                Style::default().fg(color_consts::primary_text_color())
+                Style::default().fg(configure::themed_color(|colors| colors.text.primary))
             };
             spans.push(Span::styled(descriptor.name, style));
         }
@@ -101,33 +109,51 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     let history_hint = Line::from(vec![
         Span::styled(
             "History: ",
-            Style::default().fg(color_consts::type_desc_color()),
+            Style::default().fg(configure::themed_color(|colors| {
+                colors.command.suggestion_label
+            })),
         ),
         Span::styled(
             "Ctrl+p",
-            Style::default().fg(color_consts::key_hint_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
         Span::raw(" / "),
         Span::styled(
             "Ctrl+n",
-            Style::default().fg(color_consts::key_hint_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
         Span::raw("   "),
         Span::styled(
             "Complete: ",
-            Style::default().fg(color_consts::type_desc_color()),
+            Style::default().fg(configure::themed_color(|colors| {
+                colors.command.suggestion_label
+            })),
         ),
-        Span::styled("Tab", Style::default().fg(color_consts::key_hint_color())),
+        Span::styled(
+            "Tab",
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
+        ),
         Span::raw("   "),
         Span::styled(
             "Legacy: ",
-            Style::default().fg(color_consts::type_desc_color()),
+            Style::default().fg(configure::themed_color(|colors| {
+                colors.command.suggestion_label
+            })),
         ),
-        Span::styled("42", Style::default().fg(color_consts::key_hint_color())),
+        Span::styled(
+            "42",
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
+        ),
         Span::raw(" / "),
-        Span::styled("+7", Style::default().fg(color_consts::key_hint_color())),
+        Span::styled(
+            "+7",
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
+        ),
         Span::raw(" / "),
-        Span::styled("-3", Style::default().fg(color_consts::key_hint_color())),
+        Span::styled(
+            "-3",
+            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
+        ),
     ]);
 
     let command_text_widget = Paragraph::new(Text::from(vec![
@@ -137,7 +163,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         history_hint,
     ]))
     .block(block)
-    .style(Style::default().fg(color_consts::primary_text_color()))
+    .style(Style::default().fg(configure::themed_color(|colors| colors.text.primary)))
     .wrap(Wrap { trim: true });
 
     f.render_widget(command_text_widget, area);

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::{
-    color_consts::{self, ThemeName},
     configure::errors::ConfigureErrors,
+    configure::{self, SymbolThemeName, ThemeName},
 };
 
 pub fn config_path() -> Result<PathBuf, ConfigureErrors> {
@@ -40,17 +40,37 @@ pub fn reset_config_to_default() -> Result<PathBuf, ConfigureErrors> {
 fn default_config_contents() -> String {
     let mut lines = vec![
         "-- H5V Lua configuration file".to_string(),
-        "-- Pick a built-in theme, then override any named colors you want.".to_string(),
+        "-- Pick built-in color/symbol themes, then override any named values you want."
+            .to_string(),
         format!(
             "-- Available themes: {}",
-            color_consts::available_theme_names().join(", ")
+            configure::available_theme_names().join(", ")
         ),
         format!("-- h5v.theme = \"{}\"", ThemeName::Dark.as_str()),
+        format!(
+            "-- Available symbol themes: {}",
+            configure::available_symbol_theme_names().join(", ")
+        ),
+        format!(
+            "-- h5v.symbol_theme = \"{}\"",
+            SymbolThemeName::Rich.as_str()
+        ),
+        "-- Compatibility precedence: CLI flag > h5v.compatibility > H5V_COMPATIBILITY_MODE"
+            .to_string(),
+        "-- h5v.compatibility = false".to_string(),
         "--".to_string(),
         "-- Colors accept #RRGGBB or names like blue, magenta, lightgreen, darkgray.".to_string(),
         "-- h5v.colors = {".to_string(),
     ];
     append_grouped_color_examples(&mut lines);
+    lines.push("-- }".to_string());
+    lines.push("--".to_string());
+    lines.push(
+        "-- Symbols accept any Lua string; use simple ASCII fallbacks if your terminal needs them."
+            .to_string(),
+    );
+    lines.push("-- h5v.symbols = {".to_string());
+    append_grouped_symbol_examples(&mut lines);
     lines.push("-- }".to_string());
     lines.push(String::new());
     lines.join("\n")
@@ -58,14 +78,38 @@ fn default_config_contents() -> String {
 
 fn append_grouped_color_examples(lines: &mut Vec<String>) {
     let mut groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
-    for (name, color) in color_consts::theme_named_colors(ThemeName::Dark) {
+    for (name, color) in configure::theme_named_colors(ThemeName::Dark) {
         let (group, key) = name.split_once('.').unwrap_or(("", name));
-        let value = color_consts::color_to_lua_string(color);
+        let value = configure::color_to_lua_string(color);
 
         if let Some((_, entries)) = groups.iter_mut().find(|(existing, _)| existing == group) {
             entries.push((key.to_string(), value));
         } else {
             groups.push((group.to_string(), vec![(key.to_string(), value)]));
+        }
+    }
+
+    for (group, entries) in groups {
+        lines.push(format!("--   {group} = {{"));
+        for (key, value) in entries {
+            lines.push(format!("--     {key} = \"{value}\","));
+        }
+        lines.push("--   },".to_string());
+    }
+}
+
+fn append_grouped_symbol_examples(lines: &mut Vec<String>) {
+    let mut groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for (name, value) in configure::theme_named_symbols(SymbolThemeName::Rich) {
+        let (group, key) = name.split_once('.').unwrap_or(("", name));
+
+        if let Some((_, entries)) = groups.iter_mut().find(|(existing, _)| existing == group) {
+            entries.push((key.to_string(), value.to_string()));
+        } else {
+            groups.push((
+                group.to_string(),
+                vec![(key.to_string(), value.to_string())],
+            ));
         }
     }
 
@@ -98,10 +142,20 @@ mod tests {
         let config = default_config_contents();
 
         assert_eq!(config.matches("--   text = {").count(), 1);
+        assert_eq!(config.matches("--   content = {").count(), 1);
+        assert_eq!(config.matches("--   command = {").count(), 1);
+        assert_eq!(config.matches("--   help = {").count(), 1);
+        assert_eq!(config.matches("--   metadata = {").count(), 1);
+        assert_eq!(config.matches("--   file = {").count(), 1);
+        assert_eq!(config.matches("--   mchart = {").count(), 1);
         assert_eq!(config.matches("--   surface = {").count(), 1);
         assert_eq!(config.matches("--   accent = {").count(), 1);
-        assert_eq!(config.matches("--   tree = {").count(), 1);
-        assert_eq!(config.matches("--   chart = {").count(), 1);
+        assert_eq!(config.matches("--   tree = {").count(), 2);
+        assert_eq!(config.matches("--   chart = {").count(), 2);
         assert_eq!(config.matches("--   status = {").count(), 1);
+        assert_eq!(config.matches("--   toast = {").count(), 1);
+        assert_eq!(config.matches("--   section = {").count(), 1);
+        assert_eq!(config.matches("--   title = {").count(), 1);
+        assert_eq!(config.matches("--   badge = {").count(), 1);
     }
 }

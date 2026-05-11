@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     h5f::{ComputedAttributes, H5FNode, MetadataRowKind},
 };
 
@@ -243,18 +243,19 @@ fn render_section_header(f: &mut Frame, area: Rect, title: &str) {
     let right_width = line_width.saturating_sub(left_width);
     let rendered = Line::from(vec![
         Span::styled(
-            compat::horizontal_rule(left_width),
-            Style::default().fg(color_consts::lines_color()),
+            configure::configured_symbol(|symbols| symbols.tree.horizontal_rule).repeat(left_width),
+            Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
         ),
         Span::styled(
             title.chars().take(total_width).collect::<String>(),
             Style::default()
-                .fg(color_consts::meta_section_color())
+                .fg(configure::themed_color(|colors| colors.metadata.section))
                 .bold(),
         ),
         Span::styled(
-            compat::horizontal_rule(right_width),
-            Style::default().fg(color_consts::lines_color()),
+            configure::configured_symbol(|symbols| symbols.tree.horizontal_rule)
+                .repeat(right_width),
+            Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
         ),
     ]);
     render_text_overflow_handled(f, area, &rendered);
@@ -358,7 +359,10 @@ fn render_property_grid_row(
         .split(rows_area);
     let cell_areas = [split[0], split[2]];
 
-    let separator = Line::styled(" | ", Style::default().fg(color_consts::lines_color()));
+    let separator = Line::styled(
+        " | ",
+        Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
+    );
     render_text_overflow_handled(f, split[1], &separator);
 
     for (slot, row_index) in row_indices.iter().enumerate() {
@@ -406,19 +410,21 @@ pub fn render_info_attributes(
             | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog,
-        ) => color_consts::focus_bg_color(),
-        _ => color_consts::bg_color(),
+        ) => configure::themed_color(|colors| colors.surface.focus_bg),
+        _ => configure::themed_color(|colors| colors.surface.bg),
     };
 
     let attr_header_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::panel_border_color()))
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(compat::meta_title().to_string())
+        .title(configure::configured_symbol(|symbols| symbols.title.meta).to_string())
         .bg(bg)
         .title_style(
             Style::default()
-                .fg(color_consts::panel_title_color())
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
                 .bold(),
         )
         .title_alignment(Alignment::Center);
@@ -477,12 +483,12 @@ pub fn render_info_attributes(
 
     let highlighted_bg_color = if let Focus::Attributes = state.focus {
         if state.copying {
-            color_consts::highlight_bg_copy_color()
+            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
         } else {
-            color_consts::highlight_bg_color()
+            configure::themed_color(|colors| colors.surface.highlight_bg)
         }
     } else {
-        color_consts::highlight_bg_color()
+        configure::themed_color(|colors| colors.surface.highlight_bg)
     };
 
     let mut hitboxes = Vec::new();

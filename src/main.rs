@@ -6,7 +6,6 @@ use clap::{CommandFactory, Parser};
 use ratatui::crossterm::style::{Color, Stylize};
 
 mod cli;
-mod color_consts;
 mod compat;
 mod configure;
 mod data;
@@ -20,7 +19,7 @@ mod ui;
 use git_version::git_version;
 
 use crate::cli::{collect_startup_commands, normalize_cli_args, run_script_test, Args};
-use crate::error::AppError;
+use crate::error::{log_error, AppError};
 pub const GIT_VERSION: &str =
     git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
 // only major.minor.patch without commit hash or dirty state, for more concise display in the UI
@@ -28,11 +27,27 @@ pub const GIT_VERSION_SHORT: &str = git_version!(args = ["--tags", "--abbrev=0"]
 
 fn main() -> Result<(), AppError> {
     let args = Args::parse_from(normalize_cli_args(std::env::args_os()));
+    let compatibility_from_env =
+        compat::compatibility_from_env(std::env::var_os("H5V_COMPATIBILITY_MODE").as_deref())?;
+    let default_compatibility = compatibility_from_env.unwrap_or(false);
+    let compatibility_from_config = if args.compatibility {
+        None
+    } else {
+        match configure::load_config_compatibility(default_compatibility) {
+            Ok(value) => value,
+            Err(error) => {
+                log_error(format!("Configuration error: {error}\n"));
+                eprintln!("Warning: Configuration error: {error}");
+                None
+            }
+        }
+    };
     let runtime_config = compat::resolve_runtime_config(
         args.compatibility,
         args.no_terminal_graphics,
-        std::env::var_os("H5V_COMPATIBILITY_MODE").as_deref(),
-    )?;
+        compatibility_from_config,
+        compatibility_from_env,
+    );
     compat::install_runtime_config(runtime_config)?;
     let startup = collect_startup_commands(&args)?;
 

@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     error::AppError,
     sprint_attributes::{attribute_type_description, sprint_attribute},
     ui::state::AttributeViewSelection,
@@ -222,8 +222,20 @@ impl RenderedAttributeRow {
             kind: MetadataRowKind::SectionHeader,
             key: None,
             name_line: Line::styled(
-                compat::section_title(title),
-                Style::default().fg(color_consts::title_color()).bold(),
+                match title {
+                    "Properties" => {
+                        configure::configured_symbol(|symbols| symbols.section.properties_title)
+                            .to_string()
+                    }
+                    "Attributes" => {
+                        configure::configured_symbol(|symbols| symbols.section.attributes_title)
+                            .to_string()
+                    }
+                    other => other.to_string(),
+                },
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.metadata.section))
+                    .bold(),
             ),
             value_line: Line::from(vec![Span::raw("")]),
             type_line: Line::from(vec![Span::raw("")]),
@@ -323,23 +335,28 @@ impl ComputedAttributes {
             let name_styled = Span::styled(
                 name.clone(),
                 Style::default()
-                    .fg(color_consts::variable_blue_color())
+                    .fg(configure::themed_color(|colors| {
+                        colors.metadata.attribute_name
+                    }))
                     .bold(),
             );
             let extra_name_space = name_area_width - name_len;
             let name_helper_line = Span::styled(
-                compat::horizontal_rule(extra_name_space - 1),
-                Style::default().fg(color_consts::lines_color()),
+                configure::configured_symbol(|symbols| symbols.tree.horizontal_rule)
+                    .repeat(extra_name_space - 1),
+                Style::default().fg(configure::themed_color(|colors| colors.tree.lines)),
             );
-            let equals_sign =
-                Span::styled("=", Style::default().fg(color_consts::equal_sign_color()));
+            let equals_sign = Span::styled(
+                "=",
+                Style::default().fg(configure::themed_color(|colors| colors.accent.equal_sign)),
+            );
             let name_line = Line::from(vec![name_styled, name_helper_line, equals_sign]);
 
             let value_line = match sprint_attribute(attr) {
                 Ok(l) => l,
                 Err(e) => Line::styled(
                     format!("Error: {}", e),
-                    Style::default().fg(color_consts::error_color()),
+                    Style::default().fg(configure::themed_color(|colors| colors.text.error)),
                 ),
             };
             let type_desc_str = match attribute_type_description(attr) {
@@ -349,9 +366,9 @@ impl ComputedAttributes {
             let type_desc = Line::styled(
                 format!(" ({})", type_desc_str),
                 Style::default().fg(if type_desc_str.starts_with("opaque[") {
-                    color_consts::opaque_color()
+                    configure::themed_color(|colors| colors.text.opaque)
                 } else {
-                    color_consts::type_desc_color()
+                    configure::themed_color(|colors| colors.text.type_desc)
                 }),
             );
 

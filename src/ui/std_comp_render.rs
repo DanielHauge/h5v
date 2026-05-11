@@ -11,7 +11,7 @@ use syntect::{
 };
 
 use crate::{
-    color_consts, compat,
+    configure,
     h5f::{H5FNode, Node},
 };
 
@@ -78,8 +78,8 @@ fn syntect_to_ratatui_style(style: syntect::highlighting::Style) -> ratatui::sty
 }
 
 fn primary_text_style() -> Style {
-    let mut style = Style::default().fg(color_consts::primary_text_color());
-    if color_consts::prefers_strong_text() {
+    let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
         style = style.bold();
     }
     style
@@ -99,7 +99,7 @@ pub fn render_hl_string<T: ToString>(
         Some(s) => s,
         None => return render_raw_string(f, area, node, string),
     };
-    let theme_name = if color_consts::prefers_strong_text() {
+    let theme_name = if configure::prefers_strong_text() {
         "base16-ocean.light"
     } else {
         "base16-ocean.dark"
@@ -178,7 +178,10 @@ fn render_linenums(f: &mut Frame, area: &Rect, line_offset: usize, visible_lines
     let lines = Text::from(line_nums.join("\n"));
     f.render_widget(
         Paragraph::new(lines)
-            .style(ratatui::style::Style::default().fg(color_consts::line_num_color()))
+            .style(
+                ratatui::style::Style::default()
+                    .fg(configure::themed_color(|colors| colors.text.line_num)),
+            )
             .alignment(Alignment::Right)
             .wrap(Wrap { trim: false }),
         *area,
@@ -218,8 +221,10 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
 
 pub fn render_error<T: ToString>(f: &mut Frame, area: &Rect, error: T) {
     f.render_widget(
-        Paragraph::new(error.to_string())
-            .style(ratatui::style::Style::default().fg(color_consts::error_color())),
+        Paragraph::new(error.to_string()).style(
+            ratatui::style::Style::default()
+                .fg(configure::themed_color(|colors| colors.text.error)),
+        ),
         *area,
     );
 }
@@ -239,8 +244,13 @@ pub fn render_empty_dataset(f: &mut Frame, area: &Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(ratatui::style::Style::default().fg(color_consts::break_color()))
-                .title(compat::empty_dataset_title())
+                .border_style(
+                    ratatui::style::Style::default()
+                        .fg(configure::themed_color(|colors| colors.surface.break_line)),
+                )
+                .title(configure::configured_symbol(|symbols| {
+                    symbols.title.empty_dataset
+                }))
                 .title_alignment(Alignment::Center),
         );
     f.render_widget(paragraph, *area);

@@ -6,29 +6,36 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, compat};
+use crate::configure;
 
 pub fn render_help(frame: &mut Frame<'_>, area: Rect) {
     let popup = centered_rect(area, 140, 31);
 
     frame.render_widget(
-        Block::default().style(Style::default().bg(color_consts::bg_val3_color())),
+        Block::default()
+            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3))),
         area,
     );
     frame.render_widget(Clear, popup);
 
     let help_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color_consts::break_color()))
+        .border_style(
+            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+        )
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(compat::help_title())
-        .title_style(Style::default().fg(color_consts::title_color()).bold())
+        .title(configure::configured_symbol(|symbols| symbols.title.help))
+        .title_style(
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.help.title))
+                .bold(),
+        )
         .title_bottom(Line::from(vec![
             Span::styled(" Esc ", help_key_style()),
             Span::styled(" close ", help_desc_style()),
         ]))
         .title_alignment(Alignment::Center)
-        .style(Style::default().bg(color_consts::focus_bg_color()));
+        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));
     frame.render_widget(help_block, popup);
 
     let inner = popup.inner(Margin {
@@ -42,7 +49,8 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect) {
     ])
     .split(inner);
 
-    let column_style = Style::default().bg(color_consts::focus_bg_color());
+    let column_style =
+        Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg));
     frame.render_widget(
         Paragraph::new(render_help_column_text(
             "General",
@@ -207,25 +215,25 @@ pub fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
 
 fn help_key_style() -> Style {
     Style::default()
-        .fg(color_consts::primary_text_color())
-        .bg(color_consts::help_key_bg_color())
+        .fg(configure::themed_color(|colors| colors.text.primary))
+        .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
         .underlined()
         .bold()
 }
 
 fn help_section_style() -> Style {
     Style::default()
-        .fg(color_consts::title_color())
+        .fg(configure::themed_color(|colors| colors.help.section))
         .bold()
         .underlined()
 }
 
 fn help_desc_style() -> Style {
-    Style::default().fg(color_consts::built_in_value_color())
+    Style::default().fg(configure::themed_color(|colors| colors.help.description))
 }
 
 fn help_muted_style() -> Style {
-    Style::default().fg(color_consts::type_desc_color())
+    Style::default().fg(configure::themed_color(|colors| colors.help.muted))
 }
 
 fn help_keys(keys: &[&'static str], desc: &'static str) -> Line<'static> {
@@ -261,7 +269,9 @@ fn render_help_column_text(title: &'static str, sections: &[HelpSection]) -> Tex
     let mut lines = vec![
         Line::from(vec![Span::styled(
             title.to_string(),
-            Style::default().fg(color_consts::title_color()).bold(),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.help.title))
+                .bold(),
         )])
         .centered(),
         Line::raw(""),

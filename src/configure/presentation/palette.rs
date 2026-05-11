@@ -1,9 +1,10 @@
 use ratatui::prelude::Color;
 
-use crate::color_consts::types::ToastColors;
-
 use super::types::{
-    AccentColors, ChartColors, StatusColors, SurfaceColors, TextColors, ThemeColors, TreeColors,
+    AccentColors, BadgeSymbols, ChartColors, ChartSymbols as UiChartSymbols, CommandColors,
+    ContentColors, FileColors, HelpColors, MchartColors, MetadataColors, SectionSymbols,
+    StatusColors, SurfaceColors, TextColors, ThemeColors, TitleSymbols, ToastColors, TreeColors,
+    TreeSymbols, UiSymbols,
 };
 
 impl ThemeName {
@@ -32,6 +33,35 @@ pub enum ThemeName {
     LightBlue,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum SymbolThemeName {
+    Rich,
+    Compatibility,
+}
+
+impl SymbolThemeName {
+    pub fn parse(value: &str) -> Option<Self> {
+        let normalized = value
+            .trim()
+            .to_ascii_lowercase()
+            .replace([' ', '-', '_'], "");
+        match normalized.as_str() {
+            "rich" | "default" => Some(Self::Rich),
+            "compatibility" | "compatibilitymode" | "compat" | "ascii" | "plain" => {
+                Some(Self::Compatibility)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rich => "rich",
+            Self::Compatibility => "compatibility",
+        }
+    }
+}
+
 impl ThemeColors {
     pub(crate) fn for_theme(theme: ThemeName) -> Self {
         match theme {
@@ -44,10 +74,7 @@ impl ThemeColors {
     fn dark() -> Self {
         Self {
             text: TextColors {
-                title: Color::Yellow,
-                meta_section: Color::Rgb(214, 190, 110),
                 primary: Color::White,
-                built_in_value: Color::Rgb(222, 222, 222),
                 number: Color::Rgb(181, 206, 168),
                 string: Color::Rgb(206, 145, 120),
                 opaque: Color::Rgb(198, 160, 255),
@@ -57,9 +84,51 @@ impl ThemeColors {
                 search_count: Color::DarkGray,
                 type_desc: Color::Rgb(150, 150, 150),
                 line_num: Color::DarkGray,
-                command_usage: Color::Cyan,
+            },
+            content: ContentColors {
+                app_brand: Color::Yellow,
+                app_version: Color::Rgb(222, 222, 222),
+                help_hint: Color::Rgb(150, 150, 150),
+                empty_state: Color::Yellow,
+                tab_active: Color::Yellow,
+                tab_inactive: Color::Rgb(222, 222, 222),
+                tree_membership_more: Color::Yellow,
+            },
+            command: CommandColors {
+                prompt_prefix: Color::Yellow,
+                usage: Color::Cyan,
+                description: Color::Rgb(150, 150, 150),
+                suggestion_label: Color::Rgb(150, 150, 150),
+                no_match: Color::DarkGray,
                 key_hint: Color::Yellow,
-                command_no_match: Color::DarkGray,
+            },
+            help: HelpColors {
+                title: Color::Yellow,
+                section: Color::Yellow,
+                description: Color::Rgb(222, 222, 222),
+                muted: Color::Rgb(150, 150, 150),
+            },
+            metadata: MetadataColors {
+                section: Color::Rgb(214, 190, 110),
+                property_name: Color::Rgb(66, 165, 245),
+                property_value: Color::Rgb(222, 222, 222),
+                attribute_name: Color::Rgb(136, 200, 230),
+            },
+            file: FileColors {
+                section_title: Color::Rgb(150, 150, 150),
+                label: Color::Rgb(66, 165, 245),
+                value: Color::Rgb(222, 222, 222),
+            },
+            mchart: MchartColors {
+                empty_state: Color::Yellow,
+                item_selected: Color::Yellow,
+                item_selected_hidden: Color::Yellow,
+                item_visible: Color::Rgb(222, 222, 222),
+                item_hidden: Color::Rgb(150, 150, 150),
+                prefix_selected: Color::Yellow,
+                prefix: Color::Rgb(83, 86, 89),
+                detail_label: Color::Rgb(66, 165, 245),
+                prompt_prefix: Color::Yellow,
             },
             surface: SurfaceColors {
                 title_bg: Color::Rgb(83, 86, 89),
@@ -145,10 +214,7 @@ impl ThemeColors {
     fn light() -> Self {
         Self {
             text: TextColors {
-                title: Color::Rgb(30, 58, 95),
-                meta_section: Color::Rgb(40, 70, 110),
                 primary: Color::Rgb(26, 26, 26),
-                built_in_value: Color::Rgb(30, 30, 30),
                 number: Color::Rgb(14, 124, 58),
                 string: Color::Rgb(168, 41, 14),
                 opaque: Color::Rgb(124, 58, 237),
@@ -158,9 +224,51 @@ impl ThemeColors {
                 search_count: Color::Rgb(90, 95, 110),
                 type_desc: Color::Rgb(90, 95, 110),
                 line_num: Color::Rgb(140, 145, 158),
-                command_usage: Color::Rgb(0, 90, 190),
+            },
+            content: ContentColors {
+                app_brand: Color::Rgb(30, 58, 95),
+                app_version: Color::Rgb(30, 30, 30),
+                help_hint: Color::Rgb(90, 95, 110),
+                empty_state: Color::Rgb(30, 58, 95),
+                tab_active: Color::Rgb(30, 58, 95),
+                tab_inactive: Color::Rgb(90, 95, 110),
+                tree_membership_more: Color::Rgb(30, 58, 95),
+            },
+            command: CommandColors {
+                prompt_prefix: Color::Rgb(30, 58, 95),
+                usage: Color::Rgb(0, 90, 190),
+                description: Color::Rgb(90, 95, 110),
+                suggestion_label: Color::Rgb(90, 95, 110),
+                no_match: Color::Rgb(140, 145, 158),
                 key_hint: Color::Rgb(30, 58, 95),
-                command_no_match: Color::Rgb(140, 145, 158),
+            },
+            help: HelpColors {
+                title: Color::Rgb(30, 58, 95),
+                section: Color::Rgb(30, 58, 95),
+                description: Color::Rgb(30, 30, 30),
+                muted: Color::Rgb(90, 95, 110),
+            },
+            metadata: MetadataColors {
+                section: Color::Rgb(40, 70, 110),
+                property_name: Color::Rgb(0, 80, 200),
+                property_value: Color::Rgb(30, 30, 30),
+                attribute_name: Color::Rgb(0, 100, 225),
+            },
+            file: FileColors {
+                section_title: Color::Rgb(90, 95, 110),
+                label: Color::Rgb(0, 80, 200),
+                value: Color::Rgb(30, 30, 30),
+            },
+            mchart: MchartColors {
+                empty_state: Color::Rgb(30, 58, 95),
+                item_selected: Color::Rgb(30, 58, 95),
+                item_selected_hidden: Color::Rgb(30, 58, 95),
+                item_visible: Color::Rgb(30, 30, 30),
+                item_hidden: Color::Rgb(90, 95, 110),
+                prefix_selected: Color::Rgb(30, 58, 95),
+                prefix: Color::Rgb(180, 185, 195),
+                detail_label: Color::Rgb(0, 80, 200),
+                prompt_prefix: Color::Rgb(30, 58, 95),
             },
             surface: SurfaceColors {
                 title_bg: Color::Rgb(30, 58, 95),
@@ -246,10 +354,7 @@ impl ThemeColors {
     fn light_blue() -> Self {
         Self {
             text: TextColors {
-                title: Color::Rgb(0, 56, 117),
-                meta_section: Color::Rgb(0, 70, 140),
                 primary: Color::Rgb(26, 26, 26),
-                built_in_value: Color::Rgb(0, 56, 117),
                 number: Color::Rgb(9, 134, 88),
                 string: Color::Rgb(163, 21, 21),
                 opaque: Color::Rgb(136, 0, 0),
@@ -259,9 +364,51 @@ impl ThemeColors {
                 search_count: Color::Rgb(80, 90, 110),
                 type_desc: Color::Rgb(80, 90, 110),
                 line_num: Color::Rgb(130, 140, 160),
-                command_usage: Color::Rgb(0, 103, 192),
+            },
+            content: ContentColors {
+                app_brand: Color::Rgb(0, 56, 117),
+                app_version: Color::Rgb(0, 56, 117),
+                help_hint: Color::Rgb(80, 90, 110),
+                empty_state: Color::Rgb(0, 56, 117),
+                tab_active: Color::Rgb(0, 56, 117),
+                tab_inactive: Color::Rgb(80, 90, 110),
+                tree_membership_more: Color::Rgb(0, 56, 117),
+            },
+            command: CommandColors {
+                prompt_prefix: Color::Rgb(0, 56, 117),
+                usage: Color::Rgb(0, 103, 192),
+                description: Color::Rgb(80, 90, 110),
+                suggestion_label: Color::Rgb(80, 90, 110),
+                no_match: Color::Rgb(130, 140, 160),
                 key_hint: Color::Rgb(0, 56, 117),
-                command_no_match: Color::Rgb(130, 140, 160),
+            },
+            help: HelpColors {
+                title: Color::Rgb(0, 56, 117),
+                section: Color::Rgb(0, 56, 117),
+                description: Color::Rgb(0, 56, 117),
+                muted: Color::Rgb(80, 90, 110),
+            },
+            metadata: MetadataColors {
+                section: Color::Rgb(0, 70, 140),
+                property_name: Color::Rgb(0, 56, 117),
+                property_value: Color::Rgb(0, 56, 117),
+                attribute_name: Color::Rgb(0, 103, 192),
+            },
+            file: FileColors {
+                section_title: Color::Rgb(80, 90, 110),
+                label: Color::Rgb(0, 56, 117),
+                value: Color::Rgb(0, 56, 117),
+            },
+            mchart: MchartColors {
+                empty_state: Color::Rgb(0, 56, 117),
+                item_selected: Color::Rgb(0, 56, 117),
+                item_selected_hidden: Color::Rgb(0, 56, 117),
+                item_visible: Color::Rgb(0, 56, 117),
+                item_hidden: Color::Rgb(80, 90, 110),
+                prefix_selected: Color::Rgb(0, 56, 117),
+                prefix: Color::Rgb(160, 175, 200),
+                detail_label: Color::Rgb(0, 56, 117),
+                prompt_prefix: Color::Rgb(0, 56, 117),
             },
             surface: SurfaceColors {
                 title_bg: Color::Rgb(0, 103, 192),
@@ -340,6 +487,129 @@ impl ThemeColors {
                 info: Color::Rgb(9, 134, 88),
                 warning: Color::Rgb(160, 80, 0),
                 neutral: Color::Rgb(26, 26, 26),
+            },
+        }
+    }
+}
+
+impl UiSymbols {
+    pub(crate) fn for_theme(theme: SymbolThemeName) -> Self {
+        match theme {
+            SymbolThemeName::Rich => Self::rich(),
+            SymbolThemeName::Compatibility => Self::compatibility(),
+        }
+    }
+
+    fn rich() -> Self {
+        Self {
+            tree: TreeSymbols {
+                horizontal_rule: "─",
+                connector_last: "└─",
+                connector_middle: "├─",
+                vertical_guide: "│   ",
+                collapse_expanded: " ",
+                collapse_collapsed: " ",
+                folder_open_branch: "",
+                folder_open_leaf: "",
+                folder_closed_branch: "",
+                folder_closed_leaf: "",
+                root_file_icon: "󰈚 ",
+                dataset_icon: "󰈚 ",
+                dataset_link_icon: "󰈚🔗",
+                compound_container_icon: "󰆼 ",
+                compound_leaf_icon: "󰈚 ",
+                link_marker: "🔗",
+                broken_node_icon: "*- ",
+                load_more_label: "⤵ Load more",
+            },
+            section: SectionSymbols {
+                properties_title: "󰜉 Properties",
+                attributes_title: "󰠱 Attributes",
+            },
+            title: TitleSymbols {
+                preview: "📈 Preview",
+                tree: " 🔍 Tree ",
+                meta: " 🧾 Meta ",
+                file_metadata: " 📄 File metadata ",
+                empty_group: " 📁 Empty group preview ",
+                empty_dataset: " 🧮 Empty dataset ",
+                error: " ⚠ Error ",
+                create_attribute: " ✨ Create attribute ",
+                delete_attribute: " 🗑 Delete attribute ",
+                fixed_string_overflow: " 🧵 Fixed string overflow ",
+                fixed_string_resize: " 📏 Change fixed string size ",
+                help: " ❔ Help ",
+                matrix_tab: "🧮 Matrix",
+            },
+            badge: BadgeSymbols {
+                readonly: " 🔒 read-only ",
+                writable: " ✏ write ",
+                linked: " 🔗 linked ",
+                linked_root_suffix: " ({count}) 🔗 linked ",
+                compatibility_mode: " compatibility mode ",
+            },
+            chart: UiChartSymbols {
+                membership_marker: "●",
+                visibility_visible: "●",
+                visibility_hidden: "○",
+                r#enum: ["●", "■", "▲", "◆", "✦", "✚", "⬢", "◉"],
+            },
+        }
+    }
+
+    fn compatibility() -> Self {
+        Self {
+            tree: TreeSymbols {
+                horizontal_rule: "-",
+                connector_last: "`-",
+                connector_middle: "|-",
+                vertical_guide: "|   ",
+                collapse_expanded: "v ",
+                collapse_collapsed: "> ",
+                folder_open_branch: "G",
+                folder_open_leaf: "G",
+                folder_closed_branch: "G",
+                folder_closed_leaf: "g",
+                root_file_icon: "F ",
+                dataset_icon: "D ",
+                dataset_link_icon: "D@",
+                compound_container_icon: "C ",
+                compound_leaf_icon: "c ",
+                link_marker: "@",
+                broken_node_icon: "*- ",
+                load_more_label: "Load more",
+            },
+            section: SectionSymbols {
+                properties_title: "Properties",
+                attributes_title: "Attributes",
+            },
+            title: TitleSymbols {
+                preview: "Preview",
+                tree: "Tree",
+                meta: "Meta",
+                file_metadata: " File metadata ",
+                empty_group: " Empty group preview ",
+                empty_dataset: " Empty dataset ",
+                error: "Error",
+                create_attribute: " Create attribute ",
+                delete_attribute: " Delete attribute ",
+                fixed_string_overflow: " Fixed string overflow ",
+                fixed_string_resize: " Change fixed string size ",
+                help: " Help ",
+                matrix_tab: "Matrix",
+            },
+            badge: BadgeSymbols {
+                readonly: " [ro] read-only ",
+                writable: " [rw] write ",
+                linked: " linked ",
+                linked_root_suffix: " ({count}) linked ",
+                compatibility_mode: " compatibility mode ",
+            },
+            chart: UiChartSymbols {
+                membership_marker: "*",
+                visibility_visible: "*",
+                visibility_hidden: "o",
+                r#enum: ["*", "+", "^", "#", "x", "%", "@", "o"],
             },
         }
     }

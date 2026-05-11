@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{color_consts, h5f::H5FNode};
+use crate::{configure, h5f::H5FNode};
 
 use super::state::AppState;
 
@@ -29,12 +29,14 @@ pub fn render_dim_selector(
         .title("Slice selection")
         .title_style(
             Style::default()
-                .fg(color_consts::panel_title_color())
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
                 .bold(),
         )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_consts::panel_border_color()));
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })));
     f.render_widget(block, *area);
 
     let inner_area = area.inner(Margin {
@@ -50,8 +52,9 @@ pub fn render_dim_selector(
         (chunks[0], chunks[1])
     };
     // Print Shape: and View: on each line
-    let mut label_style = Style::default().fg(color_consts::type_desc_color());
-    if color_consts::prefers_strong_text() {
+    let mut label_style =
+        Style::default().fg(configure::themed_color(|colors| colors.text.type_desc));
+    if configure::prefers_strong_text() {
         label_style = label_style.bold();
     }
     let shape_line = Line::from(Span::styled("Shape: ", label_style)).alignment(Alignment::Right);
@@ -82,7 +85,7 @@ pub fn render_dim_selector(
             break;
         }
         let spacer = Paragraph::new(" | ")
-            .style(Style::default().fg(color_consts::break_color()))
+            .style(Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)))
             .block(Block::default().borders(Borders::NONE));
         f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
         f.render_widget(spacer, *spacer_area);
@@ -91,9 +94,9 @@ pub fn render_dim_selector(
     for (i, dim) in shape_strings.iter().enumerate() {
         let mut dim_span = Span::styled(
             dim.clone(),
-            Style::default().fg(color_consts::primary_text_color()),
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
         );
-        if color_consts::prefers_strong_text() {
+        if configure::prefers_strong_text() {
             dim_span = dim_span.bold();
         }
         let dim_line = Line::from(dim_span).alignment(Alignment::Left);
@@ -102,7 +105,7 @@ pub fn render_dim_selector(
             let y_span = Span::from("Col").style(
                 Style::default()
                     .bold()
-                    .fg(color_consts::selected_dim_color()),
+                    .fg(configure::themed_color(|colors| colors.accent.selected_dim)),
             );
             let y_line = Line::from(y_span).alignment(Alignment::Center);
             f.render_widget(y_line, segments[i].offset(Offset { x: 0, y: 1 }));
@@ -111,7 +114,7 @@ pub fn render_dim_selector(
             let x_span = Span::from(x_text).style(
                 Style::default()
                     .bold()
-                    .fg(color_consts::selected_dim_color()),
+                    .fg(configure::themed_color(|colors| colors.accent.selected_dim)),
             );
             let x_line = Line::from(x_span).alignment(Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
@@ -119,7 +122,7 @@ pub fn render_dim_selector(
             let x_span = Span::from("X").style(
                 Style::default()
                     .bold()
-                    .fg(color_consts::selected_dim_color()),
+                    .fg(configure::themed_color(|colors| colors.accent.selected_dim)),
             );
             let x_line = Line::from(x_span).alignment(Alignment::Center);
             f.render_widget(x_line, segments[i].offset(Offset { x: 0, y: 1 }));
@@ -127,10 +130,12 @@ pub fn render_dim_selector(
             let selected_index = index_selection.get(i).copied().unwrap_or_default();
             let span = Span::from(format!("{}", selected_index)).style(
                 Style::default()
-                    .fg(color_consts::primary_text_color())
+                    .fg(configure::themed_color(|colors| colors.text.primary))
                     .bold()
                     .underlined()
-                    .underline_color(color_consts::selected_index_color()),
+                    .underline_color(configure::themed_color(|colors| {
+                        colors.accent.selected_index
+                    })),
             );
             let selected_line = Line::from(span).alignment(Alignment::Center);
             f.render_widget(selected_line, segments[i].offset(Offset { x: 0, y: 1 }));
@@ -138,9 +143,9 @@ pub fn render_dim_selector(
             let selected_index = index_selection.get(i).copied().unwrap_or_default();
             let mut span = Span::styled(
                 format!("{}", selected_index),
-                Style::default().fg(color_consts::primary_text_color()),
+                Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
             );
-            if color_consts::prefers_strong_text() {
+            if configure::prefers_strong_text() {
                 span = span.bold();
             }
             let selected_line = Line::from(span).alignment(Alignment::Center);
