@@ -1,12 +1,10 @@
 # Commands
 
-## Command minibuffer
+Press `:` to open the command minibuffer.
 
 ![Command minibuffer](./assets/cmd.png)
 
-Press `:` to open the command minibuffer. Commands are parsed with completion, history, aliases, and quoted argument handling, which makes them useful for both interactive use and startup automation.
-
-Useful minibuffer behavior:
+Minibuffer behavior:
 
 - `Tab` cycles matching completions
 - `Shift+Tab` and arrow keys move through suggestions
@@ -14,9 +12,9 @@ Useful minibuffer behavior:
 - `help` or `help <command>` shows command help
 - `.` repeats the last successful command
 
-## Core command families
+## Common commands
 
-### Navigation
+Navigation:
 
 ```text
 goto /signals/sine_wave
@@ -26,7 +24,7 @@ left 2
 page-down
 ```
 
-### Focus and view control
+View control:
 
 ```text
 focus tree
@@ -40,7 +38,7 @@ configure
 configure reset
 ```
 
-### Selection control
+Selection:
 
 ```text
 x next
@@ -50,14 +48,14 @@ dim next
 index next 10
 ```
 
-### Attribute operations
+Attributes:
 
 ```text
 attr create title string "release candidate"
 attr delete title
 ```
 
-### Multichart operations
+Multichart:
 
 ```text
 mchart open
@@ -71,27 +69,11 @@ mchart zoom in 25
 mchart pan right 10
 ```
 
-## Multichart command surface
-
-The `mchart` command family is broader than the quick examples suggest. Supported actions include:
-
-- `open`, `show`, `close`, `hide`, `toggle`
-- `add`
-- `expr`, `expression`, `prompt`
-- `base toggle`, `base clear`
-- `derive`
-- `select`, `move`
-- `visible toggle`, `visible show`, `visible hide`
-- `remove`, `delete`
-- `clear`, `clear all`, `clear zoom`
-- `zoom in`, `zoom out`, `zoom reset`
-- `pan left`, `pan right`
-
-When used without an explicit path, `mchart add` captures the current previewable tree selection. That includes groups with `H5V_PREVIEW_EXPR`, which are added as expression-derived chart items.
+For the full command list, aliases, and `mchart` action table, see [Command reference](./command-reference.md).
 
 ## Aliases and numeric shorthand
 
-Legacy numeric aliases still work:
+Numeric shorthand still works:
 
 ```text
 :5
@@ -99,33 +81,31 @@ Legacy numeric aliases still work:
 :-2
 ```
 
-They map to:
+Mappings:
 
 - `:5` -> `seek 5`
 - `:+3` -> `down 3`
 - `:-2` -> `up 2`
 
-## Quoting and parsing
+## Quoting
 
-Quoted strings are supported in commands and scripts, including multichart expressions and attribute values. This is especially important for:
+Quoted strings work in commands and scripts. Use them for:
 
 - attribute values with spaces
 - command scripts containing expression tuples
 - `press ...` commands that need modifier sequences
 
-The `press` command dispatches through the real keymap. For example:
+`press` goes through the normal keymap:
 
 ```text
 press ctrl+w o
 press M j enter
 ```
 
-Try these against the bundled example file:
+Try commands against the bundled example:
 
 ```bash
 h5v examples/h5v-example.h5
 ```
 
-For the Lua config file, theme overrides, and the `configure` / `configure reset` workflow, continue with [Configuration and theming](./configuration.md).
-
-For startup usage, continue with [Startup scripting](./startup-scripting.md).
+See [Configuration and theming](./configuration.md) and [Startup scripting](./startup-scripting.md).

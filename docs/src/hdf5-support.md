@@ -1,14 +1,8 @@
 # HDF5 feature support
 
-## Dataset and node support
-
-h5v can browse groups, datasets, links, broken links, and synthetic nodes created for projected compound fields. That makes it useful both for simple numeric files and for deeper HDF5 layouts where the meaningful data is nested inside compound types.
-
-The bundled `examples/h5v-example.h5` intentionally includes each of those categories in a compact tree so you can test the UI against a known file instead of assembling your own from scratch.
+h5v can browse groups, datasets, links, broken links, and synthetic nodes created for projected compound fields.
 
 ## Matrixable and previewable data types
-
-The core matrix/preview pipeline supports these HDF5 type families:
 
 | Type family | Preview | Matrix | Notes |
 | --- | --- | --- | --- |
@@ -28,36 +22,30 @@ Matrix mode is only available when a dataset is matrixable and its shape has at 
 
 ## Strings and highlighting
 
-String datasets can carry a `HIGHLIGHT` attribute with an extension hint such as `json`, `py`, or `yml`. That hint takes precedence. If the attribute is absent, h5v falls back to the dataset name and uses the trailing extension instead, so datasets like `demo.py` or `pipeline.yml` can highlight automatically.
+String datasets can carry a `HIGHLIGHT` attribute with an extension hint such as `json`, `py`, or `yml`. If it is absent, h5v falls back to the dataset name extension.
 
 ## Enum styling overrides
 
-Enum datasets can override the default enum symbol/color cycle with dataset attributes:
+Enum datasets can override the default symbol and color cycle with:
 
 - `SYMBOLS`: a 1D string attribute, aligned with ascending numeric enum value order
 - `COLORS`: a 1D string attribute, aligned with ascending numeric enum value order
 
-Color values accept common names such as `green`, `amber`, and `red`, plus `#RRGGBB` hex values.
-
-These overrides apply to dataset enum preview and matrix rendering. Generic enum-valued HDF5 attributes still use the built-in fallback renderer.
+Color values accept named colors and `#RRGGBB`. See [Configuration reference](./configuration-reference.md).
 
 ## Group preview expressions
 
-Groups can opt into preview rendering with a variable-length string attribute named `H5V_PREVIEW_EXPR`. The value is interpreted as a multichart expression, so the same explicit reference rules apply there too: `!` for series, `#` for scalars, and `:ATTR` for object attributes.
-
-That lets a group act like a lightweight dashboard node for related datasets instead of showing an empty content pane.
-
-The bundled example file includes a `/group_preview` group that demonstrates this pattern with `time`, `value`, a scalar `offset` dataset, a scalar `scale` attribute, and an expression that plots `time` against `(value - offset) * scale`.
-
-The same group can also be added directly to multichart with `m` or `mchart add` while it is selected.
+Groups can opt into preview rendering with a variable-length string attribute named `H5V_PREVIEW_EXPR`. The value uses the same expression syntax as multichart.
 
 ## Image metadata handling
 
-Datasets that follow the standard HDF5 image convention are treated specially. h5v recognizes `CLASS="IMAGE"` plus the expected image subclass attributes and renders those datasets inline as images instead of plain numeric arrays. The [Images](./images.md) chapter covers the exact rules.
+Datasets that follow the HDF5 image convention are rendered inline as images. See [Images](./images.md) and [Image conventions](./image-conventions.md).
 
-## Attribute filtering
+## Properties vs attributes
 
-Some system-level metadata is intentionally hidden from normal attribute editing views, including values such as:
+`type`, `size`, `shape`, `chunk`, `link`, and `path` are properties shown in the Properties section. They are not HDF5 attributes.
+
+Those built-in properties include:
 
 - `type`
 - `size`
@@ -65,5 +53,3 @@ Some system-level metadata is intentionally hidden from normal attribute editing
 - `chunk`
 - `link`
 - `path`
-
-Standard HDF5 image marker attributes are also filtered out of the user-editable attribute list so that structural metadata and user metadata stay separate.

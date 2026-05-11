@@ -1,143 +1,52 @@
 # Configuration and theming
 
-`h5v` can load a Lua configuration file at startup. Use it to pick a default theme, override individual colors, and script small startup helpers.
+h5v loads `init.lua` at startup.
 
 ## Config file location
 
-The config file is stored as `init.lua` inside your platform config directory under `h5v`:
+`init.lua` lives under your platform config directory:
 
 - Linux: `~/.config/h5v/init.lua`
 - macOS: `~/Library/Application Support/h5v/init.lua`
 - Windows: `%AppData%\h5v\init.lua`
 
-If the file does not exist yet, `h5v` can generate a default scaffold for you.
+If it does not exist, `h5v` creates it.
 
-`h5v` also generates LuaLS/EmmyLua sidecar files next to the config under `.h5v-luals/`. The generated `h5v.lua` stub is refreshed whenever `h5v` loads the config, and the companion `.luarc.json` is refreshed too as long as it is still the h5v-managed one. If you customize `.luarc.json` yourself, `h5v` leaves it alone.
+LuaLS sidecar files are generated next to it under `.h5v-luals/`. `h5v.lua` is refreshed automatically. `.luarc.json` is refreshed only while it is still h5v-managed.
 
 ## Configuration commands
-
-Open the command minibuffer with `:` and use:
 
 | Command | What it does |
 | --- | --- |
 | `configure` | Opens `init.lua` in `$VISUAL` or `$EDITOR`, then reloads the configuration when you exit the editor. |
 | `configure reset` | Replaces `init.lua` with a fresh default scaffold, then reloads it immediately. |
 
-These commands are useful when tuning themes interactively because you can edit, save, and jump straight back into the current session.
-
-## Lua API surface
-
-The config file gets an `h5v` table with a few built-ins:
-
-| Field | Purpose |
-| --- | --- |
-| `h5v.theme` | Selects the base built-in color theme: `"dark"`, `"light"`, or `"light_blue"`. |
-| `h5v.compatibility` | Sets compatibility mode from config when the CLI flag is not present. |
-| `h5v.content_mode_order` | Sets the preferred content-tab/default order, for example `{ "matrix", "preview" }`. |
-| `h5v.symbol_theme` | Selects the base built-in symbol theme: `"rich"` or `"compatibility"`. |
-| `h5v.colors` | Overrides individual theme colors. |
-| `h5v.symbols` | Overrides individual UI symbols, labels, and decorated titles. |
-| `h5v.themes.dark` | Exposes the built-in dark theme colors as a nested table. |
-| `h5v.themes.light` | Exposes the built-in light theme colors as a nested table. |
-| `h5v.themes.light_blue` | Exposes the built-in light-blue theme colors as a nested table. |
-| `h5v.symbol_themes.rich` | Exposes the built-in rich symbol set as a nested table. |
-| `h5v.symbol_themes.compatibility` | Exposes the built-in ASCII-safe symbol set as a nested table. |
-| `h5v.log("message")` | Sends a small informational toast while the config runs. |
-
-## Theme model
-
-The theme model is layered:
+## Config flow
 
 1. Resolve compatibility with this precedence: CLI `--compatibility` > `h5v.compatibility` > `H5V_COMPATIBILITY_MODE` > default.
-2. Pick the preferred content-mode order with `h5v.content_mode_order`; the first available mode becomes the default for each node.
+2. Pick content mode order with `h5v.content_mode_order`.
 3. Pick a built-in theme with `h5v.theme`.
 4. Pick a built-in symbol theme with `h5v.symbol_theme`.
-5. Override only the colors and symbols you want in `h5v.colors` and `h5v.symbols`.
+5. Override only the values you want in `h5v.colors` and `h5v.symbols`.
 
-That means you do not need to redefine the entire palette or symbol set just to change a few values.
-
-## Color categories
-
-Colors are grouped by purpose:
-
-| Category | Covers |
-| --- | --- |
-| `accent` | Selection, highlight, symbol, and search accent colors |
-| `text` | Primary value rendering, search text, line numbers, and type-description text |
-| `content` | App header text, empty states, content tabs, and tree membership overflow text |
-| `command` | Command prompt usage, hints, descriptions, and suggestion labels |
-| `help` | Help overlay headings, descriptions, and muted separators |
-| `metadata` | Metadata section headers plus property and attribute labels/values |
-| `file` | File preview labels, values, and subsection titles |
-| `mchart` | Multi-chart workspace empty states, list rows, detail labels, and prompt prefix |
-| `surface` | Backgrounds, borders, title bars, highlight backgrounds, and image borders |
-| `tree` | Tree lines and HDF5 node colors such as files, groups, datasets, and compounds |
-| `chart` | Axes, grids, plot background, line series, and enum series colors |
-| `status` | Read-only/write/link/update status badges |
-| `toast` | Toast border colors |
-
-## Symbol categories
-
-Symbols are grouped the same way:
-
-| Category | Covers |
-| --- | --- |
-| `tree` | Connectors, guides, expand/collapse arrows, node icons, and load-more label |
-| `section` | Decorated metadata section titles such as Properties and Attributes |
-| `title` | Panel titles, dialog titles, and tab labels |
-| `badge` | Header badges, linked markers, linked root suffix, and compatibility badge |
-| `chart` | Membership markers, visibility markers, and enum markers |
+For all keys, categories, themes, and accepted color names, see [Configuration reference](./configuration-reference.md).
 
 ## Example
 
 ```lua
 h5v.theme = "light"
-h5v.compatibility = true
 h5v.content_mode_order = { "matrix", "preview" }
 h5v.symbol_theme = "compatibility"
+h5v.compatibility = true
 
-h5v.colors = {
-  text = {
-    primary = "#050508",
-    type_desc = "#5a6670",
-  },
-  content = {
-    app_brand = "#402400",
-    tab_inactive = "#5a6670",
-  },
-  metadata = {
-    section = "#314f7a",
-    property_name = "#1e3755",
-  },
-  surface = {
-    title_bg = "#d2ccc2",
-    panel_border = "#1e3755",
-  },
-  tree = {
-    group = "#d26c00",
-    dataset_file = "#008e58",
-  },
-  accent = {
-    symbol = "#5a3200",
-    selection_bg = "#e1c878",
-  },
-}
+h5v.colors.accent.selection_bg = "#e1c878"
+h5v.colors.tree.group = "#d26c00"
+h5v.colors.surface.panel_border = "#1e3755"
 
-h5v.symbols = {
-  tree = {
-    dataset_link_icon = "D@",
-    load_more_label = "v Load more",
-  },
-  title = {
-    tree = " Tree ",
-    matrix_tab = "Matrix",
-  },
-  badge = {
-    linked_root_suffix = " ({count}) linked ",
-  },
-  chart = {
-    visibility_visible = "*",
-    visibility_hidden = "o",
-  },
-}
+h5v.symbols.tree.dataset_link_icon = "D@"
+h5v.symbols.tree.load_more_label = "v Load more"
+h5v.symbols.title.matrix_tab = "Matrix"
+h5v.symbols.chart.visibility_visible = "*"
 ```
+
+Use `h5v.themes.<name>` and `h5v.symbol_themes.<name>` as built-in catalogs when you want to copy values from a shipped theme.

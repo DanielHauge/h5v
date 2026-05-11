@@ -2,17 +2,15 @@
 
 ## Pane model
 
-h5v has three main focus targets:
+h5v has three panes:
 
 - the tree pane for HDF5 structure and selection
 - the content pane for preview, matrix, schema, image, and multichart views
 - the attributes pane for metadata inspection and editing
 
-On wider terminals, the tree sits on the left and the content plus attributes live on the right. On narrower terminals, the layout stacks vertically. Search mode temporarily takes over the full working area so the search results are easier to scan.
+Wide terminals use a side-by-side layout. Narrow terminals stack the panes. Search takes over the working area.
 
 ## Moving focus
-
-Use either style:
 
 - `Shift` + arrow keys to move between panes directly
 - `Ctrl+W`, then `h/j/k/l` for vim-style pane navigation
@@ -21,17 +19,15 @@ The sidebar can be toggled with `s` or `Ctrl+W o`.
 
 ## Tree navigation
 
-The tree is the source of truth for what the rest of the UI shows.
-
 - `j` / `k` or arrow keys move the selection
 - `h` and `l` collapse or expand nodes
 - `Enter` or `Space` toggles the current node
 - `g` / `G` jump to the top or bottom
 - `u` / `Ctrl+U` and `Ctrl+D` move by larger chunks
 
-When the current selection is previewable, `m` adds it to the multichart workspace immediately.
+When the current selection is previewable, `m` adds it to the multichart workspace.
 
-Mouse support follows the same model:
+Mouse support:
 
 - a click selects the row under the cursor
 - clicking the already selected group or compound container toggles it
@@ -39,7 +35,7 @@ Mouse support follows the same model:
 
 ## Content modes
 
-The content area changes based on the selected node:
+The content pane changes with the selected node:
 
 - numeric datasets prefer chart-style preview
 - matrixable datasets can switch to matrix mode
@@ -49,7 +45,7 @@ The content area changes based on the selected node:
 - file nodes show filesystem metadata
 - groups stay previewable even when they only show an empty-state card
 
-Use `Tab` to cycle between content modes when more than one representation is available.
+Use `Tab` to switch modes when more than one is available.
 
 ## Search and help
 
@@ -58,4 +54,4 @@ Use `Tab` to cycle between content modes when more than one representation is av
 - `?` opens the built-in help overlay
 - `.` repeats the last successful command
 
-The help overlay is worth using early; it mirrors the actual input model and command syntax exposed by the application.
+See [Controls reference](./controls.md) and [Commands](./commands.md).

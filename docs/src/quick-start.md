@@ -1,46 +1,35 @@
 # Quick start
 
-You can open any HDF5 file with `h5v` to start exploring. If you do not have one handy, you can download the example file from the repository in the `examples` folder, or generate it yourself with the provided script.
-
-You can always open the in-app help overlay with `?` to get a reminder of the key bindings.
-
-![h5v quick layout overview](./assets/help.png)
-
-## Open a file
+Open a file:
 
 ```bash
 h5v path/to/file.h5
-```
-
-If you plan to edit dataset values or attributes, reopen with write mode:
-
-```bash
 h5v -w path/to/file.h5
 ```
 
-## Try the bundled example
+`?` opens the in-app help overlay.
 
-The repository includes a compact example file plus a startup script that opens a multichart comparison workflow:
+![h5v quick layout overview](./assets/help.png)
+
+## Try the bundled example
 
 ```bash
 h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
 ```
 
-If you are editing the example content itself, regenerate the `.h5` from:
+Regenerate the example file if needed:
 
 ```bash
 python scripts/generate_example_h5.py
 ```
 
-## Learn the layout
-
-The default workflow is:
+## Default workflow
 
 1. Move around the tree on the left.
-2. Inspect the selected dataset or group preview in the content pane.
-3. Check or edit attributes in the metadata pane.
+2. Inspect the selected node in the content pane.
+3. Inspect or edit metadata in the attributes pane.
 
-Useful keys to memorize immediately:
+Useful keys:
 
 - `?` opens the in-app help overlay
 - `Tab` switches between preview and matrix when both exist
@@ -48,7 +37,7 @@ Useful keys to memorize immediately:
 - `m` adds the current preview to multichart, including group previews driven by `H5V_PREVIEW_EXPR`
 - `M` opens or closes multichart mode
 
-Interesting paths inside `examples/h5v-example.h5`:
+Example paths:
 
 | Path | What to look at |
 | --- | --- |
@@ -62,7 +51,7 @@ Interesting paths inside `examples/h5v-example.h5`:
 | `/metadata/attributes_demo` | Mixed attribute types and references |
 | `/group_preview` | Group-level chart preview driven by `H5V_PREVIEW_EXPR` |
 
-## First commands to try
+## First commands
 
 ```text
 :goto /signals/sine_wave
@@ -71,7 +60,7 @@ Interesting paths inside `examples/h5v-example.h5`:
 :help mchart
 ```
 
-## Script a repeatable startup
+## Script a startup
 
 Inline commands:
 
@@ -80,7 +69,7 @@ h5v examples/h5v-example.h5 \
   -c "goto /signals/sine_wave" \
   -c "mchart add" \
   -c "goto /signals/cosine_wave" \
-  -c "mchart add" \ 
+  -c "mchart add" \
   -c "mchart show"
 ```
 
@@ -90,8 +79,10 @@ Script file:
 h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
 ```
 
-Dry-run validation:
+Dry-run:
 
 ```bash
 h5v --script-test --script examples/h5v-example.h5v
 ```
+
+See [Controls reference](./controls.md), [Commands](./commands.md), and [Startup scripting](./startup-scripting.md).

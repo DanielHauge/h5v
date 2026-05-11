@@ -1,12 +1,10 @@
 # Multichart
 
-## What multichart is for
-
 ![Multichart workspace](./assets/multi-chart.png)
 
-Multichart is h5v's comparison workspace. Instead of looking at one previewable slice at a time, you can collect several chart items and compare them in a single view.
+Multichart is the comparison workspace for previewable series.
 
-Chart items can come from:
+Sources:
 
 - the currently selected previewable tree selection
 - an explicit dataset reference
@@ -21,13 +19,9 @@ Chart items can come from:
 4. Create derived items with `D`, `S`, `R`, `P`, or `X`.
 5. Use zoom and pan to inspect the area of interest.
 
-The bundled `examples/h5v-example.h5v` script follows exactly this workflow with `/signals/sine_wave` and `/signals/cosine_wave`.
-
-Groups with `H5V_PREVIEW_EXPR` also participate here. Selecting `/group_preview` in the bundled example and pressing `m` adds the group's derived preview expression as a multichart item.
+Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` adds the group preview expression as a chart item.
 
 ## Derived operations
-
-Built-in derived operations are:
 
 | Key / command | Operation | Notes |
 | --- | --- | --- |
@@ -37,11 +31,9 @@ Built-in derived operations are:
 | `P` / `mchart derive product` | Product | Multiplies pointwise |
 | `X` / `mchart derive xy` | X/Y pair | Requires exact length match |
 
-Difference, sum, ratio, and product align their inputs by the shorter series length. X/Y output is stricter and requires equal-length input.
+Difference, sum, ratio, and product align by the shorter series length. X/Y requires an exact match.
 
 ## Visibility and organization
-
-Within multichart mode you can:
 
 - move through chart items with `j` / `k`
 - hide or show an item with `v` or `Enter`
@@ -50,16 +42,14 @@ Within multichart mode you can:
 
 ## Zoom and pan
 
-The multichart viewport tracks an area of interest. Use:
-
 - `+`, `=`, or `Shift+Up` to zoom in
 - `-` or `Shift+Down` to zoom out
 - `h` / `Shift+Left` to pan left
 - `l` / `Shift+Right` to pan right
 - `c` to reset zoom
 
-The same capabilities are available from commands such as `mchart zoom in 10` and `mchart pan right 10`.
+The same actions are available from the command line.
 
 ## Expression workflows
 
-Expression-derived chart items support dataset references, scalar attributes, existing chart items, and tuple expressions for explicit x/y series. See [Multichart expressions](./multichart-expressions.md) for the syntax.
+See [Multichart expressions](./multichart-expressions.md) for syntax and [Command reference](./command-reference.md) for the full `mchart` command surface.
