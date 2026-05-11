@@ -33,7 +33,7 @@ eula = false
 [dependencies]
 arboard = "3.6.1"
 bktree = "1.0.1"
-macros = { path = "./macros" }
+macros = { package = "h5v-macros", version = "0.1.0", path = "./macros" }
 clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
 fuzzy-matcher = "0.3.7"

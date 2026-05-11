@@ -1355,11 +1355,11 @@ dependencies = [
  "dirs",
  "fuzzy-matcher",
  "git-version",
+ "h5v-macros",
  "hdf5-metno",
  "hdf5-metno-sys",
  "image 0.25.10",
  "itertools",
- "macros",
  "mlua",
  "ndarray",
  "plotters",
@@ -1370,6 +1370,15 @@ dependencies = [
  "tempfile",
  "time",
  "update-informer",
+]
+
+[[package]]
+name = "h5v-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2124,15 +2133,6 @@ checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
 dependencies = [
  "nix",
  "winapi",
-]
-
-[[package]]
-name = "macros"
-version = "0.0.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

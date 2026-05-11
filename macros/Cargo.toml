@@ -1,6 +1,10 @@
 [package]
-name = "macros"
+name = "h5v-macros"
+version = "0.1.0"
 edition = "2021"
+description = "Proc-macro helpers for h5v theme and symbol catalogs"
+repository = "https://github.com/DanielHauge/h5v"
+license = "Apache-2.0"
 
 [lib]
 proc-macro = true # This is what makes it a proc-macro crate
