@@ -6,12 +6,12 @@ class H5v < Formula
 
   on_macos do
       url "https://github.com/DanielHauge/h5v/releases/download/v0.8.0/h5v-aarch64-apple-darwin-v0.8.0.tar.gz"
-      sha256 "0cb5e1722768716f84394c7a397dc898cace365c80b6c05847cd3a01169fae3f"
+      sha256 "27b5fc922166edc4cdb96c4aa12cd74f2863bd6b45ab770cdf63484dfe4231d1"
   end
 
   on_linux do
     url "https://github.com/DanielHauge/h5v/releases/download/v0.8.0/h5v-x86_64-unknown-linux-gnu-v0.8.0.tar.gz"
-    sha256 "203d792b371a18524ca4ed02ea1551656e01a53f717c7584e0f02714db0990bb"
+    sha256 "9ae53b5056b70c1a449e6421480b6f3f68fc8539c4723e5ee063f64bf794d0a3"
   end
 
   def install

@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/DanielHauge/h5v/releases/download/v0.8.0/h5v-x86_64-pc-windows-msvc-v0.8.0.zip",
-      "hash": "b63302de5dc87fe9506193e64e49946ec0e187f9e07ad14cbf2403a102d897ca"
+      "hash": "20a713a5f480c42d08400cca9d884b954c86104131e5c8a2eabf64748e7e1d39"
     }
   },
   "extract_dir": "h5v-x86_64-pc-windows-msvc-v0.8.0",
