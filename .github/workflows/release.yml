@@ -253,9 +253,9 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
         run: |
-          sed -i -E "s/^version = \".*\"$/version = \"${{ needs.generate-changelog.outputs.version }}\"/" Cargo.toml
-          sed -i -E "s/^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \".\\/macros\" \\}$/macros = { package = \"h5v-macros\", version = \"${{ needs.generate-changelog.outputs.version }}\", path = \"./macros\" }/" Cargo.toml
-          sed -i -E "s/^version = \".*\"$/version = \"${{ needs.generate-changelog.outputs.version }}\"/" macros/Cargo.toml
+          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" Cargo.toml
+          sed -i -E "s|^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \"\\./macros\" \\}$|macros = { package = \"h5v-macros\", version = \"${{ needs.generate-changelog.outputs.version }}\", path = \"./macros\" }|" Cargo.toml
+          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" macros/Cargo.toml
 
           for i in {1..5}; do
             cargo publish -p h5v-macros --allow-dirty && break
