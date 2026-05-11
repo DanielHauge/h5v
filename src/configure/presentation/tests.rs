@@ -3,9 +3,11 @@
 use ratatui::style::Color;
 
 use crate::configure::{
-    available_color_names, color_to_lua_string, current_theme_name, parse_color, reset_config,
-    set_color_override, theme_named_colors, themed_color, SymbolThemeName, ThemeName,
+    available_color_names, color_to_lua_string, current_theme_name, ordered_content_modes,
+    parse_color, reset_config, set_color_override, set_content_mode_order, theme_named_colors,
+    themed_color, SymbolThemeName, ThemeName,
 };
+use crate::ui::state::ContentShowMode;
 
 #[test]
 fn parses_named_and_hex_colors() {
@@ -62,4 +64,15 @@ fn parses_symbol_theme_aliases() {
         SymbolThemeName::parse("compatibility-mode"),
         Some(SymbolThemeName::Compatibility)
     );
+}
+
+#[test]
+fn content_mode_order_reorders_available_modes() {
+    reset_config(ThemeName::Dark);
+    set_content_mode_order(&[ContentShowMode::Matrix]);
+    assert_eq!(
+        ordered_content_modes(&[ContentShowMode::Preview, ContentShowMode::Matrix]),
+        vec![ContentShowMode::Matrix, ContentShowMode::Preview]
+    );
+    reset_config(ThemeName::Dark);
 }

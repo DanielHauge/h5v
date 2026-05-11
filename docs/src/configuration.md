@@ -31,6 +31,7 @@ The config file gets an `h5v` table with a few built-ins:
 | --- | --- |
 | `h5v.theme` | Selects the base built-in color theme: `"dark"`, `"light"`, or `"light_blue"`. |
 | `h5v.compatibility` | Sets compatibility mode from config when the CLI flag is not present. |
+| `h5v.content_mode_order` | Sets the preferred content-tab/default order, for example `{ "matrix", "preview" }`. |
 | `h5v.symbol_theme` | Selects the base built-in symbol theme: `"rich"` or `"compatibility"`. |
 | `h5v.colors` | Overrides individual theme colors. |
 | `h5v.symbols` | Overrides individual UI symbols, labels, and decorated titles. |
@@ -46,9 +47,10 @@ The config file gets an `h5v` table with a few built-ins:
 The theme model is layered:
 
 1. Resolve compatibility with this precedence: CLI `--compatibility` > `h5v.compatibility` > `H5V_COMPATIBILITY_MODE` > default.
-2. Pick a built-in theme with `h5v.theme`.
-3. Pick a built-in symbol theme with `h5v.symbol_theme`.
-4. Override only the colors and symbols you want in `h5v.colors` and `h5v.symbols`.
+2. Pick the preferred content-mode order with `h5v.content_mode_order`; the first available mode becomes the default for each node.
+3. Pick a built-in theme with `h5v.theme`.
+4. Pick a built-in symbol theme with `h5v.symbol_theme`.
+5. Override only the colors and symbols you want in `h5v.colors` and `h5v.symbols`.
 
 That means you do not need to redefine the entire palette or symbol set just to change a few values.
 
@@ -89,6 +91,7 @@ Symbols are grouped the same way:
 ```lua
 h5v.theme = "light"
 h5v.compatibility = true
+h5v.content_mode_order = { "matrix", "preview" }
 h5v.symbol_theme = "compatibility"
 
 h5v.colors = {

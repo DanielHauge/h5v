@@ -3,6 +3,7 @@ use std::sync::{LazyLock, RwLock};
 use ratatui::prelude::Color;
 
 use crate::compat;
+use crate::ui::state::ContentShowMode;
 
 use super::{
     catalog::{available_color_names, available_symbol_names},
@@ -18,6 +19,10 @@ fn default_symbol_theme() -> SymbolThemeName {
     }
 }
 
+fn default_content_mode_order() -> Vec<ContentShowMode> {
+    vec![ContentShowMode::Preview, ContentShowMode::Matrix]
+}
+
 static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
     let symbol_theme = default_symbol_theme();
     RwLock::new(ConfigState {
@@ -25,6 +30,7 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
         active_symbol_theme: symbol_theme,
         colors: ThemeColors::for_theme(ThemeName::Dark),
         symbols: UiSymbols::for_theme(symbol_theme),
+        content_mode_order: default_content_mode_order(),
     })
 });
 
@@ -35,6 +41,7 @@ pub fn reset_config(theme: ThemeName) {
         state.active_symbol_theme = symbol_theme;
         state.colors = ThemeColors::for_theme(theme);
         state.symbols = UiSymbols::for_theme(symbol_theme);
+        state.content_mode_order = default_content_mode_order();
     });
 }
 
@@ -51,6 +58,7 @@ pub fn snapshot_config() -> ConfigSnapshot {
         active_symbol_theme: state.active_symbol_theme,
         colors: state.colors.clone(),
         symbols: state.symbols.clone(),
+        content_mode_order: state.content_mode_order.clone(),
     })
 }
 
@@ -60,6 +68,7 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
         state.active_symbol_theme = snapshot.active_symbol_theme;
         state.colors = snapshot.colors;
         state.symbols = snapshot.symbols;
+        state.content_mode_order = snapshot.content_mode_order;
     });
 }
 
@@ -97,6 +106,33 @@ pub fn current_symbol_theme_name() -> SymbolThemeName {
     with_config_read(|state| state.active_symbol_theme)
 }
 
+pub fn set_content_mode_order(order: &[ContentShowMode]) {
+    with_config_write(|state| {
+        state.content_mode_order = normalize_content_mode_order(order);
+    });
+}
+
+pub fn ordered_content_modes(available: &[ContentShowMode]) -> Vec<ContentShowMode> {
+    with_config_read(|state| {
+        let mut ordered = Vec::new();
+        for preferred in &state.content_mode_order {
+            if available.contains(preferred) && !ordered.contains(preferred) {
+                ordered.push(*preferred);
+            }
+        }
+        for mode in available {
+            if !ordered.contains(mode) {
+                ordered.push(*mode);
+            }
+        }
+        ordered
+    })
+}
+
+pub fn current_content_mode_order() -> Vec<ContentShowMode> {
+    with_config_read(|state| state.content_mode_order.clone())
+}
+
 pub fn prefers_strong_text() -> bool {
     matches!(current_theme_name(), ThemeName::Light)
 }
@@ -107,6 +143,21 @@ pub(crate) fn themed_color(getter: impl FnOnce(&ThemeColors) -> Color) -> Color 
 
 pub(crate) fn configured_symbol(getter: impl FnOnce(&UiSymbols) -> &'static str) -> &'static str {
     with_config_read(|state| getter(&state.symbols))
+}
+
+fn normalize_content_mode_order(order: &[ContentShowMode]) -> Vec<ContentShowMode> {
+    let mut normalized = Vec::new();
+    for mode in order {
+        if !normalized.contains(mode) {
+            normalized.push(*mode);
+        }
+    }
+    for mode in default_content_mode_order() {
+        if !normalized.contains(&mode) {
+            normalized.push(mode);
+        }
+    }
+    normalized
 }
 
 fn with_config_read<R>(f: impl FnOnce(&ConfigState) -> R) -> R {

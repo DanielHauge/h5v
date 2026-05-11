@@ -4,6 +4,7 @@ use mlua::{Lua, Table, Value};
 
 use crate::{
     configure::{self, SymbolThemeName, ThemeName},
+    ui::state::ContentShowMode,
     ui::{app::AppEvent, state::AppToast},
 };
 
@@ -36,6 +37,14 @@ fn build_h5v_table(
     h5v.set("compatibility", default_compatibility)?;
     h5v.set("theme", ThemeName::Dark.as_str())?;
     h5v.set(
+        "content_mode_order",
+        lua.create_sequence_from(
+            configure::current_content_mode_order()
+                .into_iter()
+                .map(ContentShowMode::as_str),
+        )?,
+    )?;
+    h5v.set(
         "symbol_theme",
         default_symbol_theme_for_compatibility(default_compatibility).as_str(),
     )?;
@@ -52,6 +61,45 @@ fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureEr
         Value::Boolean(value) => Ok(Some(value)),
         other => Err(mlua::Error::runtime(format!(
             "h5v.compatibility must be a boolean, got {}",
+            other.type_name()
+        ))
+        .into()),
+    }
+}
+
+fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>, ConfigureErrors> {
+    match h5v.get::<Value>("content_mode_order")? {
+        Value::Nil => Ok(None),
+        Value::Table(values) => {
+            let mut order = Vec::new();
+            for value in values.sequence_values::<Value>() {
+                let value = value?;
+                let Value::String(value) = value else {
+                    return Err(mlua::Error::runtime(
+                        "h5v.content_mode_order entries must be strings",
+                    )
+                    .into());
+                };
+                let value = value.to_str()?;
+                let mode = ContentShowMode::parse(value.as_ref()).ok_or_else(|| {
+                    mlua::Error::runtime(format!(
+                        "Unknown content mode '{value}'. Available modes: preview, matrix"
+                    ))
+                })?;
+                if !order.contains(&mode) {
+                    order.push(mode);
+                }
+            }
+            if order.is_empty() {
+                return Err(mlua::Error::runtime(
+                    "h5v.content_mode_order must include at least one content mode",
+                )
+                .into());
+            }
+            Ok(Some(order))
+        }
+        other => Err(mlua::Error::runtime(format!(
+            "h5v.content_mode_order must be an array of strings, got {}",
             other.type_name()
         ))
         .into()),
@@ -122,6 +170,7 @@ fn build_symbol_theme_table(lua: &Lua) -> Result<Table, ConfigureErrors> {
 
 fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
     let compatibility_override = parse_compatibility_override(h5v)?;
+    let content_mode_order = parse_content_mode_order(h5v)?;
     let selected_theme = match h5v.get::<Value>("theme")? {
         Value::Nil => ThemeName::Dark,
         Value::String(value) => {
@@ -142,6 +191,9 @@ fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
         }
     };
     configure::reset_config(selected_theme);
+    if let Some(order) = content_mode_order {
+        configure::set_content_mode_order(&order);
+    }
 
     let selected_symbol_theme = match h5v.get::<Value>("symbol_theme")? {
         Value::Nil => compatibility_override
@@ -306,9 +358,14 @@ fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Con
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        apply_lua_config, build_symbol_theme_table, build_theme_table, parse_compatibility_override,
+        apply_lua_config, build_symbol_theme_table, build_theme_table,
+        parse_compatibility_override, parse_content_mode_order,
     };
-    use crate::configure::{self, configured_symbol, themed_color, SymbolThemeName, ThemeName};
+    use crate::configure::{
+        self, configured_symbol, current_content_mode_order, themed_color, SymbolThemeName,
+        ThemeName,
+    };
+    use crate::ui::state::ContentShowMode;
     use mlua::{Lua, Table, Value};
     use ratatui::style::Color;
 
@@ -340,6 +397,10 @@ mod tests {
             .expect("set tree.root_file_icon");
         symbols.set("tree", tree).expect("set tree symbol table");
         h5v.set("symbols", symbols).expect("set symbols");
+        let order = lua.create_table().expect("create order table");
+        order.set(1, "matrix").expect("set order");
+        h5v.set("content_mode_order", order)
+            .expect("set content mode order");
 
         apply_lua_config(&h5v).expect("apply config");
 
@@ -354,6 +415,10 @@ mod tests {
         assert_eq!(
             configured_symbol(|symbols| symbols.tree.root_file_icon),
             "FILE "
+        );
+        assert_eq!(
+            current_content_mode_order(),
+            vec![ContentShowMode::Matrix, ContentShowMode::Preview]
         );
 
         configure::reset_config(ThemeName::Dark);
@@ -431,5 +496,17 @@ mod tests {
         assert!(error
             .to_string()
             .contains("h5v.compatibility must be a boolean"));
+    }
+
+    #[test]
+    fn content_mode_order_requires_known_modes() {
+        let lua = Lua::new();
+        let h5v = lua.create_table().expect("create h5v table");
+        let order = lua.create_table().expect("create order");
+        order.set(1, "bogus").expect("set order");
+        h5v.set("content_mode_order", order).expect("set order");
+
+        let error = parse_content_mode_order(&h5v).expect_err("unknown mode should error");
+        assert!(error.to_string().contains("Unknown content mode"));
     }
 }

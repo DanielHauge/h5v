@@ -58,6 +58,8 @@ fn default_config_contents() -> String {
         "-- Compatibility precedence: CLI flag > h5v.compatibility > H5V_COMPATIBILITY_MODE"
             .to_string(),
         "-- h5v.compatibility = false".to_string(),
+        "-- Content mode precedence/default: first available mode in this list wins".to_string(),
+        "-- h5v.content_mode_order = { \"preview\", \"matrix\" }".to_string(),
         "--".to_string(),
         "-- Colors accept #RRGGBB or names like blue, magenta, lightgreen, darkgray.".to_string(),
         "-- h5v.colors = {".to_string(),

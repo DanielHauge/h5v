@@ -422,6 +422,9 @@ fn open_configuration_and_reload(
             state.image_protocol_enabled = false;
         }
     }
+    if let Some(preferred_mode) = configure::current_content_mode_order().first().copied() {
+        state.content_mode = preferred_mode;
+    }
     state.compute_tree_view();
     let config_path = config_path.display();
     if reset {
@@ -681,7 +684,10 @@ fn main_recover_loop(
         preview_debounce_generation: 0,
         preview_debounce_until: None,
         preview_debounce_path: None,
-        content_mode: ContentShowMode::Preview,
+        content_mode: configure::current_content_mode_order()
+            .first()
+            .copied()
+            .unwrap_or(ContentShowMode::Preview),
         img_state,
         matrix_view_state,
         chart_preview_state,

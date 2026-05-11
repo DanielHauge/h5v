@@ -1,6 +1,8 @@
 use macros::{ColorGroup, SymbolGroup, ThemeColorCatalog, ThemeSymbolCatalog};
 use ratatui::prelude::Color;
 
+use crate::ui::state::ContentShowMode;
+
 use super::palette::{SymbolThemeName, ThemeName};
 
 #[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
@@ -169,6 +171,7 @@ pub struct ConfigSnapshot {
     pub(crate) active_symbol_theme: SymbolThemeName,
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
+    pub(crate) content_mode_order: Vec<ContentShowMode>,
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +180,7 @@ pub(crate) struct ConfigState {
     pub(crate) active_symbol_theme: SymbolThemeName,
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
+    pub(crate) content_mode_order: Vec<ContentShowMode>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, SymbolGroup)]

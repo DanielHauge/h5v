@@ -87,8 +87,22 @@ pub fn render_dim_selector(
         let spacer = Paragraph::new(" | ")
             .style(Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)))
             .block(Block::default().borders(Borders::NONE));
-        f.render_widget(&spacer, spacer_area.offset(Offset { x: 0, y: 1 }));
-        f.render_widget(spacer, *spacer_area);
+        let top_line = Rect {
+            height: 1,
+            ..*spacer_area
+        };
+        f.render_widget(spacer, top_line);
+        if spacer_area.height > 1 {
+            let bottom_line = Rect {
+                y: spacer_area.y.saturating_add(1),
+                height: 1,
+                ..*spacer_area
+            };
+            let spacer = Paragraph::new(" | ").style(
+                Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+            );
+            f.render_widget(spacer, bottom_line);
+        }
     }
 
     for (i, dim) in shape_strings.iter().enumerate() {

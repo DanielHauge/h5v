@@ -71,10 +71,27 @@ pub enum PendingChord {
     CtrlW,
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum ContentShowMode {
     Preview,
     Matrix,
+}
+
+impl ContentShowMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "preview" => Some(Self::Preview),
+            "matrix" => Some(Self::Matrix),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preview => "preview",
+            Self::Matrix => "matrix",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -784,24 +801,22 @@ impl AppState<'_> {
     }
 
     pub fn swap_content_show_mode(&mut self, available: Vec<ContentShowMode>) {
-        if available.is_empty() {
+        let ordered = crate::configure::ordered_content_modes(&available);
+        if ordered.is_empty() {
             return;
         }
-        match self.content_mode {
-            ContentShowMode::Preview if available.contains(&ContentShowMode::Matrix) => {
-                self.content_mode = ContentShowMode::Matrix;
-            }
-            _ => {
-                self.content_mode = ContentShowMode::Preview;
-            }
-        }
+        let current_index = ordered
+            .iter()
+            .position(|mode| *mode == self.content_mode)
+            .unwrap_or(0);
+        self.content_mode = ordered[(current_index + 1) % ordered.len()];
     }
 
     pub fn content_show_mode_eval(&self, available: Vec<ContentShowMode>) -> ContentShowMode {
         if available.contains(&self.content_mode) {
             self.content_mode
         } else {
-            available
+            crate::configure::ordered_content_modes(&available)
                 .first()
                 .copied()
                 .unwrap_or(ContentShowMode::Preview)

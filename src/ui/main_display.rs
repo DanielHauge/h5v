@@ -63,7 +63,7 @@ pub fn render_main_display(
     state.ui_layout.matrix_cells.clear();
 
     let current_display_mode = &state.content_mode;
-    let supported_display_modes = node.content_show_modes();
+    let supported_display_modes = configure::ordered_content_modes(&node.content_show_modes());
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {
             Node::Dataset(_, meta) if meta.is_compound_container() => "Compound",

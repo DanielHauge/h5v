@@ -19,7 +19,10 @@ pub use colors::{
 #[allow(unused_imports)]
 pub use presentation::reset_symbol_theme;
 #[allow(unused_imports)]
-pub use presentation::{reset_config, restore_config, snapshot_config, ConfigSnapshot};
+pub use presentation::{
+    current_content_mode_order, ordered_content_modes, reset_config, restore_config,
+    set_content_mode_order, snapshot_config, ConfigSnapshot,
+};
 pub(crate) use symbols::configured_symbol;
 #[allow(unused_imports)]
 pub use symbols::{
