@@ -12,6 +12,8 @@ The config file is stored as `init.lua` inside your platform config directory un
 
 If the file does not exist yet, `h5v` can generate a default scaffold for you.
 
+`h5v` also generates LuaLS/EmmyLua sidecar files next to the config under `.h5v-luals/`. The generated `h5v.lua` stub is refreshed whenever `h5v` loads the config, and the companion `.luarc.json` is refreshed too as long as it is still the h5v-managed one. If you customize `.luarc.json` yourself, `h5v` leaves it alone.
+
 ## Configuration commands
 
 Open the command minibuffer with `:` and use:

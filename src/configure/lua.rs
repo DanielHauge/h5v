@@ -48,11 +48,50 @@ fn build_h5v_table(
         "symbol_theme",
         default_symbol_theme_for_compatibility(default_compatibility).as_str(),
     )?;
-    h5v.set("colors", lua.create_table()?)?;
-    h5v.set("symbols", lua.create_table()?)?;
+    h5v.set(
+        "colors",
+        build_empty_nested_table(lua, configure::available_color_names().iter().copied())?,
+    )?;
+    h5v.set(
+        "symbols",
+        build_empty_nested_table(lua, configure::available_symbol_names().iter().copied())?,
+    )?;
     h5v.set("themes", build_theme_table(lua)?)?;
     h5v.set("symbol_themes", build_symbol_theme_table(lua)?)?;
     Ok(h5v)
+}
+
+fn build_empty_nested_table<'a>(
+    lua: &Lua,
+    dotted_names: impl IntoIterator<Item = &'a str>,
+) -> Result<Table, ConfigureErrors> {
+    let root = lua.create_table()?;
+    for dotted_name in dotted_names {
+        let mut table = root.clone();
+        let mut parts = dotted_name.split('.').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                break;
+            }
+            let next = match table.get::<Value>(part)? {
+                Value::Table(existing) => existing,
+                Value::Nil => {
+                    let created = lua.create_table()?;
+                    table.set(part, created.clone())?;
+                    created
+                }
+                other => {
+                    return Err(mlua::Error::runtime(format!(
+                        "Theme export conflict at '{dotted_name}': expected table before '{part}', got {}",
+                        other.type_name()
+                    ))
+                    .into());
+                }
+            };
+            table = next;
+        }
+    }
+    Ok(root)
 }
 
 fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureErrors> {
@@ -358,7 +397,7 @@ fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Con
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        apply_lua_config, build_symbol_theme_table, build_theme_table,
+        apply_lua_config, build_h5v_table, build_symbol_theme_table, build_theme_table,
         parse_compatibility_override, parse_content_mode_order,
     };
     use crate::configure::{
@@ -508,5 +547,22 @@ mod tests {
 
         let error = parse_content_mode_order(&h5v).expect_err("unknown mode should error");
         assert!(error.to_string().contains("Unknown content mode"));
+    }
+
+    #[test]
+    fn direct_nested_color_assignment_works_without_manual_table_setup() {
+        let lua = Lua::new();
+        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(r#"h5v.colors.accent.selection_bg = "green""#)
+            .exec()
+            .expect("assign nested color override");
+
+        apply_lua_config(&h5v).expect("apply config");
+        assert_eq!(
+            themed_color(|colors| colors.accent.selection_bg),
+            Color::Green
+        );
+        configure::reset_config(ThemeName::Dark);
     }
 }
