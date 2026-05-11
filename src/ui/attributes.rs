@@ -387,6 +387,16 @@ fn render_property_grid_row(
     }
 }
 
+fn selected_attribute_bg_color(focus: &Focus, copying: bool, fallback_bg: Color) -> Color {
+    match (focus, copying) {
+        (Focus::Attributes, true) => {
+            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
+        }
+        (Focus::Attributes, false) => configure::themed_color(|colors| colors.surface.highlight_bg),
+        _ => fallback_bg,
+    }
+}
+
 pub fn metadata_display_row_count(
     node: &mut H5FNode,
     outer_width: u16,
@@ -481,15 +491,7 @@ pub fn render_info_attributes(
         cursor.attribute_offset
     };
 
-    let highlighted_bg_color = if let Focus::Attributes = state.focus {
-        if state.copying {
-            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
-        } else {
-            configure::themed_color(|colors| colors.surface.highlight_bg)
-        }
-    } else {
-        configure::themed_color(|colors| colors.surface.highlight_bg)
-    };
+    let highlighted_bg_color = selected_attribute_bg_color(&state.focus, state.copying, bg);
 
     let mut hitboxes = Vec::new();
     for (visible_index, display_row) in display_rows
@@ -559,10 +561,15 @@ pub fn render_info_attributes(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_display_rows, display_row_index, navigate_metadata_grid, MetadataDisplayRow,
+        build_display_rows, display_row_index, navigate_metadata_grid, selected_attribute_bg_color,
+        MetadataDisplayRow,
     };
     use crate::h5f::RenderedAttributeRow;
-    use crate::ui::{input::keymap::Direction, state::AttributeViewSelection};
+    use crate::ui::{
+        input::keymap::Direction,
+        state::{AttributeViewSelection, Focus, LastFocused},
+    };
+    use ratatui::style::Color;
     use ratatui::text::Line;
 
     fn line(text: &str) -> Line<'static> {
@@ -668,5 +675,23 @@ mod tests {
             ),
             Some((3, AttributeViewSelection::Value))
         ));
+    }
+
+    #[test]
+    fn selection_highlight_falls_back_to_panel_bg_when_unfocused() {
+        let fallback_bg = Color::Blue;
+
+        assert_eq!(
+            selected_attribute_bg_color(&Focus::Attributes, false, fallback_bg),
+            crate::configure::themed_color(|colors| colors.surface.highlight_bg)
+        );
+        assert_eq!(
+            selected_attribute_bg_color(&Focus::Tree(LastFocused::Attributes), false, fallback_bg),
+            fallback_bg
+        );
+        assert_eq!(
+            selected_attribute_bg_color(&Focus::Content, true, fallback_bg),
+            fallback_bg
+        );
     }
 }

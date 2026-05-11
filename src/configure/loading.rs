@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{
     configure::errors::ConfigureErrors,
@@ -222,6 +222,7 @@ fn lua_ls_config_json() -> Value {
 }
 
 fn lua_ls_config_contents() -> String {
+    #[allow(clippy::expect_used)]
     let mut rendered =
         serde_json::to_string_pretty(&lua_ls_config_json()).expect("serialize LuaLS config");
     rendered.push('\n');
@@ -311,7 +312,7 @@ fn write_default_config(config_path: &PathBuf) -> Result<(), ConfigureErrors> {
     ensure_lua_ls_support_files(config_path)
 }
 
-fn ensure_lua_ls_support_files(config_path: &PathBuf) -> Result<(), ConfigureErrors> {
+fn ensure_lua_ls_support_files(config_path: &Path) -> Result<(), ConfigureErrors> {
     let parent_dir = config_path.parent().ok_or({
         ConfigureErrors::FailureCreateDefault(std::io::Error::other(
             "Failed to get parent directory of config path",

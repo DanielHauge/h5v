@@ -136,7 +136,7 @@ impl EnumRenderer {
                 color: overrides
                     .and_then(|overrides| overrides.colors.get(idx).copied().flatten())
                     .unwrap_or(crate::configure::themed_color(|colors| {
-                        colors.chart.r#enum[idx % colors.chart.r#enum.len()]
+                        colors.chart.enums[idx % colors.chart.enums.len()]
                     })),
                 symbol: overrides
                     .and_then(|overrides| overrides.symbols.get(idx))
@@ -211,6 +211,22 @@ fn render_centered_matrix_cell(f: &mut Frame, area: Rect, line: Line<'static>, b
             .style(style),
         area,
     );
+}
+
+fn selected_matrix_bg_color(
+    focus: &Focus,
+    copying: bool,
+    fallback_bg: Color,
+    has_value: bool,
+) -> Color {
+    match (focus, copying) {
+        (Focus::Content, true) if has_value => {
+            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
+        }
+        (Focus::Content, true) => configure::themed_color(|colors| colors.text.error),
+        (Focus::Content, false) => configure::themed_color(|colors| colors.surface.highlight_bg),
+        _ => fallback_bg,
+    }
 }
 
 pub fn render_matrix<T: H5Type + Display>(
@@ -383,12 +399,7 @@ fn render_matrix_with_reader<T: Display>(
                 },
             };
             let val_bg_color = if row_idx == state.matrix_view_state.cursor_row {
-                let copying = state.copying;
-                if let (true, Focus::Content) = (copying, &state.focus) {
-                    configure::themed_color(|colors| colors.surface.highlight_bg_copy)
-                } else {
-                    configure::themed_color(|colors| colors.surface.highlight_bg)
-                }
+                selected_matrix_bg_color(&state.focus, state.copying, val_bg_color, true)
             } else {
                 val_bg_color
             };
@@ -483,16 +494,12 @@ fn render_matrix_with_reader<T: Display>(
                 let val_bg_color = if idx.1 == state.matrix_view_state.cursor_col
                     && idx.0 == state.matrix_view_state.cursor_row
                 {
-                    let copying = state.copying;
-                    if let (true, Focus::Content) = (copying, &state.focus) {
-                        if val.is_some() {
-                            configure::themed_color(|colors| colors.surface.highlight_bg_copy)
-                        } else {
-                            configure::themed_color(|colors| colors.text.error)
-                        }
-                    } else {
-                        configure::themed_color(|colors| colors.surface.highlight_bg)
-                    }
+                    selected_matrix_bg_color(
+                        &state.focus,
+                        state.copying,
+                        val_bg_color,
+                        val.is_some(),
+                    )
                 } else {
                     val_bg_color
                 };
@@ -521,6 +528,7 @@ fn render_matrix_with_reader<T: Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::state::{Focus, LastFocused};
     use hdf5_metno::types::{EnumMember, EnumType, IntSize};
     use ratatui::style::Color;
 
@@ -625,5 +633,31 @@ mod tests {
         );
         assert_eq!(selection.rows, 20);
         assert_eq!(selection.cols, 5);
+    }
+
+    #[test]
+    fn selected_matrix_bg_respects_content_focus() {
+        let fallback_bg = Color::Blue;
+
+        assert_eq!(
+            selected_matrix_bg_color(&Focus::Content, false, fallback_bg, true),
+            crate::configure::themed_color(|colors| colors.surface.highlight_bg)
+        );
+        assert_eq!(
+            selected_matrix_bg_color(&Focus::Content, true, fallback_bg, true),
+            crate::configure::themed_color(|colors| colors.surface.highlight_bg_copy)
+        );
+        assert_eq!(
+            selected_matrix_bg_color(&Focus::Content, true, fallback_bg, false),
+            crate::configure::themed_color(|colors| colors.text.error)
+        );
+        assert_eq!(
+            selected_matrix_bg_color(&Focus::Tree(LastFocused::Content), false, fallback_bg, true),
+            fallback_bg
+        );
+        assert_eq!(
+            selected_matrix_bg_color(&Focus::Attributes, true, fallback_bg, true),
+            fallback_bg
+        );
     }
 }
