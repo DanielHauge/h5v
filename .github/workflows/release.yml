@@ -156,6 +156,7 @@ jobs:
           TARGET: ${{ matrix.build.TARGET }}
         run: |
           cargo wix \
+            --package h5v \
             --no-build \
             --target "$TARGET" \
             --target-bin-dir "target/$TARGET/release" \
@@ -229,18 +230,6 @@ jobs:
           shutil.rmtree(root_dir)
           PY
 
-      - name: Publish to GitHub
-        uses: svenstaro/upload-release-action@v2
-        if: ${{ inputs.publish }}
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
-          file_glob: true
-          overwrite: false
-          tag: v${{ env.RELEASE_VERSION }}
-          release_name: Release v${{ env.RELEASE_VERSION }}
-          body: ${{ needs.generate-changelog.outputs.release_body }}
-
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -248,32 +237,40 @@ jobs:
           path: h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
           if-no-files-found: error
 
-      - name: Publish to crates.io
-        if: ${{ matrix.build.NAME == 'linux-x64-glibc' && inputs.publish }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
-        run: |
-          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" Cargo.toml
-          sed -i -E "s|^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \"\\./macros\" \\}$|macros = { package = \"h5v-macros\", version = \"${{ needs.generate-changelog.outputs.version }}\", path = \"./macros\" }|" Cargo.toml
-          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" macros/Cargo.toml
+  publish-release-assets:
+    name: Publish release assets
+    needs:
+      - generate-changelog
+      - publish-binaries
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
 
-          for i in {1..5}; do
-            cargo publish -p h5v-macros --allow-dirty && break
-            echo "Publishing h5v-macros failed, retrying in 10s..."
-            sleep 10
-          done
-
-          for i in {1..10}; do
-            cargo publish -p h5v --allow-dirty && break
-            echo "Publishing h5v failed, retrying in 15s..."
-            sleep 15
-          done
+      - name: Publish release assets to GitHub
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ inputs.publish }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: release-assets/**
+          file_glob: true
+          overwrite: false
+          tag: v${{ env.RELEASE_VERSION }}
+          release_name: Release v${{ env.RELEASE_VERSION }}
+          body: ${{ needs.generate-changelog.outputs.release_body }}
 
   package-manager-assets:
     name: Generate package manager assets
     needs:
       - generate-changelog
       - publish-binaries
+      - publish-release-assets
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.generate-changelog.outputs.version }}
@@ -460,3 +457,37 @@ jobs:
           fi
           git commit -m "Update h5v-bin package"
           git push origin HEAD
+
+  publish-crates-io:
+    name: Publish crates.io
+    needs:
+      - generate-changelog
+      - publish-release-assets
+      - publish-package-manager-manifests
+      - deploy-site
+      - publish-aur
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Publish to crates.io
+        run: |
+          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" Cargo.toml
+          sed -i -E "s|^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \"\\./macros\" \\}$|macros = { package = \"h5v-macros\", version = \"${{ needs.generate-changelog.outputs.version }}\", path = \"./macros\" }|" Cargo.toml
+          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" macros/Cargo.toml
+
+          for i in {1..5}; do
+            cargo publish -p h5v-macros --allow-dirty && break
+            echo "Publishing h5v-macros failed, retrying in 10s..."
+            sleep 10
+          done
+
+          for i in {1..10}; do
+            cargo publish -p h5v --allow-dirty && break
+            echo "Publishing h5v failed, retrying in 15s..."
+            sleep 15
+          done
