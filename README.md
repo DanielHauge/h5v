@@ -114,7 +114,7 @@ On Linux, source builds may require native packages such as `cmake`, `pkg-config
 
 Themes, symbol sets, and per-key color overrides are configurable in Lua. Inside `h5v`, run `:configure` to open `init.lua`, then set `h5v.theme = "light"` or override only the specific colors you want. `:configure reset` regenerates the default scaffold with the current built-in theme catalogs.
 
-![Light theme configuration example](docs/src/assets/themes.png)
+![Light theme configuration example](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/themes.png)
 
 ## Documentation
 
