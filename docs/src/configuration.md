@@ -49,4 +49,8 @@ h5v.symbols.title.matrix_tab = "Matrix"
 h5v.symbols.chart.visibility_visible = "*"
 ```
 
+The built-in light theme is a good starting point when you want a bright palette and then layer a few targeted overrides on top:
+
+![Light theme example](./assets/themes.png)
+
 Use `h5v.themes.<name>` and `h5v.symbol_themes.<name>` as built-in catalogs when you want to copy values from a shipped theme.

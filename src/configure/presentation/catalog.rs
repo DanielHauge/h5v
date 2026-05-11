@@ -54,7 +54,7 @@ pub(crate) fn normalize_symbol_name(name: &str) -> String {
 }
 
 pub fn available_theme_names() -> &'static [&'static str] {
-    &["dark", "light", "light_blue"]
+    &["dark", "light"]
 }
 
 pub fn available_symbol_theme_names() -> &'static [&'static str] {

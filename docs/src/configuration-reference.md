@@ -20,7 +20,6 @@
 | --- |
 | `dark` |
 | `light` |
-| `light_blue` |
 
 ## Built-in symbol themes
 
@@ -86,6 +85,8 @@ Hex values: `#RRGGBB`
 | `lightmagenta` | `lightmagenta`, `light_magenta` |
 | `lightcyan` | `lightcyan`, `light_cyan` |
 | `white` | `white` |
+| `amber` | `amber` |
+| `orange` | `orange` |
 
 ## Color override keys
 

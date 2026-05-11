@@ -149,7 +149,7 @@ fn lua_ls_stub_contents() -> String {
     let mut lines = vec![
         "---@meta".to_string(),
         "---@diagnostic disable: undefined-global".to_string(),
-        "---@alias H5vThemeName \"dark\"|\"light\"|\"light_blue\"".to_string(),
+        "---@alias H5vThemeName \"dark\"|\"light\"".to_string(),
         "---@alias H5vSymbolThemeName \"rich\"|\"compatibility\"".to_string(),
         "---@alias H5vContentMode \"preview\"|\"matrix\"".to_string(),
         "---@class H5vColorOverrides".to_string(),

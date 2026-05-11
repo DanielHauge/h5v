@@ -110,6 +110,12 @@ On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and ad
 
 On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
 
+## Configuration
+
+Themes, symbol sets, and per-key color overrides are configurable in Lua. Inside `h5v`, run `:configure` to open `init.lua`, then set `h5v.theme = "light"` or override only the specific colors you want. `:configure reset` regenerates the default scaffold with the current built-in theme catalogs.
+
+![Light theme configuration example](docs/src/assets/themes.png)
+
 ## Documentation
 
 The full manual is published as an mdBook at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
