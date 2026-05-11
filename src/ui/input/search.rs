@@ -49,8 +49,14 @@ pub fn handle_search_event(
                         return Ok(EventResult::Error("No searcher available".into()));
                     };
                     if searcher.line_cursor > 0 {
-                        searcher.query.pop();
+                        searcher.query.remove(searcher.line_cursor - 1);
                         searcher.line_cursor -= 1;
+                        let result_count = searcher.count_results();
+                        if result_count == 0 {
+                            searcher.select_cursor = 0;
+                        } else if searcher.select_cursor >= result_count {
+                            searcher.select_cursor = result_count - 1;
+                        }
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
@@ -86,12 +92,16 @@ pub fn handle_search_event(
                     let Some(ref mut searcher) = state.searcher else {
                         return Ok(EventResult::Error("No searcher available".into()));
                     };
-                    if searcher.select_cursor > 0 {
-                        searcher.select_cursor -= 1;
-                    }
                     let result_count = searcher.count_results();
-                    if searcher.select_cursor > result_count {
-                        searcher.line_cursor = result_count;
+                    if result_count == 0 {
+                        searcher.select_cursor = 0;
+                    } else {
+                        if searcher.select_cursor > 0 {
+                            searcher.select_cursor -= 1;
+                        }
+                        if searcher.select_cursor >= result_count {
+                            searcher.select_cursor = result_count - 1;
+                        }
                     }
                     Ok(EventResult::Redraw)
                 }
