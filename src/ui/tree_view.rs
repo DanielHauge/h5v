@@ -91,7 +91,10 @@ fn compute_tree_view_rec<'a>(
                     ),
                     Style::default().fg(configure::themed_color(|colors| colors.tree.load_more)),
                 ),
-                Span::raw("... "),
+                Span::styled(
+                    "... ",
+                    Style::default().fg(configure::themed_color(|colors| colors.tree.load_more)),
+                ),
                 Span::styled(
                     configure::configured_symbol(|symbols| symbols.tree.load_more_label),
                     Style::default().fg(configure::themed_color(|colors| colors.tree.load_more)),

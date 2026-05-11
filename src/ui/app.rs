@@ -63,6 +63,14 @@ use super::{
     tree_view::render_tree,
 };
 
+fn primary_text_style() -> Style {
+    let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
+        style = style.bold();
+    }
+    style
+}
+
 fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
     if let Mode::Search = mode {
         Layout::default()
@@ -1192,7 +1200,7 @@ fn render_header(
             Span::raw("")
         },
     ]);
-    frame.render_widget(Paragraph::new(left), columns[0]);
+    frame.render_widget(Paragraph::new(left).style(primary_text_style()), columns[0]);
 
     let mut center = vec![
         Span::styled(
@@ -1222,7 +1230,9 @@ fn render_header(
         ));
     }
     frame.render_widget(
-        Paragraph::new(Line::from(center)).alignment(Alignment::Center),
+        Paragraph::new(Line::from(center))
+            .style(primary_text_style())
+            .alignment(Alignment::Center),
         columns[1],
     );
 
@@ -1499,6 +1509,7 @@ fn render_attribute_delete_dialog(frame: &mut Frame<'_>, area: Rect, state: &App
             "Delete attribute '{}'?\nPress Enter to confirm or Esc to cancel.",
             dialog.attr_name
         ))
+        .style(primary_text_style())
         .wrap(Wrap { trim: true }),
         rows[0],
     );
@@ -1545,6 +1556,7 @@ fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state:
         "{} needs {} bytes, current fixed size is {} bytes.",
         dialog.overflow.kind, dialog.overflow.required_size, dialog.overflow.current_size
     ))
+    .style(primary_text_style())
     .wrap(Wrap { trim: true });
     frame.render_widget(message, rows[0]);
 
@@ -1610,7 +1622,8 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
         Paragraph::new(format!(
             "Enter new byte size (minimum {}).",
             dialog.overflow.required_size
-        )),
+        ))
+        .style(primary_text_style()),
         rows[0],
     );
     frame.render_widget(

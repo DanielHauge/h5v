@@ -180,7 +180,7 @@ pub fn run_lua_engine(
 
 fn build_theme_table(lua: &Lua) -> Result<Table, ConfigureErrors> {
     let themes = lua.create_table()?;
-    for theme_name in [ThemeName::Dark, ThemeName::Light, ThemeName::LightBlue] {
+    for theme_name in [ThemeName::Dark, ThemeName::Light] {
         let theme_table = lua.create_table()?;
         for (name, color) in configure::theme_named_colors(theme_name) {
             insert_string_value(

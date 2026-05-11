@@ -230,7 +230,13 @@ fn render_text_overflow_handled(f: &mut Frame, area: Rect, line: &Line) {
     } else {
         let areas = Layout::horizontal([Constraint::Fill(1), Constraint::Length(1)]).split(area);
         f.render_widget(line, areas[0]);
-        f.render_widget("_", areas[1]);
+        f.render_widget(
+            Span::styled(
+                "_",
+                Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
+            ),
+            areas[1],
+        );
     }
 }
 

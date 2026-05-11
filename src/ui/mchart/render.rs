@@ -12,6 +12,18 @@ use crate::{configure, error::log_error};
 
 use super::{ChartSource, MultiChartState};
 
+fn mchart_body_style() -> Style {
+    let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
+        style = style.bold();
+    }
+    style
+}
+
+fn mchart_body_span(content: impl Into<String>) -> Span<'static> {
+    Span::styled(content.into(), mchart_body_style())
+}
+
 impl MultiChartState {
     pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let header_block = Block::default()
@@ -185,14 +197,16 @@ impl MultiChartState {
                         },
                     ),
                     Span::styled(marker, Style::default().fg(marker_color).bold()),
-                    Span::raw(" "),
+                    mchart_body_span(" "),
                     Span::styled(format!("(${}) ", item.id.0), id_style),
                     Span::styled(item.list_label(), label_style),
                 ])
             })
             .collect::<Vec<_>>();
         f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
+            Paragraph::new(Text::from(lines))
+                .style(mchart_body_style())
+                .wrap(Wrap { trim: true }),
             inner,
         );
     }
@@ -236,7 +250,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(base_line),
+                    mchart_body_span(base_line),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -244,7 +258,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.display_path.clone()),
+                    mchart_body_span(source.display_path.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -252,14 +266,14 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.kind_label()),
-                    Span::raw("  "),
+                    mchart_body_span(source.kind_label()),
+                    mchart_body_span("  "),
                     Span::styled(
                         "shape ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.shape_summary()),
+                    mchart_body_span(source.shape_summary()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -267,7 +281,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.selection_summary()),
+                    mchart_body_span(source.selection_summary()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -275,21 +289,21 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(item.stats_summary()),
-                    Span::raw("  "),
+                    mchart_body_span(item.stats_summary()),
+                    mchart_body_span("  "),
                     Span::styled(
                         "align ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(self.x_axis_policy.label()),
-                    Span::raw("  "),
+                    mchart_body_span(self.x_axis_policy.label()),
+                    mchart_body_span("  "),
                     Span::styled(
                         "zoom ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(viewport),
+                    mchart_body_span(viewport),
                 ]),
             ],
             ChartSource::BuiltinDerived(source) => vec![
@@ -299,7 +313,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.expression()),
+                    mchart_body_span(source.expression()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -307,7 +321,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.lhs_view.clone()),
+                    mchart_body_span(source.lhs_view.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -315,7 +329,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.rhs_view.clone()),
+                    mchart_body_span(source.rhs_view.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -323,14 +337,14 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(source.alignment_summary()),
-                    Span::raw("  "),
+                    mchart_body_span(source.alignment_summary()),
+                    mchart_body_span("  "),
                     Span::styled(
                         "zoom ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(viewport),
+                    mchart_body_span(viewport),
                 ]),
             ],
             ChartSource::DerivedExpression { expression, .. } => vec![
@@ -340,7 +354,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(expression.clone()),
+                    mchart_body_span(expression.clone()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -348,7 +362,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(base_line),
+                    mchart_body_span(base_line),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -356,7 +370,7 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(item.source.source_kind_label()),
+                    mchart_body_span(item.source.source_kind_label()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -364,14 +378,14 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(item.stats_summary()),
-                    Span::raw("  "),
+                    mchart_body_span(item.stats_summary()),
+                    mchart_body_span("  "),
                     Span::styled(
                         "align ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(self.x_axis_policy.label()),
+                    mchart_body_span(self.x_axis_policy.label()),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -379,13 +393,15 @@ impl MultiChartState {
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
-                    Span::raw(viewport),
+                    mchart_body_span(viewport),
                 ]),
             ],
         };
 
         f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
+            Paragraph::new(Text::from(lines))
+                .style(mchart_body_style())
+                .wrap(Wrap { trim: true }),
             inner,
         );
     }
@@ -413,6 +429,7 @@ impl MultiChartState {
                 "All chart items are hidden.\nPress 'v' to toggle the selected item back on.\nCurrent alignment: {}.",
                 self.x_axis_policy.description()
             ))
+            .style(Style::default().fg(configure::themed_color(|colors| colors.mchart.empty_state)))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
             f.render_widget(paragraph, chart_area);
@@ -424,6 +441,7 @@ impl MultiChartState {
         if self.picker.protocol_type() == ProtocolType::Halfblocks {
             if !self.render_braille_chart_panel(f, chart_area) {
                 let paragraph = Paragraph::new("Rendering failed")
+                    .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
                     .alignment(Alignment::Center)
                     .wrap(Wrap { trim: true });
                 f.render_widget(paragraph, chart_area);
@@ -458,6 +476,7 @@ impl MultiChartState {
         match self.stateful_protocol {
             None => {
                 let paragraph = Paragraph::new("Rendering failed")
+                    .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
                     .alignment(Alignment::Center)
                     .wrap(Wrap { trim: true });
                 f.render_widget(paragraph, chart_area);
@@ -575,21 +594,23 @@ impl MultiChartState {
                         .fg(configure::themed_color(|colors| colors.mchart.prompt_prefix))
                         .bold(),
                 ),
-                Span::raw(prompt.buffer.clone()),
+                mchart_body_span(prompt.buffer.clone()),
             ]),
             Line::from(vec![
                 Span::styled(
                     "Syntax ",
                     Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                 ),
-                Span::raw("$1 + !/ds[..,0] * #/cal:scale   or   (!/x_ticks, $2 + #/cal/offset)"),
+                mchart_body_span(
+                    "$1 + !/ds[..,0] * #/cal:scale   or   (!/x_ticks, $2 + #/cal/offset)",
+                ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "Rules ",
                     Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                 ),
-                Span::raw(
+                mchart_body_span(
                     "single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series, #/path for scalar datasets, and :ATTR on ! or # for explicit attributes",
                 ),
             ]),
@@ -602,7 +623,10 @@ impl MultiChartState {
                         .fg(configure::themed_color(|colors| colors.text.error))
                         .bold(),
                 ),
-                Span::raw(error.clone()),
+                Span::styled(
+                    error.clone(),
+                    Style::default().fg(configure::themed_color(|colors| colors.text.error)),
+                ),
             ]));
         } else {
             lines.push(Line::from(vec![
@@ -611,12 +635,14 @@ impl MultiChartState {
                     Style::default()
                         .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                 ),
-                Span::raw("Enter create  Esc cancel"),
+                mchart_body_span("Enter create  Esc cancel"),
             ]));
         }
 
         f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
+            Paragraph::new(Text::from(lines))
+                .style(mchart_body_style())
+                .wrap(Wrap { trim: true }),
             inner,
         );
         let cursor = ratatui::layout::Position::new(
@@ -624,5 +650,23 @@ impl MultiChartState {
             inner.y,
         );
         f.set_cursor_position(cursor);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mchart_body_span, mchart_body_style};
+
+    #[test]
+    fn mchart_body_style_uses_primary_text_color() {
+        assert_eq!(
+            mchart_body_style().fg,
+            Some(crate::configure::themed_color(|colors| colors.text.primary))
+        );
+    }
+
+    #[test]
+    fn mchart_body_spans_use_primary_text_color() {
+        assert_eq!(mchart_body_span("value").style.fg, mchart_body_style().fg);
     }
 }

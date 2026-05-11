@@ -12,7 +12,6 @@ impl ThemeName {
         match value.trim().to_ascii_lowercase().as_str() {
             "dark" => Some(Self::Dark),
             "light" => Some(Self::Light),
-            "light_blue" | "lightblue" | "windows" => Some(Self::LightBlue),
             _ => None,
         }
     }
@@ -21,7 +20,6 @@ impl ThemeName {
         match self {
             Self::Dark => "dark",
             Self::Light => "light",
-            Self::LightBlue => "light_blue",
         }
     }
 }
@@ -30,7 +28,6 @@ impl ThemeName {
 pub enum ThemeName {
     Dark,
     Light,
-    LightBlue,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -67,7 +64,6 @@ impl ThemeColors {
         match theme {
             ThemeName::Dark => Self::dark(),
             ThemeName::Light => Self::light(),
-            ThemeName::LightBlue => Self::light_blue(),
         }
     }
 
@@ -75,7 +71,7 @@ impl ThemeColors {
         Self {
             text: TextColors {
                 primary: Color::White,
-                number: Color::Rgb(181, 206, 168),
+                number: Color::Rgb(145, 255, 145),
                 string: Color::Rgb(206, 145, 120),
                 opaque: Color::Rgb(198, 160, 255),
                 bool_value: Color::Rgb(255, 204, 0),
@@ -219,7 +215,7 @@ impl ThemeColors {
                 opaque: Color::Rgb(124, 58, 237),
                 bool_value: Color::Rgb(0, 100, 180),
                 error: Color::Rgb(200, 20, 20),
-                search_text: Color::Rgb(26, 26, 26),
+                search_text: Color::Rgb(10, 10, 10),
                 search_count: Color::Rgb(90, 95, 110),
                 type_desc: Color::Rgb(90, 95, 110),
                 line_num: Color::Rgb(140, 145, 158),
@@ -259,24 +255,24 @@ impl ThemeColors {
                 value: Color::Rgb(30, 30, 30),
             },
             mchart: MchartColors {
-                empty_state: Color::Rgb(30, 58, 95),
+                empty_state: Color::Rgb(10, 10, 10),
                 item_selected: Color::Rgb(30, 58, 95),
                 item_selected_hidden: Color::Rgb(30, 58, 95),
                 item_visible: Color::Rgb(30, 30, 30),
                 item_hidden: Color::Rgb(90, 95, 110),
                 prefix_selected: Color::Rgb(30, 58, 95),
-                prefix: Color::Rgb(180, 185, 195),
-                detail_label: Color::Rgb(0, 80, 200),
+                prefix: Color::Rgb(65, 65, 65),
+                detail_label: Color::Blue,
                 prompt_prefix: Color::Rgb(30, 58, 95),
             },
             surface: SurfaceColors {
                 title_bg: Color::Rgb(235, 225, 235),
                 focus_bg: Color::Rgb(245, 245, 245),
                 bg: Color::Rgb(255, 255, 255),
-                bg_val1: Color::Rgb(242, 244, 247),
-                bg_val2: Color::Rgb(237, 242, 237),
-                bg_val3: Color::Rgb(237, 240, 245),
-                bg_val4: Color::Rgb(242, 244, 248),
+                bg_val1: Color::Rgb(247, 249, 252),
+                bg_val2: Color::Rgb(242, 247, 242),
+                bg_val3: Color::Rgb(242, 245, 250),
+                bg_val4: Color::Rgb(247, 249, 253),
                 break_line: Color::Rgb(180, 185, 195),
                 highlight_bg: Color::Rgb(210, 228, 255),
                 highlight_bg_copy: Color::Rgb(255, 165, 0),
@@ -310,9 +306,9 @@ impl ThemeColors {
             chart: ChartColors {
                 axis: Color::Rgb(26, 26, 26),
                 grid: Color::Rgb(200, 205, 215),
-                label: Color::Rgb(90, 95, 110),
+                label: Color::Rgb(0, 0, 0),
                 preview_line: Color::Rgb(0, 90, 190),
-                plot_bg: Color::Rgb(238, 242, 248),
+                plot_bg: Color::Rgb(255, 255, 255),
                 series: [
                     Color::Rgb(0, 90, 190),
                     Color::Rgb(14, 124, 58),
@@ -343,145 +339,6 @@ impl ThemeColors {
             },
             toast: ToastColors {
                 info: Color::Rgb(14, 124, 58),
-                warning: Color::Rgb(160, 80, 0),
-                neutral: Color::Rgb(26, 26, 26),
-            },
-        }
-    }
-
-    fn light_blue() -> Self {
-        Self {
-            text: TextColors {
-                primary: Color::Rgb(26, 26, 26),
-                number: Color::Rgb(9, 134, 88),
-                string: Color::Rgb(163, 21, 21),
-                opaque: Color::Rgb(136, 0, 0),
-                bool_value: Color::Rgb(0, 56, 117),
-                error: Color::Rgb(205, 49, 49),
-                search_text: Color::Rgb(26, 26, 26),
-                search_count: Color::Rgb(80, 90, 110),
-                type_desc: Color::Rgb(80, 90, 110),
-                line_num: Color::Rgb(130, 140, 160),
-            },
-            content: ContentColors {
-                app_brand: Color::Rgb(0, 56, 117),
-                app_version: Color::Rgb(0, 56, 117),
-                help_hint: Color::Rgb(80, 90, 110),
-                empty_state: Color::Rgb(0, 56, 117),
-                tab_active: Color::Rgb(0, 56, 117),
-                tab_inactive: Color::Rgb(80, 90, 110),
-                tree_membership_more: Color::Rgb(0, 56, 117),
-            },
-            command: CommandColors {
-                prompt_prefix: Color::Rgb(0, 56, 117),
-                usage: Color::Rgb(0, 103, 192),
-                description: Color::Rgb(80, 90, 110),
-                suggestion_label: Color::Rgb(80, 90, 110),
-                no_match: Color::Rgb(130, 140, 160),
-                key_hint: Color::Rgb(0, 56, 117),
-            },
-            help: HelpColors {
-                title: Color::Rgb(0, 56, 117),
-                section: Color::Rgb(0, 56, 117),
-                description: Color::Rgb(0, 56, 117),
-                muted: Color::Rgb(80, 90, 110),
-            },
-            metadata: MetadataColors {
-                section: Color::Rgb(0, 70, 140),
-                property_name: Color::Rgb(0, 56, 117),
-                property_value: Color::Rgb(0, 56, 117),
-                attribute_name: Color::Rgb(0, 103, 192),
-            },
-            file: FileColors {
-                section_title: Color::Rgb(80, 90, 110),
-                label: Color::Rgb(0, 56, 117),
-                value: Color::Rgb(0, 56, 117),
-            },
-            mchart: MchartColors {
-                empty_state: Color::Rgb(0, 56, 117),
-                item_selected: Color::Rgb(0, 56, 117),
-                item_selected_hidden: Color::Rgb(0, 56, 117),
-                item_visible: Color::Rgb(0, 56, 117),
-                item_hidden: Color::Rgb(80, 90, 110),
-                prefix_selected: Color::Rgb(0, 56, 117),
-                prefix: Color::Rgb(160, 175, 200),
-                detail_label: Color::Rgb(0, 56, 117),
-                prompt_prefix: Color::Rgb(0, 56, 117),
-            },
-            surface: SurfaceColors {
-                title_bg: Color::Rgb(0, 103, 192),
-                focus_bg: Color::Rgb(220, 232, 245),
-                bg: Color::Rgb(240, 244, 250),
-                bg_val1: Color::Rgb(233, 239, 248),
-                bg_val2: Color::Rgb(228, 240, 234),
-                bg_val3: Color::Rgb(228, 235, 245),
-                bg_val4: Color::Rgb(233, 239, 250),
-                break_line: Color::Rgb(160, 175, 200),
-                highlight_bg: Color::Rgb(194, 220, 255),
-                highlight_bg_copy: Color::Rgb(255, 160, 0),
-                panel_border: Color::Rgb(0, 103, 192),
-                panel_title: Color::Rgb(0, 56, 117),
-                help_key_bg: Color::Rgb(190, 215, 245),
-                image_border: Color::Rgb(140, 155, 180),
-            },
-            tree: TreeColors {
-                lines: Color::Rgb(160, 175, 200),
-                root_file: Color::Rgb(0, 103, 192),
-                group_name: Color::Rgb(0, 88, 175),
-                file: Color::Rgb(0, 103, 192),
-                group: Color::Rgb(136, 23, 152),
-                compound_name: Color::Rgb(100, 15, 115),
-                dataset: Color::Rgb(26, 26, 26),
-                dataset_file: Color::Rgb(9, 134, 88),
-                compound: Color::Rgb(136, 23, 152),
-                load_more: Color::Rgb(0, 103, 192),
-            },
-            accent: AccentColors {
-                selected_index: Color::Rgb(0, 103, 192),
-                selected_dim: Color::Rgb(80, 120, 175),
-                equal_sign: Color::Rgb(0, 103, 192),
-                symbol: Color::Rgb(0, 56, 117),
-                selection_fg: Color::Rgb(26, 26, 26),
-                selection_bg: Color::Rgb(194, 220, 255), // Win highlight blue
-                search_highlight: Color::Rgb(255, 215, 0),
-                search_icon: Color::Rgb(0, 103, 192),
-            },
-            chart: ChartColors {
-                axis: Color::Rgb(26, 26, 26),
-                grid: Color::Rgb(185, 200, 220),
-                label: Color::Rgb(80, 90, 110),
-                preview_line: Color::Rgb(0, 103, 192),
-                plot_bg: Color::Rgb(228, 235, 248),
-                series: [
-                    Color::Rgb(0, 103, 192),
-                    Color::Rgb(9, 134, 88),
-                    Color::Rgb(136, 23, 152),
-                    Color::Rgb(163, 21, 21),
-                    Color::Rgb(255, 140, 0),
-                    Color::Rgb(0, 150, 136),
-                    Color::Rgb(0, 56, 117),
-                    Color::Rgb(100, 15, 115),
-                ],
-                enums: [
-                    Color::Rgb(136, 23, 152),
-                    Color::Rgb(9, 134, 88),
-                    Color::Rgb(0, 103, 192),
-                    Color::Rgb(163, 21, 21),
-                    Color::Rgb(255, 140, 0),
-                    Color::Rgb(0, 128, 80),
-                    Color::Rgb(0, 56, 117),
-                    Color::Rgb(100, 15, 115),
-                ],
-            },
-            status: StatusColors {
-                readonly: Color::Rgb(160, 80, 0),
-                writable: Color::Rgb(9, 134, 88),
-                linked: Color::Rgb(0, 103, 192),
-                compability: Color::Rgb(136, 23, 152),
-                update_available: Color::Rgb(160, 80, 0),
-            },
-            toast: ToastColors {
-                info: Color::Rgb(9, 134, 88),
                 warning: Color::Rgb(160, 80, 0),
                 neutral: Color::Rgb(26, 26, 26),
             },

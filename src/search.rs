@@ -2,6 +2,7 @@ use std::{fmt::Debug, ops::Range, vec};
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use hdf5_metno::Group;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 pub struct Searcher {
@@ -96,10 +97,12 @@ fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
 
     let mut spans = vec![];
     let mut last_end = 0;
+    let base_style =
+        Style::default().fg(crate::configure::themed_color(|colors| colors.text.primary));
 
     for span in highlight_spans {
         if span.start > last_end {
-            spans.push(Span::raw(&path[last_end..span.start]));
+            spans.push(Span::styled(&path[last_end..span.start], base_style));
         }
         spans.push(Span::styled(
             &path[span.start..span.end],
@@ -111,7 +114,7 @@ fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
     }
 
     if last_end < path.len() {
-        spans.push(Span::raw(&path[last_end..]));
+        spans.push(Span::styled(&path[last_end..], base_style));
     }
 
     Line::from(spans)

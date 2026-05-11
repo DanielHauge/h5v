@@ -16,6 +16,10 @@ use super::{
     state::AppState,
 };
 
+fn command_body_style() -> Style {
+    Style::default().fg(configure::themed_color(|colors| colors.text.primary))
+}
+
 pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     let title = match state.command_state.history_status() {
         Some((idx, total)) => format!("Command [{idx}/{total}]"),
@@ -40,8 +44,11 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
                 .fg(configure::themed_color(|colors| colors.command.key_hint))
                 .bold(),
         ),
-        Span::raw(" "),
-        Span::raw(state.command_state.command_buffer.clone()),
+        Span::styled(" ", command_body_style()),
+        Span::styled(
+            state.command_state.command_buffer.clone(),
+            command_body_style(),
+        ),
     ]);
 
     let selected_descriptor = selected_command_descriptor(
@@ -58,7 +65,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
                     .fg(configure::themed_color(|colors| colors.command.usage))
                     .bold(),
             ),
-            Span::raw(" "),
+            Span::styled(" ", command_body_style()),
             Span::styled(
                 format!("- {}", descriptor.description),
                 Style::default().fg(configure::themed_color(|colors| colors.command.description)),
@@ -66,7 +73,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         ];
         let keys = command_keybindings(descriptor);
         if !keys.is_empty() {
-            spans.push(Span::raw(" "));
+            spans.push(Span::styled(" ", command_body_style()));
             spans.push(Span::styled(
                 format!("[{}]", keys),
                 Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
@@ -90,7 +97,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         )];
         for (index, descriptor) in matches.iter().take(5).enumerate() {
             if index > 0 {
-                spans.push(Span::raw("  "));
+                spans.push(Span::styled("  ", command_body_style()));
             }
             let is_selected = Some(descriptor.id) == selected_descriptor.map(|d| d.id);
             let style = if is_selected {
@@ -117,12 +124,12 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             "Ctrl+p",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
-        Span::raw(" / "),
+        Span::styled(" / ", command_body_style()),
         Span::styled(
             "Ctrl+n",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
-        Span::raw("   "),
+        Span::styled("   ", command_body_style()),
         Span::styled(
             "Complete: ",
             Style::default().fg(configure::themed_color(|colors| {
@@ -133,7 +140,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             "Tab",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
-        Span::raw("   "),
+        Span::styled("   ", command_body_style()),
         Span::styled(
             "Legacy: ",
             Style::default().fg(configure::themed_color(|colors| {
@@ -144,12 +151,12 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             "42",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
-        Span::raw(" / "),
+        Span::styled(" / ", command_body_style()),
         Span::styled(
             "+7",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
-        Span::raw(" / "),
+        Span::styled(" / ", command_body_style()),
         Span::styled(
             "-3",
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
@@ -163,7 +170,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         history_hint,
     ]))
     .block(block)
-    .style(Style::default().fg(configure::themed_color(|colors| colors.text.primary)))
+    .style(command_body_style())
     .wrap(Wrap { trim: true });
 
     f.render_widget(command_text_widget, area);

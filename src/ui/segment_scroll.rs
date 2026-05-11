@@ -19,6 +19,14 @@ pub struct SegmentDisplayInfo<'a> {
     pub unit: &'a str,
 }
 
+fn segment_body_style() -> Style {
+    let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
+    if configure::prefers_strong_text() {
+        style = style.bold();
+    }
+    style
+}
+
 pub fn render_position_scroll(
     f: &mut Frame,
     area: &Rect,
@@ -85,48 +93,56 @@ pub fn render_segment_panel(
                 "range ",
                 Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
-            Span::raw(format!(
-                "{}..{}",
-                compact_count(info.range_start),
-                compact_count(info.range_end.saturating_sub(1))
-            )),
+            Span::styled(
+                format!(
+                    "{}..{}",
+                    compact_count(info.range_start),
+                    compact_count(info.range_end.saturating_sub(1))
+                ),
+                segment_body_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(
                 "size  ",
                 Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
-            Span::raw(format!("{} {}", compact_count(size), info.unit)),
+            Span::styled(
+                format!("{} {}", compact_count(size), info.unit),
+                segment_body_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(
                 "total ",
                 Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
-            Span::raw(format!("{} {}", compact_count(info.total_items), info.unit)),
+            Span::styled(
+                format!("{} {}", compact_count(info.total_items), info.unit),
+                segment_body_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(
                 "cover ",
                 Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
-            Span::raw(format!("{start_pct:.1}-{end_pct:.1}%")),
+            Span::styled(
+                format!("{start_pct:.1}-{end_pct:.1}%"),
+                segment_body_style(),
+            ),
         ]),
         Line::from(vec![
             Span::styled(
                 "nav   ",
                 Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
             ),
-            Span::raw("j/k PgUp/Dn"),
+            Span::styled("j/k PgUp/Dn", segment_body_style()),
         ]),
     ];
-    let mut text_style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
-    if configure::prefers_strong_text() {
-        text_style = text_style.bold();
-    }
     f.render_widget(
         Paragraph::new(lines)
-            .style(text_style)
+            .style(segment_body_style())
             .wrap(Wrap { trim: false }),
         *text_area,
     );

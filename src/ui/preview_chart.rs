@@ -241,7 +241,13 @@ pub fn render_chart_preview(
                         EnumRenderer::with_overrides(et, ds_meta.enum_render_overrides.as_ref());
                     let scalar_value = read_single_value_dataset::<u64>(&ds)?;
                     let string = enum_rendere.render_as_line(&scalar_value);
-                    f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
+                    f.render_widget(
+                        ratatui::widgets::Paragraph::new(string).style(
+                            ratatui::style::Style::default()
+                                .fg(crate::configure::themed_color(|colors| colors.text.primary)),
+                        ),
+                        *area,
+                    );
 
                     return Ok(());
                 }
@@ -503,7 +509,13 @@ fn render_projected_chart_preview(
                 );
                 let scalar_value = read_projected_scalar::<u64>(&ds, &ds_meta)?;
                 let string = enum_renderer.render_as_line(&scalar_value);
-                f.render_widget(ratatui::widgets::Paragraph::new(string), *area);
+                f.render_widget(
+                    ratatui::widgets::Paragraph::new(string).style(
+                        ratatui::style::Style::default()
+                            .fg(crate::configure::themed_color(|colors| colors.text.primary)),
+                    ),
+                    *area,
+                );
             }
             Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
                 match read_projected_scalar::<String>(&ds, &ds_meta) {

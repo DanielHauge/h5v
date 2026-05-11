@@ -46,6 +46,15 @@ const IMAGE_CHROME_SCROLL_WIDTH: u16 = 2;
 const IMAGE_CHROME_STACK_HEIGHT: u16 = 1;
 const IMAGE_CHROME_WINDOW_HEIGHT: u16 = 4;
 
+fn image_text_style() -> Style {
+    let mut style =
+        Style::default().fg(crate::configure::themed_color(|colors| colors.text.primary));
+    if crate::configure::prefers_strong_text() {
+        style = style.bold();
+    }
+    style
+}
+
 fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
     let _ = tx_events.send(event);
 }
@@ -306,10 +315,10 @@ fn render_image_chrome(
                         colors.text.type_desc
                     })),
                 ),
-                Span::raw(format!(
-                    "{start}..{end} of 0..{total_end} {}",
-                    window.label()
-                )),
+                Span::styled(
+                    format!("{start}..{end} of 0..{total_end} {}", window.label()),
+                    image_text_style(),
+                ),
             ]),
             Line::from(vec![
                 Span::styled(
@@ -318,13 +327,21 @@ fn render_image_chrome(
                         colors.text.type_desc
                     })),
                 ),
-                Span::raw(format!(
-                    "{start_pct:.1}-{end_pct:.1}% | {visible} visible | arrows move {pan_step} {}",
-                    window.label()
-                )),
+                Span::styled(
+                    format!(
+                        "{start_pct:.1}-{end_pct:.1}% | {visible} visible | arrows move {pan_step} {}",
+                        window.label()
+                    ),
+                    image_text_style(),
+                ),
             ]),
         ];
-        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), *text_area);
+        f.render_widget(
+            Paragraph::new(lines)
+                .style(image_text_style())
+                .wrap(Wrap { trim: false }),
+            *text_area,
+        );
     } else {
         let title = match stack {
             Some((idx, count)) => format!(" Image {}/{} ", idx + 1, count),
@@ -465,7 +482,10 @@ fn render_ds_img(
         desired_window.as_ref(),
     )?;
     if state.should_debounce_preview(selected_node) {
-        f.render_widget("Loading image preview...", render_area);
+        f.render_widget(
+            Paragraph::new("Loading image preview...").style(image_text_style()),
+            render_area,
+        );
         return Ok(());
     }
 
@@ -482,7 +502,13 @@ fn render_ds_img(
         true => {
             if let Some(e) = &state.img_state.error {
                 let error_msg = format!("Error loading image: {}", e);
-                f.render_widget(error_msg, render_area);
+                f.render_widget(
+                    Paragraph::new(error_msg).style(
+                        Style::default()
+                            .fg(crate::configure::themed_color(|colors| colors.text.error)),
+                    ),
+                    render_area,
+                );
             } else if let Some(ref mut protocol) = state.img_state.protocol {
                 let image_widget =
                     StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
@@ -521,7 +547,10 @@ fn render_raw_img(
     };
 
     if state.should_debounce_preview(selected_node) {
-        f.render_widget("Loading image preview...", *area);
+        f.render_widget(
+            Paragraph::new("Loading image preview...").style(image_text_style()),
+            *area,
+        );
         return Ok(());
     }
 
@@ -538,7 +567,13 @@ fn render_raw_img(
         true => match state.img_state.error {
             Some(ref e) => {
                 let error_msg = format!("Error loading image - {}", e);
-                f.render_widget(error_msg, *area);
+                f.render_widget(
+                    Paragraph::new(error_msg).style(
+                        Style::default()
+                            .fg(crate::configure::themed_color(|colors| colors.text.error)),
+                    ),
+                    *area,
+                );
             }
             None => {
                 if let Some(ref mut protocol) = state.img_state.protocol {
