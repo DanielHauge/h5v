@@ -1360,6 +1360,7 @@ dependencies = [
  "hdf5-metno-sys",
  "image 0.25.10",
  "itertools",
+ "libc",
  "mlua",
  "ndarray",
  "plotters",

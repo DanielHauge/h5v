@@ -3,14 +3,19 @@ use std::{fs, path::Path, time::SystemTime};
 use ratatui::{
     layout::{Alignment, Constraint, Rect},
     style::{Modifier, Style},
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 #[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::{
+    ffi::CStr,
+    mem::MaybeUninit,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    ptr,
+};
 
 use super::{
     image_preview::render_img,
@@ -83,6 +88,140 @@ fn format_permissions(metadata: &fs::Metadata) -> String {
 
 fn truncate_left(text: &str, offset: usize) -> String {
     text.chars().skip(offset).collect()
+}
+
+fn truncate_left_line(line: &Line<'static>, offset: usize) -> Line<'static> {
+    if offset == 0 {
+        return line.clone();
+    }
+
+    let mut remaining = offset;
+    let mut spans = Vec::new();
+    for span in &line.spans {
+        let content = span.content.as_ref();
+        let content_len = content.chars().count();
+        if remaining >= content_len {
+            remaining -= content_len;
+            continue;
+        }
+
+        let truncated = if remaining == 0 {
+            content.to_string()
+        } else {
+            truncate_left(content, remaining)
+        };
+        spans.push(Span::styled(truncated, span.style));
+        remaining = 0;
+    }
+
+    Line::from(spans)
+}
+
+fn plain_file_value(value: impl Into<String>) -> Line<'static> {
+    Line::from(value.into())
+}
+
+#[cfg(unix)]
+fn lookup_posix_name_buffer_size(kind: libc::c_int) -> usize {
+    let size = unsafe { libc::sysconf(kind) };
+    if size <= 0 {
+        1024
+    } else {
+        size as usize
+    }
+}
+
+#[cfg(unix)]
+fn lookup_user_name(uid: u32) -> Option<String> {
+    let mut buffer_size = lookup_posix_name_buffer_size(libc::_SC_GETPW_R_SIZE_MAX);
+    for _ in 0..4 {
+        let mut passwd = MaybeUninit::<libc::passwd>::uninit();
+        let mut result = ptr::null_mut();
+        let mut buffer = vec![0_u8; buffer_size];
+        let status = unsafe {
+            libc::getpwuid_r(
+                uid,
+                passwd.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == libc::ERANGE {
+            buffer_size *= 2;
+            continue;
+        }
+        if status != 0 || result.is_null() {
+            return None;
+        }
+
+        let passwd = unsafe { passwd.assume_init() };
+        if passwd.pw_name.is_null() {
+            return None;
+        }
+
+        return Some(
+            unsafe { CStr::from_ptr(passwd.pw_name) }
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+
+    None
+}
+
+#[cfg(unix)]
+fn lookup_group_name(gid: u32) -> Option<String> {
+    let mut buffer_size = lookup_posix_name_buffer_size(libc::_SC_GETGR_R_SIZE_MAX);
+    for _ in 0..4 {
+        let mut group = MaybeUninit::<libc::group>::uninit();
+        let mut result = ptr::null_mut();
+        let mut buffer = vec![0_u8; buffer_size];
+        let status = unsafe {
+            libc::getgrgid_r(
+                gid,
+                group.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == libc::ERANGE {
+            buffer_size *= 2;
+            continue;
+        }
+        if status != 0 || result.is_null() {
+            return None;
+        }
+
+        let group = unsafe { group.assume_init() };
+        if group.gr_name.is_null() {
+            return None;
+        }
+
+        return Some(
+            unsafe { CStr::from_ptr(group.gr_name) }
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+
+    None
+}
+
+#[cfg(unix)]
+fn format_posix_identity(value: u32, name: Option<String>) -> Line<'static> {
+    let Some(name) = name else {
+        return plain_file_value(value.to_string());
+    };
+
+    Line::from(vec![
+        Span::raw(value.to_string()),
+        Span::styled(
+            format!(" ({name})"),
+            Style::default().fg(configure::themed_color(|colors| colors.file.section_title)),
+        ),
+    ])
 }
 
 fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
@@ -172,39 +311,63 @@ fn render_file_preview(
         .unwrap_or_else(|| "unavailable".to_string());
 
     let mut rows = vec![
-        ("file name".to_string(), file_name),
-        ("filesystem path".to_string(), file_path.clone()),
-        ("canonical path".to_string(), canonical_path),
-        ("hdf5 root path".to_string(), file.name()),
+        ("file name".to_string(), plain_file_value(file_name)),
+        (
+            "filesystem path".to_string(),
+            plain_file_value(file_path.clone()),
+        ),
+        (
+            "canonical path".to_string(),
+            plain_file_value(canonical_path),
+        ),
+        ("hdf5 root path".to_string(), plain_file_value(file.name())),
         (
             "open mode".to_string(),
-            if state.readonly {
+            plain_file_value(if state.readonly {
                 "read-only".to_string()
             } else {
                 "read-write".to_string()
-            },
+            }),
         ),
         (
             "path type".to_string(),
-            if state.file_watch.linked {
+            plain_file_value(if state.file_watch.linked {
                 "opened through a symlink".to_string()
             } else {
                 "direct file path".to_string()
-            },
+            }),
         ),
-        ("file size".to_string(), format_size(metadata.len())),
-        ("modified".to_string(), modified),
-        ("created".to_string(), created),
-        ("accessed".to_string(), accessed),
-        ("permissions".to_string(), format_permissions(&metadata)),
+        (
+            "file size".to_string(),
+            plain_file_value(format_size(metadata.len())),
+        ),
+        ("modified".to_string(), plain_file_value(modified)),
+        ("created".to_string(), plain_file_value(created)),
+        ("accessed".to_string(), plain_file_value(accessed)),
+        (
+            "permissions".to_string(),
+            plain_file_value(format_permissions(&metadata)),
+        ),
     ];
 
     #[cfg(unix)]
     {
-        rows.push(("owner uid".to_string(), metadata.uid().to_string()));
-        rows.push(("group gid".to_string(), metadata.gid().to_string()));
-        rows.push(("inode".to_string(), metadata.ino().to_string()));
-        rows.push(("hard links".to_string(), metadata.nlink().to_string()));
+        rows.push((
+            "owner uid".to_string(),
+            format_posix_identity(metadata.uid(), lookup_user_name(metadata.uid())),
+        ));
+        rows.push((
+            "group gid".to_string(),
+            format_posix_identity(metadata.gid(), lookup_group_name(metadata.gid())),
+        ));
+        rows.push((
+            "inode".to_string(),
+            plain_file_value(metadata.ino().to_string()),
+        ));
+        rows.push((
+            "hard links".to_string(),
+            plain_file_value(metadata.nlink().to_string()),
+        ));
     }
 
     let outer = Block::default()
@@ -257,7 +420,7 @@ fn render_file_preview(
                         .fg(configure::themed_color(|colors| colors.file.label))
                         .add_modifier(Modifier::BOLD),
                 ),
-                Cell::from(truncate_left(&value, col_offset)).style({
+                Cell::from(truncate_left_line(&value, col_offset)).style({
                     let mut style =
                         Style::default().fg(configure::themed_color(|colors| colors.file.value));
                     if configure::prefers_strong_text() {
@@ -282,6 +445,29 @@ fn render_file_preview(
             ),
     );
     f.render_widget(table, inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_left_line;
+    use ratatui::{
+        style::{Color, Style},
+        text::{Line, Span},
+    };
+
+    #[test]
+    fn truncate_left_line_preserves_remaining_styles() {
+        let line = Line::from(vec![
+            Span::raw("1000"),
+            Span::styled(" (archie)", Style::default().fg(Color::Yellow)),
+        ]);
+
+        let truncated = truncate_left_line(&line, 5);
+
+        assert_eq!(truncated.spans.len(), 1);
+        assert_eq!(truncated.spans[0].content.as_ref(), "(archie)");
+        assert_eq!(truncated.spans[0].style.fg, Some(Color::Yellow));
+    }
 }
 
 fn compound_schema_preview_text(attr: &crate::h5f::DatasetMeta) -> String {
