@@ -11,6 +11,8 @@ use ratatui::crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
+#[cfg(not(target_os = "windows"))]
+use shell_words::split as shell_split;
 use tempfile::{Builder, NamedTempFile};
 
 use crate::{error::AppError, ui::state::AppState};
@@ -99,6 +101,67 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+#[cfg(not(target_os = "windows"))]
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedEditorCommand {
+    envs: Vec<(String, String)>,
+    program: String,
+    args: Vec<String>,
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_shell_assignment(value: &str) -> bool {
+    let Some((name, _)) = value.split_once('=') else {
+        return false;
+    };
+    let mut chars = name.chars();
+    match chars.next() {
+        Some('a'..='z' | 'A'..='Z' | '_') => {}
+        _ => return false,
+    }
+    chars.all(|ch| matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_shell_operator(value: &str) -> bool {
+    matches!(
+        value,
+        "|" | "||" | "&" | "&&" | ";" | "<" | ">" | ">>" | "<<" | "<<<" | "<&" | ">&"
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+fn parse_editor_command(editor: &str) -> Option<ParsedEditorCommand> {
+    let parts = shell_split(editor).ok()?;
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut envs = Vec::new();
+    let mut index = 0;
+    while index < parts.len() && is_shell_assignment(&parts[index]) {
+        let (name, value) = parts[index].split_once('=').unwrap_or_default();
+        envs.push((name.to_string(), value.to_string()));
+        index += 1;
+    }
+
+    let program = parts.get(index)?.to_string();
+    let args = parts[index + 1..]
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if is_shell_operator(&program) || args.iter().any(|arg| is_shell_operator(arg)) {
+        return None;
+    }
+
+    Some(ParsedEditorCommand {
+        envs,
+        program,
+        args,
+    })
+}
+
 #[cfg(target_os = "windows")]
 fn launch_editor(editor: &str, path: &Path) -> Result<std::process::ExitStatus, AppError> {
     let path_str = path.to_string_lossy();
@@ -111,9 +174,19 @@ fn launch_editor(editor: &str, path: &Path) -> Result<std::process::ExitStatus, 
 
 #[cfg(not(target_os = "windows"))]
 fn launch_editor(editor: &str, path: &Path) -> Result<std::process::ExitStatus, AppError> {
+    if let Some(parsed) = parse_editor_command(editor) {
+        let mut command = Command::new(parsed.program);
+        command.args(parsed.args);
+        command.arg(path);
+        for (name, value) in parsed.envs {
+            command.env(name, value);
+        }
+        return command.status().map_err(AppError::from);
+    }
+
     let editor_cmd = format!("{editor} {}", shell_quote(&path.to_string_lossy()));
     Command::new("sh")
-        .arg("-lc")
+        .arg("-c")
         .arg(editor_cmd)
         .status()
         .map_err(AppError::from)
@@ -198,9 +271,44 @@ fn normalize_edited_content(mut content: String) -> String {
 mod tests {
     use super::{normalize_edited_content, shell_quote};
 
+    #[cfg(not(target_os = "windows"))]
+    use super::{parse_editor_command, ParsedEditorCommand};
+
     #[test]
     fn shell_quotes_single_quotes() {
         assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn parses_editor_args_without_shell() {
+        assert_eq!(
+            parse_editor_command("code --wait"),
+            Some(ParsedEditorCommand {
+                envs: vec![],
+                program: "code".to_string(),
+                args: vec!["--wait".to_string()],
+            })
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn parses_leading_env_assignments() {
+        assert_eq!(
+            parse_editor_command("GIT_EDITOR=true code --reuse-window"),
+            Some(ParsedEditorCommand {
+                envs: vec![("GIT_EDITOR".to_string(), "true".to_string())],
+                program: "code".to_string(),
+                args: vec!["--reuse-window".to_string()],
+            })
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn falls_back_for_shell_operators() {
+        assert_eq!(parse_editor_command("code --wait && echo done"), None);
     }
 
     #[test]
