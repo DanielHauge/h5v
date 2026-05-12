@@ -1,4 +1,3 @@
-
 <div class="oranda-hide">
 <p align="center" class="hide-">
   <img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/banner.png" alt="h5v banner showing HDF5 terminal viewing" />
@@ -19,13 +18,13 @@ The shell installer works on Linux, macOS, and POSIX-style Windows shells such a
 
 ## What it looks like
 
-| Charts | Images |
-| --- | --- |
-| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg) | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg) |
-| Multichart | Commands |
-| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg) |
-| Help | Scripting |
-| ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg) | ![Startup scripting and code view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/code.jpg) |
+| Charts                                                                                                     | Images                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg)         | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg)                 |
+| Multichart                                                                                                 | Commands                                                                                                            |
+| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg)                     |
+| Help                                                                                                       | Scripting                                                                                                           |
+| ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg)           | ![Startup scripting and code view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/code.jpg) |
 
 ## Highlights
 
@@ -43,7 +42,7 @@ If you do not have an h5 file, you can download an example:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/examples/h5v-example.h5 -o h5v-example.h5
-``` 
+```
 
 Open a file in read-only mode:
 
@@ -66,7 +65,6 @@ h5v -w h5v-example.h5
 ```
 
 Persistent themes and color overrides can be configured in Lua. Inside `h5v`, run `:configure` to open `init.lua`, or `:configure reset` to regenerate the default scaffold.
-
 
 Start with scripted commands:
 
@@ -97,14 +95,14 @@ python scripts/generate_example_h5.py
 
 ## Installation
 
-| Method | Command |
-| --- | --- |
-| Shell installer | `curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh \| sh` |
-| PowerShell installer | `irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 \| iex` |
-| Homebrew | `brew install DanielHauge/h5v/h5v` |
-| Scoop | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v` |
-| cargo-binstall | `cargo binstall h5v` |
-| Cargo source build | `cargo install h5v` |
+| Method               | Command                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Shell installer      | `curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh \| sh`      |
+| PowerShell installer | `irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 \| iex`           |
+| Homebrew             | `brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git && brew install h5v`     |
+| Scoop                | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v`        |
+| cargo-binstall       | `cargo binstall h5v`                                                                      |
+| Cargo source build   | `cargo install h5v`                                                                       |
 
 On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
 
@@ -120,18 +118,18 @@ Themes, symbol sets, and per-key color overrides are configurable in Lua. Inside
 
 The full manual is published as an mdBook at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
 
-| Guide | Link |
-| --- | --- |
-| Book contents | [Overview](https://danielhauge.github.io/h5v/book/) |
-| Installation | [Installation](https://danielhauge.github.io/h5v/book/installation.html) |
-| Navigation and layout | [Navigation](https://danielhauge.github.io/h5v/book/navigation.html) |
-| Controls reference | [Controls](https://danielhauge.github.io/h5v/book/controls.html) |
-| HDF5 support and previews | [HDF5 support](https://danielhauge.github.io/h5v/book/hdf5-support.html) |
-| Images and conventions | [Images](https://danielhauge.github.io/h5v/book/images.html) |
-| Commands and scripting | [Commands](https://danielhauge.github.io/h5v/book/commands.html) |
-| Configuration and theming | [Configuration](https://danielhauge.github.io/h5v/book/configuration.html) |
-| Multichart guide | [Multichart](https://danielhauge.github.io/h5v/book/multichart.html) |
-| Bundled example workflow | [`examples/h5v-example.h5`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5) and [`examples/h5v-example.h5v`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5v) |
+| Guide                     | Link                                                                                                                                                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Book contents             | [Overview](https://danielhauge.github.io/h5v/book/)                                                                                                                                                       |
+| Installation              | [Installation](https://danielhauge.github.io/h5v/book/installation.html)                                                                                                                                  |
+| Navigation and layout     | [Navigation](https://danielhauge.github.io/h5v/book/navigation.html)                                                                                                                                      |
+| Controls reference        | [Controls](https://danielhauge.github.io/h5v/book/controls.html)                                                                                                                                          |
+| HDF5 support and previews | [HDF5 support](https://danielhauge.github.io/h5v/book/hdf5-support.html)                                                                                                                                  |
+| Images and conventions    | [Images](https://danielhauge.github.io/h5v/book/images.html)                                                                                                                                              |
+| Commands and scripting    | [Commands](https://danielhauge.github.io/h5v/book/commands.html)                                                                                                                                          |
+| Configuration and theming | [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)                                                                                                                                |
+| Multichart guide          | [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)                                                                                                                                      |
+| Bundled example workflow  | [`examples/h5v-example.h5`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5) and [`examples/h5v-example.h5v`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5v) |
 
 ## Core interaction model
 

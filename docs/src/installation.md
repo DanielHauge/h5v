@@ -27,7 +27,8 @@ irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex
 ### Homebrew
 
 ```bash
-brew install DanielHauge/h5v/h5v
+brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git
+brew install h5v
 ```
 
 ### Scoop
