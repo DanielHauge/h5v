@@ -18,6 +18,8 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
+        with:
+          cache-bin: false
 
       - name: Install and run oranda
         run: |

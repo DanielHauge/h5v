@@ -40,6 +40,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
 
       - name: Verify crate
         run: |
@@ -141,6 +143,8 @@ jobs:
           targets: ${{ matrix.build.TARGET }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
 
       - name: Install cargo-wix
         if: runner.os == 'Windows'
