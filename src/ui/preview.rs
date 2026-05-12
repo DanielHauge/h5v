@@ -310,7 +310,7 @@ fn render_file_preview(
         .and_then(format_timestamp)
         .unwrap_or_else(|| "unavailable".to_string());
 
-    let mut rows = vec![
+    let rows = vec![
         ("file name".to_string(), plain_file_value(file_name)),
         (
             "filesystem path".to_string(),
@@ -351,7 +351,8 @@ fn render_file_preview(
     ];
 
     #[cfg(unix)]
-    {
+    let rows = {
+        let mut rows = rows;
         rows.push((
             "owner uid".to_string(),
             format_posix_identity(metadata.uid(), lookup_user_name(metadata.uid())),
@@ -368,7 +369,11 @@ fn render_file_preview(
             "hard links".to_string(),
             plain_file_value(metadata.nlink().to_string()),
         ));
-    }
+        rows
+    };
+
+    #[cfg(not(unix))]
+    let rows = rows;
 
     let outer = Block::default()
         .title(configure::configured_symbol(|symbols| {
