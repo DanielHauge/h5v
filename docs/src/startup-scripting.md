@@ -16,8 +16,11 @@ Startup scripts use the same command parser as the minibuffer. That includes:
 - navigation commands
 - view and focus commands
 - attribute commands
+- heatmap range commands
 - multichart commands
 - `press <keys>` sequences
+
+Heatmap can be scripted with generic movement commands, `heatmap range ...` commands, and `press` for zoom, reset, clear selection, and viewport pan.
 
 ## Validation mode
 
@@ -62,6 +65,18 @@ toggle-tree
 focus content
 mode preview
 mchart add !/group/dataset[..,0]
+```
+
+Example heatmap script fragment:
+
+```text
+focus content
+mode heatmap
+heatmap range add 5% 80% "5-80%"
+page-down
+press z
+press L
+press v
 ```
 
 Bundled `examples/h5v-example.h5v`:

@@ -2,6 +2,8 @@
 
 Heatmap is the image-style view for numeric datasets with at least two non-singleton dimensions.
 
+![Heatmap view](./assets/heatmap.png)
+
 It is available only when:
 
 - compatibility mode is off
@@ -24,9 +26,12 @@ The settings panel controls:
 - range mode
 - invert x
 - invert y
+- invert colors
 - normalization
 
-Use `Up` / `Down` to move between settings and `Left` / `Right` to change the selected value.
+Built-in range modes include `Auto`, `MIN/MAX`, `Clip 1-99%`, `Sigma +-2sigma`, and `Winsor 2-98%`.
+
+Use `Up` / `Down` to move between settings and `Left` / `Right` to change the selected value. Click a settings row to focus it directly.
 
 ## Selection and viewport
 
@@ -56,9 +61,47 @@ The region panel shows both:
 - right click on an explicit selection zooms into that selection
 - right-click drag pans the viewport
 
+## Commands and scripts
+
+Heatmap uses the existing movement commands:
+
+- `up` / `down`
+- `left` / `right`
+- `page-up` / `page-down`
+
+Dedicated heatmap range commands:
+
+- `heatmap range list`
+- `heatmap range use "Clip 1-99%"`
+- `heatmap range add 5% 80% "5-80%"`
+- `heatmap range add 2.5 5.5 "2.5..5.5"`
+
+Zoom, reset, clear selection, and viewport pan are key-driven. In scripts, use `press`:
+
+- `press z`
+- `press Z`
+- `press 0`
+- `press v`
+- `press H`
+
 ## Copy
 
 `y` copies the active heatmap summary:
 
 - selection summary when a region is selected
 - viewport summary otherwise
+
+## Configuration
+
+Heatmap configuration:
+
+- include `heatmap` in `h5v.content_mode_order`
+- style shared panel/title colors through `h5v.colors`
+- style shared symbols through `h5v.symbols`
+- set `h5v.heatmap.default_range`
+- set `h5v.heatmap.default_colormap`
+- set `h5v.heatmap.default_normalization`
+- set `h5v.heatmap.default_invert_x`
+- set `h5v.heatmap.default_invert_y`
+- set `h5v.heatmap.default_invert_c`
+- add `h5v.heatmap.range_modes`

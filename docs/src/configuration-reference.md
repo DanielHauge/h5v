@@ -8,6 +8,7 @@
 | `h5v.symbol_theme` | string | Built-in symbol theme name |
 | `h5v.compatibility` | boolean | Compatibility mode override from config |
 | `h5v.content_mode_order` | string array | Ordered content-mode preference |
+| `h5v.heatmap` | table | Preferred heatmap defaults and custom range presets |
 | `h5v.colors` | table | Per-key color overrides |
 | `h5v.symbols` | table | Per-key symbol overrides |
 | `h5v.themes.<name>` | table | Built-in color catalogs |
@@ -35,6 +36,8 @@
 | `preview` |
 | `matrix` |
 | `heatmap` |
+
+`heatmap` in `h5v.content_mode_order` only affects preferred tab order. Heatmap appears only when compatibility mode is off and terminal image rendering is available.
 
 ## Color categories
 
@@ -127,4 +130,30 @@ h5v.colors.accent.selection_bg = "lightblue"
 h5v.colors.chart.series_1 = "#ff8800"
 h5v.symbols.title.preview = "Plot"
 h5v.symbols.tree.dataset_icon = "D"
+```
+
+## Heatmap config
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `h5v.heatmap.default_range` | string | Preferred starting range preset |
+| `h5v.heatmap.default_colormap` | string | `turbo`, `grayscale`, or `inferno` |
+| `h5v.heatmap.default_normalization` | string | `linear`, `log`, or `sqrt` |
+| `h5v.heatmap.default_invert_x` | boolean | Preferred X-axis inversion |
+| `h5v.heatmap.default_invert_y` | boolean | Preferred Y-axis inversion |
+| `h5v.heatmap.default_invert_c` | boolean | Preferred colormap inversion |
+| `h5v.heatmap.range_modes` | table array | Custom selectable range presets |
+
+Example:
+
+```lua
+h5v.content_mode_order = { "heatmap", "preview", "matrix" }
+h5v.heatmap.default_range = "MIN/MAX"
+h5v.heatmap.default_colormap = "inferno"
+h5v.heatmap.default_normalization = "log"
+h5v.heatmap.default_invert_y = true
+h5v.heatmap.default_invert_c = true
+h5v.heatmap.range_modes = {
+  { label = "5-80%", min = "5%", max = "80%" },
+}
 ```

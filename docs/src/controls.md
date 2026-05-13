@@ -77,6 +77,7 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | Click the selected group or compound container again | Toggle expand or collapse |
 | Click `Load more` again | Reveal more child rows |
 | Click a matrix cell | Move the matrix cursor there |
+| Click a heatmap settings row | Focus that heatmap setting |
 | Left click a heatmap cell | Select a heatmap region |
 | Mouse wheel over heatmap | Anchored zoom on the hovered cell |
 | Right click on a heatmap selection | Zoom into the selected region |

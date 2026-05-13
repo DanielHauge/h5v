@@ -32,6 +32,7 @@ focus attributes
 focus content
 mode preview
 mode matrix
+mode heatmap
 toggle-tree
 reload
 configure
@@ -47,6 +48,25 @@ left
 right
 page-up
 page-down
+```
+
+Heatmap key-only actions:
+
+```text
+press z
+press Z
+press 0
+press v
+press H
+```
+
+Heatmap range presets:
+
+```text
+heatmap range list
+heatmap range use "Clip 1-99%"
+heatmap range add 5% 80% "5-80%"
+heatmap range add 2.5 5.5 "2.5..5.5"
 ```
 
 Selection:

@@ -39,6 +39,7 @@ The content pane changes with the selected node:
 
 - numeric datasets prefer chart-style preview
 - matrixable datasets can switch to matrix mode
+- numeric datasets with at least two non-singleton dimensions can switch to heatmap mode
 - scalar and string data render as text
 - HDF5 image datasets render inline as images
 - compound container nodes show a recursive schema view

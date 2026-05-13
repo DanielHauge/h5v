@@ -10,29 +10,27 @@
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
 
-The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin. It now prefers conventional install locations: `/usr/local/bin` when writable, `~/.local/bin` on Unix-like systems without a writable system prefix, and `%LOCALAPPDATA%\Programs\h5v\bin` on Windows shells. On Windows, the PowerShell installer or Scoop is usually the more natural choice.
+The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin.
 
-`h5v` is a Rust TUI for inspecting HDF5 files without leaving the terminal. It is built for fast data exploration: browse the tree, switch between chart and matrix views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows for repeatable sessions.
+`h5v` is a Rust TUI for inspecting HDF5 files in the terminal: browse the tree, switch between preview, matrix, and heatmap views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows.
 
 <div class="oranda-hide">
 
 ## What it looks like
 
-| Charts                                                                                                     | Images                                                                                                              |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg)         | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg)                 |
-| Multichart                                                                                                 | Commands                                                                                                            |
-| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg)                     |
-| Help                                                                                                       | Scripting                                                                                                           |
-| ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg)           | ![Startup scripting and code view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/code.jpg) |
+| Charts                                                                                                     | Heatmap                                                                                                              | Images                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg)         | ![Heatmap view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/heatmap.png)                 | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg)                |
+| Multichart                                                                                                 | Commands                                                                                                             | Help                                                                                                                |
+| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg)                    | ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg)                  |
 
 ## Highlights
 
-- Explore datasets, groups, links, and synthetic compound-field nodes from a tree view.
-- Switch between preview, matrix, schema, and image-oriented views from the same selection.
-- Edit values and scalar attributes in place when the file is opened with `-w`.
-- Automate repeatable sessions with `--command`, `--script`, `--script-test`, and simulated `press ...` input.
-- Build derived comparisons and expression-based overlays in multichart mode.
+- Tree browsing for datasets, groups, links, and projected compound fields.
+- Preview, matrix, heatmap, image, and schema views from the same selection.
+- In-place edits when the file is opened with `-w`.
+- Startup automation with commands, scripts, and `press ...`.
+- Derived series and comparisons in multichart.
 
 </div>
 
@@ -56,7 +54,7 @@ If your terminal renders icons, line drawing, or graphics previews badly, start 
 h5v --compatibility h5v-example.h5
 ```
 
-That switches the UI to simpler fallback symbols and disables terminal graphics previews. To make that the default for your shell sessions, set `H5V_COMPATIBILITY_MODE=true` in your rc file such as `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`.
+That switches the UI to simpler symbols and disables terminal graphics previews. To make it the default, set `H5V_COMPATIBILITY_MODE=true` in your shell rc file.
 
 Open the same file in write mode so edits are allowed:
 
@@ -64,7 +62,7 @@ Open the same file in write mode so edits are allowed:
 h5v -w h5v-example.h5
 ```
 
-Persistent themes and color overrides can be configured in Lua. Inside `h5v`, run `:configure` to open `init.lua`, or `:configure reset` to regenerate the default scaffold.
+Themes, symbols, and heatmap defaults are configured in Lua. Inside `h5v`, run `:configure` to open `init.lua`, or `:configure reset` to regenerate the default scaffold.
 
 Start with scripted commands:
 
@@ -110,31 +108,24 @@ On Linux, source builds may require native packages such as `cmake`, `pkg-config
 
 ## Configuration
 
-Themes, symbol sets, and per-key color overrides are configurable in Lua. Inside `h5v`, run `:configure` to open `init.lua`, then set `h5v.theme = "light"` or override only the specific colors you want. `:configure reset` regenerates the default scaffold with the current built-in theme catalogs.
+Configuration lives in `init.lua`. Use `:configure` to edit it and `:configure reset` to regenerate the default scaffold.
 
 ![Light theme configuration example](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/themes.png)
 
 ## Documentation
 
-The full manual is published as an mdBook at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
+The manual is published at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
 
-| Guide                     | Link                                                                                                                                                                                                      |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Book contents             | [Overview](https://danielhauge.github.io/h5v/book/)                                                                                                                                                       |
-| Installation              | [Installation](https://danielhauge.github.io/h5v/book/installation.html)                                                                                                                                  |
-| Navigation and layout     | [Navigation](https://danielhauge.github.io/h5v/book/navigation.html)                                                                                                                                      |
-| Controls reference        | [Controls](https://danielhauge.github.io/h5v/book/controls.html)                                                                                                                                          |
-| HDF5 support and previews | [HDF5 support](https://danielhauge.github.io/h5v/book/hdf5-support.html)                                                                                                                                  |
-| Images and conventions    | [Images](https://danielhauge.github.io/h5v/book/images.html)                                                                                                                                              |
-| Commands and scripting    | [Commands](https://danielhauge.github.io/h5v/book/commands.html)                                                                                                                                          |
-| Configuration and theming | [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)                                                                                                                                |
-| Multichart guide          | [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)                                                                                                                                      |
-| Bundled example workflow  | [`examples/h5v-example.h5`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5) and [`examples/h5v-example.h5v`](https://github.com/DanielHauge/h5v/blob/main/examples/h5v-example.h5v) |
+- [Overview](https://danielhauge.github.io/h5v/book/)
+- [Commands](https://danielhauge.github.io/h5v/book/commands.html)
+- [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)
+- [Heatmap](https://danielhauge.github.io/h5v/book/heatmap.html)
+- [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)
 
 ## Core interaction model
 
 - `Shift` + arrow keys or `Ctrl+W` then `h/j/k/l` move focus between panes.
-- `Tab` cycles content modes when the current dataset can be shown in more than one way.
+- `Tab` cycles content modes when more than one is available.
 - `:` opens the command minibuffer, `.` repeats the last command, and `?` opens the in-app help overlay.
 - `m` adds the current previewable selection to multichart and `M` opens multichart mode.
 - `s` toggles the sidebar, `/` enters search, and `Ctrl+R` reloads the file from disk.
