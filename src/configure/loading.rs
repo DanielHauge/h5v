@@ -68,6 +68,19 @@ fn default_config_contents() -> String {
         "-- h5v.compatibility = false".to_string(),
         "-- Content mode precedence/default: first available mode in this list wins".to_string(),
         "-- h5v.content_mode_order = { \"preview\", \"matrix\", \"heatmap\" }".to_string(),
+        "-- Heatmap custom range presets can mix exact bounds and percentages.".to_string(),
+        "-- h5v.heatmap = {".to_string(),
+        "--   default_range = \"Auto\",".to_string(),
+        "--   default_colormap = \"turbo\",".to_string(),
+        "--   default_normalization = \"linear\",".to_string(),
+        "--   default_invert_x = false,".to_string(),
+        "--   default_invert_y = false,".to_string(),
+        "--   default_invert_c = false,".to_string(),
+        "--   range_modes = {".to_string(),
+        "--     { label = \"5-80%\", min = \"5%\", max = \"80%\" },".to_string(),
+        "--     { label = \"2.5..5.5\", min = 2.5, max = 5.5 },".to_string(),
+        "--   },".to_string(),
+        "-- }".to_string(),
         "--".to_string(),
         format!(
             "-- LuaLS support files are generated beside this config under {LUA_LS_LIBRARY_DIR}/."
@@ -152,6 +165,20 @@ fn lua_ls_stub_contents() -> String {
         "---@alias H5vThemeName \"dark\"|\"light\"".to_string(),
         "---@alias H5vSymbolThemeName \"rich\"|\"compatibility\"".to_string(),
         "---@alias H5vContentMode \"preview\"|\"matrix\"|\"heatmap\"".to_string(),
+        "---@alias H5vHeatmapColormap \"turbo\"|\"grayscale\"|\"inferno\"".to_string(),
+        "---@alias H5vHeatmapNormalization \"linear\"|\"log\"|\"sqrt\"".to_string(),
+        "---@class H5vHeatmapRangePreset".to_string(),
+        "---@field label? string".to_string(),
+        "---@field min string|number".to_string(),
+        "---@field max string|number".to_string(),
+        "---@class H5vHeatmapConfig".to_string(),
+        "---@field default_range string".to_string(),
+        "---@field default_colormap H5vHeatmapColormap".to_string(),
+        "---@field default_normalization H5vHeatmapNormalization".to_string(),
+        "---@field default_invert_x boolean".to_string(),
+        "---@field default_invert_y boolean".to_string(),
+        "---@field default_invert_c boolean".to_string(),
+        "---@field range_modes H5vHeatmapRangePreset[]".to_string(),
         "---@class H5vColorOverrides".to_string(),
     ];
     for (group, _) in &color_groups {
@@ -183,6 +210,7 @@ fn lua_ls_stub_contents() -> String {
     lines.push("---@field content_mode_order H5vContentMode[]".to_string());
     lines.push("---@field theme H5vThemeName".to_string());
     lines.push("---@field symbol_theme H5vSymbolThemeName".to_string());
+    lines.push("---@field heatmap H5vHeatmapConfig".to_string());
     lines.push("---@field colors H5vColorOverrides".to_string());
     lines.push("---@field symbols H5vSymbolOverrides".to_string());
     lines.push("---@field themes H5vThemeCatalog".to_string());

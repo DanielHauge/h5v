@@ -7,7 +7,8 @@ use std::{
 };
 
 use ratatui::crossterm::{
-    cursor::{Hide, Show},
+    cursor::{Hide, SetCursorStyle, Show},
+    event::{self, DisableMouseCapture, EnableMouseCapture},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -19,6 +20,8 @@ use crate::{error::AppError, ui::state::AppState};
 
 pub fn leave_h5v() -> Result<(), AppError> {
     stdout().execute(Show)?;
+    stdout().execute(SetCursorStyle::DefaultUserShape)?;
+    stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     ratatui::restore();
@@ -27,9 +30,24 @@ pub fn leave_h5v() -> Result<(), AppError> {
 
 pub fn reenter_h5v() -> Result<(), AppError> {
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableMouseCapture)?;
+    stdout().execute(SetCursorStyle::DefaultUserShape)?;
     stdout().execute(Hide)?;
     enable_raw_mode()?;
     Ok(())
+}
+
+fn drain_terminal_events() {
+    loop {
+        match event::poll(std::time::Duration::from_millis(0)) {
+            Ok(true) => {
+                if event::read().is_err() {
+                    break;
+                }
+            }
+            Ok(false) | Err(_) => break,
+        }
+    }
 }
 
 fn sanitize_file_component(value: &str) -> String {
@@ -228,8 +246,9 @@ pub fn perform_edit(
         File::open(&path)?.read_to_string(&mut new_content)?;
         Ok(normalize_edited_content(new_content))
     })();
-    drop(edit_pause);
     reenter_h5v()?;
+    drain_terminal_events();
+    drop(edit_pause);
     edit_result
 }
 
@@ -252,8 +271,9 @@ pub fn edit_existing_file(state: &mut AppState<'_>, path: &Path) -> Result<(), A
         }
         Ok(())
     })();
-    drop(edit_pause);
     reenter_h5v()?;
+    drain_terminal_events();
+    drop(edit_pause);
     edit_result
 }
 

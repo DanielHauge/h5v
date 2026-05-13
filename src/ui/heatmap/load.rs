@@ -84,10 +84,11 @@ pub(super) fn build_heatmap_page(
     let stats = compute_heatmap_stats(&data, transpose, visible_rows, visible_cols);
     let color_scale = compute_heatmap_color_scale(
         &data,
+        attr,
         transpose,
         visible_rows,
         visible_cols,
-        key.settings.range,
+        &key.settings.range,
     );
     let histogram = compute_heatmap_histogram(
         &data,

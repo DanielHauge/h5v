@@ -1,4 +1,11 @@
-use crate::{error::AppError, h5f::AttributeCreateType, ui::mchart::BuiltinDerivedOp};
+use crate::{
+    error::AppError,
+    h5f::AttributeCreateType,
+    ui::{
+        mchart::BuiltinDerivedOp,
+        state::{HeatmapRangeBound, HeatmapRangeMode},
+    },
+};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 use super::super::{
@@ -104,18 +111,21 @@ pub(super) fn handle_mode(
     let requested_mode = match command.word_arg(0)?.to_ascii_lowercase().as_str() {
         "preview" => ContentShowMode::Preview,
         "matrix" => ContentShowMode::Matrix,
+        "heatmap" => ContentShowMode::Heatmap,
         mode => {
             return Err(AppError::InvalidCommand(format!(
-                "Unknown content mode '{}'. Expected preview or matrix",
+                "Unknown content mode '{}'. Expected preview, matrix, or heatmap",
                 mode
             )))
         }
     };
 
-    let available = state.treeview[state.tree_view_cursor]
-        .node
-        .borrow_mut()
-        .content_show_modes();
+    let available = state.filter_runtime_content_modes(
+        state.treeview[state.tree_view_cursor]
+            .node
+            .borrow_mut()
+            .content_show_modes(),
+    );
     if !available.contains(&requested_mode) {
         return Err(AppError::InvalidCommand(format!(
             "Mode '{}' is not available for the selected item",
@@ -513,6 +523,81 @@ pub(super) fn handle_press(
     Ok(last_result)
 }
 
+pub(super) fn handle_heatmap(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    let action = command.word_arg(0)?.to_ascii_lowercase();
+    match action.as_str() {
+        "range" => handle_heatmap_range_command(state, command),
+        other => Err(AppError::InvalidCommand(format!(
+            "Unknown heatmap action '{}'. Expected range",
+            other
+        ))),
+    }
+}
+
+fn handle_heatmap_range_command(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    let action = command
+        .word_arg_optional(1)?
+        .unwrap_or("list")
+        .to_ascii_lowercase();
+    match action.as_str() {
+        "list" => {
+            let summary = state
+                .heatmap_range_modes()
+                .into_iter()
+                .map(|mode| mode.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Ok(EventResult::Toast(
+                AppToast::Info(format!("Heatmap ranges: {summary}")),
+                false,
+            ))
+        }
+        "use" | "select" => {
+            let selector = command.word_arg(2)?;
+            let mode = state
+                .heatmap_range_modes()
+                .into_iter()
+                .find(|mode| mode.selector_matches(selector))
+                .ok_or_else(|| {
+                    AppError::InvalidCommand(format!(
+                        "Unknown heatmap range '{selector}'. Use 'heatmap range list' to inspect available presets"
+                    ))
+                })?;
+            state.heatmap_render.settings.range = mode.clone();
+            state.heatmap_render.current_key = None;
+            Ok(EventResult::Toast(
+                AppToast::Info(format!("Selected heatmap range '{}'", mode.label())),
+                false,
+            ))
+        }
+        "add" => {
+            let lower = parse_heatmap_range_bound(command.word_arg(2)?)?;
+            let upper = parse_heatmap_range_bound(command.word_arg(3)?)?;
+            let mode = HeatmapRangeMode::custom(
+                lower,
+                upper,
+                command.word_arg_optional(4)?.map(ToString::to_string),
+            );
+            let label = mode.label();
+            state.add_session_heatmap_range_mode(mode)?;
+            Ok(EventResult::Toast(
+                AppToast::Info(format!("Added heatmap range '{}' for this session", label)),
+                false,
+            ))
+        }
+        other => Err(AppError::InvalidCommand(format!(
+            "Unknown heatmap range action '{}'. Expected add, use, or list",
+            other
+        ))),
+    }
+}
+
 fn parse_direction_delta(word: &str) -> Result<isize, AppError> {
     match word.to_ascii_lowercase().as_str() {
         "next" | "forward" | "right" | "down" => Ok(1),
@@ -564,6 +649,10 @@ fn parse_word_f64(word: Option<&str>, default: f64, command_name: &str) -> Resul
         }),
         None => Ok(default),
     }
+}
+
+fn parse_heatmap_range_bound(word: &str) -> Result<HeatmapRangeBound, AppError> {
+    HeatmapRangeBound::parse(word).map_err(AppError::InvalidCommand)
 }
 
 pub(super) fn parse_simulated_key(key_spec: &str) -> Result<KeyEvent, AppError> {

@@ -1,7 +1,7 @@
 use macros::{ColorGroup, SymbolGroup, ThemeColorCatalog, ThemeSymbolCatalog};
 use ratatui::prelude::Color;
 
-use crate::ui::state::ContentShowMode;
+use crate::ui::state::{ContentShowMode, HeatmapRangeMode, HeatmapSettings};
 
 use super::palette::{SymbolThemeName, ThemeName};
 
@@ -171,6 +171,8 @@ pub struct ConfigSnapshot {
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
     pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
+    pub(crate) heatmap_default_settings: HeatmapSettings,
 }
 
 #[derive(Clone, Debug)]
@@ -180,6 +182,8 @@ pub(crate) struct ConfigState {
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
     pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
+    pub(crate) heatmap_default_settings: HeatmapSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, SymbolGroup)]

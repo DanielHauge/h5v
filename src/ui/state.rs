@@ -15,6 +15,7 @@ use ratatui::layout::Rect;
 use ratatui_image::{protocol::StatefulProtocol, thread::ThreadProtocol};
 
 use crate::{
+    configure,
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::{AppError, FixedStringOverflow},
     h5f::{plot_projected, AttributeCreateType, DatasetMeta, H5FNode, HasPath, ImageType, Node},
@@ -139,6 +140,12 @@ pub struct MatrixCellHitbox {
     pub col: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HeatmapSettingHitbox {
+    pub area: Rect,
+    pub setting: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
     pub tree: Option<TreeHitbox>,
@@ -147,6 +154,7 @@ pub struct UiLayoutState {
     pub content_tabs: Vec<ContentTabHitbox>,
     pub matrix_rows: Vec<MatrixRowHitbox>,
     pub matrix_cells: Vec<MatrixCellHitbox>,
+    pub heatmap_settings: Vec<HeatmapSettingHitbox>,
 }
 
 pub struct ChartPreviewLoadRequest {
@@ -249,10 +257,191 @@ pub enum HeatmapColormap {
     Inferno,
 }
 
+impl HeatmapColormap {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "turbo" => Some(Self::Turbo),
+            "grayscale" | "greyscale" | "gray" | "grey" => Some(Self::Grayscale),
+            "inferno" => Some(Self::Inferno),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Turbo => "turbo",
+            Self::Grayscale => "grayscale",
+            Self::Inferno => "inferno",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Turbo => "Turbo",
+            Self::Grayscale => "Gray",
+            Self::Inferno => "Inferno",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HeatmapStoredFloat(pub u64);
+
+impl HeatmapStoredFloat {
+    pub fn from_f64(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value.to_bits()))
+    }
+
+    pub fn to_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HeatmapRangeBound {
+    Exact(HeatmapStoredFloat),
+    Percentile(u16),
+}
+
+impl HeatmapRangeBound {
+    pub fn parse(token: &str) -> std::result::Result<Self, String> {
+        let trimmed = token.trim();
+        if let Some(percent) = trimmed.strip_suffix('%') {
+            let value = percent.parse::<f64>().map_err(|_| {
+                format!("Invalid heatmap percentile bound '{trimmed}'. Use values like 5% or 99%")
+            })?;
+            if !(0.0..=100.0).contains(&value) {
+                return Err(format!(
+                    "Heatmap percentile bound '{trimmed}' must be between 0% and 100%"
+                ));
+            }
+            Ok(Self::Percentile((value * 100.0).round() as u16))
+        } else {
+            let value = trimmed.parse::<f64>().map_err(|_| {
+                format!("Invalid heatmap exact bound '{trimmed}'. Use a number or percentage")
+            })?;
+            let stored = HeatmapStoredFloat::from_f64(value)
+                .ok_or_else(|| format!("Heatmap exact bound '{trimmed}' must be finite"))?;
+            Ok(Self::Exact(stored))
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Exact(value) => format_heatmap_scalar(value.to_f64()),
+            Self::Percentile(bps) => format!("{}%", format_heatmap_percent(bps)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HeatmapCustomRangeMode {
+    pub label: String,
+    pub lower: HeatmapRangeBound,
+    pub upper: HeatmapRangeBound,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HeatmapRangeMode {
     Auto,
-    Percentile1,
+    MinMax,
+    Percentile { lower_bps: u16, upper_bps: u16 },
+    SigmaClip { sigma_milli: u16 },
+    Winsorized { lower_bps: u16, upper_bps: u16 },
+    Custom(HeatmapCustomRangeMode),
+}
+
+impl HeatmapRangeMode {
+    pub fn default_modes() -> Vec<Self> {
+        vec![
+            Self::Auto,
+            Self::MinMax,
+            Self::Percentile {
+                lower_bps: 100,
+                upper_bps: 9900,
+            },
+            Self::SigmaClip { sigma_milli: 2000 },
+            Self::Winsorized {
+                lower_bps: 200,
+                upper_bps: 9800,
+            },
+        ]
+    }
+
+    pub fn custom(
+        lower: HeatmapRangeBound,
+        upper: HeatmapRangeBound,
+        label: Option<String>,
+    ) -> Self {
+        let label = label
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("{}..{}", lower.label(), upper.label()));
+        Self::Custom(HeatmapCustomRangeMode {
+            label,
+            lower,
+            upper,
+        })
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::Auto => "Auto".to_string(),
+            Self::MinMax => "MIN/MAX".to_string(),
+            Self::Percentile {
+                lower_bps,
+                upper_bps,
+            } => format!(
+                "Clip {}-{}%",
+                format_heatmap_percent(*lower_bps),
+                format_heatmap_percent(*upper_bps)
+            ),
+            Self::SigmaClip { sigma_milli } => {
+                format!("Sigma ±{}σ", format_heatmap_thousandths(*sigma_milli))
+            }
+            Self::Winsorized {
+                lower_bps,
+                upper_bps,
+            } => format!(
+                "Winsor {}-{}%",
+                format_heatmap_percent(*lower_bps),
+                format_heatmap_percent(*upper_bps)
+            ),
+            Self::Custom(mode) => mode.label.clone(),
+        }
+    }
+
+    pub fn selector_matches(&self, selector: &str) -> bool {
+        let selector = normalize_heatmap_range_selector(selector);
+        if normalize_heatmap_range_selector(&self.label()) == selector {
+            return true;
+        }
+        match self {
+            Self::Auto => selector == "auto",
+            Self::MinMax => matches!(selector.as_str(), "min/max" | "minmax" | "min-max" | "type"),
+            Self::Percentile {
+                lower_bps: 100,
+                upper_bps: 9900,
+            } => matches!(
+                selector.as_str(),
+                "clip-1-99%" | "clip-1-99" | "1-99%" | "1-99" | "percentile-1-99"
+            ),
+            Self::SigmaClip { sigma_milli: 2000 } => {
+                matches!(
+                    selector.as_str(),
+                    "sigma" | "sigma-2" | "sigma-2.0" | "2-sigma"
+                )
+            }
+            Self::Winsorized {
+                lower_bps: 200,
+                upper_bps: 9800,
+            } => matches!(
+                selector.as_str(),
+                "winsor" | "winsor-2-98%" | "winsor-2-98" | "winsorized-2-98"
+            ),
+            Self::Custom(mode) => normalize_heatmap_range_selector(&mode.label) == selector,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -262,20 +451,49 @@ pub enum HeatmapNormalization {
     Sqrt,
 }
 
+impl HeatmapNormalization {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "linear" => Some(Self::Linear),
+            "log" | "log10" | "logarithmic" => Some(Self::Log),
+            "sqrt" | "square-root" | "square_root" => Some(Self::Sqrt),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Log => "log",
+            Self::Sqrt => "sqrt",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Log => "Log",
+            Self::Sqrt => "Sqrt",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeatmapSettingField {
     Colormap,
     Range,
     InvertX,
     InvertY,
+    InvertC,
     Normalization,
 }
 
-pub const HEATMAP_SETTING_FIELDS: [HeatmapSettingField; 5] = [
+pub const HEATMAP_SETTING_FIELDS: [HeatmapSettingField; 6] = [
     HeatmapSettingField::Colormap,
     HeatmapSettingField::Range,
     HeatmapSettingField::InvertX,
     HeatmapSettingField::InvertY,
+    HeatmapSettingField::InvertC,
     HeatmapSettingField::Normalization,
 ];
 
@@ -285,7 +503,21 @@ pub struct HeatmapSettings {
     pub range: HeatmapRangeMode,
     pub invert_x: bool,
     pub invert_y: bool,
+    pub invert_c: bool,
     pub normalization: HeatmapNormalization,
+}
+
+impl Default for HeatmapSettings {
+    fn default() -> Self {
+        Self {
+            colormap: HeatmapColormap::Turbo,
+            range: HeatmapRangeMode::Auto,
+            invert_x: false,
+            invert_y: false,
+            invert_c: false,
+            normalization: HeatmapNormalization::Linear,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -345,14 +577,10 @@ impl HeatmapSettings {
                     (HeatmapColormap::Inferno, _) => HeatmapColormap::Turbo,
                 };
             }
-            HeatmapSettingField::Range => {
-                self.range = match self.range {
-                    HeatmapRangeMode::Auto => HeatmapRangeMode::Percentile1,
-                    HeatmapRangeMode::Percentile1 => HeatmapRangeMode::Auto,
-                };
-            }
+            HeatmapSettingField::Range => {}
             HeatmapSettingField::InvertX => self.invert_x = !self.invert_x,
             HeatmapSettingField::InvertY => self.invert_y = !self.invert_y,
+            HeatmapSettingField::InvertC => self.invert_c = !self.invert_c,
             HeatmapSettingField::Normalization => {
                 self.normalization = match (self.normalization, delta.signum()) {
                     (HeatmapNormalization::Linear, d) if d < 0 => HeatmapNormalization::Sqrt,
@@ -438,6 +666,7 @@ pub struct HeatmapRenderState {
     pub tx_load_heatmap: Sender<HeatmapLoadRequest>,
     pub settings: HeatmapSettings,
     pub selected_setting: usize,
+    pub session_range_modes: Vec<HeatmapRangeMode>,
 }
 
 impl HeatmapRegionSelection {
@@ -456,6 +685,43 @@ fn heatmap_partition(total: usize, cells: usize, index: usize) -> (usize, usize)
         end = (start + 1).min(total);
     }
     (start, end)
+}
+
+fn format_heatmap_percent(bps: u16) -> String {
+    let whole = bps / 100;
+    let frac = bps % 100;
+    if frac == 0 {
+        whole.to_string()
+    } else if frac % 10 == 0 {
+        format!("{whole}.{}", frac / 10)
+    } else {
+        format!("{whole}.{frac:02}")
+    }
+}
+
+fn format_heatmap_thousandths(value: u16) -> String {
+    let whole = value / 1000;
+    let frac = value % 1000;
+    if frac == 0 {
+        whole.to_string()
+    } else if frac % 100 == 0 {
+        format!("{whole}.{}", frac / 100)
+    } else if frac % 10 == 0 {
+        format!("{whole}.{:02}", frac / 10)
+    } else {
+        format!("{whole}.{frac:03}")
+    }
+}
+
+fn format_heatmap_scalar(value: f64) -> String {
+    format!("{value}")
+}
+
+fn normalize_heatmap_range_selector(selector: &str) -> String {
+    selector
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '_'], "-")
 }
 
 fn clamp_heatmap_viewport(
@@ -745,6 +1011,7 @@ pub struct AppState<'a> {
     pub clipboard_init_error: Option<String>,
     pub copying: bool,
     pub toast: AppToast,
+    pub configuration_warning: Option<String>,
     pub file_watch: FileWatchState,
     pub compatibility_mode: bool,
     pub focus: Focus,
@@ -1529,8 +1796,13 @@ impl AppState<'_> {
         let available = self
             .treeview
             .get(self.tree_view_cursor)
-            .map(|item| item.node.borrow().content_show_modes())
-            .unwrap_or_default();
+            .and_then(|item| {
+                item.node
+                    .try_borrow()
+                    .ok()
+                    .map(|node| node.content_show_modes())
+            })
+            .unwrap_or_else(|| vec![self.content_mode]);
         self.content_show_mode_eval(available)
     }
 
@@ -1629,6 +1901,7 @@ impl AppState<'_> {
     }
 
     pub fn change_selected_dimension(&mut self, delta: isize) -> Result<EventResult> {
+        let active_mode = self.active_content_mode();
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
         let shape_len = match &node.node {
@@ -1645,7 +1918,7 @@ impl AppState<'_> {
         } else {
             next as usize
         };
-        match self.active_content_mode() {
+        match active_mode {
             ContentShowMode::Preview => {
                 if new_selected_dim != node.selected_x {
                     node.selected_dim = new_selected_dim;
@@ -2006,6 +2279,66 @@ impl AppState<'_> {
         execute_command(self, &last_command)
     }
 
+    pub fn heatmap_range_modes(&self) -> Vec<HeatmapRangeMode> {
+        let mut modes = HeatmapRangeMode::default_modes();
+        for mode in configure::current_heatmap_range_modes()
+            .into_iter()
+            .chain(self.heatmap_render.session_range_modes.iter().cloned())
+        {
+            if !modes.contains(&mode) {
+                modes.push(mode);
+            }
+        }
+        modes
+    }
+
+    pub fn sync_heatmap_configuration(&mut self) {
+        let available = self.heatmap_range_modes();
+        let mut configured = configure::current_heatmap_default_settings();
+        if !available.contains(&configured.range) {
+            configured.range = available.first().cloned().unwrap_or(HeatmapRangeMode::Auto);
+        }
+        self.heatmap_render.settings = configured;
+        self.heatmap_render.current_key = None;
+    }
+
+    pub fn add_session_heatmap_range_mode(&mut self, mode: HeatmapRangeMode) -> Result<()> {
+        let label = mode.label();
+        if self
+            .heatmap_range_modes()
+            .iter()
+            .any(|existing| existing.label().eq_ignore_ascii_case(&label))
+        {
+            return Err(AppError::InvalidCommand(format!(
+                "Heatmap range mode '{label}' already exists"
+            )));
+        }
+        self.heatmap_render.session_range_modes.push(mode.clone());
+        self.heatmap_render.settings.range = mode;
+        self.heatmap_render.current_key = None;
+        Ok(())
+    }
+
+    fn adjust_heatmap_range_mode(&mut self, delta: isize) {
+        let available = self.heatmap_range_modes();
+        if available.is_empty() {
+            return;
+        }
+        let current_index = available
+            .iter()
+            .position(|mode| *mode == self.heatmap_render.settings.range)
+            .unwrap_or_else(|| {
+                available
+                    .iter()
+                    .position(|mode| *mode == configure::current_heatmap_default_range())
+                    .unwrap_or(0)
+            });
+        let next_index =
+            (current_index as isize + delta.signum()).rem_euclid(available.len() as isize) as usize;
+        self.heatmap_render.settings.range = available[next_index].clone();
+        self.heatmap_render.current_key = None;
+    }
+
     pub fn right(&mut self, inc: isize) -> Result<EventResult> {
         match self.active_content_mode() {
             ContentShowMode::Preview => match self.segment_state.segumented {
@@ -2052,8 +2385,12 @@ impl AppState<'_> {
                     .get(self.heatmap_render.selected_setting)
                     .copied()
                     .unwrap_or(HeatmapSettingField::Colormap);
-                self.heatmap_render.settings.adjust(field, inc);
-                self.heatmap_render.current_key = None;
+                if matches!(field, HeatmapSettingField::Range) {
+                    self.adjust_heatmap_range_mode(inc);
+                } else {
+                    self.heatmap_render.settings.adjust(field, inc);
+                    self.heatmap_render.current_key = None;
+                }
                 Ok(EventResult::Redraw)
             }
         }
@@ -2112,8 +2449,12 @@ impl AppState<'_> {
                     .get(self.heatmap_render.selected_setting)
                     .copied()
                     .unwrap_or(HeatmapSettingField::Colormap);
-                self.heatmap_render.settings.adjust(field, -inc);
-                self.heatmap_render.current_key = None;
+                if matches!(field, HeatmapSettingField::Range) {
+                    self.adjust_heatmap_range_mode(-inc);
+                } else {
+                    self.heatmap_render.settings.adjust(field, -inc);
+                    self.heatmap_render.current_key = None;
+                }
                 Ok(EventResult::Redraw)
             }
         }

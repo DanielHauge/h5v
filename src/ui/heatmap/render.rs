@@ -1,3 +1,4 @@
+use hdf5_metno::types::{FloatSize, IntSize, TypeDescriptor};
 use ndarray::Array2;
 use plotters::{
     prelude::{BitMapBackend, IntoDrawingArea, Rectangle as PlotRectangle},
@@ -8,6 +9,7 @@ use ratatui::layout::Rect;
 use crate::{
     configure,
     error::AppError,
+    h5f::DatasetMeta,
     ui::state::{
         AppState, HeatmapColormap, HeatmapNormalization, HeatmapRangeMode, HeatmapRegionSelection,
         HeatmapSelectedCells, HeatmapSettings,
@@ -103,10 +105,11 @@ pub(super) fn compute_heatmap_stats<T: HeatmapNumber>(
 
 pub(super) fn compute_heatmap_color_scale<T: HeatmapNumber>(
     data: &Array2<T>,
+    attr: &DatasetMeta,
     transpose: bool,
     rows: usize,
     cols: usize,
-    range_mode: HeatmapRangeMode,
+    range_mode: &HeatmapRangeMode,
 ) -> HeatmapColorScale {
     let mut values = Vec::new();
     for row in 0..rows {
@@ -130,17 +133,84 @@ pub(super) fn compute_heatmap_color_scale<T: HeatmapNumber>(
             *values.first().unwrap_or(&f64::NAN),
             *values.last().unwrap_or(&f64::NAN),
         ),
-        HeatmapRangeMode::Percentile1 => {
-            let last = values.len().saturating_sub(1);
-            let lo = ((last as f64) * 0.01).round() as usize;
-            let hi = ((last as f64) * 0.99).round() as usize;
-            (values[lo.min(last)], values[hi.min(last)])
+        HeatmapRangeMode::MinMax => type_descriptor_range(&attr.type_descriptor).unwrap_or((
+            *values.first().unwrap_or(&f64::NAN),
+            *values.last().unwrap_or(&f64::NAN),
+        )),
+        HeatmapRangeMode::Percentile {
+            lower_bps,
+            upper_bps,
         }
+        | HeatmapRangeMode::Winsorized {
+            lower_bps,
+            upper_bps,
+        } => (
+            percentile_from_sorted(&values, *lower_bps),
+            percentile_from_sorted(&values, *upper_bps),
+        ),
+        HeatmapRangeMode::SigmaClip { sigma_milli } => {
+            let mean = values.iter().sum::<f64>() / values.len() as f64;
+            let variance = values
+                .iter()
+                .map(|value| {
+                    let delta = *value - mean;
+                    delta * delta
+                })
+                .sum::<f64>()
+                / values.len() as f64;
+            let stddev = variance.max(0.0).sqrt();
+            let sigma = f64::from(*sigma_milli) / 1000.0;
+            (mean - sigma * stddev, mean + sigma * stddev)
+        }
+        HeatmapRangeMode::Custom(mode) => (
+            resolve_range_bound(&values, mode.lower),
+            resolve_range_bound(&values, mode.upper),
+        ),
     };
+    let (min, max) = if min <= max { (min, max) } else { (max, min) };
     HeatmapColorScale {
         min,
         max,
         has_finite: true,
+    }
+}
+
+fn type_descriptor_range(type_descriptor: &TypeDescriptor) -> Option<(f64, f64)> {
+    match type_descriptor {
+        TypeDescriptor::Integer(size) => Some(match size {
+            IntSize::U1 => (i8::MIN as f64, i8::MAX as f64),
+            IntSize::U2 => (i16::MIN as f64, i16::MAX as f64),
+            IntSize::U4 => (i32::MIN as f64, i32::MAX as f64),
+            IntSize::U8 => (i64::MIN as f64, i64::MAX as f64),
+        }),
+        TypeDescriptor::Unsigned(size) => Some(match size {
+            IntSize::U1 => (u8::MIN as f64, u8::MAX as f64),
+            IntSize::U2 => (u16::MIN as f64, u16::MAX as f64),
+            IntSize::U4 => (u32::MIN as f64, u32::MAX as f64),
+            IntSize::U8 => (0.0, u64::MAX as f64),
+        }),
+        TypeDescriptor::Float(size) => Some(match size {
+            FloatSize::U4 => (f32::MIN as f64, f32::MAX as f64),
+            FloatSize::U8 => (f64::MIN, f64::MAX),
+        }),
+        TypeDescriptor::Boolean => Some((0.0, 1.0)),
+        _ => None,
+    }
+}
+
+fn percentile_from_sorted(values: &[f64], basis_points: u16) -> f64 {
+    let last = values.len().saturating_sub(1);
+    let percentile = f64::from(basis_points) / 10_000.0;
+    let index = ((last as f64) * percentile).round() as usize;
+    values[index.min(last)]
+}
+
+fn resolve_range_bound(values: &[f64], bound: crate::ui::state::HeatmapRangeBound) -> f64 {
+    match bound {
+        crate::ui::state::HeatmapRangeBound::Exact(value) => value.to_f64(),
+        crate::ui::state::HeatmapRangeBound::Percentile(basis_points) => {
+            percentile_from_sorted(values, basis_points)
+        }
     }
 }
 
@@ -322,11 +392,14 @@ pub(super) fn render_heatmap_image<T: HeatmapNumber>(
             let rgb = if !value.is_finite() || !color_scale.has_finite {
                 (nan_r, nan_g, nan_b)
             } else {
-                let normalized = normalize_heatmap_value(
-                    value,
-                    color_scale.min,
-                    color_scale.max,
-                    settings.normalization,
+                let normalized = apply_invert_colors(
+                    normalize_heatmap_value(
+                        value,
+                        color_scale.min,
+                        color_scale.max,
+                        settings.normalization,
+                    ),
+                    settings.invert_c,
                 );
                 heatmap_colormap_rgb(normalized, settings.colormap)
             };
@@ -432,6 +505,14 @@ pub(super) fn heatmap_colormap_rgb(value: f64, colormap: HeatmapColormap) -> (u8
             (gray, gray, gray)
         }
         HeatmapColormap::Inferno => inferno_rgb(value),
+    }
+}
+
+pub(super) fn apply_invert_colors(value: f64, invert_colors: bool) -> f64 {
+    if invert_colors {
+        1.0 - value.clamp(0.0, 1.0)
+    } else {
+        value
     }
 }
 

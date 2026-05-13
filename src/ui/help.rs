@@ -85,7 +85,7 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect) {
                 (
                     "View",
                     &[
-                        (&["Tab"], "preview / matrix / schema"),
+                        (&["Tab"], "preview / matrix / heatmap / schema"),
                         (&["y"], "copy selected"),
                         (
                             &["a", "d", "Delete"],

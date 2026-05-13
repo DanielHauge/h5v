@@ -18,9 +18,11 @@ pub(crate) use state::configured_symbol;
 pub(crate) use state::themed_color;
 #[allow(unused_imports)]
 pub use state::{
-    current_content_mode_order, current_symbol_theme_name, current_theme_name,
+    current_content_mode_order, current_heatmap_default_range, current_heatmap_default_settings,
+    current_heatmap_range_modes, current_symbol_theme_name, current_theme_name,
     ordered_content_modes, prefers_strong_text, reset_config, reset_symbol_theme, restore_config,
-    set_color_override, set_content_mode_order, set_symbol_override, snapshot_config,
+    set_color_override, set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges,
+    set_symbol_override, snapshot_config,
 };
 #[allow(unused_imports)]
 pub use types::ConfigSnapshot;

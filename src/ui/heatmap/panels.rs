@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-use super::render::heatmap_colormap_rgb;
+use super::render::{apply_invert_colors, heatmap_colormap_rgb};
 
 pub(super) fn render_heatmap_frame(f: &mut Frame, area: &Rect) -> Rect {
     let heatmap_block = Block::default()
@@ -53,6 +53,7 @@ pub(super) fn render_heatmap_sidebar(
         state,
         legend_summary,
         state.heatmap_render.settings.colormap,
+        state.heatmap_render.settings.invert_c,
     );
     Ok(())
 }
@@ -74,7 +75,7 @@ pub(super) fn render_heatmap_loading_sidebar(f: &mut Frame, area: &Rect) -> Resu
     Ok(())
 }
 
-pub(super) fn render_heatmap_settings(f: &mut Frame, area: &Rect, state: &AppState) {
+pub(super) fn render_heatmap_settings(f: &mut Frame, area: &Rect, state: &mut AppState) {
     let block = Block::default()
         .title(" * Settings ")
         .title_style(
@@ -89,18 +90,49 @@ pub(super) fn render_heatmap_settings(f: &mut Frame, area: &Rect, state: &AppSta
         })));
     let inner = block.inner(*area);
     f.render_widget(block, *area);
+    state.ui_layout.heatmap_settings.clear();
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     let settings = &state.heatmap_render.settings;
     let rows = [
-        ("Color", heatmap_colormap_label(settings.colormap)),
-        ("Range", heatmap_range_label(settings.range)),
-        ("InvertX", if settings.invert_x { "Yes" } else { "No" }),
-        ("InvertY", if settings.invert_y { "Yes" } else { "No" }),
-        ("Norm", heatmap_normalization_label(settings.normalization)),
+        (
+            "Color".to_string(),
+            heatmap_colormap_label(settings.colormap).to_string(),
+        ),
+        ("Range".to_string(), heatmap_range_label(&settings.range)),
+        (
+            "InvertX".to_string(),
+            if settings.invert_x { "Yes" } else { "No" }.to_string(),
+        ),
+        (
+            "InvertY".to_string(),
+            if settings.invert_y { "Yes" } else { "No" }.to_string(),
+        ),
+        (
+            "InvertC".to_string(),
+            if settings.invert_c { "Yes" } else { "No" }.to_string(),
+        ),
+        (
+            "Norm".to_string(),
+            heatmap_normalization_label(settings.normalization).to_string(),
+        ),
     ];
     let highlight_bg = configure::themed_color(|colors| colors.surface.highlight_bg);
+    for idx in 0..rows.len().min(inner.height as usize) {
+        state
+            .ui_layout
+            .heatmap_settings
+            .push(crate::ui::state::HeatmapSettingHitbox {
+                area: Rect {
+                    x: inner.x,
+                    y: inner.y + idx as u16,
+                    width: inner.width,
+                    height: 1,
+                },
+                setting: idx,
+            });
+    }
     let lines = rows
         .iter()
         .enumerate()
@@ -134,26 +166,15 @@ pub(super) fn render_heatmap_settings(f: &mut Frame, area: &Rect, state: &AppSta
 }
 
 fn heatmap_colormap_label(value: HeatmapColormap) -> &'static str {
-    match value {
-        HeatmapColormap::Turbo => "Turbo",
-        HeatmapColormap::Grayscale => "Gray",
-        HeatmapColormap::Inferno => "Inferno",
-    }
+    value.label()
 }
 
-fn heatmap_range_label(value: HeatmapRangeMode) -> &'static str {
-    match value {
-        HeatmapRangeMode::Auto => "Auto",
-        HeatmapRangeMode::Percentile1 => "1-99%",
-    }
+fn heatmap_range_label(value: &HeatmapRangeMode) -> String {
+    value.label()
 }
 
 fn heatmap_normalization_label(value: HeatmapNormalization) -> &'static str {
-    match value {
-        HeatmapNormalization::Linear => "Linear",
-        HeatmapNormalization::Log => "Log",
-        HeatmapNormalization::Sqrt => "Sqrt",
-    }
+    value.label()
 }
 
 pub(super) fn render_heatmap_region_panel(
@@ -269,6 +290,7 @@ fn render_heatmap_legend_histogram(
     state: &AppState,
     summary: &HeatmapLegendSummary,
     colormap: HeatmapColormap,
+    invert_colors: bool,
 ) {
     let block = Block::default()
         .title(" = Legend ")
@@ -310,9 +332,9 @@ fn render_heatmap_legend_histogram(
             Paragraph::new(Line::from(format!("{:.4}", summary.min))).right_aligned(),
             split[2],
         );
-        render_heatmap_legend_plot(f, &split[1], state, summary, colormap);
+        render_heatmap_legend_plot(f, &split[1], state, summary, colormap, invert_colors);
     } else {
-        render_heatmap_legend_plot(f, &split[0], state, summary, colormap);
+        render_heatmap_legend_plot(f, &split[0], state, summary, colormap, invert_colors);
     }
 }
 
@@ -322,6 +344,7 @@ fn render_heatmap_legend_plot(
     state: &AppState,
     summary: &HeatmapLegendSummary,
     colormap: HeatmapColormap,
+    invert_colors: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -345,7 +368,8 @@ fn render_heatmap_legend_plot(
 
         for y in 0..plot_height {
             let norm = 1.0 - (f64::from(y) / f64::from(plot_height.max(1)));
-            let (r, g, b) = heatmap_colormap_rgb(norm, colormap);
+            let (r, g, b) =
+                heatmap_colormap_rgb(apply_invert_colors(norm, invert_colors), colormap);
             let _ = root.draw(&PlotRectangle::new(
                 [(0, y), (legend_width, y + 1)],
                 ShapeStyle::from(&RGBColor(r, g, b)).filled(),
@@ -360,7 +384,8 @@ fn render_heatmap_legend_plot(
             let max_count = summary.histogram.iter().copied().max().unwrap_or(0).max(1);
             for y in 0..plot_height {
                 let norm = 1.0 - (f64::from(y) / f64::from(plot_height.max(1)));
-                let (hist_r, hist_g, hist_b) = heatmap_colormap_rgb(norm, colormap);
+                let (hist_r, hist_g, hist_b) =
+                    heatmap_colormap_rgb(apply_invert_colors(norm, invert_colors), colormap);
                 let idx = ((usize::try_from(plot_height - 1 - y).unwrap_or(0)
                     * summary.histogram.len())
                     / usize::try_from(plot_height.max(1)).unwrap_or(1))

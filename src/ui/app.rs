@@ -414,11 +414,19 @@ fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> 
     })
 }
 
+fn configuration_warning_message(error: &impl std::fmt::Display, keeping_previous: bool) -> String {
+    if keeping_previous {
+        format!("Configuration warning: {error}. Keeping previous settings.")
+    } else {
+        format!("Configuration warning: {error}. Using built-in settings.")
+    }
+}
+
 fn open_configuration_and_reload(
     state: &mut AppState<'_>,
     tx_events: Sender<AppEvent>,
     reset: bool,
-) -> Result<String> {
+) -> Result<AppToast> {
     let config_path = if reset {
         reset_config_path()?
     } else {
@@ -432,7 +440,9 @@ fn open_configuration_and_reload(
 
     if let Err(error) = run_lua_engine(tx_events, state.compatibility_mode) {
         log_configuration_error(&error);
-        return Err(error.into());
+        let message = configuration_warning_message(&error, true);
+        state.configuration_warning = Some(message.clone());
+        return Ok(AppToast::Warning(message));
     }
     if let Ok(Some(compatibility_mode)) =
         configure::load_config_compatibility(state.compatibility_mode)
@@ -442,15 +452,21 @@ fn open_configuration_and_reload(
             state.image_protocol_enabled = false;
         }
     }
+    state.configuration_warning = None;
     if let Some(preferred_mode) = configure::current_content_mode_order().first().copied() {
         state.content_mode = preferred_mode;
     }
+    state.sync_heatmap_configuration();
     state.compute_tree_view();
     let config_path = config_path.display();
     if reset {
-        Ok(format!("Reset configuration to default at {config_path}"))
+        Ok(AppToast::Info(format!(
+            "Reset configuration to default at {config_path}"
+        )))
     } else {
-        Ok(format!("Reloaded configuration from {config_path}"))
+        Ok(AppToast::Info(format!(
+            "Reloaded configuration from {config_path}"
+        )))
     }
 }
 
@@ -588,9 +604,8 @@ fn main_recover_loop(
     let startup_config_error = run_lua_engine(tx_events.clone(), runtime_config.compatibility_mode)
         .err()
         .map(|error| {
-            let message = format!("Configuration error: {error}");
             log_configuration_error(&error);
-            message
+            configuration_warning_message(&error, false)
         });
 
     #[allow(deprecated)]
@@ -674,6 +689,7 @@ fn main_recover_loop(
         editing: false,
         file: Some(h5f.file),
         toast: AppToast::Empty,
+        configuration_warning: startup_config_error.clone(),
         file_watch: FileWatchState {
             path: filename.clone(),
             linked: link,
@@ -724,21 +740,17 @@ fn main_recover_loop(
             cached_pages: Default::default(),
             pending_keys: Default::default(),
             tx_load_heatmap,
-            settings: state::HeatmapSettings {
-                colormap: state::HeatmapColormap::Turbo,
-                range: state::HeatmapRangeMode::Auto,
-                invert_x: false,
-                invert_y: false,
-                normalization: state::HeatmapNormalization::Linear,
-            },
+            settings: configure::current_heatmap_default_settings(),
             selected_setting: 0,
+            session_range_modes: Vec::new(),
         },
         chart_preview_state,
         ui_layout: state::UiLayoutState::default(),
     };
     if let Some(message) = startup_config_error {
-        state.toast = AppToast::Error(message);
+        state.toast = AppToast::Warning(message);
     }
+    state.sync_heatmap_configuration();
 
     state.sync_file_watch();
     state.compute_tree_view();
@@ -905,10 +917,10 @@ fn main_recover_loop(
                     }
                     EventResult::Configure { reset } => {
                         match open_configuration_and_reload(&mut state, tx_events.clone(), reset) {
-                            Ok(message) => {
+                            Ok(toast) => {
                                 terminal.clear()?;
                                 terminal.flush()?;
-                                state.toast = AppToast::Info(message);
+                                state.toast = toast;
                             }
                             Err(error) => {
                                 state.toast = AppToast::Error(error.to_string());
@@ -1294,6 +1306,16 @@ fn render_header(
                 configure::configured_symbol(|symbols| symbols.badge.compatibility_mode),
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.status.compability))
+                    .bold(),
+            )
+        } else {
+            Span::raw("")
+        },
+        if state.configuration_warning.is_some() {
+            Span::styled(
+                " ! config ",
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.toast.warning))
                     .bold(),
             )
         } else {
@@ -1742,7 +1764,9 @@ fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &
 
 #[cfg(test)]
 mod tests {
-    use super::{is_crostini_env, should_use_alternate_screen, RuntimeConfig};
+    use super::{
+        configuration_warning_message, is_crostini_env, should_use_alternate_screen, RuntimeConfig,
+    };
 
     #[test]
     fn detects_crostini_from_cros_container() {
@@ -1775,5 +1799,17 @@ mod tests {
             },
             Some("1"),
         ));
+    }
+
+    #[test]
+    fn formats_configuration_warning_by_context() {
+        assert_eq!(
+            configuration_warning_message(&"bad config", true),
+            "Configuration warning: bad config. Keeping previous settings."
+        );
+        assert_eq!(
+            configuration_warning_message(&"bad config", false),
+            "Configuration warning: bad config. Using built-in settings."
+        );
     }
 }

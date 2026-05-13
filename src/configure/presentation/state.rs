@@ -3,7 +3,7 @@ use std::sync::{LazyLock, RwLock};
 use ratatui::prelude::Color;
 
 use crate::compat;
-use crate::ui::state::ContentShowMode;
+use crate::ui::state::{ContentShowMode, HeatmapRangeMode, HeatmapSettings};
 
 use super::{
     catalog::{available_color_names, available_symbol_names},
@@ -35,6 +35,8 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
         colors: ThemeColors::for_theme(ThemeName::Dark),
         symbols: UiSymbols::for_theme(symbol_theme),
         content_mode_order: default_content_mode_order(),
+        heatmap_range_modes: Vec::new(),
+        heatmap_default_settings: HeatmapSettings::default(),
     })
 });
 
@@ -46,6 +48,8 @@ pub fn reset_config(theme: ThemeName) {
         state.colors = ThemeColors::for_theme(theme);
         state.symbols = UiSymbols::for_theme(symbol_theme);
         state.content_mode_order = default_content_mode_order();
+        state.heatmap_range_modes = Vec::new();
+        state.heatmap_default_settings = HeatmapSettings::default();
     });
 }
 
@@ -63,6 +67,8 @@ pub fn snapshot_config() -> ConfigSnapshot {
         colors: state.colors.clone(),
         symbols: state.symbols.clone(),
         content_mode_order: state.content_mode_order.clone(),
+        heatmap_range_modes: state.heatmap_range_modes.clone(),
+        heatmap_default_settings: state.heatmap_default_settings.clone(),
     })
 }
 
@@ -73,6 +79,8 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
         state.colors = snapshot.colors;
         state.symbols = snapshot.symbols;
         state.content_mode_order = snapshot.content_mode_order;
+        state.heatmap_range_modes = snapshot.heatmap_range_modes;
+        state.heatmap_default_settings = snapshot.heatmap_default_settings;
     });
 }
 
@@ -135,6 +143,31 @@ pub fn ordered_content_modes(available: &[ContentShowMode]) -> Vec<ContentShowMo
 
 pub fn current_content_mode_order() -> Vec<ContentShowMode> {
     with_config_read(|state| state.content_mode_order.clone())
+}
+
+pub fn set_heatmap_ranges(range_modes: &[HeatmapRangeMode], default_range: &HeatmapRangeMode) {
+    with_config_write(|state| {
+        state.heatmap_range_modes = range_modes.to_vec();
+        state.heatmap_default_settings.range = default_range.clone();
+    });
+}
+
+pub fn current_heatmap_range_modes() -> Vec<HeatmapRangeMode> {
+    with_config_read(|state| state.heatmap_range_modes.clone())
+}
+
+pub fn set_heatmap_default_settings(default_settings: &HeatmapSettings) {
+    with_config_write(|state| {
+        state.heatmap_default_settings = default_settings.clone();
+    });
+}
+
+pub fn current_heatmap_default_settings() -> HeatmapSettings {
+    with_config_read(|state| state.heatmap_default_settings.clone())
+}
+
+pub fn current_heatmap_default_range() -> HeatmapRangeMode {
+    with_config_read(|state| state.heatmap_default_settings.range.clone())
 }
 
 pub fn prefers_strong_text() -> bool {

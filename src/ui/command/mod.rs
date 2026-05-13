@@ -55,6 +55,7 @@ pub enum CommandId {
     Repeat,
     MultiChart,
     Press,
+    Heatmap,
     Noop,
 }
 

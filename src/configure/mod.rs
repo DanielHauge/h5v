@@ -20,8 +20,10 @@ pub use colors::{
 pub use presentation::reset_symbol_theme;
 #[allow(unused_imports)]
 pub use presentation::{
-    current_content_mode_order, ordered_content_modes, reset_config, restore_config,
-    set_content_mode_order, snapshot_config, ConfigSnapshot,
+    current_content_mode_order, current_heatmap_default_range, current_heatmap_default_settings,
+    current_heatmap_range_modes, ordered_content_modes, reset_config, restore_config,
+    set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges, snapshot_config,
+    ConfigSnapshot,
 };
 pub(crate) use symbols::configured_symbol;
 #[allow(unused_imports)]

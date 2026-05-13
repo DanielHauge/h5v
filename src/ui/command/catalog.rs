@@ -1,9 +1,9 @@
 use super::{
     handlers::{
         handle_attr, handle_col, handle_configure, handle_dim, handle_down, handle_focus,
-        handle_goto, handle_help, handle_index, handle_left, handle_mchart, handle_mode,
-        handle_page_down, handle_page_up, handle_press, handle_reload, handle_repeat, handle_right,
-        handle_row, handle_seek, handle_toggle_tree, handle_up, handle_x,
+        handle_goto, handle_heatmap, handle_help, handle_index, handle_left, handle_mchart,
+        handle_mode, handle_page_down, handle_page_up, handle_press, handle_reload, handle_repeat,
+        handle_right, handle_row, handle_seek, handle_toggle_tree, handle_up, handle_x,
     },
     CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor, CommandId,
 };
@@ -58,6 +58,24 @@ const ACTION_ARG: CommandArgSpec = CommandArgSpec {
 
 const OPTIONAL_WORD_ARG: CommandArgSpec = CommandArgSpec {
     name: "arg",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const OPTIONAL_WORD_ARG_2: CommandArgSpec = CommandArgSpec {
+    name: "arg2",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const OPTIONAL_WORD_ARG_3: CommandArgSpec = CommandArgSpec {
+    name: "arg3",
+    kind: CommandArgKind::Word,
+    required: false,
+};
+
+const OPTIONAL_WORD_ARG_4: CommandArgSpec = CommandArgSpec {
+    name: "arg4",
     kind: CommandArgKind::Word,
     required: false,
 };
@@ -316,6 +334,22 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         keybindings: &[],
         args: &[KEY_ARG_1, KEY_ARG_2, KEY_ARG_3, KEY_ARG_4],
         handler: handle_press,
+    },
+    CommandDescriptor {
+        id: CommandId::Heatmap,
+        name: "heatmap",
+        aliases: &[],
+        description: "Manage heatmap-specific settings such as range presets",
+        category: CommandCategory::View,
+        keybindings: &[],
+        args: &[
+            ACTION_ARG,
+            OPTIONAL_WORD_ARG,
+            OPTIONAL_WORD_ARG_2,
+            OPTIONAL_WORD_ARG_3,
+            OPTIONAL_WORD_ARG_4,
+        ],
+        handler: handle_heatmap,
     },
 ];
 

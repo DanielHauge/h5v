@@ -261,6 +261,18 @@ fn handle_left_click(
         return Ok(EventResult::Redraw);
     }
 
+    if let Some(setting_hitbox) = state
+        .ui_layout
+        .heatmap_settings
+        .iter()
+        .find(|hitbox| point_in_rect(hitbox.area, column, row))
+        .copied()
+    {
+        state.focus = Focus::Content;
+        state.heatmap_render.selected_setting = setting_hitbox.setting;
+        return Ok(EventResult::Redraw);
+    }
+
     if let Some(matrix_row) = state
         .ui_layout
         .matrix_rows
