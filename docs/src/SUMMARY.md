@@ -8,6 +8,7 @@
 - [HDF5 feature support](./hdf5-support.md)
 - [Preview types](./previews.md)
 - [Matrix views](./matrix.md)
+- [Heatmap](./heatmap.md)
 - [Images](./images.md)
   - [Image conventions](./image-conventions.md)
 - [Compound datasets](./compound-datasets.md)

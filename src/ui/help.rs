@@ -107,6 +107,16 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect) {
                         (&["Ctrl-X", "Ctrl-A"], "index - / +"),
                     ],
                 ),
+                (
+                    "Heatmap",
+                    &[
+                        (&["↑↓", "←→"], "setting row / value"),
+                        (&["PgUp", "PgDn"], "heatmap page"),
+                        (&["z", "Z", "0", "v"], "zoom in / out / reset / clear"),
+                        (&["H", "J", "K", "L"], "pan zoomed viewport"),
+                        (&["mouse"], "left select, wheel zoom, right-drag pan"),
+                    ],
+                ),
             ],
         ))
         .style(column_style)

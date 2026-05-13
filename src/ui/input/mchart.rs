@@ -145,20 +145,20 @@ pub(crate) fn handle_mchart_event(
             KeyEventKind::Release => Ok(EventResult::Continue),
         },
         Event::Mouse(mouse_event) => match mouse_event.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Down(MouseButton::Right) => {
                 state
                     .multi_chart
                     .start_drag_at_position(mouse_event.column, mouse_event.row);
                 Ok(EventResult::Continue)
             }
-            MouseEventKind::Drag(MouseButton::Left) => {
+            MouseEventKind::Drag(MouseButton::Right) => {
                 if state.multi_chart.drag_to_position(mouse_event.column) {
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Continue)
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => {
+            MouseEventKind::Up(MouseButton::Right) => {
                 if state
                     .multi_chart
                     .finish_drag_at_position(mouse_event.column)

@@ -34,6 +34,7 @@
 | --- |
 | `preview` |
 | `matrix` |
+| `heatmap` |
 
 ## Color categories
 

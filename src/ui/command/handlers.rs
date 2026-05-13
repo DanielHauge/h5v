@@ -122,7 +122,7 @@ pub(super) fn handle_mode(
             command.word_arg(0)?
         )));
     }
-    state.content_mode = requested_mode;
+    state.set_content_mode(requested_mode);
     Ok(EventResult::Redraw)
 }
 

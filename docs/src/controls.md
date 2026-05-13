@@ -56,6 +56,19 @@
 
 Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 
+## Heatmap
+
+| Keys | Action |
+| --- | --- |
+| `Up`, `Down` | Select heatmap setting row |
+| `Left`, `Right` | Change the selected heatmap setting |
+| `PageUp`, `PageDown` | Move through segmented heatmap pages |
+| `z`, `Z` | Zoom in or out |
+| `0` | Reset the heatmap viewport |
+| `v` | Clear the explicit heatmap selection |
+| `H`, `J`, `K`, `L` | Pan the zoomed viewport |
+| `y` | Copy the active viewport or selection summary |
+
 ## Mouse
 
 | Action | Effect |
@@ -64,6 +77,10 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | Click the selected group or compound container again | Toggle expand or collapse |
 | Click `Load more` again | Reveal more child rows |
 | Click a matrix cell | Move the matrix cursor there |
+| Left click a heatmap cell | Select a heatmap region |
+| Mouse wheel over heatmap | Anchored zoom on the hovered cell |
+| Right click on a heatmap selection | Zoom into the selected region |
+| Right-click drag on heatmap or multichart | Pan |
 
 ## Command minibuffer
 
@@ -97,3 +114,4 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | `-`, `Shift+Down` | Zoom out |
 | `h`, `Shift+Left` | Pan left |
 | `l`, `Shift+Right` | Pan right |
+| Right-click drag | Pan horizontally |

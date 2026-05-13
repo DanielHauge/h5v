@@ -63,6 +63,14 @@ fn copy_text_to_clipboard(
     ))
 }
 
+fn redraw_if(changed: bool) -> EventResult {
+    if changed {
+        EventResult::Redraw
+    } else {
+        EventResult::Continue
+    }
+}
+
 fn copy_image_to_clipboard(
     state: &mut AppState<'_>,
     width: usize,
@@ -181,6 +189,16 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
 
     format_dataset_value_for_edit(&dataset, &meta, selection.as_ref())
         .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))
+}
+
+fn selected_heatmap_copy_text(state: &mut AppState<'_>) -> Result<String, EventResult> {
+    let Some(region) = state.heatmap_region.as_ref() else {
+        return Err(EventResult::Toast(
+            AppToast::Warning("Heatmap selection is not available yet".to_string()),
+            false,
+        ));
+    };
+    Ok(region.summary())
 }
 
 fn enum_value_to_string(enum_type: &EnumType, value: u64) -> String {
@@ -507,6 +525,14 @@ fn selected_content_edit_request(
                 Some(exact_element_selection(&indices))
             }
         }
+        ContentShowMode::Heatmap => {
+            return Err(EventResult::Toast(
+                AppToast::Warning(
+                    "Heatmap mode is read-only for now; use Matrix mode to edit values".to_string(),
+                ),
+                false,
+            ));
+        }
     };
     let edit_name_hint = meta.virtual_path().unwrap_or(&dataset.name()).to_string();
 
@@ -561,6 +587,16 @@ fn apply_content_edit_request(
     state.img_state.protocol = None;
     state.img_state.clipboard_image = None;
     state.img_state.error = None;
+    state.heatmap_viewport_region = None;
+    state.heatmap_region = None;
+    state.heatmap_render.current_key = None;
+    state.heatmap_render.current_selection = None;
+    state.heatmap_render.current_slice_summary = None;
+    state.heatmap_render.viewport = None;
+    state.heatmap_render.selected_cells = None;
+    state.heatmap_render.segment = None;
+    state.heatmap_render.cached_pages.clear();
+    state.heatmap_render.pending_keys.clear();
     state.acknowledge_file_write();
 
     Ok(EventResult::Toast(
@@ -602,6 +638,10 @@ pub fn handle_normal_content_event(
                         Ok(EventResult::Redraw)
                     }
                     (
+                        Some(ContentAction::Move(Direction::Left, amount)),
+                        ContentShowMode::Heatmap,
+                    ) => state.left(amount as isize),
+                    (
                         Some(ContentAction::Move(Direction::Right, amount)),
                         ContentShowMode::Matrix,
                     ) => {
@@ -625,6 +665,10 @@ pub fn handle_normal_content_event(
                         state.matrix_view_state.cursor_col = new_cursor;
                         Ok(EventResult::Redraw)
                     }
+                    (
+                        Some(ContentAction::Move(Direction::Right, amount)),
+                        ContentShowMode::Heatmap,
+                    ) => state.right(amount as isize),
                     (Some(ContentAction::Move(Direction::Up, amount)), ContentShowMode::Matrix) => {
                         let max = state
                             .matrix_view_state
@@ -644,6 +688,10 @@ pub fn handle_normal_content_event(
                         state.matrix_view_state.cursor_row = new_cursor;
                         Ok(EventResult::Redraw)
                     }
+                    (
+                        Some(ContentAction::Move(Direction::Up, amount)),
+                        ContentShowMode::Heatmap,
+                    ) => state.up(amount),
                     (
                         Some(ContentAction::Move(Direction::Down, amount)),
                         ContentShowMode::Matrix,
@@ -670,6 +718,10 @@ pub fn handle_normal_content_event(
                     }
                     (
                         Some(ContentAction::Move(Direction::Down, amount)),
+                        ContentShowMode::Heatmap,
+                    ) => state.down(amount),
+                    (
+                        Some(ContentAction::Move(Direction::Down, amount)),
                         ContentShowMode::Preview,
                     ) => state.down(amount),
                     (
@@ -685,6 +737,15 @@ pub fn handle_normal_content_event(
                         ContentShowMode::Preview,
                     ) => state.left(amount as isize),
                     (Some(ContentAction::Edit), _) => {
+                        if matches!(content_mode, ContentShowMode::Heatmap) {
+                            return Ok(EventResult::Toast(
+                                AppToast::Info(
+                                    "Heatmap mode is read-only for now; use Matrix mode to edit values"
+                                        .to_string(),
+                                ),
+                                false,
+                            ));
+                        }
                         let request = match selected_content_edit_request(state) {
                             Ok(request) => request,
                             Err(event_result) => return Ok(event_result),
@@ -701,6 +762,40 @@ pub fn handle_normal_content_event(
                         };
                         copy_text_to_clipboard(state, text, "Copied matrix value to clipboard")
                     }
+                    (Some(ContentAction::Copy), ContentShowMode::Heatmap) => {
+                        let text = match selected_heatmap_copy_text(state) {
+                            Ok(text) => text,
+                            Err(event_result) => return Ok(event_result),
+                        };
+                        copy_text_to_clipboard(state, text, "Copied heatmap region to clipboard")
+                    }
+                    (Some(ContentAction::HeatmapZoomIn), ContentShowMode::Heatmap) => {
+                        Ok(redraw_if(state.zoom_heatmap(None, true)))
+                    }
+                    (Some(ContentAction::HeatmapZoomOut), ContentShowMode::Heatmap) => {
+                        Ok(redraw_if(state.zoom_heatmap(None, false)))
+                    }
+                    (Some(ContentAction::HeatmapResetView), ContentShowMode::Heatmap) => {
+                        Ok(redraw_if(state.reset_heatmap_view()))
+                    }
+                    (Some(ContentAction::HeatmapClearSelection), ContentShowMode::Heatmap) => {
+                        Ok(redraw_if(state.clear_heatmap_selection()))
+                    }
+                    (
+                        Some(ContentAction::HeatmapPan(Direction::Left)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.pan_heatmap_by(-1, 0))),
+                    (
+                        Some(ContentAction::HeatmapPan(Direction::Right)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.pan_heatmap_by(1, 0))),
+                    (Some(ContentAction::HeatmapPan(Direction::Up)), ContentShowMode::Heatmap) => {
+                        Ok(redraw_if(state.pan_heatmap_by(0, -1)))
+                    }
+                    (
+                        Some(ContentAction::HeatmapPan(Direction::Down)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.pan_heatmap_by(0, 1))),
                     _ => Ok(EventResult::Continue),
                 }
             }

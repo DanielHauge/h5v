@@ -1,12 +1,9 @@
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
-    style::Style,
-    text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
+    layout::Rect,
+    widgets::{Scrollbar, ScrollbarState},
     Frame,
 };
 
-use crate::configure;
 use crate::error::AppError;
 
 pub struct SegmentDisplayInfo<'a> {
@@ -17,14 +14,6 @@ pub struct SegmentDisplayInfo<'a> {
     pub range_end: usize,
     pub total_items: usize,
     pub unit: &'a str,
-}
-
-fn segment_body_style() -> Style {
-    let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
-    if configure::prefers_strong_text() {
-        style = style.bold();
-    }
-    style
 }
 
 pub fn render_position_scroll(
@@ -45,111 +34,7 @@ pub fn render_position_scroll(
     Ok(())
 }
 
-pub fn render_segment_panel(
-    f: &mut Frame,
-    area: &Rect,
-    info: &SegmentDisplayInfo<'_>,
-) -> Result<(), AppError> {
-    let block = Block::default()
-        .title(format!(
-            " {} {}/{} ",
-            info.title,
-            info.current.saturating_add(1),
-            info.total.max(1)
-        ))
-        .title_style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                .bold(),
-        )
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
-        )
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3)));
-    let inner = block.inner(*area);
-    f.render_widget(block, *area);
-
-    let split = Layout::horizontal([Constraint::Min(1), Constraint::Length(2)]).split(inner);
-    let [text_area, scroll_area] = split.as_ref() else {
-        return Ok(());
-    };
-
-    let size = info.range_end.saturating_sub(info.range_start);
-    let start_pct = if info.total_items == 0 {
-        0.0
-    } else {
-        (info.range_start as f64 / info.total_items as f64) * 100.0
-    };
-    let end_pct = if info.total_items == 0 {
-        0.0
-    } else {
-        (info.range_end as f64 / info.total_items as f64) * 100.0
-    };
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                "range ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(
-                format!(
-                    "{}..{}",
-                    compact_count(info.range_start),
-                    compact_count(info.range_end.saturating_sub(1))
-                ),
-                segment_body_style(),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "size  ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(
-                format!("{} {}", compact_count(size), info.unit),
-                segment_body_style(),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "total ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(
-                format!("{} {}", compact_count(info.total_items), info.unit),
-                segment_body_style(),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "cover ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(
-                format!("{start_pct:.1}-{end_pct:.1}%"),
-                segment_body_style(),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "nav   ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled("j/k PgUp/Dn", segment_body_style()),
-        ]),
-    ];
-    f.render_widget(
-        Paragraph::new(lines)
-            .style(segment_body_style())
-            .wrap(Wrap { trim: false }),
-        *text_area,
-    );
-    render_position_scroll(f, scroll_area, info.total, info.current, 1)
-}
-
-fn compact_count(value: usize) -> String {
+pub(crate) fn compact_count(value: usize) -> String {
     match value {
         0..=999 => value.to_string(),
         1_000..=999_999 => format!("{:.1}k", value as f64 / 1_000.0),

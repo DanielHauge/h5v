@@ -4,6 +4,7 @@ pub mod command;
 pub mod command_view;
 pub mod dims;
 pub mod edit;
+pub mod heatmap;
 pub mod help;
 pub mod image_preview;
 pub mod input;

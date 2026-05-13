@@ -37,6 +37,7 @@ use crate::{
     h5f::{self, HasPath, Node, NodeType},
     ui::{
         edit::edit_existing_file,
+        heatmap::{handle_heatmap_load, HEATMAP_CACHE_CAPACITY},
         image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
         input::EventResult,
         mchart::MultiChartState,
@@ -45,7 +46,7 @@ use crate::{
     GIT_VERSION, GIT_VERSION_SHORT,
 };
 
-use super::state::{ChartPreviewKey, ImageLoadKey};
+use super::state::{ChartPreviewKey, HeatmapLoadedPage, HeatmapRenderKey, ImageLoadKey};
 use super::{
     command::{execute_command, parse_command_text, CommandState, StartupCommand},
     command_view::render_command_dialog,
@@ -300,6 +301,17 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
+    state.heatmap_viewport_region = None;
+    state.heatmap_region = None;
+    state.heatmap_render.current_key = None;
+    state.heatmap_render.current_selection = None;
+    state.heatmap_render.current_slice_summary = None;
+    state.heatmap_render.viewport = None;
+    state.heatmap_render.selected_cells = None;
+    state.heatmap_render.drag_state = None;
+    state.heatmap_render.segment = None;
+    state.heatmap_render.cached_pages.clear();
+    state.heatmap_render.pending_keys.clear();
 }
 
 fn placeholder_root(path: &str) -> Rc<std::cell::RefCell<h5f::H5FNode>> {
@@ -600,6 +612,7 @@ fn main_recover_loop(
     let tx_chart_preview_resize = handle_chartpreview_resize(tx_events.clone());
     let tx_load_chartpreview =
         handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
+    let tx_load_heatmap = handle_heatmap_load(tx_events.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -698,6 +711,28 @@ fn main_recover_loop(
             .unwrap_or(ContentShowMode::Preview),
         img_state,
         matrix_view_state,
+        heatmap_viewport_region: None,
+        heatmap_region: None,
+        heatmap_render: state::HeatmapRenderState {
+            current_key: None,
+            current_selection: None,
+            current_slice_summary: None,
+            viewport: None,
+            selected_cells: None,
+            drag_state: None,
+            segment: None,
+            cached_pages: Default::default(),
+            pending_keys: Default::default(),
+            tx_load_heatmap,
+            settings: state::HeatmapSettings {
+                colormap: state::HeatmapColormap::Turbo,
+                range: state::HeatmapRangeMode::Auto,
+                invert_x: false,
+                invert_y: false,
+                normalization: state::HeatmapNormalization::Linear,
+            },
+            selected_setting: 0,
+        },
         chart_preview_state,
         ui_layout: state::UiLayoutState::default(),
     };
@@ -996,6 +1031,56 @@ fn main_recover_loop(
                     })?;
                 }
             },
+            AppEvent::HeatmapLoad(heatmap_loaded_result) => match heatmap_loaded_result {
+                HeatmapLoadedResult::Success { page } => {
+                    state.heatmap_render.pending_keys.remove(&page.key);
+                    let should_redraw =
+                        state.heatmap_render.current_key.as_ref() == Some(&page.key);
+                    if let Some(image) = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
+                        page.pixel_width,
+                        page.pixel_height,
+                        page.rgb_bytes,
+                    ) {
+                        let dyn_img = image::DynamicImage::ImageRgb8(image);
+                        state
+                            .heatmap_render
+                            .cached_pages
+                            .retain(|entry| entry.key != page.key);
+                        state
+                            .heatmap_render
+                            .cached_pages
+                            .push_back(state::HeatmapCachedPage {
+                                key: page.key,
+                                protocol: state.multi_chart.picker.new_resize_protocol(dyn_img),
+                                slice_summary: page.slice_summary,
+                                legend_summary: page.legend_summary,
+                                viewport_selection: page.viewport_selection,
+                                selection: page.selection,
+                            });
+                        while state.heatmap_render.cached_pages.len() > HEATMAP_CACHE_CAPACITY {
+                            state.heatmap_render.cached_pages.pop_front();
+                        }
+                        if should_redraw {
+                            terminal.draw(|f| {
+                                draw_closure(f, &mut state);
+                            })?;
+                        }
+                    }
+                }
+                HeatmapLoadedResult::Failure { key, message } => {
+                    state.heatmap_render.pending_keys.remove(&key);
+                    if state.heatmap_render.current_key.as_ref() == Some(&key) {
+                        state.toast =
+                            AppToast::Error(format!("Heatmap prefetch failed: {message}"));
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
+                }
+                HeatmapLoadedResult::Dropped { key } => {
+                    state.heatmap_render.pending_keys.remove(&key);
+                }
+            },
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
                     terminal.draw(|f| {
@@ -1076,6 +1161,7 @@ pub enum AppEvent {
     ImageLoad(ImageLoadedResult),
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
+    HeatmapLoad(HeatmapLoadedResult),
     PreviewDebounceExpired(u64),
     Toast(AppToast),
     FileChanged,
@@ -1132,6 +1218,20 @@ pub enum ChartPreviewLoadedResult {
     Failure {
         key: ChartPreviewKey,
         message: String,
+    },
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum HeatmapLoadedResult {
+    Success {
+        page: HeatmapLoadedPage,
+    },
+    Failure {
+        key: HeatmapRenderKey,
+        message: String,
+    },
+    Dropped {
+        key: HeatmapRenderKey,
     },
 }
 

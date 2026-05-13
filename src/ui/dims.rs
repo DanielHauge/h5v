@@ -10,7 +10,10 @@ use ratatui::{
 
 use crate::{configure, h5f::H5FNode};
 
-use super::state::AppState;
+use super::{
+    segment_scroll::{compact_count, SegmentDisplayInfo},
+    state::AppState,
+};
 
 pub fn render_dim_selector(
     f: &mut Frame,
@@ -18,6 +21,7 @@ pub fn render_dim_selector(
     node: &mut H5FNode,
     shape: &[usize],
     row_columns: bool,
+    segment_info: Option<&SegmentDisplayInfo<'_>>,
 ) -> Result<(), Error> {
     node.sync_selection_rank(shape.len());
     let x_selection = node.selected_x;
@@ -68,6 +72,16 @@ pub fn render_dim_selector(
 
     let shape_strings = shape.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let bounds: Vec<u16> = shape_strings.iter().map(|s| s.len() as u16).collect();
+    let dims_width = bounds.iter().map(|s| s.max(&3)).copied().sum::<u16>()
+        + shape.len().saturating_sub(1) as u16 * 3;
+    let (dims_area, segment_area) = if segment_info.is_some() && dims_area.width > dims_width + 14 {
+        let split = Layout::horizontal([Constraint::Length(dims_width), Constraint::Min(12)])
+            .spacing(2)
+            .split(dims_area);
+        (split[0], Some(split[1]))
+    } else {
+        (dims_area, None)
+    };
     let (segments, spacers) = Layout::default()
         .direction(Direction::Horizontal)
         .spacing(3)
@@ -167,7 +181,79 @@ pub fn render_dim_selector(
         }
     }
 
+    if let (Some(info), Some(segment_area)) = (segment_info, segment_area) {
+        render_inline_segment_info(f, &segment_area, info);
+    }
+
     Ok(())
+}
+
+fn render_inline_segment_info(f: &mut Frame, area: &Rect, info: &SegmentDisplayInfo<'_>) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let size = info.range_end.saturating_sub(info.range_start);
+    let start_pct = if info.total_items == 0 {
+        0.0
+    } else {
+        (info.range_start as f64 / info.total_items as f64) * 100.0
+    };
+    let end_pct = if info.total_items == 0 {
+        0.0
+    } else {
+        (info.range_end as f64 / info.total_items as f64) * 100.0
+    };
+    let split = Layout::horizontal([Constraint::Length(1), Constraint::Min(1)]).split(*area);
+    let separator_style =
+        Style::default().fg(configure::themed_color(|colors| colors.surface.break_line));
+    f.render_widget(Paragraph::new("│\n│").style(separator_style), split[0]);
+    let label_style = Style::default().fg(configure::themed_color(|colors| colors.text.type_desc));
+    let value_style = if configure::prefers_strong_text() {
+        Style::default()
+            .fg(configure::themed_color(|colors| colors.text.primary))
+            .bold()
+    } else {
+        Style::default().fg(configure::themed_color(|colors| colors.text.primary))
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!(
+                    "{} {}/{}  ",
+                    info.title,
+                    info.current.saturating_add(1),
+                    info.total.max(1)
+                ),
+                value_style,
+            ),
+            Span::styled("range ", label_style),
+            Span::styled(
+                format!(
+                    "{}..{}  ",
+                    compact_count(info.range_start),
+                    compact_count(info.range_end.saturating_sub(1))
+                ),
+                value_style,
+            ),
+            Span::styled("size ", label_style),
+            Span::styled(
+                format!("{} {}", compact_count(size), info.unit),
+                value_style,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("cover ", label_style),
+            Span::styled(format!("{start_pct:.1}-{end_pct:.1}%  "), value_style),
+            Span::styled("total ", label_style),
+            Span::styled(
+                format!("{} {}  ", compact_count(info.total_items), info.unit),
+                value_style,
+            ),
+            Span::styled("nav ", label_style),
+            Span::styled("j/k PgUp/Dn", value_style),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines), split[1]);
 }
 
 pub struct MatrixSelection {

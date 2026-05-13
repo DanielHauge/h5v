@@ -232,6 +232,9 @@ impl H5FNode {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
                         }
+                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                            result.push(ContentShowMode::Heatmap);
+                        }
                         result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Opaque => {
@@ -245,11 +248,17 @@ impl H5FNode {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
                         }
+                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                            result.push(ContentShowMode::Heatmap);
+                        }
                         result.push(ContentShowMode::Preview);
                     }
                     MatrixRenderType::Int64 => {
                         if dataset_meta.shape.iter().any(|x| *x > 1) {
                             result.push(ContentShowMode::Matrix);
+                        }
+                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                            result.push(ContentShowMode::Heatmap);
                         }
                         result.push(ContentShowMode::Preview);
                     }
@@ -307,6 +316,7 @@ mod tests {
         ui::state::ContentShowMode,
     };
     use hdf5_metno::types::TypeDescriptor;
+    use ndarray::arr2;
 
     #[test]
     fn file_nodes_support_preview_mode() {
@@ -430,5 +440,89 @@ mod tests {
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+    }
+
+    #[test]
+    fn rank_two_numeric_datasets_support_heatmap_mode() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(arr2(&[[1.0_f64, 2.0_f64], [3.0_f64, 4.0_f64]]).view())
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "values".to_string(),
+                shape: vec![2, 2],
+                data_type: "float64".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8),
+                data_bytesize: 8,
+                storage_required: 32,
+                total_bytes: 32,
+                total_elems: 4,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::Float64),
+                encoding: Encoding::UTF8,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: None,
+            },
+        ));
+
+        assert_eq!(
+            node.content_show_modes(),
+            vec![
+                ContentShowMode::Matrix,
+                ContentShowMode::Heatmap,
+                ContentShowMode::Preview
+            ]
+        );
+    }
+
+    #[test]
+    fn rank_one_numeric_datasets_do_not_support_heatmap_mode() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1.0_f64, 2.0_f64])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "values".to_string(),
+                shape: vec![2],
+                data_type: "float64".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8),
+                data_bytesize: 8,
+                storage_required: 16,
+                total_bytes: 16,
+                total_elems: 2,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::Float64),
+                encoding: Encoding::UTF8,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: None,
+            },
+        ));
+
+        assert_eq!(
+            node.content_show_modes(),
+            vec![ContentShowMode::Matrix, ContentShowMode::Preview]
+        );
     }
 }

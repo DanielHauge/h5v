@@ -16,6 +16,7 @@ use crate::{
     sprint_typedesc::MatrixRenderType,
     ui::{
         self,
+        heatmap::render_heatmap,
         matrix::{DefaultMatrixResultRenderIntercept, EnumRenderer},
     },
 };
@@ -63,7 +64,9 @@ pub fn render_main_display(
     state.ui_layout.matrix_cells.clear();
 
     let current_display_mode = &state.content_mode;
-    let supported_display_modes = configure::ordered_content_modes(&node.content_show_modes());
+    let supported_display_modes = configure::ordered_content_modes(
+        &state.filter_runtime_content_modes(node.content_show_modes()),
+    );
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {
             Node::Dataset(_, meta) if meta.is_compound_container() => "Compound",
@@ -107,6 +110,7 @@ pub fn render_main_display(
             ContentShowMode::Matrix => {
                 configure::configured_symbol(|symbols| symbols.title.matrix_tab)
             }
+            ContentShowMode::Heatmap => "# Heatmap",
         };
         tab_layout.push((*x, title, Line::from(title).width() as u16));
 
@@ -182,7 +186,7 @@ pub fn render_main_display(
         )
         .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
-    let available = node.content_show_modes();
+    let available = state.filter_runtime_content_modes(node.content_show_modes());
 
     match state.content_show_mode_eval(available) {
         ContentShowMode::Preview => render_preview(f, &content_area, &mut node, state),
@@ -347,6 +351,7 @@ pub fn render_main_display(
                 },
             }
         }
+        ContentShowMode::Heatmap => render_heatmap(f, &content_area, &mut node, state)?,
     }
 
     Ok(())

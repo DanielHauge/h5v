@@ -54,6 +54,11 @@ pub enum ContentAction {
     Move(Direction, usize),
     Edit,
     Copy,
+    HeatmapZoomIn,
+    HeatmapZoomOut,
+    HeatmapResetView,
+    HeatmapClearSelection,
+    HeatmapPan(Direction),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +223,14 @@ pub fn content_action(key: &KeyEvent) -> Option<ContentAction> {
         }
         (KeyCode::Enter, _) | (KeyCode::Char('e'), _) => Some(ContentAction::Edit),
         (KeyCode::Char('y'), _) => Some(ContentAction::Copy),
+        (KeyCode::Char('z'), _) => Some(ContentAction::HeatmapZoomIn),
+        (KeyCode::Char('Z'), _) => Some(ContentAction::HeatmapZoomOut),
+        (KeyCode::Char('0'), _) => Some(ContentAction::HeatmapResetView),
+        (KeyCode::Char('v'), _) => Some(ContentAction::HeatmapClearSelection),
+        (KeyCode::Char('H'), _) => Some(ContentAction::HeatmapPan(Direction::Left)),
+        (KeyCode::Char('L'), _) => Some(ContentAction::HeatmapPan(Direction::Right)),
+        (KeyCode::Char('K'), _) => Some(ContentAction::HeatmapPan(Direction::Up)),
+        (KeyCode::Char('J'), _) => Some(ContentAction::HeatmapPan(Direction::Down)),
         _ => None,
     }
 }

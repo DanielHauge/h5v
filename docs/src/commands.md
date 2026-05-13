@@ -38,6 +38,17 @@ configure
 configure reset
 ```
 
+Heatmap view control:
+
+```text
+up
+down
+left
+right
+page-up
+page-down
+```
+
 Selection:
 
 ```text

@@ -343,7 +343,7 @@ fn render_matrix_with_reader<T: Display>(
         }
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
-        render_dim_selector(f, &areas_split[0], node, &attr.shape, true)?;
+        render_dim_selector(f, &areas_split[0], node, &attr.shape, true, None)?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,

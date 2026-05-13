@@ -51,6 +51,19 @@
 | `preview` |
 | `matrix` |
 
+## Heatmap view command mapping
+
+Heatmap uses the existing movement commands:
+
+| Command | Effect in heatmap |
+| --- | --- |
+| `up [amount]` | Move the selected heatmap setting row |
+| `down [amount]` | Move the selected heatmap setting row |
+| `left [amount]` | Change the selected heatmap setting value |
+| `right [amount]` | Change the selected heatmap setting value |
+| `page-up` | Move to the previous segmented heatmap page |
+| `page-down` | Move to the next segmented heatmap page |
+
 ## Selection directions
 
 | Direction |

@@ -20,7 +20,11 @@ fn default_symbol_theme() -> SymbolThemeName {
 }
 
 fn default_content_mode_order() -> Vec<ContentShowMode> {
-    vec![ContentShowMode::Preview, ContentShowMode::Matrix]
+    vec![
+        ContentShowMode::Preview,
+        ContentShowMode::Matrix,
+        ContentShowMode::Heatmap,
+    ]
 }
 
 static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {

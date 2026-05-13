@@ -122,7 +122,7 @@ fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>,
                 let value = value.to_str()?;
                 let mode = ContentShowMode::parse(value.as_ref()).ok_or_else(|| {
                     mlua::Error::runtime(format!(
-                        "Unknown content mode '{value}'. Available modes: preview, matrix"
+                        "Unknown content mode '{value}'. Available modes: preview, matrix, heatmap"
                     ))
                 })?;
                 if !order.contains(&mode) {
@@ -457,7 +457,11 @@ mod tests {
         );
         assert_eq!(
             current_content_mode_order(),
-            vec![ContentShowMode::Matrix, ContentShowMode::Preview]
+            vec![
+                ContentShowMode::Matrix,
+                ContentShowMode::Preview,
+                ContentShowMode::Heatmap
+            ]
         );
 
         configure::reset_config(ThemeName::Dark);

@@ -67,7 +67,7 @@ fn default_config_contents() -> String {
             .to_string(),
         "-- h5v.compatibility = false".to_string(),
         "-- Content mode precedence/default: first available mode in this list wins".to_string(),
-        "-- h5v.content_mode_order = { \"preview\", \"matrix\" }".to_string(),
+        "-- h5v.content_mode_order = { \"preview\", \"matrix\", \"heatmap\" }".to_string(),
         "--".to_string(),
         format!(
             "-- LuaLS support files are generated beside this config under {LUA_LS_LIBRARY_DIR}/."
@@ -151,7 +151,7 @@ fn lua_ls_stub_contents() -> String {
         "---@diagnostic disable: undefined-global".to_string(),
         "---@alias H5vThemeName \"dark\"|\"light\"".to_string(),
         "---@alias H5vSymbolThemeName \"rich\"|\"compatibility\"".to_string(),
-        "---@alias H5vContentMode \"preview\"|\"matrix\"".to_string(),
+        "---@alias H5vContentMode \"preview\"|\"matrix\"|\"heatmap\"".to_string(),
         "---@class H5vColorOverrides".to_string(),
     ];
     for (group, _) in &color_groups {

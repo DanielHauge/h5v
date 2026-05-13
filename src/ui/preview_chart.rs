@@ -26,7 +26,7 @@ use crate::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
         preview::render_string_preview,
-        segment_scroll::{render_segment_panel, SegmentDisplayInfo},
+        segment_scroll::SegmentDisplayInfo,
         state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs, SegmentType},
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
@@ -290,10 +290,40 @@ pub fn render_chart_preview(
             .unwrap_or(0);
     }
 
-    let chart_area = if x_selectable_dims.len() > 1 {
+    let segment_info = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
+        state.segment_state.segumented = SegmentType::Chart;
+        state.segment_state.segment_count =
+            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+        let max_len = shape[node.selected_x];
+        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
+        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
+        Some(SegmentDisplayInfo {
+            title: "Segment",
+            current: state.segment_state.idx.max(0) as usize,
+            total: state.segment_state.segment_count.max(0) as usize,
+            range_start,
+            range_end,
+            total_items: max_len,
+            unit: "pts",
+        })
+    } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
+        None
+    };
+
+    let chart_area = if x_selectable_dims.len() > 1 || segment_info.is_some() {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], node, &shape, false)?;
+        render_dim_selector(
+            f,
+            &areas_split[0],
+            node,
+            &shape,
+            false,
+            segment_info.as_ref(),
+        )?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -317,38 +347,14 @@ pub fn render_chart_preview(
         );
         return Ok(());
     };
-    let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
-        state.segment_state.segumented = SegmentType::Chart;
-        state.segment_state.segment_count =
-            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
-        let max_len = shape[node.selected_x];
-        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
-        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
-        let areas_split =
-            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(24)]).split(chart_area);
-        render_segment_panel(
-            f,
-            &areas_split[1],
-            &SegmentDisplayInfo {
-                title: "Segment",
-                current: state.segment_state.idx.max(0) as usize,
-                total: state.segment_state.segment_count.max(0) as usize,
-                range_start,
-                range_end,
-                total_items: max_len,
-                unit: "pts",
-            },
-        )?;
+    let (chart_area, data_preview_selection) = if let Some(segment_info) = segment_info.as_ref() {
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes.clone(),
-            slice: SliceSelection::FromTo(range_start, range_end),
+            slice: SliceSelection::FromTo(segment_info.range_start, segment_info.range_end),
         };
-        (areas_split[0], data_preview_selection)
+        (chart_area, data_preview_selection)
     } else {
-        state.segment_state.segumented = SegmentType::NoSegment;
-        state.segment_state.segment_count = 0;
-        state.segment_state.idx = 0;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes,
@@ -567,10 +573,40 @@ fn render_projected_chart_preview(
             .unwrap_or(0);
     }
 
-    let chart_area = if x_selectable_dims.len() > 1 {
+    let segment_info = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
+        state.segment_state.segumented = SegmentType::Chart;
+        state.segment_state.segment_count =
+            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
+        let max_len = shape[node.selected_x];
+        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
+        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
+        Some(SegmentDisplayInfo {
+            title: "Segment",
+            current: state.segment_state.idx.max(0) as usize,
+            total: state.segment_state.segment_count.max(0) as usize,
+            range_start,
+            range_end,
+            total_items: max_len,
+            unit: "pts",
+        })
+    } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
+        None
+    };
+
+    let chart_area = if x_selectable_dims.len() > 1 || segment_info.is_some() {
         let areas_split =
             Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], node, &shape, false)?;
+        render_dim_selector(
+            f,
+            &areas_split[0],
+            node,
+            &shape,
+            false,
+            segment_info.as_ref(),
+        )?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
             vertical: 1,
@@ -594,38 +630,14 @@ fn render_projected_chart_preview(
         );
         return Ok(());
     };
-    let (chart_area, data_preview_selection) = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
-        state.segment_state.segumented = SegmentType::Chart;
-        state.segment_state.segment_count =
-            (shape[node.selected_x] as f64 / MAX_SEGMENT_SIZE as f64).ceil() as i32;
-        let max_len = shape[node.selected_x];
-        let range_start = MAX_SEGMENT_SIZE * state.segment_state.idx as usize;
-        let range_end = (MAX_SEGMENT_SIZE * (state.segment_state.idx + 1) as usize).min(max_len);
-        let areas_split =
-            Layout::horizontal(vec![Constraint::Min(1), Constraint::Length(24)]).split(chart_area);
-        render_segment_panel(
-            f,
-            &areas_split[1],
-            &SegmentDisplayInfo {
-                title: "Segment",
-                current: state.segment_state.idx.max(0) as usize,
-                total: state.segment_state.segment_count.max(0) as usize,
-                range_start,
-                range_end,
-                total_items: max_len,
-                unit: "pts",
-            },
-        )?;
+    let (chart_area, data_preview_selection) = if let Some(segment_info) = segment_info.as_ref() {
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes.clone(),
-            slice: SliceSelection::FromTo(range_start, range_end),
+            slice: SliceSelection::FromTo(segment_info.range_start, segment_info.range_end),
         };
-        (areas_split[0], data_preview_selection)
+        (chart_area, data_preview_selection)
     } else {
-        state.segment_state.segumented = SegmentType::NoSegment;
-        state.segment_state.segment_count = 0;
-        state.segment_state.idx = 0;
         let data_preview_selection = PreviewSelection {
             x: node.selected_x,
             index: selection_indexes,
