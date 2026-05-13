@@ -108,3 +108,37 @@ fn heatmap_minmax_uses_numeric_type_bounds() {
     assert_eq!(scale.min, 0.0);
     assert_eq!(scale.max, 255.0);
 }
+
+#[test]
+fn heatmap_ignores_non_finite_values_in_stats_and_scale() {
+    let data = arr2(&[[1.0, f64::NAN], [f64::INFINITY, 4.0]]);
+    let attr = DatasetMeta {
+        link_name: None,
+        display_name: "x".to_string(),
+        shape: vec![2, 2],
+        data_type: "f64".to_string(),
+        unsupported_reason: None,
+        type_descriptor: TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8),
+        data_bytesize: 8,
+        storage_required: 0,
+        total_bytes: 32,
+        total_elems: 4,
+        chunk_shape: None,
+        hl: None,
+        matrixable: Some(MatrixRenderType::Float64),
+        encoding: Encoding::Unknown,
+        image: None,
+        enum_render_overrides: None,
+        is_link: false,
+        filename: String::new(),
+        compound_projection: None,
+    };
+    let scale = compute_heatmap_color_scale(&data, &attr, false, 2, 2, &HeatmapRangeMode::Auto);
+    let region = compute_region_selection(&data, false, 2, 2, 2, 2, None, 0, 0, false, false);
+    assert!(scale.has_finite);
+    assert_eq!(scale.min, 1.0);
+    assert_eq!(scale.max, 4.0);
+    assert_eq!(region.min, 1.0);
+    assert_eq!(region.max, 4.0);
+    assert_eq!(region.mean, 2.5);
+}

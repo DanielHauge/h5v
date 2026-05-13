@@ -460,13 +460,30 @@ pub struct ChartSeries {
     sample_min: usize,
 }
 
+fn is_finite_chart_point((x, y): Point) -> bool {
+    x.is_finite() && y.is_finite()
+}
+
+fn sanitize_chart_points(points: Vec<Point>) -> Vec<Point> {
+    points
+        .into_iter()
+        .filter(|point| is_finite_chart_point(*point))
+        .collect()
+}
+
 impl ChartSeries {
     fn from_points(points: Vec<Point>) -> Option<Self> {
+        let points = sanitize_chart_points(points);
         if points.is_empty() {
             return None;
         }
-        let y_max = points.iter().map(|(_, y)| *y).fold(f64::MIN, f64::max);
-        let y_min = points.iter().map(|(_, y)| *y).fold(f64::MAX, f64::min);
+        let (_, first_y) = points[0];
+        let (y_min, y_max) = points
+            .iter()
+            .skip(1)
+            .fold((first_y, first_y), |(min, max), (_, y)| {
+                (min.min(*y), max.max(*y))
+            });
         let points_len = points.len();
         Some(Self {
             points,
@@ -738,14 +755,18 @@ impl MultiChartState {
         file: Option<&File>,
     ) -> Result<(ChartSource, Vec<Point>), String> {
         let evaluated = self.evaluate_expression_with_file(expression, file)?;
-        let len = evaluated.points.len();
+        let points = sanitize_chart_points(evaluated.points);
+        if points.is_empty() {
+            return Err("Expression resolved to no finite points".to_string());
+        }
+        let len = points.len();
         let source = ChartSource::DerivedExpression {
             expression: expression.to_string(),
             input_ids: evaluated.input_ids,
             len,
             kind: evaluated.kind,
         };
-        Ok((source, evaluated.points))
+        Ok((source, points))
     }
 
     fn create_expression_derived_with_file(
@@ -754,14 +775,18 @@ impl MultiChartState {
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
         let evaluated = self.evaluate_expression_with_file(&expression, file)?;
-        let len = evaluated.points.len();
+        let points = sanitize_chart_points(evaluated.points);
+        if points.is_empty() {
+            return Err("Expression resolved to no finite points".to_string());
+        }
+        let len = points.len();
         let source = ChartSource::DerivedExpression {
             expression,
             input_ids: evaluated.input_ids,
             len,
             kind: evaluated.kind,
         };
-        self.add_chart_item(source, evaluated.points)
+        self.add_chart_item(source, points)
             .ok_or_else(|| "Failed to create expression-derived chart".to_string())
     }
 
@@ -1444,7 +1469,11 @@ impl MultiChartState {
                 .sample_max
                 .min(x_max)
                 .clamp(item.series.sample_min, item.series.sample_max);
-            let points = item.series.points[local_x_min..local_x_max].to_vec();
+            let points = item.series.points[local_x_min..local_x_max]
+                .iter()
+                .copied()
+                .filter(|point| is_finite_chart_point(*point))
+                .collect::<Vec<_>>();
             if points.is_empty() {
                 continue;
             }
@@ -2112,8 +2141,9 @@ fn validate_expression_series_compatibility(
 }
 
 fn dataset_ploting_data_from_points(points: Vec<Point>) -> Result<DatasetPlotingData, String> {
+    let points = sanitize_chart_points(points);
     let Some((_, first_y)) = points.first().copied() else {
-        return Err("Cannot build a preview from an empty series".to_string());
+        return Err("Cannot build a preview from a series with no finite points".to_string());
     };
     let (min, max) = points
         .iter()
@@ -2208,6 +2238,16 @@ fn resolve_expression_scalar_values(
     Ok(values)
 }
 
+fn require_finite_scalar_value(value: f64, reference: &str) -> Result<f64, String> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(format!(
+            "Scalar reference {reference} resolved to a non-finite value"
+        ))
+    }
+}
+
 fn resolve_expression_series_values(
     state: &MultiChartState,
     file: Option<&File>,
@@ -2233,10 +2273,20 @@ fn resolve_expression_series_value(
     series_ref: &ExpressionSeriesRef,
 ) -> Result<Vec<Point>, String> {
     match (&series_ref.target, &series_ref.attr_name) {
-        (ExpressionObjectTarget::ItemRef(id), None) => state
-            .item_by_id(*id)
-            .map(|item| item.series.points.clone())
-            .ok_or_else(|| format!("Unknown chart item reference ${}", id.0)),
+        (ExpressionObjectTarget::ItemRef(id), None) => {
+            let points = state
+                .item_by_id(*id)
+                .map(|item| sanitize_chart_points(item.series.points.clone()))
+                .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
+            if points.is_empty() {
+                Err(format!(
+                    "Series reference {} resolved to no finite points",
+                    series_ref.render()
+                ))
+            } else {
+                Ok(points)
+            }
+        }
         (target, Some(attr_name)) => {
             let object_path = resolve_expression_target_path(state, target, &series_ref.render())?;
             let attr = open_expression_attribute(file, &object_path, attr_name)?;
@@ -2371,14 +2421,16 @@ fn read_expression_dataset_points(
     }
     .map_err(|error| format!("Failed reading {}: {}", series_ref.render(), error))?;
 
-    let points = values
-        .into_iter()
-        .enumerate()
-        .map(|(idx, value)| (idx as f64, value))
-        .collect::<Vec<_>>();
+    let points = sanitize_chart_points(
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(idx, value)| (idx as f64, value))
+            .collect::<Vec<_>>(),
+    );
     if points.is_empty() {
         return Err(format!(
-            "Series reference {} resolved to an empty series",
+            "Series reference {} resolved to no finite points",
             series_ref.render()
         ));
     }
@@ -2422,7 +2474,10 @@ fn resolve_expression_scalar_value(
     match &scalar_ref.attr_name {
         Some(attr_name) => {
             let attr = open_expression_attribute(file, &object_path, attr_name)?;
-            read_expression_numeric_scalar_attr(&attr, &scalar_ref.render())
+            require_finite_scalar_value(
+                read_expression_numeric_scalar_attr(&attr, &scalar_ref.render())?,
+                &scalar_ref.render(),
+            )
         }
         None => {
             let dataset = file.dataset(&object_path).map_err(|error| {
@@ -2433,7 +2488,10 @@ fn resolve_expression_scalar_value(
                     error
                 )
             })?;
-            read_expression_numeric_scalar_dataset(&dataset, &scalar_ref.render())
+            require_finite_scalar_value(
+                read_expression_numeric_scalar_dataset(&dataset, &scalar_ref.render())?,
+                &scalar_ref.render(),
+            )
         }
     }
 }
@@ -2664,16 +2722,19 @@ fn read_expression_numeric_series_attr(
     }
     .map_err(|error| format!("Failed reading {reference}: {error}"))?;
 
-    if values.is_empty() {
+    let points = sanitize_chart_points(
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(idx, value)| (idx as f64, value))
+            .collect(),
+    );
+    if points.is_empty() {
         return Err(format!(
-            "Series reference {reference} resolved to an empty series"
+            "Series reference {reference} resolved to no finite points"
         ));
     }
-    Ok(values
-        .into_iter()
-        .enumerate()
-        .map(|(idx, value)| (idx as f64, value))
-        .collect())
+    Ok(points)
 }
 
 fn read_expression_numeric_scalar_dataset(
@@ -3598,6 +3659,55 @@ mod tests {
         assert!(state.finish_drag_at_position(15));
         assert_eq!(state.aoi_from, Some(36));
         assert_eq!(state.aoi_to, Some(96));
+    }
+
+    #[test]
+    fn chart_series_filters_non_finite_points() {
+        let series = ChartSeries::from_points(vec![
+            (0.0, 1.0),
+            (1.0, f64::NAN),
+            (f64::INFINITY, 2.0),
+            (2.0, 3.0),
+        ])
+        .expect("finite points should remain");
+        assert_eq!(series.points, vec![(0.0, 1.0), (2.0, 3.0)]);
+        assert_eq!(series.y_min, 1.0);
+        assert_eq!(series.y_max, 3.0);
+    }
+
+    #[test]
+    fn dataset_plot_preview_filters_non_finite_points() {
+        let preview = dataset_ploting_data_from_points(vec![
+            (0.0, f64::NAN),
+            (1.0, 4.0),
+            (2.0, f64::INFINITY),
+            (3.0, 6.0),
+        ])
+        .expect("finite preview points");
+        assert_eq!(preview.data, vec![(1.0, 4.0), (3.0, 6.0)]);
+        assert_eq!(preview.min, 4.0);
+        assert_eq!(preview.max, 6.0);
+    }
+
+    #[test]
+    fn prepared_chart_data_filters_legacy_non_finite_points() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+        );
+        state.items[0].series.points[1] = (1.0, f64::NAN);
+
+        let prepared = state.prepared_chart_data().expect("prepared chart data");
+        assert_eq!(prepared.series.len(), 1);
+        assert_eq!(prepared.series[0].points, vec![(0.0, 1.0), (2.0, 3.0)]);
+        assert_eq!(prepared.y_min, 1.0);
+        assert_eq!(prepared.y_max, 3.0);
     }
 
     #[test]
