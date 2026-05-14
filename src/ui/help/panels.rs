@@ -361,24 +361,43 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
         (
             "Overview",
             &[
-                "Multichart lets you compare several dataset selections and expressions in one plot.",
-                "Open it with M, add the current previewable selection with m, or use :mchart add from anywhere.",
+                "Multichart compares dataset selections and derived expressions in one plot.",
+                "Open with M. Add the current previewable selection with m or :mchart add.",
             ],
         ),
         (
-            "Expressions",
+            "Workflow",
             &[
-                "Press Enter to open a new expression below the chart, or e to edit the selected series. Enter submits, Tab completes, and Esc closes it.",
-                "Use $1 for an existing item, $1[0..128] for an item slice, !/group/data[..,0] for a dataset series, and #/group/value for a scalar.",
-                "Tuple expressions make explicit x/y plots, for example (!/time[..], $2 * #/calibration:scale).",
+                "Add raw series first so you have stable $1, $2, and $3 references.",
+                "Press Enter for a new expression, e to edit the selected one, Tab to complete, and Esc to close.",
             ],
         ),
         (
-            "Navigation",
+            "Reference rules",
             &[
-                "j/k select series, Space or v toggles visibility, and ? opens this help page directly from multichart.",
-                "Use h/l or Shift+Left/Right to pan and + / - (or Shift+Up/Down) to zoom.",
-                "c resets zoom, d/Delete removes the selected series, and C clears everything.",
+                "$id refers to a chart item series, for example $1 or $2[0..256].",
+                "!path refers to a series source, for example !/signals/sine_wave or !/matrix[..,0].",
+                "#path refers to a scalar value, and :ATTR adds an attribute lookup, for example #/group/ds:BIAS or #$1:SCALE.",
+                "(x_expr, y_expr) creates an explicit x/y plot.",
+            ],
+        ),
+        (
+            "Examples",
+            &[
+                "$1 - $2",
+                "$1 * #$1:SCALE",
+                "!/signals/sine_wave + #/group_preview/offset",
+                "($1 * #/group_preview:scale, !/group_preview/time)",
+                "(!/signals/sine_wave, !/signals/cosine_wave)",
+            ],
+        ),
+        (
+            "Viewport and items",
+            &[
+                "j/k selects, Space or v toggles visibility, d removes, and C clears all.",
+                "f fits all visible series, F fits the selected series, and c resets the viewport.",
+                "+ / - zoom, h / l pan, wheel zoom is anchored to the pointer, Ctrl-wheel zooms x only, and Shift-wheel zooms y only.",
+                "Right-drag snapshots on press and pans on release.",
             ],
         ),
     ])
@@ -389,24 +408,34 @@ pub(super) fn heatmap_help_lines() -> Vec<Line<'static>> {
         (
             "Overview",
             &[
-                "Heatmap mode gives you a dense overview of matrix-like data, with selection stats and a configurable color scale.",
-                "Use Tab to switch into heatmap mode when the dataset supports it.",
+                "Heatmap shows numeric datasets as a rendered 2D slice with viewport, selection, legend, and histogram panels.",
+                "Use Tab to switch into heatmap mode when the selected dataset supports it.",
             ],
         ),
         (
-            "Selection and viewport",
+            "Selection rules",
             &[
-                "Left click selects a cell, wheel zooms toward the hovered region, and right-drag pans the zoomed viewport.",
-                "z / Z zoom in and out, 0 resets the viewport, and v clears the current selection.",
-                "H J K L pan the zoomed viewport when you want precise keyboard control.",
+                "No explicit selection means the active region is the current viewport.",
+                "One left click selects one cell region, a second click expands that to a rectangle, and another click clears it.",
+                "y copies the selection summary when a region is selected, or the viewport summary otherwise.",
             ],
         ),
         (
-            "Settings and presets",
+            "Viewport",
             &[
-                "Arrow keys move through the heatmap settings card and adjust colormap, normalization, and axis inversion.",
-                "Use :heatmap range ... commands or h5v.heatmap.range_modes in Lua to define custom named ranges.",
-                "The sidebar shows legend and region stats for the current viewport or selection.",
+                "Wheel zoom is anchored to the hovered cell.",
+                "Right click on an explicit selection zooms into that selection, and right-drag pans the viewport.",
+                "z / Z zoom in and out, 0 resets the viewport, v clears the explicit selection, and H J K L pan by keyboard.",
+                "PageUp and PageDown move through segmented heatmap pages.",
+            ],
+        ),
+        (
+            "Settings and ranges",
+            &[
+                "Up and Down move through settings. Left and Right change the selected value.",
+                "Settings include colormap, range mode, invert x, invert y, invert colors, and normalization.",
+                "Built-in range modes include Auto, MIN/MAX, Clip 1-99%, Sigma +-2sigma, and Winsor 2-98%.",
+                "Use :heatmap range ... commands or h5v.heatmap.range_modes in Lua to add named custom ranges.",
             ],
         ),
     ])
