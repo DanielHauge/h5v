@@ -7,7 +7,7 @@ h5v path/to/file.h5
 h5v -w path/to/file.h5
 ```
 
-`?` opens the in-app help overlay.
+Press `?` to open the in-app help.
 
 ![h5v quick layout overview](./assets/help.png)
 
@@ -31,11 +31,25 @@ python scripts/generate_example_h5.py
 
 Useful keys:
 
-- `?` opens the in-app help overlay
+- `?` opens the in-app help
 - `Tab` switches between preview and matrix when both exist
 - `:` opens the command minibuffer
 - `m` adds the current preview to multichart, including group previews driven by `H5V_PREVIEW_EXPR`
 - `M` opens or closes multichart mode
+
+## Help
+
+The help view has five tabs:
+
+- `Keymap`
+- `Commands`
+- `Multichart`
+- `Heatmap`
+- `Customization`
+
+Use `Tab` / `Shift+Tab` or `h` / `l` to switch tabs.
+
+In `Keymap`, `Commands`, and `Customization`, use `j` / `k`, arrow keys, `Home`, `End`, `g`, and `G` to move through the left-hand list.
 
 Example paths:
 
@@ -85,4 +99,4 @@ Dry-run:
 h5v --script-test --script examples/h5v-example.h5v
 ```
 
-See [Controls reference](./controls.md), [Commands](./commands.md), and [Startup scripting](./startup-scripting.md).
+See [Controls reference](./controls.md), [Commands](./commands.md), [Configuration](./configuration.md), and [Startup scripting](./startup-scripting.md).

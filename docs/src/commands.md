@@ -12,6 +12,8 @@ Minibuffer behavior:
 - `help` or `help <command>` shows command help
 - `.` repeats the last successful command
 
+Press `?` for the full in-app help. Use `help <command>` in the minibuffer for command-specific help.
+
 ## Common commands
 
 Navigation:

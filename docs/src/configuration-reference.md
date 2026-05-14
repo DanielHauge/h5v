@@ -207,6 +207,8 @@ Helper functions:
 | `bind_lua(mode, key, callback[, description])` | Append a Lua callback |
 | `unbind(mode, key)` | Append one key to the scope `unbind` list |
 
+Common mode constants: `h5v.modes.Global`, `h5v.modes.Normal`, `h5v.modes.Window`, `h5v.modes.Tree`, `h5v.modes.Content`, `h5v.modes.Heatmap`, `h5v.modes.Attributes`, `h5v.modes.Multichart`.
+
 Example:
 
 ```lua

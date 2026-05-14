@@ -52,7 +52,9 @@ Use `Tab` to switch modes when more than one is available.
 
 - `/` enters search mode
 - `:` opens the command minibuffer
-- `?` opens the built-in help overlay
+- `?` opens the built-in help
 - `.` repeats the last successful command
+
+The help view has tabs for `Keymap`, `Commands`, `Multichart`, `Heatmap`, and `Customization`. Tabs with a left-hand list use the normal list navigation keys.
 
 See [Controls reference](./controls.md) and [Commands](./commands.md).

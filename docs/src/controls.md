@@ -16,6 +16,19 @@ These are the shipped defaults. `h5v.keymaps` can override them for non-text-ent
 | `s` or `Ctrl+W o` | Toggle the sidebar |
 | `Ctrl+R` | Reload the file |
 
+## Help
+
+| Keys | Action |
+| --- | --- |
+| `?` | Open help |
+| `Esc` | Close help |
+| `Tab`, `l`, `Right` | Next tab |
+| `Shift+Tab`, `h`, `Left` | Previous tab |
+| `j`, `Down` | Next item in the left-hand list |
+| `k`, `Up` | Previous item in the left-hand list |
+| `g`, `Home` | Jump to the first item in the left-hand list |
+| `G`, `End` | Jump to the last item in the left-hand list |
+
 ## Tree navigation
 
 | Keys | Action |

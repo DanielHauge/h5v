@@ -1,4 +1,4 @@
-# Configuration and theming
+# Configuration
 
 h5v loads `init.lua` at startup.
 
@@ -16,38 +16,31 @@ If it does not exist, `h5v` creates it.
 
 LuaLS sidecar files are generated next to it under `.h5v-luals/`. `h5v.lua` is refreshed automatically. `.luarc.json` is refreshed only while h5v manages it.
 
-## Configuration commands
+## Commands
 
 | Command | What it does |
 | --- | --- |
 | `configure` | Opens `init.lua` in `$VISUAL` or `$EDITOR`, then reloads the configuration when you exit the editor. |
 | `configure reset` | Replaces `init.lua` with a fresh default scaffold, then reloads it immediately. |
 
-## Config flow
+## Start here
 
-1. Resolve compatibility with this precedence: CLI `--compatibility` > `h5v.compatibility` > `H5V_COMPATIBILITY_MODE` > default.
-2. Pick content mode order with `h5v.content_mode_order`.
-3. Pick a built-in theme with `h5v.theme`.
-4. Pick a built-in symbol theme with `h5v.symbol_theme`.
-5. Pick preferred heatmap defaults in `h5v.heatmap`.
-6. Add keymap overrides in `h5v.keymaps`.
-7. Override only the values you want in `h5v.colors` and `h5v.symbols`.
+Most configs only need these fields:
 
-For all keys, categories, themes, and accepted color names, see [Configuration reference](./configuration-reference.md).
+- `h5v.theme`
+- `h5v.symbol_theme`
+- `h5v.content_mode_order`
+- `h5v.compatibility`
+- `h5v.heatmap.*`
+- `h5v.keymaps`
+- `h5v.colors`
+- `h5v.symbols`
 
-Heatmap also supports preferred defaults in `h5v.heatmap`:
-
-- `default_range`
-- `default_colormap`
-- `default_normalization`
-- `default_invert_x`
-- `default_invert_y`
-- `default_invert_c`
-- `range_modes` for custom presets
+For all keys, scopes, themes, and accepted color names, see [Configuration reference](./configuration-reference.md).
 
 ## Keymaps
 
-Keymaps are configurable in `h5v.keymaps`.
+Keymaps live in `h5v.keymaps`.
 
 Scopes:
 
@@ -79,9 +72,7 @@ Each scope supports:
 - `bind_lua(mode, key, callback[, description])`
 - `unbind(mode, key)`
 
-`h5v.modes` and `h5v.actions` expose scope and action constants.
-
-The first pass covers non-text-entry contexts only. Command-line editing, search editing, and the multichart expression prompt keep their built-in editing keys.
+Use `h5v.modes.*` and `h5v.actions.*` constants in Lua. Examples: `h5v.modes.Global`, `h5v.modes.Heatmap`, `h5v.actions.ShowHelp`, `h5v.actions.HeatmapZoomIn`.
 
 Example:
 
@@ -96,6 +87,18 @@ bind_lua(h5v.modes.Global, "ctrl+l", function(ctx)
 end)
 bind(h5v.modes.Heatmap, "ctrl+z", h5v.actions.HeatmapZoomIn)
 ```
+
+## Heatmap defaults
+
+Heatmap settings live under `h5v.heatmap`:
+
+- `default_range`
+- `default_colormap`
+- `default_normalization`
+- `default_invert_x`
+- `default_invert_y`
+- `default_invert_c`
+- `range_modes`
 
 ## Example
 
