@@ -73,11 +73,12 @@ pub(super) fn prepare_app<'a>(
     picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
     let image_cell_size = picker.font_size();
     let tx_resize = tx_events.clone();
-    let tx_load_img = handle_image_resize(tx_resize);
-    let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
+    let tx_resize_img = handle_image_resize(tx_resize);
+    let tx_load_imgfs =
+        handle_imagefs_load(tx_events.clone(), tx_resize_img.clone(), picker.clone());
     let tx_load_imgfsvlen =
-        handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
-    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
+        handle_imagefsvlen_load(tx_events.clone(), tx_resize_img.clone(), picker.clone());
+    let tx_load_img = handle_image_load(tx_events.clone(), tx_resize_img.clone(), picker.clone());
     let tx_chart_preview_resize = handle_chartpreview_resize(tx_events.clone());
     let tx_load_chartpreview =
         handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
@@ -85,6 +86,7 @@ pub(super) fn prepare_app<'a>(
 
     let img_state = ImgState {
         protocol: None,
+        tx_resize_img,
         tx_load_imgfs,
         tx_load_imgfsvlen,
         tx_load_img,
@@ -95,6 +97,8 @@ pub(super) fn prepare_app<'a>(
         idx_to_load: 0,
         idx_loaded: -1,
         error: None,
+        cached_images: Default::default(),
+        pending_keys: Default::default(),
     };
 
     let chart_preview_state = ChartPreviwState {
@@ -103,6 +107,7 @@ pub(super) fn prepare_app<'a>(
         clipboard_image: None,
         error: None,
         ds_selection: None,
+        pending_key: None,
         tx_load_chartpreview,
     };
 

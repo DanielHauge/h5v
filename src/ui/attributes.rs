@@ -24,6 +24,16 @@ enum MetadataDisplayRow {
     Cells(Vec<usize>),
 }
 
+pub struct PreparedMetadataLayout {
+    initial_display_rows: Vec<MetadataDisplayRow>,
+}
+
+impl PreparedMetadataLayout {
+    pub fn row_count(&self) -> usize {
+        self.initial_display_rows.len()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MetadataCellPosition {
     display_row: usize,
@@ -386,7 +396,7 @@ fn render_property_grid_row(
             row,
             name_area,
             value_area,
-            selection.clone(),
+            selection,
             *row_index == selected_row_index,
             highlighted_bg_color,
         );
@@ -403,12 +413,14 @@ fn selected_attribute_bg_color(focus: &Focus, copying: bool, fallback_bg: Color)
     }
 }
 
-pub fn metadata_display_row_count(
+pub fn prepare_metadata_layout(
     node: &mut H5FNode,
     outer_width: u16,
-) -> Result<usize, hdf5_metno::Error> {
+) -> Result<PreparedMetadataLayout, hdf5_metno::Error> {
     let attributes = node.read_attributes()?;
-    Ok(build_rows_for_width(attributes, outer_width).len())
+    Ok(PreparedMetadataLayout {
+        initial_display_rows: build_rows_for_width(attributes, outer_width),
+    })
 }
 
 pub fn render_info_attributes(
@@ -416,6 +428,7 @@ pub fn render_info_attributes(
     area: &Rect,
     node: &mut H5FNode,
     state: &mut AppState,
+    prepared_layout: Option<&PreparedMetadataLayout>,
 ) -> Result<(), hdf5_metno::Error> {
     let outer_area = *area;
     let bg = match (&state.focus, &state.mode) {
@@ -455,7 +468,13 @@ pub fn render_info_attributes(
     let cursor = node.attributes_view_cursor.clone();
     let attributes = node.read_attributes()?;
 
-    let initial_display_rows = build_rows_for_width(attributes, outer_area.width);
+    let owned_initial_display_rows;
+    let initial_display_rows = if let Some(layout) = prepared_layout {
+        layout.initial_display_rows.as_slice()
+    } else {
+        owned_initial_display_rows = build_rows_for_width(attributes, outer_area.width);
+        owned_initial_display_rows.as_slice()
+    };
     let scroll_size = if area_inner.height as usize >= initial_display_rows.len() {
         0
     } else {
@@ -522,7 +541,7 @@ pub fn render_info_attributes(
                     row_indices,
                     attributes,
                     selected_row_index,
-                    cursor.attribute_view_selection.clone(),
+                    cursor.attribute_view_selection,
                     highlighted_bg_color,
                     &mut hitboxes,
                 );
@@ -546,7 +565,7 @@ pub fn render_info_attributes(
                     row,
                     name_area,
                     value_area,
-                    cursor.attribute_view_selection.clone(),
+                    cursor.attribute_view_selection,
                     row_index == selected_row_index,
                     highlighted_bg_color,
                 );

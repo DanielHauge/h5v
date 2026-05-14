@@ -19,7 +19,8 @@ use crate::{
     error::AppError,
     h5f::{
         read_opaque_values_1d, read_opaque_values_2d, read_projected_values_1d,
-        read_projected_values_2d, DatasetMeta, EnumRenderOverrides, H5FNode,
+        read_projected_values_2d, read_varlen_u8_matrix_table, read_varlen_u8_matrix_values,
+        DatasetMeta, EnumRenderOverrides, H5FNode,
     },
     ui::state::Focus,
 };
@@ -288,6 +289,26 @@ pub fn render_opaque_matrix(
         |selection| read_opaque_values_1d(ds, selection),
         |selection| read_opaque_values_2d(ds, selection),
         OpaqueHexRenderIntercept,
+    )
+}
+
+pub fn render_varlen_u8_matrix(
+    f: &mut Frame,
+    area: &Rect,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+) -> Result<(), AppError> {
+    render_matrix_with_reader(
+        f,
+        area,
+        attr,
+        node,
+        state,
+        |selection| read_varlen_u8_matrix_values(ds, selection),
+        |selection| read_varlen_u8_matrix_table(ds, selection),
+        DefaultMatrixResultRenderIntercept,
     )
 }
 

@@ -90,6 +90,7 @@ pub fn render_heatmap(
         }
         Some(MatrixRenderType::Enum)
         | Some(MatrixRenderType::Strings)
+        | Some(MatrixRenderType::ByteArray)
         | Some(MatrixRenderType::Opaque)
         | Some(MatrixRenderType::Compound)
         | None => render_not_yet_implemented(
@@ -318,7 +319,8 @@ fn render_heatmap_body(
     ds: &Dataset,
     ds_path: &str,
 ) -> Result<(), AppError> {
-    let heatmap_inner = panels::render_heatmap_frame(f, area);
+    let previous_key = state.heatmap_render.current_key.clone();
+    let heatmap_inner = panels::heatmap_frame_inner(area);
     if heatmap_inner.width == 0 || heatmap_inner.height == 0 {
         return Ok(());
     }
@@ -344,6 +346,7 @@ fn render_heatmap_body(
         state.heatmap_render.segment.as_ref(),
     );
     state.heatmap_render.segment = page_window.clone();
+    let page_range = page_window.as_ref().map(|window| window.current_range());
     let ((row_start, row_end), (col_start, col_end)) =
         page_ranges(page_window.as_ref(), base_viewport);
     let visible_rows = row_end.saturating_sub(row_start).max(1);
@@ -370,15 +373,8 @@ fn render_heatmap_body(
         cell_height: state.image_cell_size.1,
         viewport: state.heatmap_render.viewport,
         segment_axis: page_window.as_ref().map(|window| window.axis),
-        segment_start: page_window
-            .as_ref()
-            .map_or(0, |window| window.current_range().0),
-        segment_len: page_window.as_ref().map_or(0, |window| {
-            window
-                .current_range()
-                .1
-                .saturating_sub(window.current_range().0)
-        }),
+        segment_start: page_range.map_or(0, |range| range.0),
+        segment_len: page_range.map_or(0, |range| range.1.saturating_sub(range.0)),
         selected_row: node.selected_row,
         selected_col: node.selected_col,
         selected_indexes: node.selected_indexes.clone(),
@@ -386,6 +382,8 @@ fn render_heatmap_body(
         settings: state.heatmap_render.settings.clone(),
     };
     state.heatmap_render.current_key = Some(render_key.clone());
+    let is_loading = state.heatmap_render.pending_keys.contains(&render_key);
+    panels::render_heatmap_frame(f, area, is_loading);
     render::populate_viewport_hitboxes(state, heatmap_inner, viewport_rows, viewport_cols);
 
     let cached_pos = state
@@ -411,11 +409,6 @@ fn render_heatmap_body(
             }
             schedule_heatmap_prefetch(state, ds, attr, &render_key, page_window.as_ref())?;
         } else {
-            state.heatmap_render.current_key = None;
-            state.heatmap_viewport_region = None;
-            state.heatmap_region = None;
-            state.heatmap_render.current_selection = None;
-            state.heatmap_render.current_slice_summary = None;
             if !state.heatmap_render.pending_keys.contains(&render_key) {
                 state.heatmap_render.pending_keys.insert(render_key.clone());
                 state
@@ -428,16 +421,35 @@ fn render_heatmap_body(
                         priority: HeatmapLoadPriority::Current,
                     })?;
             }
-            panels::render_heatmap_loading(f, &heatmap_inner);
-            if let Some(sidebar_area) = sidebar_area {
-                panels::render_heatmap_loading_sidebar(f, sidebar_area)?;
+            if let Some(previous_key) = previous_key.as_ref() {
+                if let Some(previous_entry) = state
+                    .heatmap_render
+                    .cached_pages
+                    .iter_mut()
+                    .find(|entry| entry.key == *previous_key)
+                {
+                    let slice_summary = previous_entry.slice_summary.clone();
+                    let legend_summary = previous_entry.legend_summary.clone();
+                    let viewport_selection = previous_entry.viewport_selection.clone();
+                    let selection = previous_entry.selection.clone();
+                    f.render_stateful_widget(
+                        StatefulImage::default(),
+                        heatmap_inner,
+                        &mut previous_entry.protocol,
+                    );
+                    state.heatmap_viewport_region = Some(viewport_selection.clone());
+                    state.heatmap_region = selection
+                        .clone()
+                        .or_else(|| Some(viewport_selection.clone()));
+                    state.heatmap_render.current_selection = selection;
+                    state.heatmap_render.current_slice_summary = Some(slice_summary);
+                    if let Some(sidebar_area) = sidebar_area {
+                        panels::render_heatmap_sidebar(f, sidebar_area, state, &legend_summary)?;
+                    }
+                }
             }
         }
     } else {
-        state.heatmap_viewport_region = None;
-        state.heatmap_region = None;
-        state.heatmap_render.current_selection = None;
-        state.heatmap_render.current_slice_summary = None;
         if !state.heatmap_render.pending_keys.contains(&render_key) {
             state.heatmap_render.pending_keys.insert(render_key.clone());
             state
@@ -450,9 +462,32 @@ fn render_heatmap_body(
                     priority: HeatmapLoadPriority::Current,
                 })?;
         }
-        panels::render_heatmap_loading(f, &heatmap_inner);
-        if let Some(sidebar_area) = sidebar_area {
-            panels::render_heatmap_loading_sidebar(f, sidebar_area)?;
+        if let Some(previous_key) = previous_key.as_ref() {
+            if let Some(previous_entry) = state
+                .heatmap_render
+                .cached_pages
+                .iter_mut()
+                .find(|entry| entry.key == *previous_key)
+            {
+                let slice_summary = previous_entry.slice_summary.clone();
+                let legend_summary = previous_entry.legend_summary.clone();
+                let viewport_selection = previous_entry.viewport_selection.clone();
+                let selection = previous_entry.selection.clone();
+                f.render_stateful_widget(
+                    StatefulImage::default(),
+                    heatmap_inner,
+                    &mut previous_entry.protocol,
+                );
+                state.heatmap_viewport_region = Some(viewport_selection.clone());
+                state.heatmap_region = selection
+                    .clone()
+                    .or_else(|| Some(viewport_selection.clone()));
+                state.heatmap_render.current_selection = selection;
+                state.heatmap_render.current_slice_summary = Some(slice_summary);
+                if let Some(sidebar_area) = sidebar_area {
+                    panels::render_heatmap_sidebar(f, sidebar_area, state, &legend_summary)?;
+                }
+            }
         }
     }
 

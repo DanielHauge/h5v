@@ -295,6 +295,7 @@ fn preview_text_value(
                 };
                 Ok(Some(rendered))
             }
+            Some(MatrixRenderType::ByteArray) => Ok(None),
             _ => Ok(None),
         };
     };
@@ -586,6 +587,7 @@ fn apply_content_edit_request(
     state.chart_preview_state.protocol = None;
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
+    state.chart_preview_state.pending_key = None;
     state.img_state.ds = None;
     state.img_state.current_key = None;
     state.img_state.protocol = None;

@@ -36,7 +36,7 @@ use super::{
     help::render_help,
     input::handle_input_event,
     main_display::render_main_display,
-    preview::image::ImageResizeResult,
+    preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
     state::{self, AppState, Mode},
     tree_view::render_tree,
 };
@@ -361,27 +361,32 @@ fn main_recover_loop(
                     protocol,
                     clipboard_image,
                 } => {
-                    if state.img_state.current_request_key() != Some(key) {
-                        continue;
+                    state.img_state.pending_keys.remove(&key);
+                    state.img_state.cache_image(
+                        key.clone(),
+                        clipboard_image.clone(),
+                        IMAGE_CACHE_CAPACITY,
+                    );
+                    if state.img_state.current_request_key() == Some(key) {
+                        state.img_state.protocol = Some(protocol);
+                        state.img_state.clipboard_image = Some(clipboard_image);
+                        state.img_state.error = None;
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
                     }
-                    state.img_state.protocol = Some(protocol);
-                    state.img_state.clipboard_image = Some(clipboard_image);
-                    state.img_state.error = None;
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
                 }
                 ImageLoadedResult::Failure { key, message } => {
-                    if state.img_state.current_request_key() != Some(key) {
-                        continue;
-                    }
-                    state.img_state.protocol = None;
-                    state.img_state.clipboard_image = None;
-                    state.img_state.error = Some(message);
+                    state.img_state.pending_keys.remove(&key);
+                    if state.img_state.current_request_key() == Some(key) {
+                        state.img_state.protocol = None;
+                        state.img_state.clipboard_image = None;
+                        state.img_state.error = Some(message);
 
-                    terminal.draw(|f| {
-                        draw_closure(f, &mut state);
-                    })?;
+                        terminal.draw(|f| {
+                            draw_closure(f, &mut state);
+                        })?;
+                    }
                 }
             },
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
@@ -390,6 +395,9 @@ fn main_recover_loop(
                     protocol,
                     clipboard_image,
                 } => {
+                    if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
+                        state.chart_preview_state.pending_key = None;
+                    }
                     if state.chart_preview_state.current_request_key() != Some(key) {
                         continue;
                     }
@@ -401,11 +409,12 @@ fn main_recover_loop(
                     })?;
                 }
                 ChartPreviewLoadedResult::Failure { key, message } => {
+                    if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
+                        state.chart_preview_state.pending_key = None;
+                    }
                     if state.chart_preview_state.current_request_key() != Some(key) {
                         continue;
                     }
-                    state.chart_preview_state.protocol = None;
-                    state.chart_preview_state.clipboard_image = None;
                     state.chart_preview_state.error = Some(message);
 
                     terminal.draw(|f| {

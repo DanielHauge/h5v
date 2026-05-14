@@ -71,7 +71,7 @@ impl ContentShowMode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeViewSelection {
     Name,
     Value,

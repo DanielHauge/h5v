@@ -1,4 +1,4 @@
-use hdf5_metno::{Dataset, Selection};
+use hdf5_metno::Dataset;
 use ndarray::Array2;
 
 use crate::{
@@ -15,9 +15,10 @@ use crate::{
 use super::{
     build_heatmap_selection,
     render::{
-        compute_heatmap_color_scale, compute_heatmap_histogram, compute_heatmap_stats,
-        compute_region_selection, render_heatmap_image,
+        compute_heatmap_histogram, compute_heatmap_metrics, compute_region_selection,
+        render_heatmap_image,
     },
+    HeatmapNumber,
 };
 
 pub(super) fn build_heatmap_page(
@@ -75,14 +76,106 @@ pub(super) fn build_heatmap_page(
         (row_start, row_end),
         (col_start, col_end),
     );
-    let data = read_heatmap_table(ds, attr, selection)?;
     let transpose = key.selected_row > key.selected_col;
+    match attr.matrixable {
+        Some(MatrixRenderType::Float64) => {
+            if attr.is_compound_leaf() {
+                build_heatmap_page_from_data(
+                    read_projected_values_2d::<f64>(ds, attr, selection)?,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            } else {
+                build_heatmap_page_from_data(
+                    ds.matrix_table::<f64>(selection)?.data,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            }
+        }
+        Some(MatrixRenderType::Uint64) => {
+            if attr.is_compound_leaf() {
+                build_heatmap_page_from_data(
+                    read_projected_values_2d::<u64>(ds, attr, selection)?,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            } else {
+                build_heatmap_page_from_data(
+                    ds.matrix_table::<u64>(selection)?.data,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            }
+        }
+        Some(MatrixRenderType::Int64) => {
+            if attr.is_compound_leaf() {
+                build_heatmap_page_from_data(
+                    read_projected_values_2d::<i64>(ds, attr, selection)?,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            } else {
+                build_heatmap_page_from_data(
+                    ds.matrix_table::<i64>(selection)?.data,
+                    attr,
+                    key,
+                    row_start,
+                    row_end,
+                    col_start,
+                    col_end,
+                    transpose,
+                )
+            }
+        }
+        _ => Err(AppError::DrawingError(
+            "Heatmap mode currently supports numeric datasets and numeric compound leaves"
+                .to_string(),
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_heatmap_page_from_data<T: HeatmapNumber>(
+    data: Array2<T>,
+    attr: &DatasetMeta,
+    key: &HeatmapRenderKey,
+    row_start: usize,
+    row_end: usize,
+    col_start: usize,
+    col_end: usize,
+    transpose: bool,
+) -> Result<HeatmapLoadedPage, AppError> {
     let visible_rows = row_end.saturating_sub(row_start).max(1);
     let visible_cols = col_end.saturating_sub(col_start).max(1);
     let viewport_rows = usize::from(key.height).min(visible_rows);
     let viewport_cols = usize::from(key.width).min(visible_cols);
-    let stats = compute_heatmap_stats(&data, transpose, visible_rows, visible_cols);
-    let color_scale = compute_heatmap_color_scale(
+    let (stats, color_scale) = compute_heatmap_metrics(
         &data,
         attr,
         transpose,
@@ -160,38 +253,4 @@ pub(super) fn build_heatmap_page(
         viewport_selection: viewport_region,
         selection: region,
     })
-}
-
-fn read_heatmap_table(
-    ds: &Dataset,
-    attr: &DatasetMeta,
-    selection: Selection,
-) -> Result<Array2<f64>, AppError> {
-    match attr.matrixable {
-        Some(MatrixRenderType::Float64) => {
-            if attr.is_compound_leaf() {
-                Ok(read_projected_values_2d::<f64>(ds, attr, selection)?)
-            } else {
-                Ok(ds.matrix_table::<f64>(selection)?.data)
-            }
-        }
-        Some(MatrixRenderType::Uint64) => {
-            if attr.is_compound_leaf() {
-                Ok(read_projected_values_2d::<u64>(ds, attr, selection)?.mapv(|v| v as f64))
-            } else {
-                Ok(ds.matrix_table::<u64>(selection)?.data.mapv(|v| v as f64))
-            }
-        }
-        Some(MatrixRenderType::Int64) => {
-            if attr.is_compound_leaf() {
-                Ok(read_projected_values_2d::<i64>(ds, attr, selection)?.mapv(|v| v as f64))
-            } else {
-                Ok(ds.matrix_table::<i64>(selection)?.data.mapv(|v| v as f64))
-            }
-        }
-        _ => Err(AppError::DrawingError(
-            "Heatmap mode currently supports numeric datasets and numeric compound leaves"
-                .to_string(),
-        )),
-    }
 }

@@ -31,7 +31,7 @@ use crate::{
     configure,
     error::AppError,
     h5f::{read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, Node},
-    ui::render::sprint_type_schema,
+    ui::render::{sprint_type_schema, MatrixRenderType},
 };
 
 use self::{
@@ -548,7 +548,14 @@ pub fn render_preview(
                 }
             }
             None => {
-                if attr.matrixable.is_none() {
+                if matches!(attr.matrixable, Some(MatrixRenderType::ByteArray)) {
+                    render_unsupported_rendering(
+                        f,
+                        &area_inner,
+                        &selected_node.node,
+                        "Preview is only supported for vlen byte arrays when image attributes are present; use Matrix mode to inspect values",
+                    );
+                } else if attr.matrixable.is_none() {
                     match render_string_preview(f, &area_inner, selected_node) {
                         Ok(()) => {}
                         Err(e) => {

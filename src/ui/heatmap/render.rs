@@ -11,8 +11,8 @@ use crate::{
     error::AppError,
     h5f::DatasetMeta,
     ui::state::{
-        AppState, HeatmapColormap, HeatmapNormalization, HeatmapRangeMode, HeatmapRegionSelection,
-        HeatmapSelectedCells, HeatmapSettings,
+        AppState, HeatmapColormap, HeatmapNormalization, HeatmapRangeBound, HeatmapRangeMode,
+        HeatmapRegionSelection, HeatmapSelectedCells, HeatmapSettings,
     },
 };
 
@@ -31,6 +31,35 @@ pub(super) struct HeatmapColorScale {
     pub(super) min: f64,
     pub(super) max: f64,
     pub(super) has_finite: bool,
+}
+
+pub(super) fn compute_heatmap_metrics<T: HeatmapNumber>(
+    data: &Array2<T>,
+    attr: &DatasetMeta,
+    transpose: bool,
+    rows: usize,
+    cols: usize,
+    range_mode: &HeatmapRangeMode,
+) -> (HeatmapStats, HeatmapColorScale) {
+    let scan = scan_heatmap_values(data, transpose, rows, cols);
+    (
+        HeatmapStats {
+            min: scan.min,
+            max: scan.max,
+            has_finite: scan.has_finite,
+        },
+        compute_heatmap_color_scale_from_scan(data, attr, transpose, rows, cols, range_mode, scan),
+    )
+}
+
+#[derive(Clone, Copy)]
+struct HeatmapScan {
+    min: f64,
+    max: f64,
+    has_finite: bool,
+    count: usize,
+    sum: f64,
+    sum_sq: f64,
 }
 
 pub(super) fn populate_viewport_hitboxes(
@@ -76,33 +105,7 @@ pub(super) fn populate_viewport_hitboxes(
     }
 }
 
-pub(super) fn compute_heatmap_stats<T: HeatmapNumber>(
-    data: &Array2<T>,
-    transpose: bool,
-    rows: usize,
-    cols: usize,
-) -> HeatmapStats {
-    let mut min = f64::INFINITY;
-    let mut max = f64::NEG_INFINITY;
-    let mut has_finite = false;
-    for row in 0..rows {
-        for col in 0..cols {
-            let value = heatmap_value(data, transpose, row, col);
-            if !value.is_finite() {
-                continue;
-            }
-            has_finite = true;
-            min = min.min(value);
-            max = max.max(value);
-        }
-    }
-    HeatmapStats {
-        min,
-        max,
-        has_finite,
-    }
-}
-
+#[cfg(test)]
 pub(super) fn compute_heatmap_color_scale<T: HeatmapNumber>(
     data: &Array2<T>,
     attr: &DatasetMeta,
@@ -111,32 +114,31 @@ pub(super) fn compute_heatmap_color_scale<T: HeatmapNumber>(
     cols: usize,
     range_mode: &HeatmapRangeMode,
 ) -> HeatmapColorScale {
-    let mut values = Vec::new();
-    for row in 0..rows {
-        for col in 0..cols {
-            let value = heatmap_value(data, transpose, row, col);
-            if value.is_finite() {
-                values.push(value);
-            }
-        }
-    }
-    if values.is_empty() {
+    let scan = scan_heatmap_values(data, transpose, rows, cols);
+    compute_heatmap_color_scale_from_scan(data, attr, transpose, rows, cols, range_mode, scan)
+}
+
+fn compute_heatmap_color_scale_from_scan<T: HeatmapNumber>(
+    data: &Array2<T>,
+    attr: &DatasetMeta,
+    transpose: bool,
+    rows: usize,
+    cols: usize,
+    range_mode: &HeatmapRangeMode,
+    scan: HeatmapScan,
+) -> HeatmapColorScale {
+    if !scan.has_finite {
         return HeatmapColorScale {
             min: f64::INFINITY,
             max: f64::NEG_INFINITY,
             has_finite: false,
         };
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let (min, max) = match range_mode {
-        HeatmapRangeMode::Auto => (
-            *values.first().unwrap_or(&f64::NAN),
-            *values.last().unwrap_or(&f64::NAN),
-        ),
-        HeatmapRangeMode::MinMax => type_descriptor_range(&attr.type_descriptor).unwrap_or((
-            *values.first().unwrap_or(&f64::NAN),
-            *values.last().unwrap_or(&f64::NAN),
-        )),
+        HeatmapRangeMode::Auto => (scan.min, scan.max),
+        HeatmapRangeMode::MinMax => {
+            type_descriptor_range(&attr.type_descriptor).unwrap_or((scan.min, scan.max))
+        }
         HeatmapRangeMode::Percentile {
             lower_bps,
             upper_bps,
@@ -144,28 +146,36 @@ pub(super) fn compute_heatmap_color_scale<T: HeatmapNumber>(
         | HeatmapRangeMode::Winsorized {
             lower_bps,
             upper_bps,
-        } => (
-            percentile_from_sorted(&values, *lower_bps),
-            percentile_from_sorted(&values, *upper_bps),
-        ),
+        } => {
+            let values = sorted_heatmap_finite_values(data, transpose, rows, cols);
+            (
+                percentile_from_sorted(&values, *lower_bps),
+                percentile_from_sorted(&values, *upper_bps),
+            )
+        }
         HeatmapRangeMode::SigmaClip { sigma_milli } => {
-            let mean = values.iter().sum::<f64>() / values.len() as f64;
-            let variance = values
-                .iter()
-                .map(|value| {
-                    let delta = *value - mean;
-                    delta * delta
-                })
-                .sum::<f64>()
-                / values.len() as f64;
+            let mean = scan.sum / scan.count as f64;
+            let variance = (scan.sum_sq / scan.count as f64) - mean * mean;
             let stddev = variance.max(0.0).sqrt();
             let sigma = f64::from(*sigma_milli) / 1000.0;
             (mean - sigma * stddev, mean + sigma * stddev)
         }
-        HeatmapRangeMode::Custom(mode) => (
-            resolve_range_bound(&values, mode.lower),
-            resolve_range_bound(&values, mode.upper),
-        ),
+        HeatmapRangeMode::Custom(mode)
+            if matches!(mode.lower, HeatmapRangeBound::Exact(_))
+                && matches!(mode.upper, HeatmapRangeBound::Exact(_)) =>
+        {
+            (
+                resolve_range_bound(&[], mode.lower),
+                resolve_range_bound(&[], mode.upper),
+            )
+        }
+        HeatmapRangeMode::Custom(mode) => {
+            let values = sorted_heatmap_finite_values(data, transpose, rows, cols);
+            (
+                resolve_range_bound(&values, mode.lower),
+                resolve_range_bound(&values, mode.upper),
+            )
+        }
     };
     let (min, max) = if min <= max { (min, max) } else { (max, min) };
     HeatmapColorScale {
@@ -212,6 +222,56 @@ fn resolve_range_bound(values: &[f64], bound: crate::ui::state::HeatmapRangeBoun
             percentile_from_sorted(values, basis_points)
         }
     }
+}
+
+fn scan_heatmap_values<T: HeatmapNumber>(
+    data: &Array2<T>,
+    transpose: bool,
+    rows: usize,
+    cols: usize,
+) -> HeatmapScan {
+    let mut scan = HeatmapScan {
+        min: f64::INFINITY,
+        max: f64::NEG_INFINITY,
+        has_finite: false,
+        count: 0,
+        sum: 0.0,
+        sum_sq: 0.0,
+    };
+    for row in 0..rows {
+        for col in 0..cols {
+            let value = heatmap_value(data, transpose, row, col);
+            if !value.is_finite() {
+                continue;
+            }
+            scan.has_finite = true;
+            scan.min = scan.min.min(value);
+            scan.max = scan.max.max(value);
+            scan.count += 1;
+            scan.sum += value;
+            scan.sum_sq += value * value;
+        }
+    }
+    scan
+}
+
+fn sorted_heatmap_finite_values<T: HeatmapNumber>(
+    data: &Array2<T>,
+    transpose: bool,
+    rows: usize,
+    cols: usize,
+) -> Vec<f64> {
+    let mut values = Vec::new();
+    for row in 0..rows {
+        for col in 0..cols {
+            let value = heatmap_value(data, transpose, row, col);
+            if value.is_finite() {
+                values.push(value);
+            }
+        }
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    values
 }
 
 pub(super) fn compute_heatmap_histogram<T: HeatmapNumber>(

@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
 use hdf5_metno::{
-    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenAscii, VarLenUnicode},
+    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenArray, VarLenAscii, VarLenUnicode},
     Dataset, H5Type, Selection,
 };
-use ndarray::{arr0, IxDyn};
+use ndarray::{arr0, Array1, Array2, IxDyn};
 
 use crate::error::AppError;
 
@@ -35,6 +35,11 @@ pub fn format_dataset_value_for_edit(
     }
 
     let type_desc = dataset_value_type_descriptor(meta);
+
+    if is_varlen_u8_array_type(&type_desc) {
+        let values = read_selected_dataset_scalar::<VarLenArray<u8>>(dataset, selection)?;
+        return Ok(format_varlen_u8_values_for_edit(&values));
+    }
 
     if meta.compound_projection.is_some() {
         let bytes = read_projected_selection_bytes(dataset, meta, selection)?;
@@ -113,6 +118,17 @@ pub fn write_dataset_value_from_text(
     }
 
     let type_desc = dataset_value_type_descriptor(meta);
+
+    if is_varlen_u8_array_type(&type_desc) {
+        let values = parse_varlen_u8_values_from_text(new_value)?;
+        write_selected_dataset_scalar::<VarLenArray<u8>>(
+            dataset,
+            selection,
+            VarLenArray::from_slice(&values),
+        )?;
+        dataset.file()?.flush()?;
+        return Ok(type_desc.to_string());
+    }
 
     if meta.compound_projection.is_some() {
         let bytes = encode_projected_value_from_text(&type_desc, new_value)?;
@@ -217,6 +233,77 @@ fn dataset_value_type_descriptor(meta: &DatasetMeta) -> TypeDescriptor {
         .as_ref()
         .map(|projection| projection.field_type.clone())
         .unwrap_or_else(|| meta.type_descriptor.clone())
+}
+
+fn is_varlen_u8_array_type(type_desc: &TypeDescriptor) -> bool {
+    matches!(
+        type_desc,
+        TypeDescriptor::VarLenArray(inner)
+            if matches!(inner.as_ref(), TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1))
+    )
+}
+
+pub fn format_varlen_u8_values_for_display(values: &[u8]) -> String {
+    if values.is_empty() {
+        return "[]".to_string();
+    }
+    let rendered = values
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{rendered}]")
+}
+
+fn format_varlen_u8_values_for_edit(values: &[u8]) -> String {
+    values
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn parse_varlen_u8_values_from_text(new_value: &str) -> Result<Vec<u8>, AppError> {
+    let mut lines = new_value
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .collect::<Vec<_>>();
+    if matches!(lines.last(), Some(last) if last.is_empty()) {
+        lines.pop();
+    }
+    if lines.len() == 1 && lines[0].trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let value = line.trim();
+            parse_scalar::<u8>(value, "u8").map_err(|error| {
+                AppError::EditError(format!("Invalid u8 value on line {}: {}", idx + 1, error))
+            })
+        })
+        .collect()
+}
+
+pub fn read_varlen_u8_matrix_values(
+    dataset: &Dataset,
+    selection: Selection,
+) -> Result<Array1<String>, AppError> {
+    dataset
+        .read_slice_1d::<VarLenArray<u8>, _>(selection)
+        .map(|values| values.mapv(|value| format_varlen_u8_values_for_display(&value)))
+        .map_err(AppError::from)
+}
+
+pub fn read_varlen_u8_matrix_table(
+    dataset: &Dataset,
+    selection: Selection,
+) -> Result<Array2<String>, AppError> {
+    dataset
+        .read_slice_2d::<VarLenArray<u8>, _>(selection)
+        .map(|values| values.mapv(|value| format_varlen_u8_values_for_display(&value)))
+        .map_err(AppError::from)
 }
 
 fn validate_dataset_value_edit_support(type_desc: &TypeDescriptor) -> Result<(), AppError> {
@@ -605,7 +692,10 @@ where
 mod tests {
     use hdf5_metno::types::{IntSize, TypeDescriptor};
 
-    use super::{encode_fixed_array_memory_from_text, format_fixed_array_memory_for_edit};
+    use super::{
+        encode_fixed_array_memory_from_text, format_fixed_array_memory_for_edit,
+        format_varlen_u8_values_for_display, parse_varlen_u8_values_from_text,
+    };
 
     #[test]
     fn fixed_array_edit_format_uses_one_line_per_value() {
@@ -616,6 +706,25 @@ mod tests {
         )
         .expect("failed formatting fixed array edit content");
         assert_eq!(rendered, "0\n1\n2");
+    }
+
+    #[test]
+    fn varlen_u8_display_formats_as_bracketed_list() {
+        assert_eq!(format_varlen_u8_values_for_display(&[1, 2, 3]), "[1, 2, 3]");
+        assert_eq!(format_varlen_u8_values_for_display(&[]), "[]");
+    }
+
+    #[test]
+    fn parses_varlen_u8_values_from_one_per_line() {
+        let parsed =
+            parse_varlen_u8_values_from_text("1\n2\n255\n").expect("failed parsing u8 values");
+        assert_eq!(parsed, vec![1, 2, 255]);
+    }
+
+    #[test]
+    fn parses_empty_varlen_u8_value_list() {
+        let parsed = parse_varlen_u8_values_from_text("").expect("failed parsing empty list");
+        assert!(parsed.is_empty());
     }
 
     #[test]

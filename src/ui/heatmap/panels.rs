@@ -4,7 +4,7 @@ use plotters::{
     style::{RGBColor, ShapeStyle},
 };
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
@@ -23,9 +23,20 @@ use crate::{
 
 use super::render::{apply_invert_colors, heatmap_colormap_rgb};
 
-pub(super) fn render_heatmap_frame(f: &mut Frame, area: &Rect) -> Rect {
+pub(super) fn heatmap_frame_inner(area: &Rect) -> Rect {
+    area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    })
+}
+
+pub(super) fn render_heatmap_frame(f: &mut Frame, area: &Rect, loading: bool) -> Rect {
     let heatmap_block = Block::default()
-        .title(" # Heatmap ")
+        .title(if loading {
+            " # Heatmap * "
+        } else {
+            " # Heatmap "
+        })
         .title_style(
             Style::default()
                 .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -36,7 +47,7 @@ pub(super) fn render_heatmap_frame(f: &mut Frame, area: &Rect) -> Rect {
         .border_style(Style::default().fg(configure::themed_color(|colors| {
             colors.surface.panel_border
         })));
-    let inner = heatmap_block.inner(*area);
+    let inner = heatmap_frame_inner(area);
     f.render_widget(heatmap_block, *area);
     inner
 }
@@ -54,23 +65,6 @@ pub(super) fn render_heatmap_sidebar(
         legend_summary,
         state.heatmap_render.settings.colormap,
         state.heatmap_render.settings.invert_c,
-    );
-    Ok(())
-}
-
-pub(super) fn render_heatmap_loading(f: &mut Frame, area: &Rect) {
-    f.render_widget(
-        Paragraph::new("Seeking heatmap page...")
-            .style(Style::default().fg(configure::themed_color(|colors| colors.help.description))),
-        *area,
-    );
-}
-
-pub(super) fn render_heatmap_loading_sidebar(f: &mut Frame, area: &Rect) -> Result<(), AppError> {
-    f.render_widget(
-        Paragraph::new("Loading legend...")
-            .style(Style::default().fg(configure::themed_color(|colors| colors.help.description))),
-        *area,
     );
     Ok(())
 }

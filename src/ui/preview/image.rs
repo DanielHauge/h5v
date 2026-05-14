@@ -23,15 +23,15 @@ use ratatui_image::{
 use crate::{
     data::Previewable,
     error::AppError,
-    h5f::{H5FNode, ImageType, InterlaceMode, Node},
+    h5f::{plot_projected, H5FNode, ImageType, InterlaceMode, Node},
     ui::{
         app::AppEvent,
         preview::chart::{render_image_chart, MAX_SEGMENT_SIZE},
         segment_scroll::render_position_scroll,
         state::{
             AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource,
-            DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-            RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
+            ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
+            ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
         },
     },
 };
@@ -45,6 +45,7 @@ const SMART_IMAGE_WINDOW_MIN_CLIPPED_FRACTION: f32 = 0.5;
 const IMAGE_CHROME_SCROLL_WIDTH: u16 = 2;
 const IMAGE_CHROME_STACK_HEIGHT: u16 = 1;
 const IMAGE_CHROME_WINDOW_HEIGHT: u16 = 4;
+pub(crate) const IMAGE_CACHE_CAPACITY: usize = 6;
 
 fn image_text_style() -> Style {
     let mut style =
@@ -53,6 +54,192 @@ fn image_text_style() -> Style {
         style = style.bold();
     }
     style
+}
+
+fn raw_image_frame_count(
+    ds: &Dataset,
+    typedesc: &hdf5_metno::types::TypeDescriptor,
+) -> Option<i32> {
+    match typedesc {
+        hdf5_metno::types::TypeDescriptor::VarLenArray(arr_type)
+            if matches!(
+                **arr_type,
+                hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)
+            ) =>
+        {
+            Some(ds.shape().first().copied().unwrap_or(1) as i32)
+        }
+        _ => None,
+    }
+}
+
+fn render_image_loading_indicator(f: &mut Frame, area: Rect) {
+    let indicator = Block::default()
+        .title(Span::styled(
+            " * ",
+            Style::default().fg(crate::configure::themed_color(|colors| {
+                colors.help.description
+            })),
+        ))
+        .title_alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(indicator, area);
+}
+
+fn thread_protocol_from_clipboard_image(
+    picker: &Picker,
+    tx_resize_img: &Sender<ResizeRequest>,
+    clipboard_image: &ClipboardImageData,
+) -> Option<ThreadProtocol> {
+    let image = ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+        clipboard_image.width as u32,
+        clipboard_image.height as u32,
+        clipboard_image.bytes.clone(),
+    )?;
+    let dyn_img = DynamicImage::ImageRgba8(image);
+    let protocol = picker.new_resize_protocol(dyn_img);
+    Some(ThreadProtocol::new(tx_resize_img.clone(), Some(protocol)))
+}
+
+fn restore_cached_image(state: &mut AppState<'_>, key: &ImageLoadKey) -> bool {
+    let Some(clipboard_image) = state.img_state.touch_cached_image(key) else {
+        return false;
+    };
+    let Some(protocol) = thread_protocol_from_clipboard_image(
+        &state.multi_chart.picker,
+        &state.img_state.tx_resize_img,
+        &clipboard_image,
+    ) else {
+        state
+            .img_state
+            .cached_images
+            .retain(|entry| entry.key != *key);
+        return false;
+    };
+    state.img_state.protocol = Some(protocol);
+    state.img_state.clipboard_image = Some(clipboard_image);
+    state.img_state.error = None;
+    state.img_state.ds = Some(key.ds_path.clone());
+    state.img_state.current_key = Some(key.clone());
+    state.img_state.idx_loaded = key.idx;
+    true
+}
+
+fn should_skip_image_request(state: &AppState<'_>, key: &ImageLoadKey) -> bool {
+    state.img_state.current_request_key().as_ref() == Some(key)
+        || state.img_state.pending_keys.contains(key)
+        || state.img_state.has_cached_image(key)
+}
+
+fn prefetched_window(window: &ImageWindowState) -> Option<ImageWindowState> {
+    let start = if window.end() < window.total {
+        window.start + window.len
+    } else if window.start > 0 {
+        window.start.saturating_sub(window.len)
+    } else {
+        return None;
+    };
+    Some(ImageWindowState {
+        ds_path: window.ds_path.clone(),
+        axis: window.axis,
+        start,
+        len: window.len,
+        total: window.total,
+    })
+}
+
+fn schedule_dataset_image_prefetch(
+    state: &mut AppState<'_>,
+    ds: &Dataset,
+    image_type: &ImageType,
+    current_key: &ImageLoadKey,
+    window: Option<&ImageWindowState>,
+    frame_count: usize,
+) -> Result<(), AppError> {
+    let (prefetch_key, prefetch_window) = if frame_count > 1 {
+        let next_idx = if (current_key.idx as usize) + 1 < frame_count {
+            current_key.idx + 1
+        } else if current_key.idx > 0 {
+            current_key.idx - 1
+        } else {
+            return Ok(());
+        };
+        (
+            ImageLoadKey {
+                ds_path: current_key.ds_path.clone(),
+                idx: next_idx,
+                window_axis: current_key.window_axis,
+                window_start: current_key.window_start,
+                window_len: current_key.window_len,
+            },
+            window.cloned(),
+        )
+    } else {
+        let Some(prefetch_window) = window.and_then(prefetched_window) else {
+            return Ok(());
+        };
+        (
+            ImageLoadKey {
+                ds_path: current_key.ds_path.clone(),
+                idx: current_key.idx,
+                window_axis: Some(prefetch_window.axis),
+                window_start: prefetch_window.start,
+                window_len: prefetch_window.len,
+            },
+            Some(prefetch_window),
+        )
+    };
+
+    if should_skip_image_request(state, &prefetch_key) {
+        return Ok(());
+    }
+
+    state.img_state.pending_keys.insert(prefetch_key.clone());
+    state.img_state.tx_load_img.send(DatasetImageLoadRequest {
+        key: prefetch_key,
+        dataset: ds.clone(),
+        image_type: image_type.clone(),
+        window: prefetch_window,
+    })?;
+    Ok(())
+}
+
+fn schedule_varlen_image_prefetch(
+    state: &mut AppState<'_>,
+    ds: &Dataset,
+    format: ImageFormat,
+    current_key: &ImageLoadKey,
+    frame_count: i32,
+) -> Result<(), AppError> {
+    if frame_count <= 1 {
+        return Ok(());
+    }
+    let next_idx = if current_key.idx + 1 < frame_count {
+        current_key.idx + 1
+    } else if current_key.idx > 0 {
+        current_key.idx - 1
+    } else {
+        return Ok(());
+    };
+    let prefetch_key = ImageLoadKey {
+        ds_path: current_key.ds_path.clone(),
+        idx: next_idx,
+        window_axis: None,
+        window_start: 0,
+        window_len: 0,
+    };
+    if should_skip_image_request(state, &prefetch_key) {
+        return Ok(());
+    }
+    state.img_state.pending_keys.insert(prefetch_key.clone());
+    state
+        .img_state
+        .tx_load_imgfsvlen
+        .send(VarLenImageLoadRequest {
+            key: prefetch_key,
+            dataset: ds.clone(),
+            format,
+        })?;
+    Ok(())
 }
 
 fn dataset_image_dims(image_type: &ImageType, ds: &Dataset) -> Option<(usize, usize, usize)> {
@@ -159,6 +346,7 @@ fn render_image_chrome(
     area: &Rect,
     stack: Option<(i32, i32)>,
     window: Option<&ImageWindowState>,
+    loading: bool,
 ) -> Result<Rect, AppError> {
     if stack.is_none() && window.is_none() {
         return Ok(*area);
@@ -187,12 +375,17 @@ fn render_image_chrome(
     if let Some(window) = window {
         let title = match stack {
             Some((idx, count)) => format!(
-                " Viewport {} | image {}/{} ",
+                " Viewport {} | image {}/{}{} ",
                 window.label(),
                 idx + 1,
-                count
+                count,
+                if loading { " *" } else { "" }
             ),
-            None => format!(" Viewport {} ", window.label()),
+            None => format!(
+                " Viewport {}{} ",
+                window.label(),
+                if loading { " *" } else { "" }
+            ),
         };
         let block = Block::default()
             .title(title)
@@ -275,8 +468,13 @@ fn render_image_chrome(
         );
     } else {
         let title = match stack {
-            Some((idx, count)) => format!(" Image {}/{} ", idx + 1, count),
-            None => " Image ".to_string(),
+            Some((idx, count)) => format!(
+                " Image {}/{}{} ",
+                idx + 1,
+                count,
+                if loading { " *" } else { "" }
+            ),
+            None => format!(" Image{} ", if loading { " *" } else { "" }),
         };
         let block = Block::default()
             .title(title)
@@ -305,31 +503,11 @@ pub fn render_img(
     match image_type {
         ImageType::Jpeg => {
             state.img_state.window = None;
-            let render_area = if let SegmentType::Image = state.segment_state.segumented {
-                render_image_chrome(
-                    f,
-                    area,
-                    Some((state.segment_state.idx, state.segment_state.segment_count)),
-                    None,
-                )?
-            } else {
-                *area
-            };
-            render_raw_img(f, &render_area, node, state, ImageFormat::Jpeg)
+            render_raw_img(f, area, node, state, ImageFormat::Jpeg)
         }
         ImageType::Png => {
             state.img_state.window = None;
-            let render_area = if let SegmentType::Image = state.segment_state.segumented {
-                render_image_chrome(
-                    f,
-                    area,
-                    Some((state.segment_state.idx, state.segment_state.segment_count)),
-                    None,
-                )?
-            } else {
-                *area
-            };
-            render_raw_img(f, &render_area, node, state, ImageFormat::Png)
+            render_raw_img(f, area, node, state, ImageFormat::Png)
         }
         ImageType::Truecolor(m) => {
             render_ds_img(f, area, node, state, ImageType::Truecolor(m.clone()))
@@ -406,20 +584,6 @@ fn render_ds_img(
     .or(stack_window);
     state.img_state.window = desired_window.clone();
 
-    let render_area = render_image_chrome(
-        f,
-        area,
-        has_stack.then_some((state.segment_state.idx, state.segment_state.segment_count)),
-        desired_window.as_ref(),
-    )?;
-    if state.should_debounce_preview(selected_node) {
-        f.render_widget(
-            Paragraph::new("Loading image preview...").style(image_text_style()),
-            render_area,
-        );
-        return Ok(());
-    }
-
     let desired_key = ImageLoadKey {
         ds_path: ds_path.clone(),
         idx: state.img_state.idx_to_load,
@@ -427,7 +591,43 @@ fn render_ds_img(
         window_start: desired_window.as_ref().map_or(0, |window| window.start),
         window_len: desired_window.as_ref().map_or(0, |window| window.len),
     };
+    let render_area = render_image_chrome(
+        f,
+        area,
+        has_stack.then_some((state.segment_state.idx, state.segment_state.segment_count)),
+        desired_window.as_ref(),
+        state.img_state.pending_keys.contains(&desired_key),
+    )?;
+    if state.should_debounce_preview(selected_node) {
+        if let Some(ref mut protocol) = state.img_state.protocol {
+            let image_widget =
+                StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+            f.render_stateful_widget(image_widget, render_area, protocol);
+            render_image_loading_indicator(f, render_area);
+        }
+        return Ok(());
+    }
     let image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
+
+    if !image_loaded && restore_cached_image(state, &desired_key) {
+        if let Some(ref mut protocol) = state.img_state.protocol {
+            let image_widget =
+                StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+            f.render_stateful_widget(image_widget, render_area, protocol);
+            if state.img_state.pending_keys.contains(&desired_key) {
+                render_image_loading_indicator(f, render_area);
+            }
+        }
+        schedule_dataset_image_prefetch(
+            state,
+            ds,
+            &img_type,
+            &desired_key,
+            desired_window.as_ref(),
+            frame_count,
+        )?;
+        return Ok(());
+    }
 
     match image_loaded {
         true => {
@@ -444,15 +644,25 @@ fn render_ds_img(
                 let image_widget =
                     StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
                 f.render_stateful_widget(image_widget, render_area, protocol);
+                if state.img_state.pending_keys.contains(&desired_key) {
+                    render_image_loading_indicator(f, render_area);
+                }
+                schedule_dataset_image_prefetch(
+                    state,
+                    ds,
+                    &img_type,
+                    &desired_key,
+                    desired_window.as_ref(),
+                    frame_count,
+                )?;
             }
         }
         false => {
-            state.img_state.protocol = None;
-            state.img_state.clipboard_image = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds_path);
             state.img_state.idx_loaded = state.img_state.idx_to_load;
             state.img_state.current_key = Some(desired_key.clone());
+            state.img_state.pending_keys.insert(desired_key.clone());
             state.img_state.tx_load_img.send(DatasetImageLoadRequest {
                 key: desired_key,
                 dataset: ds.clone(),
@@ -476,13 +686,33 @@ fn render_raw_img(
         Node::Dataset(ds, attr) => (ds, attr),
         _ => return Ok(()),
     };
-
-    if state.should_debounce_preview(selected_node) {
-        f.render_widget(
-            Paragraph::new("Loading image preview...").style(image_text_style()),
-            *area,
-        );
-        return Ok(());
+    let typedesc = ds.dtype()?.to_descriptor()?;
+    let varlen_frame_count = raw_image_frame_count(ds, &typedesc);
+    let has_stack = matches!(varlen_frame_count, Some(frame_count) if frame_count > 1);
+    if let Some(frame_count) = varlen_frame_count {
+        let clamped_idx = state
+            .img_state
+            .idx_to_load
+            .clamp(0, frame_count.saturating_sub(1));
+        state.img_state.idx_to_load = clamped_idx;
+        state.img_state.idx_loaded = state
+            .img_state
+            .idx_loaded
+            .clamp(0, frame_count.saturating_sub(1));
+        if frame_count > 1 {
+            state.segment_state.segumented = SegmentType::Image;
+            state.segment_state.segment_count = frame_count;
+            state.segment_state.idx = clamped_idx;
+        } else {
+            state.segment_state.segumented = SegmentType::NoSegment;
+            state.segment_state.segment_count = 0;
+            state.segment_state.idx = 0;
+        }
+    } else {
+        state.segment_state.segumented = SegmentType::NoSegment;
+        state.segment_state.segment_count = 0;
+        state.segment_state.idx = 0;
+        state.img_state.idx_to_load = 0;
     }
 
     let desired_key = ImageLoadKey {
@@ -492,7 +722,46 @@ fn render_raw_img(
         window_start: 0,
         window_len: 0,
     };
-    let image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
+    let mut image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
+    if !image_loaded && restore_cached_image(state, &desired_key) {
+        image_loaded = true;
+    }
+    let show_loading = state.img_state.pending_keys.contains(&desired_key)
+        || (state.should_debounce_preview(selected_node) && !image_loaded);
+    let render_area = if has_stack {
+        render_image_chrome(
+            f,
+            area,
+            Some((state.segment_state.idx, state.segment_state.segment_count)),
+            None,
+            show_loading,
+        )?
+    } else {
+        *area
+    };
+
+    if state.should_debounce_preview(selected_node) {
+        if let Some(ref mut protocol) = state.img_state.protocol {
+            let image_widget =
+                StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
+            f.render_stateful_widget(image_widget, render_area, protocol);
+            if show_loading {
+                render_image_loading_indicator(f, render_area);
+            }
+            if image_loaded && !state.img_state.pending_keys.contains(&desired_key) {
+                if let Some(frame_count) = varlen_frame_count {
+                    schedule_varlen_image_prefetch(
+                        state,
+                        ds,
+                        img_format,
+                        &desired_key,
+                        frame_count,
+                    )?;
+                }
+            }
+        }
+        return Ok(());
+    }
 
     match image_loaded {
         true => match state.img_state.error {
@@ -503,29 +772,39 @@ fn render_raw_img(
                         Style::default()
                             .fg(crate::configure::themed_color(|colors| colors.text.error)),
                     ),
-                    *area,
+                    render_area,
                 );
             }
             None => {
                 if let Some(ref mut protocol) = state.img_state.protocol {
                     let image_widget =
                         StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
-                    f.render_stateful_widget(image_widget, *area, protocol);
+                    f.render_stateful_widget(image_widget, render_area, protocol);
+                    if state.img_state.pending_keys.contains(&desired_key) {
+                        render_image_loading_indicator(f, render_area);
+                    }
+                }
+                if let Some(frame_count) = varlen_frame_count {
+                    schedule_varlen_image_prefetch(
+                        state,
+                        ds,
+                        img_format,
+                        &desired_key,
+                        frame_count,
+                    )?;
                 }
             }
         },
         false => {
-            state.img_state.protocol = None;
-            state.img_state.clipboard_image = None;
             state.img_state.error = None;
             state.img_state.ds = Some(ds.name());
-            let typedesc = ds.dtype()?.to_descriptor()?;
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
                     state.segment_state.segumented = SegmentType::NoSegment;
                     state.img_state.idx_loaded = state.img_state.idx_to_load;
                     state.img_state.current_key = Some(desired_key.clone());
+                    state.img_state.pending_keys.insert(desired_key.clone());
                     let ds_buffered = BufReader::new(ds_reader);
                     state.img_state.tx_load_imgfs.send(RawImageLoadRequest {
                         key: desired_key,
@@ -538,19 +817,9 @@ fn render_raw_img(
                         *arr_type,
                         hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)
                     ) {
-                        let i = state.img_state.idx_to_load;
-                        let frame_count = ds.shape().first().copied().unwrap_or(1) as i32;
-                        state.img_state.idx_loaded = i;
-                        if frame_count > 1 {
-                            state.segment_state.segumented = SegmentType::Image;
-                            state.segment_state.segment_count = frame_count;
-                            state.segment_state.idx = i.clamp(0, frame_count - 1);
-                        } else {
-                            state.segment_state.segumented = SegmentType::NoSegment;
-                            state.segment_state.segment_count = frame_count.max(0);
-                            state.segment_state.idx = 0;
-                        }
+                        state.img_state.idx_loaded = state.img_state.idx_to_load;
                         state.img_state.current_key = Some(desired_key.clone());
+                        state.img_state.pending_keys.insert(desired_key.clone());
                         state
                             .img_state
                             .tx_load_imgfsvlen
@@ -661,6 +930,24 @@ pub fn handle_chartpreview_load(
                                 selection: req.selection.clone(),
                             },
                             format!("Failed to plot data for chart preview: {}", e),
+                        );
+                        continue;
+                    }
+                },
+                ChartPreviewSource::ProjectedDataset {
+                    ds,
+                    meta,
+                    selection,
+                } => match plot_projected(&ds, &meta, &selection) {
+                    Ok(data_preview) => data_preview,
+                    Err(e) => {
+                        send_chart_failure(
+                            &tx_events,
+                            ChartPreviewKey {
+                                ds_path: req.ds_path.clone(),
+                                selection: req.selection.clone(),
+                            },
+                            format!("Failed to plot projected data for chart preview: {}", e),
                         );
                         continue;
                     }

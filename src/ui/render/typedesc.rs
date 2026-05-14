@@ -238,11 +238,22 @@ pub fn is_type_matrixable(type_desc: &TypeDescriptor) -> Option<MatrixRenderType
         TypeDescriptor::FixedArray(_, _) => None,
         TypeDescriptor::FixedAscii(_) => Some(MatrixRenderType::Strings),
         TypeDescriptor::FixedUnicode(_) => Some(MatrixRenderType::Strings),
+        TypeDescriptor::VarLenArray(_) if is_varlen_byte_array(type_desc) => {
+            Some(MatrixRenderType::ByteArray)
+        }
         TypeDescriptor::VarLenArray(_) => None,
         TypeDescriptor::VarLenAscii => Some(MatrixRenderType::Strings),
         TypeDescriptor::VarLenUnicode => Some(MatrixRenderType::Strings),
         TypeDescriptor::Reference(_) => None,
     }
+}
+
+pub fn is_varlen_byte_array(type_desc: &TypeDescriptor) -> bool {
+    matches!(
+        type_desc,
+        TypeDescriptor::VarLenArray(inner)
+            if matches!(inner.as_ref(), TypeDescriptor::Unsigned(hdf5_metno::types::IntSize::U1))
+    )
 }
 pub fn encoding_from_dtype(dtype: &TypeDescriptor) -> Encoding {
     match dtype {
@@ -271,6 +282,7 @@ pub enum MatrixRenderType {
     Compound,
     Strings,
     Enum,
+    ByteArray,
 }
 
 #[cfg(test)]

@@ -22,9 +22,10 @@ use crate::{
 };
 
 use super::{
-    attributes::{metadata_display_row_count, render_info_attributes},
+    attributes::{prepare_metadata_layout, render_info_attributes},
     matrix::{
         render_matrix, render_not_yet_implemented, render_opaque_matrix, render_projected_matrix,
+        render_varlen_u8_matrix,
     },
     preview::render_preview,
     state::{AppState, ContentShowMode},
@@ -49,11 +50,24 @@ pub fn render_main_display(
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
     let mut node = selected_node_no.borrow_mut();
-    let attr_count = metadata_display_row_count(&mut node, area.width)?;
+    let prepared_attributes = if state.show_tree_view {
+        Some(prepare_metadata_layout(&mut node, area.width)?)
+    } else {
+        None
+    };
 
     let content_area = if state.show_tree_view {
-        let (attr_area, content_area) = split_main_display(*area, attr_count);
-        render_info_attributes(f, &attr_area, &mut node, state)?;
+        let (attr_area, content_area) = split_main_display(
+            *area,
+            prepared_attributes.as_ref().map_or(0, |x| x.row_count()),
+        );
+        render_info_attributes(
+            f,
+            &attr_area,
+            &mut node,
+            state,
+            prepared_attributes.as_ref(),
+        )?;
         content_area
     } else {
         *area
@@ -64,9 +78,8 @@ pub fn render_main_display(
     state.ui_layout.matrix_cells.clear();
 
     let current_display_mode = &state.content_mode;
-    let supported_display_modes = configure::ordered_content_modes(
-        &state.filter_runtime_content_modes(node.content_show_modes()),
-    );
+    let available = state.filter_runtime_content_modes(node.content_show_modes());
+    let supported_display_modes = configure::ordered_content_modes(&available);
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {
             Node::Dataset(_, meta) if meta.is_compound_container() => "Compound",
@@ -186,8 +199,6 @@ pub fn render_main_display(
         )
         .style(Style::default().bg(bg_color));
     f.render_widget(break_line, content_area);
-    let available = state.filter_runtime_content_modes(node.content_show_modes());
-
     match state.content_show_mode_eval(available) {
         ContentShowMode::Preview => render_preview(f, &content_area, &mut node, state),
         ContentShowMode::Matrix => {
@@ -347,6 +358,9 @@ pub fn render_main_display(
                                 enum_mapper,
                             )?
                         }
+                    }
+                    MatrixRenderType::ByteArray => {
+                        render_varlen_u8_matrix(f, &content_area, &ds, &attr, &mut node, state)?
                     }
                 },
             }

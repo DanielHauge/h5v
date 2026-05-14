@@ -10,7 +10,8 @@ use ndarray::{Array1, Array2};
 
 use crate::{
     data::{
-        validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
+        plot_sampling_step, validate_preview_selection_shape, DatasetPlotingData, PreviewSelection,
+        SliceSelection,
     },
     error::AppError,
 };
@@ -535,12 +536,14 @@ pub fn plot_projected(
         SliceSelection::All => 0..shape[selection.x],
         SliceSelection::FromTo(a, b) => a..b,
     };
+    let length = slice.end.saturating_sub(slice.start);
+    let step = plot_sampling_step(length);
     let mut slice_selections = Vec::new();
     for idx in 0..shape.len() {
         if idx == selection.x {
             slice_selections.push(hdf5_metno::SliceOrIndex::SliceTo {
                 start: slice.start,
-                step: 1,
+                step,
                 end: slice.end,
                 block: 1,
             });
@@ -553,9 +556,8 @@ pub fn plot_projected(
     let data = values
         .iter()
         .enumerate()
-        .map(|(idx, value)| (idx as f64, *value))
+        .map(|(idx, value)| ((idx * step) as f64, *value))
         .collect::<Vec<_>>();
-    let length = data.len();
     let max = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::max);
     let min = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::min);
     Ok(DatasetPlotingData {

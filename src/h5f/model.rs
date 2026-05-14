@@ -277,6 +277,16 @@ impl H5FNode {
                         }
                         result.push(ContentShowMode::Preview);
                     }
+                    MatrixRenderType::ByteArray => {
+                        if dataset_meta.shape.iter().any(|x| *x > 1) {
+                            result.push(ContentShowMode::Matrix);
+                        }
+                        if dataset_meta.image.is_some()
+                            || !dataset_meta.shape.iter().any(|x| *x > 1)
+                        {
+                            result.push(ContentShowMode::Preview);
+                        }
+                    }
                     MatrixRenderType::Compound => {}
                 },
                 None => result.push(ContentShowMode::Preview),
@@ -431,6 +441,45 @@ mod tests {
                 chunk_shape: None,
                 hl: None,
                 matrixable: Some(MatrixRenderType::Opaque),
+                encoding: Encoding::Unknown,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: None,
+            },
+        ));
+
+        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+    }
+
+    #[test]
+    fn multi_value_varlen_byte_arrays_are_matrix_only_without_image_attrs() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "bytes".to_string(),
+                shape: vec![2],
+                data_type: "[]u8".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::VarLenArray(Box::new(TypeDescriptor::Unsigned(
+                    hdf5_metno::types::IntSize::U1,
+                ))),
+                data_bytesize: 8,
+                storage_required: 16,
+                total_bytes: 16,
+                total_elems: 2,
+                chunk_shape: None,
+                hl: None,
+                matrixable: Some(MatrixRenderType::ByteArray),
                 encoding: Encoding::Unknown,
                 image: None,
                 enum_render_overrides: None,

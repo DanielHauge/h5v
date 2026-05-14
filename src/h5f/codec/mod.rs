@@ -17,7 +17,8 @@ mod opaque;
 
 pub use dataset::{
     format_dataset_value_for_edit, read_scalar_string_dataset, read_single_value_dataset,
-    read_string_dataset_preview, write_dataset_value_from_text,
+    read_string_dataset_preview, read_varlen_u8_matrix_table, read_varlen_u8_matrix_values,
+    write_dataset_value_from_text,
 };
 pub use fixed_string::{read_string_attr_values, rewrite_fixed_string_attr, FixedStringRewrite};
 pub use opaque::{

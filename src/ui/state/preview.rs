@@ -1,12 +1,16 @@
-use std::{io::BufReader, sync::mpsc::Sender};
+use std::{
+    collections::{HashSet, VecDeque},
+    io::BufReader,
+    sync::mpsc::Sender,
+};
 
 use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
-use ratatui_image::thread::ThreadProtocol;
+use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
-    h5f::{HasPath, ImageType, Node},
+    h5f::{DatasetMeta, HasPath, ImageType, Node},
 };
 
 pub struct ChartPreviewLoadRequest {
@@ -21,6 +25,11 @@ pub struct ChartPreviewLoadRequest {
 pub enum ChartPreviewSource {
     Dataset {
         ds: Dataset,
+        selection: PreviewSelection,
+    },
+    ProjectedDataset {
+        ds: Dataset,
+        meta: DatasetMeta,
         selection: PreviewSelection,
     },
     Precomputed {
@@ -41,10 +50,11 @@ pub struct ChartPreviwState {
     pub clipboard_image: Option<ClipboardImageData>,
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
+    pub pending_key: Option<ChartPreviewKey>,
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImageLoadKey {
     pub ds_path: String,
     pub idx: i32,
@@ -53,7 +63,7 @@ pub struct ImageLoadKey {
     pub window_len: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageWindowAxis {
     Rows,
     Cols,
@@ -124,6 +134,7 @@ pub struct DatasetImageLoadRequest {
 
 pub struct ImgState {
     pub protocol: Option<ThreadProtocol>,
+    pub tx_resize_img: Sender<ResizeRequest>,
     pub tx_load_imgfs: Sender<RawImageLoadRequest>,
     pub tx_load_imgfsvlen: Sender<VarLenImageLoadRequest>,
     pub tx_load_img: Sender<DatasetImageLoadRequest>,
@@ -134,6 +145,14 @@ pub struct ImgState {
     pub error: Option<String>,
     pub idx_to_load: i32,
     pub idx_loaded: i32,
+    pub cached_images: VecDeque<CachedImage>,
+    pub pending_keys: HashSet<ImageLoadKey>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedImage {
+    pub key: ImageLoadKey,
+    pub clipboard_image: ClipboardImageData,
 }
 
 pub trait IsFromDsReq {
@@ -169,6 +188,37 @@ impl IsFromDsReq for ImgState {
 impl ImgState {
     pub fn current_request_key(&self) -> Option<ImageLoadKey> {
         self.current_key.clone()
+    }
+
+    pub fn has_cached_image(&self, key: &ImageLoadKey) -> bool {
+        self.cached_images.iter().any(|entry| &entry.key == key)
+    }
+
+    pub fn touch_cached_image(&mut self, key: &ImageLoadKey) -> Option<ClipboardImageData> {
+        let index = self
+            .cached_images
+            .iter()
+            .position(|entry| &entry.key == key)?;
+        let entry = self.cached_images.remove(index)?;
+        let clipboard_image = entry.clipboard_image.clone();
+        self.cached_images.push_back(entry);
+        Some(clipboard_image)
+    }
+
+    pub fn cache_image(
+        &mut self,
+        key: ImageLoadKey,
+        clipboard_image: ClipboardImageData,
+        capacity: usize,
+    ) {
+        self.cached_images.retain(|entry| entry.key != key);
+        self.cached_images.push_back(CachedImage {
+            key,
+            clipboard_image,
+        });
+        while self.cached_images.len() > capacity {
+            self.cached_images.pop_front();
+        }
     }
 }
 

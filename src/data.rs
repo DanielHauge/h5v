@@ -3,6 +3,8 @@ use core::f64;
 use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
+pub(crate) const MAX_PLOT_SAMPLES: usize = 4096;
+
 pub trait Previewable {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error>;
 }
@@ -175,13 +177,15 @@ impl Previewable for Dataset {
             SliceSelection::All => 0..shape[selection.x],
             SliceSelection::FromTo(a, b) => a..b,
         };
+        let length = slice.end.saturating_sub(slice.start);
+        let step = plot_sampling_step(length);
 
         let mut slice_selections: Vec<SliceOrIndex> = Vec::new();
         for idx in 0..shape.len() {
             if idx == selection.x {
                 slice_selections.push(SliceOrIndex::SliceTo {
                     start: slice.start,
-                    step: 1,
+                    step,
                     end: slice.end,
                     block: 1,
                 });
@@ -192,13 +196,11 @@ impl Previewable for Dataset {
 
         let selection = Selection::Hyperslab(Hyperslab::from(slice_selections));
         let data_to_show = self.read_slice_1d(selection)?;
-
         let data = data_to_show
             .iter()
             .enumerate()
-            .map(|(i, y)| (i as f64, *y))
+            .map(|(i, y)| ((i * step) as f64, *y))
             .collect::<Vec<_>>();
-        let length = data.len();
         let max = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::max);
         let min = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::min);
         Ok(DatasetPlotingData {
@@ -210,12 +212,16 @@ impl Previewable for Dataset {
     }
 }
 
+pub(crate) fn plot_sampling_step(length: usize) -> usize {
+    length.div_ceil(MAX_PLOT_SAMPLES).max(1)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        validate_preview_selection_shape, DatasetTableData, PreviewSelection, SliceSelection,
-        StringLengths,
+        plot_sampling_step, validate_preview_selection_shape, DatasetTableData, PreviewSelection,
+        SliceSelection, StringLengths,
     };
     use ndarray::Array2;
 
@@ -247,5 +253,13 @@ mod tests {
             data: Array2::<String>::default((2, 0)),
         };
         assert_eq!(data.string_lengths(), vec![0, 0]);
+    }
+
+    #[test]
+    fn plot_sampling_step_caps_large_previews() {
+        assert_eq!(plot_sampling_step(16), 1);
+        assert_eq!(plot_sampling_step(4096), 1);
+        assert_eq!(plot_sampling_step(4097), 2);
+        assert_eq!(plot_sampling_step(10_000), 3);
     }
 }
