@@ -8,7 +8,10 @@ use plotters::{
 };
 use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
-use std::ops::Range;
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    ops::Range,
+};
 
 use crate::{
     configure,
@@ -16,12 +19,13 @@ use crate::{
         validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
     },
     error::log_error,
-    search::full_traversal,
+    search::{full_traversal, fuzzy_highlight_spans, fuzzy_match_score},
 };
 
 mod render;
 
 pub type Point = (f64, f64);
+pub(crate) const EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 enum ExpressionPromptMode {
@@ -49,6 +53,7 @@ struct ExpressionPromptSuggestion {
     label: String,
     detail: String,
     kind: ExpressionPromptSuggestionKind,
+    highlight_spans: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +145,7 @@ impl ChartXAxisPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChartItemId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -632,6 +637,21 @@ impl ChartSource {
             ChartSource::BuiltinDerived(_) | ChartSource::DerivedExpression { .. } => None,
         }
     }
+
+    fn editable_expression(&self) -> Option<String> {
+        match self {
+            ChartSource::DatasetSelection(source) => Some(source.expression_reference()),
+            ChartSource::DerivedExpression { expression, .. } => Some(expression.clone()),
+            ChartSource::BuiltinDerived(_) => None,
+        }
+    }
+
+    fn input_ids(&self) -> &[ChartItemId] {
+        match self {
+            ChartSource::DerivedExpression { input_ids, .. } => input_ids,
+            ChartSource::DatasetSelection(_) | ChartSource::BuiltinDerived(_) => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -711,6 +731,10 @@ impl ChartItem {
 
     pub fn reference_label(&self) -> String {
         format!("${} {}", self.id.0, self.list_label())
+    }
+
+    fn editable_expression(&self) -> Option<String> {
+        self.source.editable_expression()
     }
 
     pub fn list_label(&self) -> String {
@@ -874,22 +898,34 @@ impl MultiChartState {
     }
 
     pub fn open_expression_prompt(&mut self) {
-        self.open_expression_prompt_for_selected();
-    }
-
-    pub fn open_expression_prompt_for_selected(&mut self) {
-        let mode = match self.selected_item() {
-            Some(ChartItem {
-                id,
-                source: ChartSource::DerivedExpression { .. },
-                ..
-            }) => ExpressionPromptMode::EditExisting(*id),
-            Some(_) | None => ExpressionPromptMode::New,
-        };
         let buffer = String::new();
         let cursor = buffer.len();
-        self.expression_prompt = Some(ExpressionPromptState::new(buffer, cursor, mode));
+        self.expression_prompt = Some(ExpressionPromptState::new(
+            buffer,
+            cursor,
+            ExpressionPromptMode::New,
+        ));
         self.modified = true;
+    }
+
+    pub fn open_selected_item_for_edit(&mut self) -> Result<(), String> {
+        let selected = self
+            .selected_item()
+            .ok_or_else(|| "No chart item selected".to_string())?;
+        let buffer = selected.editable_expression().ok_or_else(|| {
+            format!(
+                "Selected series ${} cannot be edited as an expression",
+                selected.id.0
+            )
+        })?;
+        let cursor = buffer.len();
+        self.expression_prompt = Some(ExpressionPromptState::new(
+            buffer,
+            cursor,
+            ExpressionPromptMode::EditExisting(selected.id),
+        ));
+        self.modified = true;
+        Ok(())
     }
 
     pub fn close_expression_prompt(&mut self) {
@@ -967,8 +1003,12 @@ impl MultiChartState {
     pub fn expression_select_next_suggestion(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             if !prompt.suggestions.is_empty() {
+                let visible = prompt
+                    .suggestions
+                    .len()
+                    .min(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS);
                 prompt.selected_suggestion = Some(match prompt.selected_suggestion {
-                    Some(selected) => (selected + 1).min(prompt.suggestions.len() - 1),
+                    Some(selected) => (selected + 1) % visible,
                     None => 0,
                 });
             }
@@ -978,9 +1018,13 @@ impl MultiChartState {
     pub fn expression_select_prev_suggestion(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             if !prompt.suggestions.is_empty() {
+                let visible = prompt
+                    .suggestions
+                    .len()
+                    .min(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS);
                 prompt.selected_suggestion = Some(match prompt.selected_suggestion {
-                    Some(selected) => selected.saturating_sub(1),
-                    None => prompt.suggestions.len() - 1,
+                    Some(0) | None => visible - 1,
+                    Some(selected) => selected - 1,
                 });
             }
         }
@@ -1124,20 +1168,150 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
-        let evaluated = self.evaluate_expression_with_file(&expression, file)?;
+        let (source, series) = self.build_expression_chart_item(&expression, file)?;
+        let points = series.points.clone();
+        self.add_chart_item(source, points)
+            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
+    }
+
+    fn build_expression_chart_item(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<(ChartSource, ChartSeries), String> {
+        let evaluated = self.evaluate_expression_with_file(expression, file)?;
         let points = sanitize_chart_points(evaluated.points);
         if points.is_empty() {
             return Err("Expression resolved to no finite points".to_string());
         }
         let len = points.len();
         let source = ChartSource::DerivedExpression {
-            expression,
+            expression: expression.to_string(),
             input_ids: evaluated.input_ids,
             len,
             kind: evaluated.kind,
         };
-        self.add_chart_item(source, points)
-            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
+        let series = ChartSeries::from_points(points)
+            .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
+        Ok((source, series))
+    }
+
+    fn direct_expression_dependents_of(&self, id: ChartItemId) -> Vec<ChartItemId> {
+        let mut dependents = self
+            .items
+            .iter()
+            .filter_map(|item| item.source.input_ids().contains(&id).then_some(item.id))
+            .collect::<Vec<_>>();
+        dependents.sort_by_key(|id| id.0);
+        dependents
+    }
+
+    fn transitive_expression_dependents_of(&self, id: ChartItemId) -> Vec<ChartItemId> {
+        let mut pending = self.direct_expression_dependents_of(id);
+        let mut seen = HashSet::new();
+        let mut ordered = Vec::new();
+        while let Some(next) = pending.pop() {
+            if seen.insert(next) {
+                ordered.push(next);
+                pending.extend(self.direct_expression_dependents_of(next));
+            }
+        }
+        ordered.sort_by_key(|dep_id| dep_id.0);
+        ordered
+    }
+
+    fn validate_expression_rewire(
+        &self,
+        id: ChartItemId,
+        previous_dependents: &[ChartItemId],
+        new_input_ids: &[ChartItemId],
+    ) -> Result<(), String> {
+        if new_input_ids.contains(&id) {
+            return Err(format!("Series ${} cannot depend on itself", id.0));
+        }
+        let blocked = previous_dependents
+            .iter()
+            .copied()
+            .find(|dependent_id| new_input_ids.contains(dependent_id));
+        if let Some(blocked) = blocked {
+            return Err(format!(
+                "Updating ${} would create a dependency cycle through ${}",
+                id.0, blocked.0
+            ));
+        }
+        Ok(())
+    }
+
+    fn recompute_expression_dependents(
+        &mut self,
+        affected_ids: Vec<ChartItemId>,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        if affected_ids.is_empty() {
+            return Ok(());
+        }
+
+        let affected = affected_ids.iter().copied().collect::<HashSet<_>>();
+        let mut indegree = HashMap::<ChartItemId, usize>::new();
+        let mut edges = HashMap::<ChartItemId, Vec<ChartItemId>>::new();
+        for id in &affected_ids {
+            let item = self
+                .item_by_id(*id)
+                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+            let mut local_indegree = 0usize;
+            for dependency in item.source.input_ids() {
+                if affected.contains(dependency) {
+                    local_indegree += 1;
+                    edges.entry(*dependency).or_default().push(*id);
+                }
+            }
+            indegree.insert(*id, local_indegree);
+        }
+
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+            .collect::<BTreeSet<_>>();
+        let mut processed = 0usize;
+
+        while let Some(id) = ready.iter().next().copied() {
+            ready.remove(&id);
+            let expression = match self.item_by_id(id).map(|item| item.source.clone()) {
+                Some(ChartSource::DerivedExpression { expression, .. }) => expression,
+                Some(_) => continue,
+                None => return Err(format!("Chart item ${} no longer exists", id.0)),
+            };
+            let (source, series) = self
+                .build_expression_chart_item(&expression, file)
+                .map_err(|error| format!("Failed to recompute ${}: {}", id.0, error))?;
+            let index = self
+                .items
+                .iter()
+                .position(|item| item.id == id)
+                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+            self.items[index].label = source.label();
+            self.items[index].source = source;
+            self.items[index].series = series;
+            processed += 1;
+
+            if let Some(dependents) = edges.get(&id) {
+                for dependent in dependents {
+                    if let Some(entry) = indegree.get_mut(dependent) {
+                        *entry = entry.saturating_sub(1);
+                        if *entry == 0 {
+                            ready.insert(*dependent);
+                        }
+                    }
+                }
+            }
+        }
+
+        if processed != affected_ids.len() {
+            return Err(
+                "Expression dependency cycle blocked recomputing dependent series".to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn update_expression_item_with_file(
@@ -1146,20 +1320,12 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<(), String> {
-        let evaluated = self.evaluate_expression_with_file(&expression, file)?;
-        let points = sanitize_chart_points(evaluated.points);
-        if points.is_empty() {
-            return Err("Expression resolved to no finite points".to_string());
-        }
-        let len = points.len();
-        let source = ChartSource::DerivedExpression {
-            expression,
-            input_ids: evaluated.input_ids,
-            len,
-            kind: evaluated.kind,
-        };
-        let series = ChartSeries::from_points(points)
-            .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
+        let original_items = self.items.clone();
+        let original_idx = self.idx;
+        let original_modified = self.modified;
+        let previous_dependents = self.transitive_expression_dependents_of(id);
+        let (source, series) = self.build_expression_chart_item(&expression, file)?;
+        self.validate_expression_rewire(id, &previous_dependents, source.input_ids())?;
         let index = self
             .items
             .iter()
@@ -1169,8 +1335,19 @@ impl MultiChartState {
         self.items[index].source = source;
         self.items[index].series = series;
         self.idx = index;
-        self.modified = true;
-        Ok(())
+        let result = self.recompute_expression_dependents(previous_dependents, file);
+        match result {
+            Ok(()) => {
+                self.modified = true;
+                Ok(())
+            }
+            Err(error) => {
+                self.items = original_items;
+                self.idx = original_idx;
+                self.modified = original_modified;
+                Err(error)
+            }
+        }
     }
 
     fn evaluate_expression_with_file(
@@ -1456,7 +1633,22 @@ impl MultiChartState {
         }
     }
 
-    pub fn clear_selected(&mut self) {
+    pub fn clear_selected(&mut self) -> Result<(), String> {
+        if self.idx < self.items.len() {
+            let selected_id = self.items[self.idx].id;
+            let selected_ref = format!("${}", selected_id.0);
+            let direct_dependents = self.direct_expression_dependents_of(selected_id);
+            if !direct_dependents.is_empty() {
+                let refs = direct_dependents
+                    .into_iter()
+                    .map(|id| format!("${}", id.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!(
+                    "Cannot delete {selected_ref}; it is used by {refs}"
+                ));
+            }
+        }
         if self.idx < self.items.len() {
             let removed = self.items.remove(self.idx);
             if self.marked_base_item == Some(removed.id) {
@@ -1469,6 +1661,7 @@ impl MultiChartState {
             }
             self.modified = true;
         }
+        Ok(())
     }
 
     pub fn clear_all(&mut self) {
@@ -3442,46 +3635,72 @@ fn expression_prompt_suggestions(
         return Vec::new();
     };
     if fragment.starts_with('$') {
-        return state
+        let mut suggestions = state
             .items
             .iter()
-            .take(8)
-            .filter(|item| {
-                let candidate = format!("${}", item.id.0);
-                candidate.starts_with(&fragment)
+            .filter_map(|item| {
+                let label = format!("${}", item.id.0);
+                let score = expression_suggestion_score(&label, &fragment, None)?;
+                Some((score, item, label))
             })
-            .map(|item| ExpressionPromptSuggestion {
-                symbol: match &item.source {
-                    ChartSource::DatasetSelection(source) => match source.kind {
-                        DatasetChartKind::Dataset => {
-                            configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
+            .map(|(score, item, label)| {
+                (
+                    score,
+                    ExpressionPromptSuggestion {
+                        symbol: match &item.source {
+                            ChartSource::DatasetSelection(source) => match source.kind {
+                                DatasetChartKind::Dataset => {
+                                    configure::configured_symbol(|symbols| {
+                                        symbols.tree.dataset_icon
+                                    })
+                                    .to_string()
+                                }
+                                DatasetChartKind::CompoundLeaf => {
+                                    configure::configured_symbol(|symbols| {
+                                        symbols.tree.compound_leaf_icon
+                                    })
+                                    .to_string()
+                                }
+                            },
+                            ChartSource::DerivedExpression { .. }
+                            | ChartSource::BuiltinDerived(_) => {
+                                configure::configured_symbol(|symbols| {
+                                    symbols.chart.membership_marker
+                                })
                                 .to_string()
-                        }
-                        DatasetChartKind::CompoundLeaf => {
-                            configure::configured_symbol(|symbols| symbols.tree.compound_leaf_icon)
-                                .to_string()
-                        }
+                            }
+                        },
+                        insert_text: label.clone(),
+                        label: label.clone(),
+                        detail: format!("{} | len {}", item.list_label(), item.series.len()),
+                        kind: match &item.source {
+                            ChartSource::DatasetSelection(source) => match source.kind {
+                                DatasetChartKind::Dataset => {
+                                    ExpressionPromptSuggestionKind::Dataset
+                                }
+                                DatasetChartKind::CompoundLeaf => {
+                                    ExpressionPromptSuggestionKind::CompoundLeaf
+                                }
+                            },
+                            ChartSource::DerivedExpression { .. }
+                            | ChartSource::BuiltinDerived(_) => {
+                                ExpressionPromptSuggestionKind::ItemRef
+                            }
+                        },
+                        highlight_spans: fuzzy_highlight_spans(&label, &fragment),
                     },
-                    ChartSource::DerivedExpression { .. } | ChartSource::BuiltinDerived(_) => {
-                        configure::configured_symbol(|symbols| symbols.chart.membership_marker)
-                            .to_string()
-                    }
-                },
-                insert_text: format!("${}", item.id.0),
-                label: format!("${}", item.id.0),
-                detail: format!("{} | len {}", item.list_label(), item.series.len()),
-                kind: match &item.source {
-                    ChartSource::DatasetSelection(source) => match source.kind {
-                        DatasetChartKind::Dataset => ExpressionPromptSuggestionKind::Dataset,
-                        DatasetChartKind::CompoundLeaf => {
-                            ExpressionPromptSuggestionKind::CompoundLeaf
-                        }
-                    },
-                    ChartSource::DerivedExpression { .. } | ChartSource::BuiltinDerived(_) => {
-                        ExpressionPromptSuggestionKind::ItemRef
-                    }
-                },
+                )
             })
+            .collect::<Vec<_>>();
+        suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+            rhs_score
+                .cmp(lhs_score)
+                .then_with(|| lhs.label.cmp(&rhs.label))
+        });
+        return suggestions
+            .into_iter()
+            .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+            .map(|(_, suggestion)| suggestion)
             .collect();
     }
 
@@ -3502,6 +3721,34 @@ fn expression_prompt_suggestions(
     }
 
     expression_path_suggestions(file, &fragment)
+}
+
+fn expression_suggestion_score(
+    candidate: &str,
+    query: &str,
+    basename: Option<&str>,
+) -> Option<i64> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let mut score = fuzzy_match_score(candidate, query)?;
+    if candidate.starts_with(query) {
+        score += 10_000;
+    }
+    if let Some(basename) = basename {
+        let trimmed_query = query.trim_start_matches(&['!', '#', '/'][..]);
+        if !trimmed_query.is_empty() && basename.starts_with(trimmed_query) {
+            score += 5_000;
+        }
+    }
+    Some(score)
+}
+
+fn shift_highlight_spans(spans: Vec<Range<usize>>, offset: usize) -> Vec<Range<usize>> {
+    spans
+        .into_iter()
+        .map(|span| (span.start + offset)..(span.end + offset))
+        .collect()
 }
 
 fn resolve_completion_target_path(state: &MultiChartState, target: &str) -> Option<String> {
@@ -3541,20 +3788,35 @@ fn expression_attribute_suggestions(
     }
     .unwrap_or_default();
 
-    names
+    let mut suggestions = names
         .into_iter()
-        .filter(|name| {
-            name.to_ascii_lowercase()
-                .contains(&attr_prefix.to_ascii_lowercase())
+        .filter_map(|name| {
+            let score = expression_suggestion_score(&name, attr_prefix, Some(&name))?;
+            let label = format!("{target}:{name}");
+            let highlight_spans =
+                shift_highlight_spans(fuzzy_highlight_spans(&name, attr_prefix), target.len() + 1);
+            Some((
+                score,
+                ExpressionPromptSuggestion {
+                    symbol: String::new(),
+                    insert_text: label.clone(),
+                    label,
+                    detail: String::new(),
+                    kind: ExpressionPromptSuggestionKind::Attribute,
+                    highlight_spans,
+                },
+            ))
         })
-        .take(8)
-        .map(|name| ExpressionPromptSuggestion {
-            symbol: String::new(),
-            insert_text: format!("{target}:{name}"),
-            label: format!("{target}:{name}"),
-            detail: String::new(),
-            kind: ExpressionPromptSuggestionKind::Attribute,
-        })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+        rhs_score
+            .cmp(lhs_score)
+            .then_with(|| lhs.label.cmp(&rhs.label))
+    });
+    suggestions
+        .into_iter()
+        .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+        .map(|(_, suggestion)| suggestion)
         .collect()
 }
 
@@ -3564,10 +3826,9 @@ fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPro
         Some('#') => Some(ExpressionAbsolutePathKind::Dataset),
         _ => None,
     };
-    let needle = fragment[1..].to_ascii_lowercase();
-    expression_absolute_path_entries(file)
+    let mut suggestions = expression_absolute_path_entries(file)
         .into_iter()
-        .filter(|entry| {
+        .filter_map(|entry| {
             let kind_matches = match target_kind {
                 Some(ExpressionAbsolutePathKind::Dataset) => true,
                 Some(ExpressionAbsolutePathKind::Group) => {
@@ -3575,13 +3836,12 @@ fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPro
                 }
                 None => true,
             };
-            kind_matches
-                && (entry.path.to_ascii_lowercase().contains(&needle)
-                    || entry.path.to_ascii_lowercase().starts_with(&needle))
-        })
-        .take(8)
-        .map(|entry| {
+            if !kind_matches {
+                return None;
+            }
             let label = format!("{}{}", &fragment[..1], entry.path);
+            let basename = entry.path.rsplit('/').next();
+            let score = expression_suggestion_score(&label, fragment, basename)?;
             let insert_text = match (&fragment[..1], entry.kind, entry.shape.as_ref()) {
                 ("!", ExpressionAbsolutePathKind::Dataset, Some(shape)) if !shape.is_empty() => {
                     format!(
@@ -3593,26 +3853,42 @@ fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPro
                 }
                 _ => label.clone(),
             };
-            ExpressionPromptSuggestion {
-                symbol: match entry.kind {
-                    ExpressionAbsolutePathKind::Group => {
-                        configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
-                            .to_string()
-                    }
-                    ExpressionAbsolutePathKind::Dataset => {
-                        configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
-                            .to_string()
-                    }
+            Some((
+                score,
+                ExpressionPromptSuggestion {
+                    symbol: match entry.kind {
+                        ExpressionAbsolutePathKind::Group => {
+                            configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
+                                .to_string()
+                        }
+                        ExpressionAbsolutePathKind::Dataset => {
+                            configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
+                                .to_string()
+                        }
+                    },
+                    insert_text,
+                    label: label.clone(),
+                    detail: entry.detail,
+                    kind: match entry.kind {
+                        ExpressionAbsolutePathKind::Group => ExpressionPromptSuggestionKind::Group,
+                        ExpressionAbsolutePathKind::Dataset => {
+                            ExpressionPromptSuggestionKind::Dataset
+                        }
+                    },
+                    highlight_spans: fuzzy_highlight_spans(&label, fragment),
                 },
-                insert_text,
-                label,
-                detail: entry.detail,
-                kind: match entry.kind {
-                    ExpressionAbsolutePathKind::Group => ExpressionPromptSuggestionKind::Group,
-                    ExpressionAbsolutePathKind::Dataset => ExpressionPromptSuggestionKind::Dataset,
-                },
-            }
+            ))
         })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+        rhs_score
+            .cmp(lhs_score)
+            .then_with(|| lhs.label.cmp(&rhs.label))
+    });
+    suggestions
+        .into_iter()
+        .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+        .map(|(_, suggestion)| suggestion)
         .collect()
 }
 
@@ -4536,6 +4812,172 @@ mod tests {
 
         state.expression_backspace();
         assert!(!state.modified);
+    }
+
+    #[test]
+    fn suggestion_selection_wraps_within_visible_entries() {
+        let mut state = make_state();
+        state.expression_prompt = Some(ExpressionPromptState {
+            buffer: "!/".to_string(),
+            cursor: 2,
+            mode: ExpressionPromptMode::New,
+            messages: Vec::new(),
+            suggestions: (0..6)
+                .map(|idx| ExpressionPromptSuggestion {
+                    symbol: String::new(),
+                    insert_text: format!("!/path{idx}"),
+                    label: format!("!/path{idx}"),
+                    detail: String::new(),
+                    kind: ExpressionPromptSuggestionKind::Dataset,
+                    highlight_spans: Vec::new(),
+                })
+                .collect(),
+            selected_suggestion: Some(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS - 1),
+            input_segments: Vec::new(),
+        });
+
+        state.expression_select_next_suggestion();
+        assert_eq!(
+            state
+                .expression_prompt
+                .as_ref()
+                .unwrap()
+                .selected_suggestion,
+            Some(0)
+        );
+
+        state.expression_select_prev_suggestion();
+        assert_eq!(
+            state
+                .expression_prompt
+                .as_ref()
+                .unwrap()
+                .selected_suggestion,
+            Some(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS - 1)
+        );
+    }
+
+    #[test]
+    fn suggestion_score_prefers_prefix_and_basename_matches() {
+        let prefix =
+            expression_suggestion_score("!/group/series", "!/ser", Some("series")).unwrap();
+        let fuzzy =
+            expression_suggestion_score("!/group/alpha_series", "!/ser", Some("alpha_series"))
+                .unwrap();
+        assert!(prefix > fuzzy);
+    }
+
+    #[test]
+    fn open_selected_item_for_edit_prefills_existing_expression() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+        state
+            .create_expression_derived("$1 + 1".to_string())
+            .expect("create derived");
+        state
+            .open_selected_item_for_edit()
+            .expect("open edit prompt");
+        let prompt = state.expression_prompt.as_ref().expect("prompt");
+        assert_eq!(prompt.buffer, "$1 + 1");
+        assert_eq!(
+            prompt.mode,
+            ExpressionPromptMode::EditExisting(ChartItemId(2))
+        );
+    }
+
+    #[test]
+    fn updating_series_recomputes_dependent_expressions_recursively() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0)],
+        );
+        state
+            .create_expression_derived("$1 + 1".to_string())
+            .expect("create $3");
+        state
+            .create_expression_derived("$3 + 1".to_string())
+            .expect("create $4");
+
+        state
+            .update_expression_item_with_file(ChartItemId(1), "$2 + 5".to_string(), None)
+            .expect("update $1");
+
+        assert_eq!(
+            state.item_by_id(ChartItemId(1)).unwrap().series.points,
+            vec![(0.0, 15.0), (1.0, 25.0)]
+        );
+        assert_eq!(
+            state.item_by_id(ChartItemId(3)).unwrap().series.points,
+            vec![(0.0, 16.0), (1.0, 26.0)]
+        );
+        assert_eq!(
+            state.item_by_id(ChartItemId(4)).unwrap().series.points,
+            vec![(0.0, 17.0), (1.0, 27.0)]
+        );
+    }
+
+    #[test]
+    fn updating_series_rejects_dependency_cycles_and_keeps_original_series() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+        state
+            .create_expression_derived("$1 + 1".to_string())
+            .expect("create $2");
+
+        let err = state
+            .update_expression_item_with_file(ChartItemId(1), "$2 + 1".to_string(), None)
+            .expect_err("cycle should fail");
+        assert!(err.contains("dependency cycle"));
+        assert_eq!(
+            state.item_by_id(ChartItemId(1)).unwrap().series.points,
+            vec![(0.0, 1.0), (1.0, 2.0)]
+        );
+        assert_eq!(
+            state.item_by_id(ChartItemId(2)).unwrap().series.points,
+            vec![(0.0, 2.0), (1.0, 3.0)]
+        );
+    }
+
+    #[test]
+    fn clear_selected_blocks_deleting_series_with_dependents() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+        state
+            .create_expression_derived("$1 + 1".to_string())
+            .expect("create dependent");
+        state.idx = 0;
+
+        let err = state
+            .clear_selected()
+            .expect_err("delete should be blocked");
+        assert!(err.contains("Cannot delete $1"));
+        assert!(err.contains("$2"));
+        assert_eq!(state.chart_items().len(), 2);
     }
 
     #[test]

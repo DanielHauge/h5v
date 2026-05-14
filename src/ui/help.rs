@@ -731,6 +731,9 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
                 "Show or hide the selected series".to_string()
             }
             MultiChartAction::OpenExpressionPrompt => "Open the expression editor".to_string(),
+            MultiChartAction::EditSelectedExpression => {
+                "Edit the selected series in the expression editor".to_string()
+            }
             MultiChartAction::MoveUp => "Select the previous series".to_string(),
             MultiChartAction::MoveDown => "Select the next series".to_string(),
         }
@@ -794,7 +797,7 @@ fn multichart_help_lines() -> Vec<Line<'static>> {
         (
             "Expressions",
             &[
-                "Press Enter or e to open the expression editor below the chart. Enter submits, Tab completes, and Esc closes it.",
+                "Press Enter to open a new expression below the chart, or e to edit the selected series. Enter submits, Tab completes, and Esc closes it.",
                 "Use $1 for an existing item, $1[0..128] for an item slice, !/group/data[..,0] for a dataset series, and #/group/value for a scalar.",
                 "Tuple expressions make explicit x/y plots, for example (!/time[..], $2 * #/calibration:scale).",
             ],

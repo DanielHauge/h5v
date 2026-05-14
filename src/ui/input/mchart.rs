@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind
 
 use crate::{
     error::AppError,
-    ui::state::{AppState, Mode},
+    ui::state::{AppState, AppToast, Mode},
 };
 
 use super::{
@@ -145,7 +145,9 @@ pub(crate) fn handle_mchart_event(
                         Ok(EventResult::Redraw)
                     }
                     Some(BoundAction::Action(MultiChartAction::DeleteSelected)) => {
-                        state.multi_chart.clear_selected();
+                        if let Err(error) = state.multi_chart.clear_selected() {
+                            return Ok(EventResult::Toast(AppToast::Warning(error), false));
+                        }
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     }
@@ -160,6 +162,14 @@ pub(crate) fn handle_mchart_event(
                     }
                     Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt)) => {
                         state.multi_chart.open_expression_prompt();
+                        let file = state.file.clone();
+                        state.multi_chart.refresh_expression_prompt(file.as_ref());
+                        Ok(EventResult::Redraw)
+                    }
+                    Some(BoundAction::Action(MultiChartAction::EditSelectedExpression)) => {
+                        if let Err(error) = state.multi_chart.open_selected_item_for_edit() {
+                            return Ok(EventResult::Toast(AppToast::Warning(error), false));
+                        }
                         let file = state.file.clone();
                         state.multi_chart.refresh_expression_prompt(file.as_ref());
                         Ok(EventResult::Redraw)

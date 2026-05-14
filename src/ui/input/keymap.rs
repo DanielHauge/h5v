@@ -106,6 +106,7 @@ pub enum MultiChartAction {
     ClearAll,
     ToggleSelectedVisible,
     OpenExpressionPrompt,
+    EditSelectedExpression,
     MoveUp,
     MoveDown,
 }
@@ -948,6 +949,11 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::OpenExpressionPrompt,
     },
     ActionCode {
+        symbol: "EditSelectedExpression",
+        code: "edit-selected-expression",
+        action: MultiChartAction::EditSelectedExpression,
+    },
+    ActionCode {
         symbol: "MoveUp",
         code: "move-up",
         action: MultiChartAction::MoveUp,
@@ -1508,7 +1514,7 @@ fn default_multichart_bindings() -> Vec<KeyBinding<MultiChartAction>> {
         binding("C", BoundAction::Action(MultiChartAction::ClearAll)),
         binding(
             "e",
-            BoundAction::Action(MultiChartAction::OpenExpressionPrompt),
+            BoundAction::Action(MultiChartAction::EditSelectedExpression),
         ),
         binding("?", BoundAction::Action(MultiChartAction::ShowHelp)),
         binding(
@@ -1559,6 +1565,18 @@ mod tests {
         assert_eq!(
             multichart_action(&key, &keymaps),
             Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt))
+        );
+    }
+
+    #[test]
+    fn multichart_e_edits_selected_expression() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(
+                MultiChartAction::EditSelectedExpression
+            ))
         );
     }
 

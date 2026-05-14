@@ -12,7 +12,8 @@ use crate::{configure, error::log_error};
 
 use super::{
     ChartSource, ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
-    ExpressionPromptSuggestionKind, MultiChartState,
+    ExpressionPromptSuggestion, ExpressionPromptSuggestionKind, MultiChartState,
+    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 fn mchart_body_style() -> Style {
@@ -25,6 +26,38 @@ fn mchart_body_style() -> Style {
 
 fn mchart_body_span(content: impl Into<String>) -> Span<'static> {
     Span::styled(content.into(), mchart_body_style())
+}
+
+fn render_suggestion_label(
+    suggestion: &ExpressionPromptSuggestion,
+    base_style: Style,
+    highlight_style: Style,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut last_end = 0;
+    for span in &suggestion.highlight_spans {
+        if span.start > last_end {
+            spans.push(Span::styled(
+                suggestion.label[last_end..span.start].to_string(),
+                base_style,
+            ));
+        }
+        spans.push(Span::styled(
+            suggestion.label[span.start..span.end].to_string(),
+            highlight_style,
+        ));
+        last_end = span.end;
+    }
+    if last_end < suggestion.label.len() {
+        spans.push(Span::styled(
+            suggestion.label[last_end..].to_string(),
+            base_style,
+        ));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(suggestion.label.clone(), base_style));
+    }
+    spans
 }
 
 impl MultiChartState {
@@ -66,7 +99,7 @@ impl MultiChartState {
                 .split(panes[0]);
             let main_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .constraints([Constraint::Min(10), Constraint::Length(7)])
                 .split(panes[1]);
 
             self.render_item_list(f, sidebar_chunks[0]);
@@ -85,7 +118,7 @@ impl MultiChartState {
         let panes = {
             let split = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .constraints([Constraint::Min(10), Constraint::Length(7)])
                 .split(inner_area);
             let workspace_area = split[0];
             let prompt_area = split[1];
@@ -112,7 +145,7 @@ impl MultiChartState {
             f,
             Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .constraints([Constraint::Min(10), Constraint::Length(7)])
                 .split(inner_area)[1],
         );
     }
@@ -639,7 +672,7 @@ impl MultiChartState {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Length(3)])
+            .constraints([Constraint::Length(3), Constraint::Length(2)])
             .split(inner);
 
         let input_text = match prompt {
@@ -719,7 +752,7 @@ impl MultiChartState {
                 let suggestion_line = prompt
                     .suggestions
                     .iter()
-                    .take(4)
+                    .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
                     .enumerate()
                     .flat_map(|(idx, suggestion)| {
                         let (symbol_color, label_color) = match suggestion.kind {
@@ -749,15 +782,27 @@ impl MultiChartState {
                             .unwrap_or(panel_bg);
                         let symbol_style = Style::default().fg(symbol_color).bg(selected_bg);
                         let label_style = Style::default().fg(label_color).bg(selected_bg);
+                        let highlight_style = Style::default()
+                            .fg(configure::themed_color(|colors| {
+                                colors.accent.search_highlight
+                            }))
+                            .bg(selected_bg)
+                            .bold();
                         let detail_style = Style::default()
                             .fg(configure::themed_color(|colors| colors.text.type_desc))
                             .bg(selected_bg);
-                        [
-                            Span::styled(format!(" {} ", suggestion.symbol), symbol_style),
-                            Span::styled(suggestion.label.clone(), label_style),
-                            Span::styled(suggestion.detail.clone(), detail_style),
-                            Span::raw(" "),
-                        ]
+                        let mut spans = vec![Span::styled(
+                            format!(" {} ", suggestion.symbol),
+                            symbol_style,
+                        )];
+                        spans.extend(render_suggestion_label(
+                            suggestion,
+                            label_style,
+                            highlight_style,
+                        ));
+                        spans.push(Span::styled(suggestion.detail.clone(), detail_style));
+                        spans.push(Span::raw(" "));
+                        spans
                     })
                     .collect::<Vec<_>>();
                 lines.push(Line::from(suggestion_line));

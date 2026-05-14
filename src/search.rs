@@ -41,16 +41,15 @@ pub fn full_traversal(g: &Group) -> Vec<String> {
     traversal_result.unwrap_or_default()
 }
 
-fn fuzzy_search<'a>(paths: &'a [String], query: &str) -> Vec<&'a str> {
+pub(crate) fn fuzzy_match_score(candidate: &str, query: &str) -> Option<i64> {
     let matcher = SkimMatcherV2::default();
+    matcher.fuzzy_match(candidate, query)
+}
 
+fn fuzzy_search<'a>(paths: &'a [String], query: &str) -> Vec<&'a str> {
     let mut results: Vec<_> = paths
         .iter()
-        .filter_map(|p| {
-            matcher
-                .fuzzy_match(p, query)
-                .map(|score| (score, p.as_str()))
-        })
+        .filter_map(|p| fuzzy_match_score(p, query).map(|score| (score, p.as_str())))
         .collect();
 
     // sort best matches first
@@ -68,7 +67,7 @@ fn fuzzy_highlight(path: &str, query: &str) -> Vec<usize> {
     }
 }
 
-fn indices_to_spans(highlight_idx: &[usize]) -> Vec<Range<usize>> {
+pub(crate) fn indices_to_spans(highlight_idx: &[usize]) -> Vec<Range<usize>> {
     let mut spans = vec![];
     if highlight_idx.is_empty() {
         return spans;
@@ -91,9 +90,13 @@ fn indices_to_spans(highlight_idx: &[usize]) -> Vec<Range<usize>> {
     spans
 }
 
+pub(crate) fn fuzzy_highlight_spans(candidate: &str, query: &str) -> Vec<Range<usize>> {
+    let highlight_idx = fuzzy_highlight(candidate, query);
+    indices_to_spans(&highlight_idx)
+}
+
 fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
-    let highlight_idx = fuzzy_highlight(path, query);
-    let highlight_spans = indices_to_spans(&highlight_idx);
+    let highlight_spans = fuzzy_highlight_spans(path, query);
 
     let mut spans = vec![];
     let mut last_end = 0;

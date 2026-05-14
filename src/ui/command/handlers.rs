@@ -302,7 +302,10 @@ pub(super) fn handle_mchart(
             ))),
         },
         "remove" | "delete" => {
-            state.multi_chart.clear_selected();
+            state
+                .multi_chart
+                .clear_selected()
+                .map_err(AppError::InvalidCommand)?;
             state.compute_tree_view();
             Ok(EventResult::Redraw)
         }
