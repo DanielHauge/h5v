@@ -182,6 +182,7 @@ pub struct ConfigSnapshot {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConfigState {
+    pub(crate) config_generation: u64,
     pub(crate) active_theme: ThemeName,
     pub(crate) active_symbol_theme: SymbolThemeName,
     pub(crate) colors: ThemeColors,

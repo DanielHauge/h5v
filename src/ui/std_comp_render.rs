@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use itertools::Itertools;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -85,6 +87,42 @@ fn primary_text_style() -> Style {
     style
 }
 
+fn highlight_theme_name() -> &'static str {
+    if configure::prefers_strong_text() {
+        "base16-ocean.light"
+    } else {
+        "base16-ocean.dark"
+    }
+}
+
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+pub fn highlighted_lines(string: &str, hl: &str) -> Option<Vec<Line<'static>>> {
+    let syntax = SYNTAX_SET.find_syntax_by_extension(hl)?;
+    let mut h = HighlightLines::new(syntax, &THEME_SET.themes[highlight_theme_name()]);
+    let string = if hl == "json" {
+        serde_json::from_str::<serde_json::Value>(string)
+            .ok()
+            .and_then(|value| serde_json::to_string_pretty(&value).ok())?
+    } else {
+        string.to_string()
+    };
+
+    let mut highlighted = Vec::new();
+    for line in LinesWithEndings::from(&string) {
+        let ranges = h
+            .highlight_line(line, &SYNTAX_SET)
+            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
+        let spans = ranges
+            .into_iter()
+            .map(|(style, text)| Span::styled(text.to_string(), syntect_to_ratatui_style(style)))
+            .collect::<Vec<_>>();
+        highlighted.push(Line::from(spans));
+    }
+    Some(highlighted)
+}
+
 pub fn render_hl_string<T: ToString>(
     f: &mut Frame,
     area: &Rect,
@@ -92,19 +130,11 @@ pub fn render_hl_string<T: ToString>(
     string: T,
     hl: String,
 ) {
-    let ps = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
-
-    let syntax = match ps.find_syntax_by_extension(&hl) {
+    let syntax = match SYNTAX_SET.find_syntax_by_extension(&hl) {
         Some(s) => s,
         None => return render_raw_string(f, area, node, string),
     };
-    let theme_name = if configure::prefers_strong_text() {
-        "base16-ocean.light"
-    } else {
-        "base16-ocean.dark"
-    };
-    let mut h = HighlightLines::new(syntax, &ts.themes[theme_name]);
+    let mut h = HighlightLines::new(syntax, &THEME_SET.themes[highlight_theme_name()]);
     let string = string.to_string();
     let string = if hl == "json" {
         match serde_json::from_str::<serde_json::Value>(&string) {
@@ -130,7 +160,7 @@ pub fn render_hl_string<T: ToString>(
     let mut skips = line_offset;
     for line in LinesWithEndings::from(&string) {
         let ranges: Vec<(syntect::highlighting::Style, &str)> = h
-            .highlight_line(line, &ps)
+            .highlight_line(line, &SYNTAX_SET)
             .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
         let mut spans = vec![];
         for (style, text) in ranges {

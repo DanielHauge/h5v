@@ -828,6 +828,7 @@ fn main_recover_loop(
         command_return_mode: Mode::Normal,
         copying: false,
         searcher: None,
+        help: state::HelpViewState::default(),
         pending_chord: None,
         binding_command_depth: 0,
         show_tree_view: true,
@@ -892,7 +893,7 @@ fn main_recover_loop(
         state.ui_layout = state::UiLayoutState::default();
 
         if let Mode::Help = state.mode {
-            render_help(frame, content_area);
+            render_help(frame, content_area, state);
             return;
         }
         if matches!(state.mode, Mode::MultiChart) || command_over_multichart {

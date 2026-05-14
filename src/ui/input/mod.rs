@@ -381,9 +381,42 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 if !is_handled_key_press(&key_event) {
                     return Ok(EventResult::Continue);
                 }
-                if key_event.code == KeyCode::Esc {
-                    state.mode = Mode::Normal;
-                    return Ok(EventResult::Redraw);
+                match key_event.code {
+                    KeyCode::Esc => {
+                        state.mode = Mode::Normal;
+                        return Ok(EventResult::Redraw);
+                    }
+                    KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                        if state.help_next_tab() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                        if state.help_prev_tab() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.help_next_section() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.help_prev_section() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    KeyCode::Home | KeyCode::Char('g') => {
+                        if state.help_first_section() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    KeyCode::End | KeyCode::Char('G') => {
+                        if state.help_last_section() {
+                            return Ok(EventResult::Redraw);
+                        }
+                    }
+                    _ => {}
                 }
                 let keymaps = configure::current_keymaps();
                 if let Some(action) = global_action(&key_event, &keymaps) {

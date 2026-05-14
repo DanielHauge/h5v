@@ -33,6 +33,7 @@ fn default_content_mode_order() -> Vec<ContentShowMode> {
 static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
     let symbol_theme = default_symbol_theme();
     RwLock::new(ConfigState {
+        config_generation: 0,
         active_theme: ThemeName::Dark,
         active_symbol_theme: symbol_theme,
         colors: ThemeColors::for_theme(ThemeName::Dark),
@@ -47,6 +48,7 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
 
 pub fn reset_config(theme: ThemeName) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         let symbol_theme = default_symbol_theme();
         state.active_theme = theme;
         state.active_symbol_theme = symbol_theme;
@@ -62,6 +64,7 @@ pub fn reset_config(theme: ThemeName) {
 
 pub fn reset_symbol_theme(theme: SymbolThemeName) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.active_symbol_theme = theme;
         state.symbols = UiSymbols::for_theme(theme);
     });
@@ -83,6 +86,7 @@ pub fn snapshot_config() -> ConfigSnapshot {
 
 pub fn restore_config(snapshot: ConfigSnapshot) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.active_theme = snapshot.active_theme;
         state.active_symbol_theme = snapshot.active_symbol_theme;
         state.colors = snapshot.colors;
@@ -98,6 +102,7 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
 pub fn set_color_override(name: &str, color: Color) -> Result<(), String> {
     with_config_write(|state| {
         if state.colors.set_named_color(name, color) {
+            state.config_generation = state.config_generation.wrapping_add(1);
             Ok(())
         } else {
             Err(format!(
@@ -111,6 +116,7 @@ pub fn set_color_override(name: &str, color: Color) -> Result<(), String> {
 pub fn set_symbol_override(name: &str, value: &str) -> Result<(), String> {
     with_config_write(|state| {
         if state.symbols.set_named_symbol(name, value) {
+            state.config_generation = state.config_generation.wrapping_add(1);
             Ok(())
         } else {
             Err(format!(
@@ -131,6 +137,7 @@ pub fn current_symbol_theme_name() -> SymbolThemeName {
 
 pub fn set_content_mode_order(order: &[ContentShowMode]) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.content_mode_order = normalize_content_mode_order(order);
     });
 }
@@ -158,6 +165,7 @@ pub fn current_content_mode_order() -> Vec<ContentShowMode> {
 
 pub fn set_heatmap_ranges(range_modes: &[HeatmapRangeMode], default_range: &HeatmapRangeMode) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.heatmap_range_modes = range_modes.to_vec();
         state.heatmap_default_settings.range = default_range.clone();
     });
@@ -169,6 +177,7 @@ pub fn current_heatmap_range_modes() -> Vec<HeatmapRangeMode> {
 
 pub fn set_heatmap_default_settings(default_settings: &HeatmapSettings) {
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.heatmap_default_settings = default_settings.clone();
     });
 }
@@ -184,6 +193,7 @@ pub fn current_heatmap_default_range() -> HeatmapRangeMode {
 pub fn set_keymap_config(keymap_config: &KeymapConfig) -> Result<(), String> {
     let keymaps = merge_keymap_config(keymap_config)?;
     with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
         state.keymap_config = keymap_config.clone();
         state.keymaps = keymaps;
     });
@@ -196,6 +206,10 @@ pub fn current_keymaps() -> EffectiveKeymaps {
 
 pub fn prefers_strong_text() -> bool {
     matches!(current_theme_name(), ThemeName::Light)
+}
+
+pub fn current_config_generation() -> u64 {
+    with_config_read(|state| state.config_generation)
 }
 
 pub(crate) fn themed_color(getter: impl FnOnce(&ThemeColors) -> Color) -> Color {

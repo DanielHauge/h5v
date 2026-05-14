@@ -3,9 +3,9 @@
 use ratatui::style::Color;
 
 use crate::configure::{
-    available_color_names, color_to_lua_string, current_theme_name, ordered_content_modes,
-    parse_color, reset_config, set_color_override, set_content_mode_order, theme_named_colors,
-    themed_color, SymbolThemeName, ThemeName,
+    available_color_names, color_to_lua_string, current_config_generation, current_theme_name,
+    ordered_content_modes, parse_color, reset_config, set_color_override, set_content_mode_order,
+    theme_named_colors, themed_color, SymbolThemeName, ThemeName,
 };
 use crate::ui::state::ContentShowMode;
 
@@ -75,4 +75,17 @@ fn content_mode_order_reorders_available_modes() {
         vec![ContentShowMode::Matrix, ContentShowMode::Preview]
     );
     reset_config(ThemeName::Dark);
+}
+
+#[test]
+fn config_generation_tracks_successful_mutations() {
+    reset_config(ThemeName::Dark);
+    let start = current_config_generation();
+    set_content_mode_order(&[ContentShowMode::Heatmap, ContentShowMode::Preview]);
+    let after_reorder = current_config_generation();
+    assert!(after_reorder > start);
+
+    let failed = set_color_override("bogus.color", Color::Blue);
+    assert!(failed.is_err());
+    assert_eq!(current_config_generation(), after_reorder);
 }

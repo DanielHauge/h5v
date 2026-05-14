@@ -69,6 +69,146 @@ pub enum Mode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTab {
+    Keymap,
+    Commands,
+    MultiChart,
+    Heatmap,
+    Configuration,
+}
+
+impl HelpTab {
+    const ALL: [Self; 5] = [
+        Self::Keymap,
+        Self::Commands,
+        Self::MultiChart,
+        Self::Heatmap,
+        Self::Configuration,
+    ];
+
+    fn step(self, delta: isize) -> Self {
+        let current = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(Self::ALL.len() as isize) as usize;
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpKeymapSection {
+    Global,
+    Normal,
+    Window,
+    Tree,
+    Content,
+    Heatmap,
+    Attributes,
+    MultiChart,
+}
+
+impl HelpKeymapSection {
+    const ALL: [Self; 8] = [
+        Self::Global,
+        Self::Normal,
+        Self::Window,
+        Self::Tree,
+        Self::Content,
+        Self::Heatmap,
+        Self::Attributes,
+        Self::MultiChart,
+    ];
+
+    fn step(self, delta: isize) -> Self {
+        let current = Self::ALL
+            .iter()
+            .position(|section| *section == self)
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(Self::ALL.len() as isize) as usize;
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpCommandSection {
+    Navigation,
+    View,
+    Selection,
+    Attributes,
+    App,
+    MultiChart,
+    Input,
+}
+
+impl HelpCommandSection {
+    const ALL: [Self; 7] = [
+        Self::Navigation,
+        Self::View,
+        Self::Selection,
+        Self::Attributes,
+        Self::App,
+        Self::MultiChart,
+        Self::Input,
+    ];
+
+    fn step(self, delta: isize) -> Self {
+        let current = Self::ALL
+            .iter()
+            .position(|section| *section == self)
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(Self::ALL.len() as isize) as usize;
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpCustomizationSection {
+    Configuration,
+    Settings,
+    Colors,
+    Symbols,
+    Keymaps,
+    Scripting,
+}
+
+impl HelpCustomizationSection {
+    const ALL: [Self; 6] = [
+        Self::Configuration,
+        Self::Settings,
+        Self::Colors,
+        Self::Symbols,
+        Self::Keymaps,
+        Self::Scripting,
+    ];
+
+    fn step(self, delta: isize) -> Self {
+        let current = Self::ALL
+            .iter()
+            .position(|section| *section == self)
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(Self::ALL.len() as isize) as usize;
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpViewState {
+    pub selected_tab: HelpTab,
+    pub keymap_section: HelpKeymapSection,
+    pub command_section: HelpCommandSection,
+    pub customization_section: HelpCustomizationSection,
+}
+
+impl Default for HelpViewState {
+    fn default() -> Self {
+        Self {
+            selected_tab: HelpTab::Keymap,
+            keymap_section: HelpKeymapSection::Global,
+            command_section: HelpCommandSection::Navigation,
+            customization_section: HelpCustomizationSection::Configuration,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingChord {
     CtrlW,
 }
@@ -1028,6 +1168,7 @@ pub struct AppState<'a> {
     pub mode: Mode,
     pub command_return_mode: Mode,
     pub searcher: Option<Searcher>,
+    pub help: HelpViewState,
     pub pending_chord: Option<PendingChord>,
     pub binding_command_depth: usize,
     pub show_tree_view: bool,
@@ -1690,6 +1831,144 @@ impl AppState<'_> {
             Focus::Content => LastFocused::Content,
         };
         self.focus = Focus::Tree(last_focused);
+    }
+
+    pub fn help_next_tab(&mut self) -> bool {
+        let next = self.help.selected_tab.step(1);
+        if next == self.help.selected_tab {
+            return false;
+        }
+        self.help.selected_tab = next;
+        true
+    }
+
+    pub fn help_prev_tab(&mut self) -> bool {
+        let next = self.help.selected_tab.step(-1);
+        if next == self.help.selected_tab {
+            return false;
+        }
+        self.help.selected_tab = next;
+        true
+    }
+
+    pub fn help_next_section(&mut self) -> bool {
+        match self.help.selected_tab {
+            HelpTab::Keymap => {
+                let next = self.help.keymap_section.step(1);
+                if next == self.help.keymap_section {
+                    return false;
+                }
+                self.help.keymap_section = next;
+                true
+            }
+            HelpTab::Commands => {
+                let next = self.help.command_section.step(1);
+                if next == self.help.command_section {
+                    return false;
+                }
+                self.help.command_section = next;
+                true
+            }
+            HelpTab::Configuration => {
+                let next = self.help.customization_section.step(1);
+                if next == self.help.customization_section {
+                    return false;
+                }
+                self.help.customization_section = next;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn help_prev_section(&mut self) -> bool {
+        match self.help.selected_tab {
+            HelpTab::Keymap => {
+                let next = self.help.keymap_section.step(-1);
+                if next == self.help.keymap_section {
+                    return false;
+                }
+                self.help.keymap_section = next;
+                true
+            }
+            HelpTab::Commands => {
+                let next = self.help.command_section.step(-1);
+                if next == self.help.command_section {
+                    return false;
+                }
+                self.help.command_section = next;
+                true
+            }
+            HelpTab::Configuration => {
+                let next = self.help.customization_section.step(-1);
+                if next == self.help.customization_section {
+                    return false;
+                }
+                self.help.customization_section = next;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn help_first_section(&mut self) -> bool {
+        match self.help.selected_tab {
+            HelpTab::Keymap => {
+                if self.help.keymap_section == HelpKeymapSection::Global {
+                    false
+                } else {
+                    self.help.keymap_section = HelpKeymapSection::Global;
+                    true
+                }
+            }
+            HelpTab::Commands => {
+                if self.help.command_section == HelpCommandSection::Navigation {
+                    false
+                } else {
+                    self.help.command_section = HelpCommandSection::Navigation;
+                    true
+                }
+            }
+            HelpTab::Configuration => {
+                if self.help.customization_section == HelpCustomizationSection::Configuration {
+                    false
+                } else {
+                    self.help.customization_section = HelpCustomizationSection::Configuration;
+                    true
+                }
+            }
+            _ => false,
+        }
+    }
+
+    pub fn help_last_section(&mut self) -> bool {
+        match self.help.selected_tab {
+            HelpTab::Keymap => {
+                if self.help.keymap_section == HelpKeymapSection::MultiChart {
+                    false
+                } else {
+                    self.help.keymap_section = HelpKeymapSection::MultiChart;
+                    true
+                }
+            }
+            HelpTab::Commands => {
+                if self.help.command_section == HelpCommandSection::Input {
+                    false
+                } else {
+                    self.help.command_section = HelpCommandSection::Input;
+                    true
+                }
+            }
+            HelpTab::Configuration => {
+                if self.help.customization_section == HelpCustomizationSection::Scripting {
+                    false
+                } else {
+                    self.help.customization_section = HelpCustomizationSection::Scripting;
+                    true
+                }
+            }
+            _ => false,
+        }
     }
 
     pub fn focus_left(&mut self) {
@@ -2481,7 +2760,10 @@ impl AppState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::heatmap_anchor_fraction;
+    use super::{
+        heatmap_anchor_fraction, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
+        HelpTab, HelpViewState,
+    };
 
     #[test]
     fn heatmap_anchor_fraction_uses_display_position_when_not_inverted() {
@@ -2493,5 +2775,39 @@ mod tests {
     fn heatmap_anchor_fraction_flips_for_inverted_axes() {
         assert!((heatmap_anchor_fraction(0, 10, true) - 0.95).abs() < f64::EPSILON);
         assert!((heatmap_anchor_fraction(9, 10, true) - 0.05).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn help_tab_navigation_wraps() {
+        assert_eq!(HelpTab::Keymap.step(-1), HelpTab::Configuration);
+        assert_eq!(HelpTab::Configuration.step(1), HelpTab::Keymap);
+    }
+
+    #[test]
+    fn help_sidebar_navigation_wraps() {
+        assert_eq!(
+            HelpKeymapSection::Global.step(-1),
+            HelpKeymapSection::MultiChart
+        );
+        assert_eq!(
+            HelpCommandSection::Input.step(1),
+            HelpCommandSection::Navigation
+        );
+        assert_eq!(
+            HelpCustomizationSection::Configuration.step(-1),
+            HelpCustomizationSection::Scripting
+        );
+    }
+
+    #[test]
+    fn help_view_defaults_to_keymap_navigation() {
+        let help = HelpViewState::default();
+        assert_eq!(help.selected_tab, HelpTab::Keymap);
+        assert_eq!(help.keymap_section, HelpKeymapSection::Global);
+        assert_eq!(help.command_section, HelpCommandSection::Navigation);
+        assert_eq!(
+            help.customization_section,
+            HelpCustomizationSection::Configuration
+        );
     }
 }

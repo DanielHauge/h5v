@@ -20,10 +20,11 @@ pub use colors::{
 pub use presentation::reset_symbol_theme;
 #[allow(unused_imports)]
 pub use presentation::{
-    current_content_mode_order, current_heatmap_default_range, current_heatmap_default_settings,
-    current_heatmap_range_modes, current_keymaps, ordered_content_modes, reset_config,
-    restore_config, set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges,
-    set_keymap_config, snapshot_config, ConfigSnapshot,
+    current_config_generation, current_content_mode_order, current_heatmap_default_range,
+    current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
+    ordered_content_modes, reset_config, restore_config, set_content_mode_order,
+    set_heatmap_default_settings, set_heatmap_ranges, set_keymap_config, snapshot_config,
+    ConfigSnapshot,
 };
 pub(crate) use symbols::configured_symbol;
 #[allow(unused_imports)]
@@ -34,6 +35,10 @@ pub use symbols::{
 
 pub fn ensure_config_path() -> Result<PathBuf, ConfigureErrors> {
     loading::ensure_config_exists()
+}
+
+pub fn config_path() -> Result<PathBuf, ConfigureErrors> {
+    loading::config_path()
 }
 
 pub fn reset_config_path() -> Result<PathBuf, ConfigureErrors> {
