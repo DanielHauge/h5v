@@ -93,11 +93,12 @@ Multichart:
 ```text
 mchart open
 mchart add !/signals/sine_wave
+mchart fit all
 mchart visible
 mchart select next
 mchart prompt
 mchart expr "($1[0..512], !/signals/cosine_wave[..512])"
-mchart zoom in 25
+mchart zoom x in 25
 mchart pan right 10
 ```
 

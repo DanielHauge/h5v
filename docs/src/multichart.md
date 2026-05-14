@@ -45,9 +45,19 @@ The editor validates expressions live and suggests chart item ids, dataset paths
 - `-` or `Shift+Down` to zoom out
 - `h` / `Shift+Left` to pan left
 - `l` / `Shift+Right` to pan right
+- `f` to fit all visible series
+- `F` to fit the selected series
 - `c` to reset zoom
 
-The same actions are available from the command line.
+Mouse interaction follows the same anchored viewport model as heatmap:
+
+- wheel zoom over the plot anchors to the hovered point
+- plain wheel zoom changes both x and y
+- `Ctrl` + wheel zoom changes x only
+- `Shift` + wheel zoom changes y only
+- right-click drag snapshots on press and pans on release
+
+The same actions are available from the command line, including `mchart fit ...` and axis-specific zoom like `mchart zoom x in 20`.
 
 ## Expression workflows
 

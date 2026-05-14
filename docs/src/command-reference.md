@@ -113,7 +113,9 @@ These actions are available from the keymap and can be scripted with `press ...`
 | visible toggle / show / hide | `mchart visible hide` |
 | remove / delete | `mchart delete` |
 | clear / clear all / clear zoom | `mchart clear zoom` |
+| fit all / selected | `mchart fit selected` |
 | zoom in / out / reset | `mchart zoom in 25` |
+| zoom x / y / uniform | `mchart zoom x in 20` |
 | pan left / right | `mchart pan right 10` |
 
 ## Press examples

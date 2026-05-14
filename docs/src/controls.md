@@ -126,8 +126,13 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | `d`, `Backspace`, `Delete` | Remove the selected item when nothing depends on it |
 | `C` | Clear all chart items |
 | `c` | Reset zoom |
+| `f` | Fit all visible series |
+| `F` | Fit the selected series |
 | `+`, `=`, `Shift+Up` | Zoom in |
 | `-`, `Shift+Down` | Zoom out |
 | `h`, `Shift+Left` | Pan left |
 | `l`, `Shift+Right` | Pan right |
-| Right-click drag | Pan horizontally |
+| Wheel over the plot | Anchored zoom |
+| `Ctrl` + wheel over the plot | Anchored x-only zoom |
+| `Shift` + wheel over the plot | Anchored y-only zoom |
+| Right-click drag | Pan both axes on release |
