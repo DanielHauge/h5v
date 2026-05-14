@@ -27,6 +27,12 @@ pub(super) struct EvaluatedExpression {
     pub(super) input_ids: Vec<ChartItemId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExpressionSeriesResolution {
+    Overview,
+    Active,
+}
+
 pub(super) fn validate_expression_series_compatibility(
     referenced: &[ExpressionSeriesInput],
     expected_len: usize,
@@ -62,11 +68,21 @@ pub(super) fn validate_expression_series_compatibility(
 pub(super) fn resolve_expression_item_value(
     state: &MultiChartState,
     item_ref: &ExpressionItemRef,
+    resolution: ExpressionSeriesResolution,
 ) -> Result<Vec<Point>, String> {
     let item = state
         .item_by_id(item_ref.id)
         .ok_or_else(|| format!("Unknown chart item reference ${}", item_ref.id.0))?;
-    let points = sanitize_chart_points(item.series.points.clone());
+    if !item.has_loaded_series() {
+        return Err(format!(
+            "Chart item reference {} is still loading",
+            item_ref.render()
+        ));
+    }
+    let points = sanitize_chart_points(match resolution {
+        ExpressionSeriesResolution::Overview => item.overview_series().points.clone(),
+        ExpressionSeriesResolution::Active => item.active_series().points.clone(),
+    });
     let points = match &item_ref.slice {
         Some(slice) => {
             if slice.end > points.len() {
@@ -202,6 +218,8 @@ pub(super) fn resolve_expression_series_values(
     state: &MultiChartState,
     file: Option<&File>,
     refs: &[ExpressionSeriesRef],
+    resolution: ExpressionSeriesResolution,
+    allow_external_series: bool,
 ) -> Result<std::collections::HashMap<ExpressionSeriesRef, Vec<Point>>, String> {
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
@@ -211,7 +229,13 @@ pub(super) fn resolve_expression_series_values(
     })?;
     let mut series = std::collections::HashMap::with_capacity(refs.len());
     for series_ref in refs {
-        let points = resolve_expression_series_value(state, file, series_ref)?;
+        let points = resolve_expression_series_value(
+            state,
+            file,
+            series_ref,
+            resolution,
+            allow_external_series,
+        )?;
         series.insert(series_ref.clone(), points);
     }
     Ok(series)
@@ -221,12 +245,21 @@ pub(super) fn resolve_expression_series_value(
     state: &MultiChartState,
     file: &File,
     series_ref: &ExpressionSeriesRef,
+    resolution: ExpressionSeriesResolution,
+    allow_external_series: bool,
 ) -> Result<Vec<Point>, String> {
     match (&series_ref.target, &series_ref.attr_name) {
         (ExpressionObjectTarget::ItemRef(id), None) => {
             let points = state
                 .item_by_id(*id)
-                .map(|item| sanitize_chart_points(item.series.points.clone()))
+                .map(|item| {
+                    sanitize_chart_points(match resolution {
+                        ExpressionSeriesResolution::Overview => {
+                            item.overview_series().points.clone()
+                        }
+                        ExpressionSeriesResolution::Active => item.active_series().points.clone(),
+                    })
+                })
                 .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
             if points.is_empty() {
                 Err(format!(
@@ -243,6 +276,12 @@ pub(super) fn resolve_expression_series_value(
             read_expression_numeric_series_attr(&attr, &series_ref.render())
         }
         (ExpressionObjectTarget::AbsolutePath(path), None) => {
+            if !allow_external_series {
+                return Err(format!(
+                    "Series reference {} cannot refine from viewport detail yet",
+                    series_ref.render()
+                ));
+            }
             let object_path = normalize_absolute_object_path(path)?;
             let dataset = file.dataset(&object_path).map_err(|error| {
                 format!(

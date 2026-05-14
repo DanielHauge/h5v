@@ -365,6 +365,17 @@ pub(super) fn expression_prompt_messages(
         return Vec::new();
     }
 
+    if MultiChartState::raw_dataset_reference(trimmed)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return vec![ExpressionPromptMessage {
+            kind: ExpressionPromptMessageKind::Valid,
+            text: "Dataset reference will load in the background when submitted".to_string(),
+        }];
+    }
+
     match state.evaluate_expression_with_file(trimmed, file) {
         Ok(evaluated) => {
             let result_kind = match evaluated.kind {
@@ -515,7 +526,11 @@ fn validate_expression_reference_fragment(
             if chars.next().is_some() {
                 return Err(format!("Invalid chart item reference {fragment}"));
             }
-            let _ = resolve_expression_item_value(state, &item_ref)?;
+            let _ = resolve_expression_item_value(
+                state,
+                &item_ref,
+                super::ExpressionSeriesResolution::Overview,
+            )?;
             Ok(())
         }
         Some('!') => {
@@ -525,7 +540,13 @@ fn validate_expression_reference_fragment(
                 return Err(format!("Invalid series reference {fragment}"));
             }
             let file = file.ok_or_else(|| "No file loaded for series references".to_string())?;
-            let _ = resolve_expression_series_value(state, file, &series_ref)?;
+            let _ = resolve_expression_series_value(
+                state,
+                file,
+                &series_ref,
+                super::ExpressionSeriesResolution::Overview,
+                true,
+            )?;
             Ok(())
         }
         Some('#') => {

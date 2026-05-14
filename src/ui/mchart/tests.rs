@@ -1,11 +1,13 @@
 use super::eval::{dataset_ploting_data_from_points, normalize_absolute_object_path};
 use super::expression::{ExpressionDatasetSelector, ExpressionScalarRef, ExpressionSeriesRef};
 use super::prompt::{
-    consume_expression_reference_fragment, current_expression_fragment, expression_suggestion_score,
+    consume_expression_reference_fragment, current_expression_fragment, expression_prompt_messages,
+    expression_suggestion_score,
 };
 use super::*;
 use std::{
     fs,
+    sync::mpsc::channel,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,7 +16,8 @@ use ndarray::Array;
 
 #[allow(deprecated)]
 fn make_state() -> MultiChartState {
-    MultiChartState::new(Picker::from_fontsize((7, 14)))
+    let (tx, _rx) = channel();
+    MultiChartState::new(Picker::from_fontsize((7, 14)), tx)
 }
 
 fn source(path: &str, selection: PreviewSelection) -> ChartSource {
@@ -110,6 +113,13 @@ fn chart_item_statistics_compute_mean_median_and_stddev() {
         },
         series: ChartSeries::from_points(vec![(1.0, 1.0), (2.0, 3.0), (3.0, 5.0), (4.0, 7.0)])
             .expect("series"),
+        detail_series: None,
+        detail_window: None,
+        pending_detail_window: None,
+        detail_generation: 0,
+        source_len: 4,
+        sampled: false,
+        load_state: MultiChartLoadState::Ready,
         visible: true,
     };
 
@@ -522,6 +532,18 @@ fn expression_prompt_edits_do_not_invalidate_chart_render() {
 
     state.expression_backspace();
     assert!(!state.modified);
+}
+
+#[test]
+fn raw_dataset_reference_prompt_message_is_background_loading_hint() {
+    let state = make_state();
+    let messages = expression_prompt_messages(&state, None, "!/big_dataset[266505050]");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].kind, ExpressionPromptMessageKind::Valid);
+    assert_eq!(
+        messages[0].text,
+        "Dataset reference will load in the background when submitted"
+    );
 }
 
 #[test]
@@ -1255,4 +1277,259 @@ fn prepared_chart_data_respects_visibility_and_viewport() {
     assert_eq!(prepared.plot_x_max, 3.0);
     assert_eq!(prepared.y_min, 100.0);
     assert_eq!(prepared.y_max, 200.0);
+}
+
+#[test]
+fn detail_window_targets_viewport_slice_for_large_dataset_series() {
+    let source = DatasetChartSource {
+        dataset_path: "/big".to_string(),
+        display_path: "/big".to_string(),
+        selection: PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        },
+        shape: vec![100_000],
+        kind: DatasetChartKind::Dataset,
+    };
+    let window = MultiChartState::detail_window_for_viewport(
+        &source,
+        ChartViewport {
+            x_min: 1_000.0,
+            x_max: 1_500.0,
+            y_min: -1.0,
+            y_max: 1.0,
+        },
+        2_048,
+    )
+    .expect("detail window");
+    assert!(window.start <= 1_000);
+    assert!(window.end >= 1_500);
+    assert_eq!(window.sample_cap, 2_048);
+}
+
+#[test]
+fn detail_load_replaces_active_series_without_losing_overview() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let item_id = state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].source_len = 10_000;
+    state.items[0].sampled = true;
+    state.items[0].detail_generation = 1;
+
+    state
+        .apply_loaded_item(
+            item_id,
+            MultiChartLoadKind::Detail {
+                generation: 1,
+                window: ChartLodWindow {
+                    start: 100,
+                    end: 140,
+                    sample_cap: 512,
+                },
+            },
+            vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)],
+            0,
+        )
+        .expect("detail load");
+
+    let item = state.item_by_id(item_id).expect("item");
+    assert_eq!(item.series.len(), 8);
+    assert_eq!(
+        item.active_series().points,
+        vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]
+    );
+    assert_eq!(
+        item.detail_window,
+        Some(ChartLodWindow {
+            start: 100,
+            end: 140,
+            sample_cap: 512,
+        })
+    );
+}
+
+#[test]
+fn clearing_zoom_discards_detail_series() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].detail_series = ChartSeries::from_points(vec![(10.0, 2.0), (11.0, 3.0)]);
+    state.items[0].detail_window = Some(ChartLodWindow {
+        start: 10,
+        end: 12,
+        sample_cap: 512,
+    });
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 12.0,
+        y_min: 2.0,
+        y_max: 3.0,
+    });
+
+    assert!(state.clear_zoom());
+    assert!(state.items[0].detail_series.is_none());
+    assert!(state.items[0].detail_window.is_none());
+}
+
+#[test]
+fn clearing_zoom_invalidates_inflight_detail_results() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let item_id = state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].detail_generation = 4;
+    state.items[0].pending_detail_window = Some(ChartLodWindow {
+        start: 10,
+        end: 20,
+        sample_cap: 512,
+    });
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 20.0,
+        y_min: 0.0,
+        y_max: 20.0,
+    });
+    assert!(state.clear_zoom());
+
+    state
+        .apply_loaded_item(
+            item_id,
+            MultiChartLoadKind::Detail {
+                generation: 4,
+                window: ChartLodWindow {
+                    start: 10,
+                    end: 20,
+                    sample_cap: 512,
+                },
+            },
+            vec![(10.0, 10.0), (11.0, 11.0)],
+            0,
+        )
+        .expect("stale detail load ignored");
+
+    assert!(state.items[0].detail_series.is_none());
+    assert!(state.items[0].detail_window.is_none());
+}
+
+#[test]
+fn derived_series_builds_detail_from_matching_input_windows() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+        )
+        .expect("source a");
+    state
+        .add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+        )
+        .expect("source b");
+    state
+        .create_expression_derived("$1 + $2".to_string())
+        .expect("derived");
+
+    let window = ChartLodWindow {
+        start: 100,
+        end: 120,
+        sample_cap: 256,
+    };
+    state.items[0].detail_series =
+        ChartSeries::from_points(vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]);
+    state.items[0].detail_window = Some(window);
+    state.items[1].detail_series =
+        ChartSeries::from_points(vec![(100.0, 10.0), (110.0, 20.0), (120.0, 30.0)]);
+    state.items[1].detail_window = Some(window);
+
+    state
+        .refresh_expression_detail_series(None)
+        .expect("refresh detail");
+
+    let derived = state.item_by_id(ChartItemId(3)).expect("derived");
+    assert_eq!(derived.detail_window, Some(window));
+    assert_eq!(
+        derived.active_series().points,
+        vec![(100.0, 11.0), (110.0, 22.0), (120.0, 33.0)]
+    );
+}
+
+#[test]
+fn derived_series_detail_clears_when_inputs_do_not_share_window() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+        )
+        .expect("source a");
+    state
+        .add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+        )
+        .expect("source b");
+    state
+        .create_expression_derived("$1 + $2".to_string())
+        .expect("derived");
+
+    state.items[0].detail_series =
+        ChartSeries::from_points(vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]);
+    state.items[0].detail_window = Some(ChartLodWindow {
+        start: 100,
+        end: 120,
+        sample_cap: 256,
+    });
+    state.items[1].detail_series =
+        ChartSeries::from_points(vec![(200.0, 10.0), (210.0, 20.0), (220.0, 30.0)]);
+    state.items[1].detail_window = Some(ChartLodWindow {
+        start: 200,
+        end: 220,
+        sample_cap: 256,
+    });
+
+    state
+        .refresh_expression_detail_series(None)
+        .expect("refresh detail");
+
+    let derived = state.item_by_id(ChartItemId(3)).expect("derived");
+    assert!(derived.detail_series.is_none());
+    assert!(derived.detail_window.is_none());
 }

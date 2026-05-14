@@ -238,13 +238,16 @@ pub(super) fn handle_mchart(
                     .add_dataset_reference_command(spec, file.as_ref())
                     .map_err(AppError::InvalidCommand)?;
             } else {
-                let Some((source, points)) = state.capture_multichart_item()? else {
+                let Some(captured) = state.capture_multichart_item()? else {
                     return Err(AppError::InvalidCommand(
                         "The current selection is not previewable as a multichart chart item"
                             .to_string(),
                     ));
                 };
-                state.multi_chart.add_chart_item(source, points);
+                state
+                    .multi_chart
+                    .queue_loaded_item(captured)
+                    .map_err(AppError::InvalidCommand)?;
             }
             state.compute_tree_view();
             Ok(EventResult::Redraw)

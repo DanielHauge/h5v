@@ -171,49 +171,62 @@ impl MatrixValues for Dataset {
 
 impl Previewable for Dataset {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error> {
-        let shape = self.shape();
-        validate_preview_selection_shape(&shape, selection)?;
-        let slice = match selection.slice {
-            SliceSelection::All => 0..shape[selection.x],
-            SliceSelection::FromTo(a, b) => a..b,
-        };
-        let length = slice.end.saturating_sub(slice.start);
-        let step = plot_sampling_step(length);
-
-        let mut slice_selections: Vec<SliceOrIndex> = Vec::new();
-        for idx in 0..shape.len() {
-            if idx == selection.x {
-                slice_selections.push(SliceOrIndex::SliceTo {
-                    start: slice.start,
-                    step,
-                    end: slice.end,
-                    block: 1,
-                });
-            } else {
-                slice_selections.push(SliceOrIndex::Index(selection.index[idx]));
-            }
-        }
-
-        let selection = Selection::Hyperslab(Hyperslab::from(slice_selections));
-        let data_to_show = self.read_slice_1d(selection)?;
-        let data = data_to_show
-            .iter()
-            .enumerate()
-            .map(|(i, y)| ((i * step) as f64, *y))
-            .collect::<Vec<_>>();
-        let max = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::max);
-        let min = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::min);
-        Ok(DatasetPlotingData {
-            data,
-            length,
-            max,
-            min,
-        })
+        plot_dataset_with_cap(self, selection, MAX_PLOT_SAMPLES)
     }
 }
 
+pub(crate) fn plot_dataset_with_cap(
+    dataset: &Dataset,
+    selection: &PreviewSelection,
+    max_samples: usize,
+) -> Result<DatasetPlotingData, Error> {
+    let shape = dataset.shape();
+    validate_preview_selection_shape(&shape, selection)?;
+    let slice = match selection.slice {
+        SliceSelection::All => 0..shape[selection.x],
+        SliceSelection::FromTo(a, b) => a..b,
+    };
+    let length = slice.end.saturating_sub(slice.start);
+    let step = plot_sampling_step_with_cap(length, max_samples);
+
+    let mut slice_selections: Vec<SliceOrIndex> = Vec::new();
+    for idx in 0..shape.len() {
+        if idx == selection.x {
+            slice_selections.push(SliceOrIndex::SliceTo {
+                start: slice.start,
+                step,
+                end: slice.end,
+                block: 1,
+            });
+        } else {
+            slice_selections.push(SliceOrIndex::Index(selection.index[idx]));
+        }
+    }
+
+    let selection = Selection::Hyperslab(Hyperslab::from(slice_selections));
+    let data_to_show = dataset.read_slice_1d(selection)?;
+    let data = data_to_show
+        .iter()
+        .enumerate()
+        .map(|(i, y)| ((i * step) as f64, *y))
+        .collect::<Vec<_>>();
+    let max = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::max);
+    let min = data.iter().map(|(_, y)| *y).fold(f64::NAN, f64::min);
+    Ok(DatasetPlotingData {
+        data,
+        length,
+        max,
+        min,
+    })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn plot_sampling_step(length: usize) -> usize {
-    length.div_ceil(MAX_PLOT_SAMPLES).max(1)
+    plot_sampling_step_with_cap(length, MAX_PLOT_SAMPLES)
+}
+
+pub(crate) fn plot_sampling_step_with_cap(length: usize, max_samples: usize) -> usize {
+    length.div_ceil(max_samples.max(1)).max(1)
 }
 
 #[cfg(test)]

@@ -71,7 +71,7 @@ impl MultiChartState {
         let visible_items = self
             .items
             .iter()
-            .filter(|item| item.visible)
+            .filter(|item| item.visible && item.has_loaded_series())
             .collect::<Vec<_>>();
         if visible_items.is_empty() {
             return None;
@@ -86,7 +86,7 @@ impl MultiChartState {
 
         for item in visible_items {
             let points = super::model::sanitize_chart_points(
-                item.series
+                item.active_series()
                     .points
                     .iter()
                     .copied()
@@ -376,9 +376,10 @@ impl MultiChartState {
     fn render_item_list(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let block = Block::default()
             .title(format!(
-                "Items ({}/{} visible)",
+                "Items ({}/{} visible, {} loading)",
                 self.visible_item_count(),
-                self.items.len()
+                self.items.len(),
+                self.loading_item_count()
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -439,6 +440,13 @@ impl MultiChartState {
                     Span::styled(" ", row_style),
                     Span::styled(format!("${} ", item.id.0), row_style),
                     Span::styled(item.list_label(), row_style),
+                    Span::styled(" ", row_style),
+                    Span::styled(
+                        format!("[{}]", item.data_state_label()),
+                        row_style
+                            .fg(configure::themed_color(|colors| colors.mchart.detail_label))
+                            .dim(),
+                    ),
                 ])
             })
             .collect::<Vec<_>>();
@@ -519,6 +527,14 @@ impl MultiChartState {
                     ),
                     mchart_body_span(viewport),
                 ]),
+                Line::from(vec![
+                    Span::styled(
+                        "data ",
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                    ),
+                    mchart_body_span(item.data_state_label()),
+                ]),
             ],
             ChartSource::DerivedExpression { expression, .. } => vec![
                 Line::from(vec![
@@ -552,6 +568,14 @@ impl MultiChartState {
                     ),
                     mchart_body_span(viewport),
                 ]),
+                Line::from(vec![
+                    Span::styled(
+                        "data ",
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                    ),
+                    mchart_body_span(item.data_state_label()),
+                ]),
             ],
         };
 
@@ -582,6 +606,15 @@ impl MultiChartState {
         let Some(item) = self.selected_item() else {
             return;
         };
+        if !item.has_loaded_series() {
+            f.render_widget(
+                Paragraph::new(item.data_state_label())
+                    .style(mchart_body_style())
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+            return;
+        }
         let stats = item.statistics();
         let lines = vec![
             Line::from(vec![
@@ -641,7 +674,15 @@ impl MultiChartState {
 
     fn render_chart_panel(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let block = Block::default()
-            .title(format!("Overlay chart [{}]", self.x_axis_policy.label()))
+            .title(if self.loading_item_count() == 0 {
+                format!("Overlay chart [{}]", self.x_axis_policy.label())
+            } else {
+                format!(
+                    "Overlay chart [{}] · {} loading",
+                    self.x_axis_policy.label(),
+                    self.loading_item_count()
+                )
+            })
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(
@@ -664,6 +705,23 @@ impl MultiChartState {
             .style(Style::default().fg(configure::themed_color(|colors| colors.mchart.empty_state)))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
+            f.render_widget(paragraph, chart_area);
+            return;
+        }
+        if self
+            .items
+            .iter()
+            .filter(|item| item.visible)
+            .all(|item| !item.has_loaded_series())
+        {
+            self.last_chart_area = None;
+            let paragraph = Paragraph::new("Loading sampled chart data...")
+                .style(
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.empty_state)),
+                )
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true });
             f.render_widget(paragraph, chart_area);
             return;
         }

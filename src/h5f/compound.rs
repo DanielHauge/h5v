@@ -10,8 +10,8 @@ use ndarray::{Array1, Array2};
 
 use crate::{
     data::{
-        plot_sampling_step, validate_preview_selection_shape, DatasetPlotingData, PreviewSelection,
-        SliceSelection,
+        plot_sampling_step_with_cap, validate_preview_selection_shape, DatasetPlotingData,
+        PreviewSelection, SliceSelection,
     },
     error::AppError,
 };
@@ -530,6 +530,15 @@ pub fn plot_projected(
     meta: &DatasetMeta,
     selection: &PreviewSelection,
 ) -> Result<DatasetPlotingData, AppError> {
+    plot_projected_with_cap(dataset, meta, selection, crate::data::MAX_PLOT_SAMPLES)
+}
+
+pub fn plot_projected_with_cap(
+    dataset: &Dataset,
+    meta: &DatasetMeta,
+    selection: &PreviewSelection,
+    max_samples: usize,
+) -> Result<DatasetPlotingData, AppError> {
     let shape = dataset.shape();
     validate_preview_selection_shape(&shape, selection).map_err(AppError::Hdf5)?;
     let slice = match selection.slice {
@@ -537,7 +546,7 @@ pub fn plot_projected(
         SliceSelection::FromTo(a, b) => a..b,
     };
     let length = slice.end.saturating_sub(slice.start);
-    let step = plot_sampling_step(length);
+    let step = plot_sampling_step_with_cap(length, max_samples);
     let mut slice_selections = Vec::new();
     for idx in 0..shape.len() {
         if idx == selection.x {

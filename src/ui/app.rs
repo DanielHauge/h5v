@@ -36,6 +36,7 @@ use super::{
     help::render_help,
     input::handle_input_event,
     main_display::render_main_display,
+    mchart::MultiChartLoadResult,
     preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
     state::{self, AppState, Mode},
     tree_view::render_tree,
@@ -264,6 +265,15 @@ fn main_recover_loop(
                 let selected_before = state.selected_tree_path();
                 let event_result = handle_input_event(&mut state, event)
                     .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false));
+                state
+                    .multi_chart
+                    .schedule_viewport_detail_loads(state.file.as_ref());
+                if let Err(error) = state
+                    .multi_chart
+                    .refresh_expression_detail_series(state.file.as_ref())
+                {
+                    state.toast = AppToast::Error(error);
+                }
                 let selected_after = state.selected_tree_path();
                 if selected_before != selected_after {
                     if let Some(path) = selected_after {
@@ -497,6 +507,42 @@ fn main_recover_loop(
                     state.heatmap_render.pending_keys.remove(&key);
                 }
             },
+            AppEvent::MultiChartLoad(result) => {
+                match result {
+                    MultiChartLoadResult::Started { item_id, kind } => {
+                        state.multi_chart.apply_load_started(item_id, kind);
+                    }
+                    MultiChartLoadResult::Success {
+                        item_id,
+                        kind,
+                        points,
+                        source_len,
+                    } => {
+                        if let Err(error) = state
+                            .multi_chart
+                            .apply_loaded_item(item_id, kind, points, source_len)
+                        {
+                            state.toast = AppToast::Error(error);
+                        }
+                    }
+                    MultiChartLoadResult::Failure {
+                        item_id,
+                        kind,
+                        message,
+                    } => {
+                        state.multi_chart.apply_load_failure(item_id, kind, message);
+                    }
+                }
+                if let Err(error) = state
+                    .multi_chart
+                    .refresh_expression_detail_series(state.file.as_ref())
+                {
+                    state.toast = AppToast::Error(error);
+                }
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
+            }
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
                     terminal.draw(|f| {
@@ -578,6 +624,7 @@ pub enum AppEvent {
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
     HeatmapLoad(HeatmapLoadedResult),
+    MultiChartLoad(MultiChartLoadResult),
     PreviewDebounceExpired(u64),
     Toast(AppToast),
     FileChanged,

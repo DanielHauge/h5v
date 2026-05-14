@@ -11,11 +11,14 @@ use hdf5_metno::File;
 
 use crate::{
     configure,
-    data::{PreviewSelection, Previewable, SliceSelection},
+    data::{PreviewSelection, SliceSelection},
     error::AppError,
-    h5f::{plot_projected, H5FNode, HasPath, Node},
+    h5f::{H5FNode, HasPath, Node},
     search::Searcher,
-    ui::mchart::{ChartSource, DatasetChartKind, DatasetChartSource, MultiChartState, Point},
+    ui::mchart::{
+        CapturedMultiChartItem, ChartSource, DatasetChartKind, DatasetChartSource,
+        MultiChartLoadRequest, MultiChartLoadSource, MultiChartLoadState, MultiChartState,
+    },
 };
 
 use super::{
@@ -671,7 +674,7 @@ impl AppState<'_> {
         }
     }
 
-    pub fn capture_multichart_item(&self) -> Result<Option<(ChartSource, Vec<Point>)>> {
+    pub fn capture_multichart_item(&self) -> Result<Option<CapturedMultiChartItem>> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
         match &node.node {
@@ -683,7 +686,14 @@ impl AppState<'_> {
                     .multi_chart
                     .capture_expression_chart_item(expression, self.file.as_ref())
                     .map_err(AppError::InvalidCommand)?;
-                Ok(Some(item))
+                let (source, points) = item;
+                Ok(Some(CapturedMultiChartItem {
+                    source,
+                    source_len: points.len(),
+                    initial_points: Some(points),
+                    load_state: MultiChartLoadState::Ready,
+                    request: None,
+                }))
             }
             Node::Dataset(_, dsattr) if dsattr.is_compound_container() => Ok(None),
             Node::Dataset(ds, dsattr) => {
@@ -695,15 +705,10 @@ impl AppState<'_> {
                 else {
                     return Ok(None);
                 };
-                let data = if meta.is_compound_leaf() {
-                    plot_projected(&ds, &meta, &selection)?.data
-                } else {
-                    ds.plot(&selection)?.data
-                };
                 let source = ChartSource::DatasetSelection(DatasetChartSource {
                     dataset_path: ds.name(),
                     display_path: meta.virtual_path().unwrap_or(&ds.name()).to_string(),
-                    selection,
+                    selection: selection.clone(),
                     shape,
                     kind: if meta.is_compound_leaf() {
                         DatasetChartKind::CompoundLeaf
@@ -711,7 +716,28 @@ impl AppState<'_> {
                         DatasetChartKind::Dataset
                     },
                 });
-                Ok(Some((source, data)))
+                Ok(Some(CapturedMultiChartItem {
+                    source,
+                    source_len: 0,
+                    initial_points: None,
+                    load_state: MultiChartLoadState::Queued,
+                    request: Some(MultiChartLoadRequest {
+                        item_id: crate::ui::mchart::ChartItemId(0),
+                        kind: crate::ui::mchart::MultiChartLoadKind::Overview { generation: 0 },
+                        source: if meta.is_compound_leaf() {
+                            MultiChartLoadSource::CompoundLeaf {
+                                dataset: ds,
+                                meta: Box::new(meta),
+                                selection,
+                            }
+                        } else {
+                            MultiChartLoadSource::Dataset {
+                                dataset: ds,
+                                selection,
+                            }
+                        },
+                    }),
+                }))
             }
             _ => Ok(None),
         }

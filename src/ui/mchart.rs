@@ -1,11 +1,17 @@
 use hdf5_metno::File;
 use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    sync::mpsc::{channel, Sender},
+    thread,
+};
 
-use crate::data::DatasetPlotingData;
-#[cfg(test)]
-use crate::data::{PreviewSelection, SliceSelection};
+use crate::{
+    data::{plot_dataset_with_cap, DatasetPlotingData, PreviewSelection, SliceSelection},
+    h5f::{plot_projected, plot_projected_with_cap, DatasetMeta},
+    ui::app::AppEvent,
+};
 
 mod eval;
 mod expression;
@@ -14,10 +20,10 @@ mod model;
 mod prompt;
 mod render;
 use eval::{
-    dataset_ploting_data_from_points, eval_expression_at, read_expression_dataset_points,
-    resolve_expression_item_value, resolve_expression_scalar_values,
-    resolve_expression_series_values, validate_expression_series_compatibility,
-    EvaluatedExpression, ExpressionSeriesInput,
+    dataset_ploting_data_from_points, eval_expression_at, resolve_expression_item_value,
+    resolve_expression_scalar_values, resolve_expression_series_values,
+    validate_expression_series_compatibility, EvaluatedExpression, ExpressionSeriesInput,
+    ExpressionSeriesResolution,
 };
 use expression::{
     collect_expression_input_ids, collect_parsed_expression_refs, parse_derived_expression,
@@ -26,8 +32,9 @@ use expression::{
 use model::sanitize_chart_points;
 #[allow(unused_imports)]
 pub use model::{
-    ChartItem, ChartItemId, ChartItemStats, ChartSeries, ChartSource, ChartXAxisPolicy,
-    DatasetChartKind, DatasetChartSource, DerivedExpressionKind, Point,
+    ChartItem, ChartItemId, ChartItemStats, ChartLodWindow, ChartSeries, ChartSource,
+    ChartXAxisPolicy, DatasetChartKind, DatasetChartSource, DerivedExpressionKind,
+    MultiChartLoadState, Point,
 };
 use prompt::{
     ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
@@ -76,6 +83,175 @@ struct PreparedChartData {
     series: Vec<PreparedChartSeries>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CapturedMultiChartItem {
+    pub source: ChartSource,
+    pub initial_points: Option<Vec<Point>>,
+    pub source_len: usize,
+    pub load_state: MultiChartLoadState,
+    pub request: Option<MultiChartLoadRequest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MultiChartLoadRequest {
+    pub item_id: ChartItemId,
+    pub kind: MultiChartLoadKind,
+    pub source: MultiChartLoadSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiChartLoadKind {
+    Overview {
+        generation: u64,
+    },
+    Detail {
+        generation: u64,
+        window: ChartLodWindow,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum MultiChartLoadSource {
+    Dataset {
+        dataset: hdf5_metno::Dataset,
+        selection: PreviewSelection,
+    },
+    CompoundLeaf {
+        dataset: hdf5_metno::Dataset,
+        meta: Box<DatasetMeta>,
+        selection: PreviewSelection,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum MultiChartLoadResult {
+    Started {
+        item_id: ChartItemId,
+        kind: MultiChartLoadKind,
+    },
+    Success {
+        item_id: ChartItemId,
+        kind: MultiChartLoadKind,
+        points: Vec<Point>,
+        source_len: usize,
+    },
+    Failure {
+        item_id: ChartItemId,
+        kind: MultiChartLoadKind,
+        message: String,
+    },
+}
+
+pub fn handle_mchart_load(tx_events: Sender<AppEvent>) -> Sender<MultiChartLoadRequest> {
+    let (tx_load, rx_load) = channel::<MultiChartLoadRequest>();
+    thread::spawn(move || loop {
+        let Ok(request) = rx_load.recv() else {
+            return;
+        };
+        let _ = tx_events.send(AppEvent::MultiChartLoad(MultiChartLoadResult::Started {
+            item_id: request.item_id,
+            kind: request.kind,
+        }));
+        let result = match (&request.kind, request.source) {
+            (
+                MultiChartLoadKind::Overview { .. },
+                MultiChartLoadSource::Dataset { dataset, selection },
+            ) => plot_dataset_with_cap(&dataset, &selection, crate::data::MAX_PLOT_SAMPLES)
+                .map(|preview| MultiChartLoadResult::Success {
+                    item_id: request.item_id,
+                    kind: request.kind,
+                    points: preview.data,
+                    source_len: preview.length,
+                })
+                .map_err(|error| format!("Failed loading sampled series: {error}")),
+            (
+                MultiChartLoadKind::Overview { .. },
+                MultiChartLoadSource::CompoundLeaf {
+                    dataset,
+                    meta,
+                    selection,
+                },
+            ) => plot_projected(&dataset, meta.as_ref(), &selection)
+                .map(|preview| MultiChartLoadResult::Success {
+                    item_id: request.item_id,
+                    kind: request.kind,
+                    points: preview.data,
+                    source_len: preview.length,
+                })
+                .map_err(|error| format!("Failed loading sampled series: {error}")),
+            (
+                MultiChartLoadKind::Detail { window, .. },
+                MultiChartLoadSource::Dataset { dataset, selection },
+            ) => {
+                let detail_selection = selection_with_window(&selection, window.start, window.end);
+                plot_dataset_with_cap(&dataset, &detail_selection, window.sample_cap)
+                    .map(|preview| MultiChartLoadResult::Success {
+                        item_id: request.item_id,
+                        kind: request.kind,
+                        points: offset_points(preview.data, window.start),
+                        source_len: 0,
+                    })
+                    .map_err(|error| format!("Failed loading viewport detail: {error}"))
+            }
+            (
+                MultiChartLoadKind::Detail { window, .. },
+                MultiChartLoadSource::CompoundLeaf {
+                    dataset,
+                    meta,
+                    selection,
+                },
+            ) => {
+                let detail_selection = selection_with_window(&selection, window.start, window.end);
+                plot_projected_with_cap(
+                    &dataset,
+                    meta.as_ref(),
+                    &detail_selection,
+                    window.sample_cap,
+                )
+                .map(|preview| MultiChartLoadResult::Success {
+                    item_id: request.item_id,
+                    kind: request.kind,
+                    points: offset_points(preview.data, window.start),
+                    source_len: 0,
+                })
+                .map_err(|error| format!("Failed loading viewport detail: {error}"))
+            }
+        };
+        let _ = tx_events.send(AppEvent::MultiChartLoad(match result {
+            Ok(result) => result,
+            Err(message) => MultiChartLoadResult::Failure {
+                item_id: request.item_id,
+                kind: request.kind,
+                message,
+            },
+        }));
+    });
+    tx_load
+}
+
+fn selection_with_window(
+    selection: &PreviewSelection,
+    start: usize,
+    end: usize,
+) -> PreviewSelection {
+    let base_start = match selection.slice {
+        SliceSelection::All => 0,
+        SliceSelection::FromTo(base_start, _) => base_start,
+    };
+    PreviewSelection {
+        index: selection.index.clone(),
+        x: selection.x,
+        slice: SliceSelection::FromTo(base_start + start, base_start + end),
+    }
+}
+
+fn offset_points(points: Vec<Point>, start: usize) -> Vec<Point> {
+    points
+        .into_iter()
+        .map(|(x, y)| (x + start as f64, y))
+        .collect()
+}
+
 pub struct MultiChartState {
     items: Vec<ChartItem>,
     pub modified: bool,
@@ -85,6 +261,7 @@ pub struct MultiChartState {
     pub picker: Picker,
     pub idx: usize,
     viewport: Option<ChartViewport>,
+    tx_load: Sender<MultiChartLoadRequest>,
     stateful_protocol: Option<StatefulProtocol>,
     next_id: u64,
     next_color_slot: usize,
@@ -95,7 +272,7 @@ pub struct MultiChartState {
 }
 
 impl MultiChartState {
-    pub fn new(picker: Picker) -> Self {
+    pub fn new(picker: Picker, tx_load: Sender<MultiChartLoadRequest>) -> Self {
         Self {
             items: Vec::new(),
             modified: false,
@@ -105,6 +282,7 @@ impl MultiChartState {
             plot_buffer: Vec::new(),
             picker,
             viewport: None,
+            tx_load,
             stateful_protocol: None,
             next_id: 1,
             next_color_slot: 0,
@@ -131,6 +309,13 @@ impl MultiChartState {
         self.items.iter().filter(|item| item.visible).count()
     }
 
+    pub fn loading_item_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| !matches!(item.load_state, MultiChartLoadState::Ready))
+            .count()
+    }
+
     pub fn selected_item(&self) -> Option<&ChartItem> {
         self.items.get(self.idx)
     }
@@ -141,6 +326,24 @@ impl MultiChartState {
 
     fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
         self.items.iter().find(|item| item.id == id)
+    }
+
+    fn raw_dataset_reference(
+        expression: &str,
+    ) -> Result<Option<expression::ExpressionSeriesRef>, String> {
+        let tokens = tokenize_expression(expression)?;
+        let Some(ExpressionToken::SeriesRef(series_ref)) = tokens.first() else {
+            return Ok(None);
+        };
+        if tokens.len() != 1 {
+            return Ok(None);
+        }
+        if !matches!(series_ref.target, ExpressionObjectTarget::AbsolutePath(_))
+            || series_ref.attr_name.is_some()
+        {
+            return Ok(None);
+        }
+        Ok(Some(series_ref.clone()))
     }
 
     #[cfg(test)]
@@ -182,10 +385,16 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
+        if Self::raw_dataset_reference(&expression)?.is_some() {
+            return self.add_dataset_reference_command(&expression, file);
+        }
         let (source, series) = self.build_expression_chart_item(&expression, file)?;
         let points = series.points.clone();
-        self.add_chart_item(source, points)
-            .ok_or_else(|| "Failed to create expression-derived chart".to_string())
+        let id = self
+            .add_chart_item(source, points)
+            .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
+        self.refresh_expression_detail_series(file)?;
+        Ok(id)
     }
 
     fn build_expression_chart_item(
@@ -256,19 +465,18 @@ impl MultiChartState {
         Ok(())
     }
 
-    fn recompute_expression_dependents(
-        &mut self,
-        affected_ids: Vec<ChartItemId>,
-        file: Option<&File>,
-    ) -> Result<(), String> {
+    fn expression_recompute_order(
+        &self,
+        affected_ids: &[ChartItemId],
+    ) -> Result<Vec<ChartItemId>, String> {
         if affected_ids.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let affected = affected_ids.iter().copied().collect::<HashSet<_>>();
         let mut indegree = HashMap::<ChartItemId, usize>::new();
         let mut edges = HashMap::<ChartItemId, Vec<ChartItemId>>::new();
-        for id in &affected_ids {
+        for id in affected_ids {
             let item = self
                 .item_by_id(*id)
                 .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
@@ -286,10 +494,38 @@ impl MultiChartState {
             .iter()
             .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
             .collect::<BTreeSet<_>>();
-        let mut processed = 0usize;
+        let mut ordered = Vec::with_capacity(affected_ids.len());
 
         while let Some(id) = ready.iter().next().copied() {
             ready.remove(&id);
+            ordered.push(id);
+
+            if let Some(dependents) = edges.get(&id) {
+                for dependent in dependents {
+                    if let Some(entry) = indegree.get_mut(dependent) {
+                        *entry = entry.saturating_sub(1);
+                        if *entry == 0 {
+                            ready.insert(*dependent);
+                        }
+                    }
+                }
+            }
+        }
+
+        if ordered.len() != affected_ids.len() {
+            return Err(
+                "Expression dependency cycle blocked recomputing dependent series".to_string(),
+            );
+        }
+        Ok(ordered)
+    }
+
+    fn recompute_expression_dependents(
+        &mut self,
+        affected_ids: Vec<ChartItemId>,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        for id in self.expression_recompute_order(&affected_ids)? {
             let expression = match self.item_by_id(id).map(|item| item.source.clone()) {
                 Some(ChartSource::DerivedExpression { expression, .. }) => expression,
                 Some(_) => continue,
@@ -306,24 +542,6 @@ impl MultiChartState {
             self.items[index].label = source.label();
             self.items[index].source = source;
             self.items[index].series = series;
-            processed += 1;
-
-            if let Some(dependents) = edges.get(&id) {
-                for dependent in dependents {
-                    if let Some(entry) = indegree.get_mut(dependent) {
-                        *entry = entry.saturating_sub(1);
-                        if *entry == 0 {
-                            ready.insert(*dependent);
-                        }
-                    }
-                }
-            }
-        }
-
-        if processed != affected_ids.len() {
-            return Err(
-                "Expression dependency cycle blocked recomputing dependent series".to_string(),
-            );
         }
         Ok(())
     }
@@ -334,6 +552,19 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<(), String> {
+        if Self::raw_dataset_reference(&expression)?.is_some() {
+            let item_id = self.add_dataset_reference_command(&expression, file)?;
+            if item_id != id {
+                let index = self
+                    .items
+                    .iter()
+                    .position(|item| item.id == id)
+                    .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+                self.items.remove(index);
+                self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
+            }
+            return Ok(());
+        }
         let original_items = self.items.clone();
         let original_idx = self.idx;
         let original_modified = self.modified;
@@ -352,6 +583,7 @@ impl MultiChartState {
         let result = self.recompute_expression_dependents(previous_dependents, file);
         match result {
             Ok(()) => {
+                self.refresh_expression_detail_series(file)?;
                 self.modified = true;
                 Ok(())
             }
@@ -368,6 +600,21 @@ impl MultiChartState {
         &self,
         expression: &str,
         file: Option<&File>,
+    ) -> Result<EvaluatedExpression, String> {
+        self.evaluate_expression_with_resolution(
+            expression,
+            file,
+            ExpressionSeriesResolution::Overview,
+            true,
+        )
+    }
+
+    fn evaluate_expression_with_resolution(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+        resolution: ExpressionSeriesResolution,
+        allow_external_series: bool,
     ) -> Result<EvaluatedExpression, String> {
         let tokens = tokenize_expression(expression)?;
         let parsed = parse_derived_expression(&tokens)?;
@@ -402,12 +649,18 @@ impl MultiChartState {
             .item_refs
             .iter()
             .map(|item_ref| {
-                resolve_expression_item_value(self, item_ref)
+                resolve_expression_item_value(self, item_ref, resolution)
                     .map(|points| (item_ref.clone(), points))
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
 
-        let external_series = resolve_expression_series_values(self, file, &refs.series_refs)?;
+        let external_series = resolve_expression_series_values(
+            self,
+            file,
+            &refs.series_refs,
+            resolution,
+            allow_external_series,
+        )?;
         let mut series_inputs = item_values
             .iter()
             .map(|(item_ref, points)| ExpressionSeriesInput {
@@ -483,12 +736,112 @@ impl MultiChartState {
         })
     }
 
+    fn expression_detail_window(&self, expression: &str) -> Result<Option<ChartLodWindow>, String> {
+        let tokens = tokenize_expression(expression)?;
+        let parsed = parse_derived_expression(&tokens)?;
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        let mut expected = None::<ChartLodWindow>;
+        for item_ref in &refs.item_refs {
+            let item = self
+                .item_by_id(item_ref.id)
+                .ok_or_else(|| format!("Unknown chart item reference ${}", item_ref.id.0))?;
+            let Some(window) = item.detail_window else {
+                return Ok(None);
+            };
+            if expected.is_some_and(|existing| existing != window) {
+                return Ok(None);
+            }
+            expected = Some(window);
+        }
+        for series_ref in &refs.series_refs {
+            if let ExpressionObjectTarget::ItemRef(id) = &series_ref.target {
+                let item = self
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
+                let Some(window) = item.detail_window else {
+                    return Ok(None);
+                };
+                if expected.is_some_and(|existing| existing != window) {
+                    return Ok(None);
+                }
+                expected = Some(window);
+            } else {
+                return Ok(None);
+            }
+        }
+        Ok(expected)
+    }
+
+    pub(crate) fn refresh_expression_detail_series(
+        &mut self,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        let derived_ids = self
+            .items
+            .iter()
+            .filter_map(|item| {
+                matches!(item.source, ChartSource::DerivedExpression { .. }).then_some(item.id)
+            })
+            .collect::<Vec<_>>();
+        for id in self.expression_recompute_order(&derived_ids)? {
+            let expression = match self.item_by_id(id).map(|item| item.source.clone()) {
+                Some(ChartSource::DerivedExpression { expression, .. }) => expression,
+                _ => continue,
+            };
+            let index = self
+                .items
+                .iter()
+                .position(|item| item.id == id)
+                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+            let Some(window) = self.expression_detail_window(&expression)? else {
+                self.items[index].clear_detail_state(true);
+                continue;
+            };
+            match self.evaluate_expression_with_resolution(
+                &expression,
+                file,
+                ExpressionSeriesResolution::Active,
+                false,
+            ) {
+                Ok(evaluated) => {
+                    let points = sanitize_chart_points(evaluated.points);
+                    let Some(series) = ChartSeries::from_points(points) else {
+                        self.items[index].clear_detail_state(true);
+                        continue;
+                    };
+                    self.items[index].detail_series = Some(series);
+                    self.items[index].detail_window = Some(window);
+                    self.items[index].pending_detail_window = None;
+                    self.items[index].load_state = MultiChartLoadState::Ready;
+                }
+                Err(_) => {
+                    self.items[index].clear_detail_state(true);
+                }
+            }
+        }
+        self.modified = true;
+        Ok(())
+    }
+
     pub fn add_chart_item(
         &mut self,
         source: ChartSource,
         points: Vec<Point>,
     ) -> Option<ChartItemId> {
-        let series = ChartSeries::from_points(points)?;
+        self.add_chart_item_with_status(source, Some(points), 0, MultiChartLoadState::Ready, false)
+    }
+
+    pub fn add_chart_item_with_status(
+        &mut self,
+        source: ChartSource,
+        points: Option<Vec<Point>>,
+        source_len: usize,
+        load_state: MultiChartLoadState,
+        sampled: bool,
+    ) -> Option<ChartItemId> {
+        let loaded_len = points.as_ref().map_or(0, Vec::len);
+        let series = ChartSeries::from_points(points.unwrap_or_else(|| vec![(0.0, 0.0)]))?;
         if let Some((idx, item)) = self
             .items
             .iter_mut()
@@ -496,6 +849,15 @@ impl MultiChartState {
             .find(|(_, item)| item.source == source)
         {
             item.series = series;
+            item.clear_detail_state(true);
+            item.detail_generation = 0;
+            item.source_len = if source_len == 0 {
+                loaded_len.max(item.series.len())
+            } else {
+                source_len
+            };
+            item.sampled = sampled || item.source_len > loaded_len.max(1);
+            item.load_state = load_state;
             item.visible = true;
             self.idx = idx;
             self.modified = true;
@@ -512,11 +874,233 @@ impl MultiChartState {
             label: source.label(),
             source,
             series,
+            detail_series: None,
+            detail_window: None,
+            pending_detail_window: None,
+            detail_generation: 0,
+            source_len: if source_len == 0 {
+                loaded_len
+            } else {
+                source_len
+            },
+            sampled: sampled || source_len > loaded_len.max(1),
+            load_state,
             visible: true,
         });
         self.idx = self.items.len().saturating_sub(1);
         self.modified = true;
         Some(id)
+    }
+
+    pub fn queue_loaded_item(
+        &mut self,
+        mut item: CapturedMultiChartItem,
+    ) -> Result<ChartItemId, String> {
+        let initial_len = item.initial_points.as_ref().map_or(0, Vec::len);
+        let item_id = self
+            .add_chart_item_with_status(
+                item.source,
+                item.initial_points.take(),
+                item.source_len,
+                item.load_state.clone(),
+                item.source_len > initial_len.max(1),
+            )
+            .ok_or_else(|| "Failed to add dataset to multichart".to_string())?;
+        if let Some(mut request) = item.request {
+            request.item_id = item_id;
+            request.kind = MultiChartLoadKind::Overview { generation: 0 };
+            self.queue_load(request, MultiChartLoadState::Queued);
+        }
+        Ok(item_id)
+    }
+
+    pub fn queue_load(&mut self, request: MultiChartLoadRequest, status: MultiChartLoadState) {
+        let item_id = request.item_id;
+        let kind = request.kind;
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) {
+            item.load_state = status;
+            if let MultiChartLoadKind::Detail { window, generation } = kind {
+                item.pending_detail_window = Some(window);
+                item.detail_generation = generation;
+            }
+        }
+        if self.tx_load.send(request).is_err() {
+            self.apply_load_failure(item_id, kind, "multichart loader unavailable".to_string());
+        }
+        self.modified = true;
+    }
+
+    pub fn apply_load_started(&mut self, item_id: ChartItemId, kind: MultiChartLoadKind) {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) {
+            item.load_state = match kind {
+                MultiChartLoadKind::Overview { .. } => MultiChartLoadState::Sampling,
+                MultiChartLoadKind::Detail { .. } => MultiChartLoadState::Refining,
+            };
+            self.modified = true;
+        }
+    }
+
+    pub fn apply_loaded_item(
+        &mut self,
+        item_id: ChartItemId,
+        kind: MultiChartLoadKind,
+        points: Vec<Point>,
+        source_len: usize,
+    ) -> Result<(), String> {
+        let series = ChartSeries::from_points(points)
+            .ok_or_else(|| format!("Loaded series for ${} had no finite points", item_id.0))?;
+        let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) else {
+            return Ok(());
+        };
+        match kind {
+            MultiChartLoadKind::Overview { .. } => {
+                item.series = series;
+                if source_len != 0 {
+                    item.source_len = source_len;
+                }
+                item.sampled = item.source_len > item.series.len();
+                item.load_state = if item.pending_detail_window.is_some() {
+                    MultiChartLoadState::Refining
+                } else {
+                    MultiChartLoadState::Ready
+                };
+            }
+            MultiChartLoadKind::Detail { generation, window } => {
+                if generation != item.detail_generation {
+                    return Ok(());
+                }
+                item.detail_series = Some(series);
+                item.detail_window = Some(window);
+                item.pending_detail_window = None;
+                item.load_state = MultiChartLoadState::Ready;
+            }
+        }
+        self.modified = true;
+        Ok(())
+    }
+
+    pub fn apply_load_failure(
+        &mut self,
+        item_id: ChartItemId,
+        kind: MultiChartLoadKind,
+        message: String,
+    ) {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) {
+            match kind {
+                MultiChartLoadKind::Overview { .. } => {
+                    item.load_state = MultiChartLoadState::Error(message);
+                }
+                MultiChartLoadKind::Detail { generation, .. } => {
+                    if generation != item.detail_generation {
+                        return;
+                    }
+                    item.pending_detail_window = None;
+                    item.load_state = MultiChartLoadState::Ready;
+                }
+            }
+            self.modified = true;
+        }
+    }
+
+    fn dataset_selection_len(source: &DatasetChartSource) -> usize {
+        match source.selection.slice {
+            SliceSelection::All => source
+                .shape
+                .get(source.selection.x)
+                .copied()
+                .unwrap_or_default(),
+            SliceSelection::FromTo(start, end) => end.saturating_sub(start),
+        }
+    }
+
+    fn detail_window_for_viewport(
+        source: &DatasetChartSource,
+        viewport: ChartViewport,
+        sample_cap: usize,
+    ) -> Option<ChartLodWindow> {
+        let total_len = Self::dataset_selection_len(source);
+        if total_len <= sample_cap {
+            return None;
+        }
+        let viewport_start = viewport.x_min.floor().max(0.0) as usize;
+        let viewport_end = viewport.x_max.ceil().max(0.0) as usize;
+        let viewport_end = viewport_end.clamp(1, total_len);
+        let viewport_start = viewport_start.min(viewport_end.saturating_sub(1));
+        let span = viewport_end.saturating_sub(viewport_start).max(1);
+        if span >= total_len {
+            return None;
+        }
+        let pad = span / 5;
+        let start = viewport_start.saturating_sub(pad);
+        let end = viewport_end.saturating_add(pad).min(total_len);
+        Some(ChartLodWindow {
+            start,
+            end: end.max(start + 1),
+            sample_cap,
+        })
+    }
+
+    fn viewport_sample_cap(&self) -> Option<usize> {
+        let chart_area = self.last_chart_area?;
+        Some(
+            (chart_area.width as usize)
+                .saturating_mul(4)
+                .clamp(512, 16_384),
+        )
+    }
+
+    pub(crate) fn schedule_viewport_detail_loads(&mut self, file: Option<&File>) {
+        let Some(viewport) = self.viewport else {
+            return;
+        };
+        let Some(sample_cap) = self.viewport_sample_cap() else {
+            return;
+        };
+        let Some(file) = file else {
+            return;
+        };
+        let mut requests = Vec::new();
+        for item in self.items.iter_mut().filter(|item| item.visible) {
+            let Some(source) = item.source.dataset_source().cloned() else {
+                continue;
+            };
+            let Some(window) = Self::detail_window_for_viewport(&source, viewport, sample_cap)
+            else {
+                item.clear_detail_state(true);
+                continue;
+            };
+            if item.detail_window == Some(window) || item.pending_detail_window == Some(window) {
+                continue;
+            }
+            item.clear_detail_state(true);
+            let Ok(dataset) = file.dataset(&source.dataset_path) else {
+                continue;
+            };
+            let request_source = match source.kind {
+                DatasetChartKind::Dataset => MultiChartLoadSource::Dataset {
+                    dataset,
+                    selection: source.selection,
+                },
+                DatasetChartKind::CompoundLeaf => continue,
+            };
+            requests.push((item.id, window, request_source));
+        }
+        for (item_id, window, source) in requests {
+            let generation = self
+                .items
+                .iter()
+                .find(|item| item.id == item_id)
+                .map(|item| item.detail_generation.saturating_add(1))
+                .unwrap_or(1);
+            self.queue_load(
+                MultiChartLoadRequest {
+                    item_id,
+                    kind: MultiChartLoadKind::Detail { generation, window },
+                    source,
+                },
+                MultiChartLoadState::Refining,
+            );
+        }
     }
 
     pub fn move_up(&mut self) {
@@ -604,31 +1188,16 @@ impl MultiChartState {
         } else {
             format!("!{normalized}")
         };
-        let tokens = tokenize_expression(&prefixed)?;
-        let Some(ExpressionToken::SeriesRef(series_ref)) = tokens.first() else {
+        let Some(series_ref) = Self::raw_dataset_reference(&prefixed)? else {
             return Err(format!(
                 "Dataset reference '{}' must look like !/path or !/path[..,0]",
                 dataset_spec
             ));
         };
-        if tokens.len() != 1 {
-            return Err(format!(
-                "Dataset reference '{}' must contain only a single dataset selector",
-                dataset_spec
-            ));
-        }
         let file = file.ok_or_else(|| {
             "Adding a dataset by path requires an open file handle, but no file is loaded"
                 .to_string()
         })?;
-        if !matches!(series_ref.target, ExpressionObjectTarget::AbsolutePath(_))
-            || series_ref.attr_name.is_some()
-        {
-            return Err(format!(
-                "Dataset reference '{}' must look like !/path or !/path[..,0]",
-                dataset_spec
-            ));
-        }
         let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target else {
             unreachable!();
         };
@@ -641,16 +1210,24 @@ impl MultiChartState {
         })?;
         let shape = dataset.shape();
         let selection = series_ref.to_preview_selection(&shape)?;
-        let points = read_expression_dataset_points(&dataset, series_ref)?;
         let source = ChartSource::DatasetSelection(DatasetChartSource {
             dataset_path: dataset.name(),
             display_path: dataset.name(),
-            selection,
+            selection: selection.clone(),
             shape,
             kind: DatasetChartKind::Dataset,
         });
-        self.add_chart_item(source, points)
-            .ok_or_else(|| "Failed to add dataset to multichart".to_string())
+        self.queue_loaded_item(CapturedMultiChartItem {
+            source,
+            initial_points: None,
+            source_len: 0,
+            load_state: MultiChartLoadState::Queued,
+            request: Some(MultiChartLoadRequest {
+                item_id: ChartItemId(0),
+                kind: MultiChartLoadKind::Overview { generation: 0 },
+                source: MultiChartLoadSource::Dataset { dataset, selection },
+            }),
+        })
     }
 }
 

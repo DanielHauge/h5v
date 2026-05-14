@@ -74,10 +74,13 @@ pub fn handle_normal_tree_event(
                     Ok(EventResult::Redraw)
                 }
                 Some(BoundAction::Action(TreeAction::AddToMultiChart)) => {
-                    let Some((source, points)) = state.capture_multichart_item()? else {
+                    let Some(captured) = state.capture_multichart_item()? else {
                         return Ok(EventResult::Continue);
                     };
-                    state.multi_chart.add_chart_item(source, points);
+                    state
+                        .multi_chart
+                        .queue_loaded_item(captured)
+                        .map_err(crate::error::AppError::InvalidCommand)?;
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }

@@ -129,14 +129,17 @@ impl MultiChartState {
         Self::bounds_from_points(
             self.items
                 .iter()
-                .filter(|item| item.visible)
-                .flat_map(|item| item.series.points.iter()),
+                .filter(|item| item.visible && item.has_loaded_series())
+                .flat_map(|item| item.overview_series().points.iter()),
         )
     }
 
     pub(super) fn selected_data_bounds(&self) -> Option<ChartViewport> {
         let item = self.selected_item()?;
-        Self::bounds_from_points(item.series.points.iter())
+        if !item.has_loaded_series() {
+            return None;
+        }
+        Self::bounds_from_points(item.overview_series().points.iter())
     }
 
     pub(super) fn effective_viewport(&self) -> Option<ChartViewport> {
@@ -169,6 +172,11 @@ impl MultiChartState {
             return false;
         }
         self.viewport = next;
+        if self.viewport.is_none() {
+            for item in &mut self.items {
+                item.clear_detail_state(true);
+            }
+        }
         self.modified = true;
         true
     }

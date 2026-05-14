@@ -270,7 +270,30 @@ pub struct ChartItem {
     pub label: String,
     pub source: ChartSource,
     pub series: ChartSeries,
+    pub detail_series: Option<ChartSeries>,
+    pub detail_window: Option<ChartLodWindow>,
+    pub pending_detail_window: Option<ChartLodWindow>,
+    pub detail_generation: u64,
+    pub source_len: usize,
+    pub sampled: bool,
+    pub load_state: MultiChartLoadState,
     pub visible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChartLodWindow {
+    pub start: usize,
+    pub end: usize,
+    pub sample_cap: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MultiChartLoadState {
+    Queued,
+    Sampling,
+    Refining,
+    Ready,
+    Error(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -301,9 +324,54 @@ impl ChartItem {
         }
     }
 
+    pub fn data_state_label(&self) -> String {
+        match &self.load_state {
+            MultiChartLoadState::Queued => "queued".to_string(),
+            MultiChartLoadState::Sampling => "sampling".to_string(),
+            MultiChartLoadState::Refining => "refining".to_string(),
+            MultiChartLoadState::Ready => {
+                if self.detail_window.is_some() {
+                    format!("detail {}/{}", self.active_series().len(), self.source_len)
+                } else if self.sampled {
+                    format!("sampled {}/{}", self.series.len(), self.source_len)
+                } else {
+                    format!("ready {}", self.series.len())
+                }
+            }
+            MultiChartLoadState::Error(message) => format!("error: {message}"),
+        }
+    }
+
+    pub fn has_loaded_series(&self) -> bool {
+        matches!(
+            self.load_state,
+            MultiChartLoadState::Ready | MultiChartLoadState::Refining
+        )
+    }
+
+    pub fn active_series(&self) -> &ChartSeries {
+        self.detail_series.as_ref().unwrap_or(&self.series)
+    }
+
+    pub fn overview_series(&self) -> &ChartSeries {
+        &self.series
+    }
+
+    pub(super) fn clear_detail_state(&mut self, invalidate_generation: bool) {
+        self.detail_series = None;
+        self.detail_window = None;
+        self.pending_detail_window = None;
+        if invalidate_generation {
+            self.detail_generation = self.detail_generation.saturating_add(1);
+        }
+        if self.has_loaded_series() {
+            self.load_state = MultiChartLoadState::Ready;
+        }
+    }
+
     pub fn statistics(&self) -> ChartItemStats {
         let mut ys = self
-            .series
+            .active_series()
             .points
             .iter()
             .map(|(_, y)| *y)
@@ -333,13 +401,13 @@ impl ChartItem {
             n => (ys[n / 2 - 1] + ys[n / 2]) / 2.0,
         };
         let x_min = self
-            .series
+            .active_series()
             .points
             .first()
             .map(|(x, _)| *x)
             .unwrap_or_default();
         let x_max = self
-            .series
+            .active_series()
             .points
             .last()
             .map(|(x, _)| *x)
@@ -349,8 +417,8 @@ impl ChartItem {
             samples,
             x_min,
             x_max,
-            y_min: self.series.y_min,
-            y_max: self.series.y_max,
+            y_min: self.active_series().y_min,
+            y_max: self.active_series().y_max,
             mean,
             median,
             stddev: variance.sqrt(),

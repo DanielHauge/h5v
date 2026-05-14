@@ -16,7 +16,7 @@ use crate::{
     ui::command::CommandState,
     ui::{
         heatmap::handle_heatmap_load,
-        mchart::MultiChartState,
+        mchart::{handle_mchart_load, MultiChartState},
         preview::image::{
             handle_chartpreview_load, handle_chartpreview_resize, handle_image_load,
             handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
@@ -83,6 +83,7 @@ pub(super) fn prepare_app<'a>(
     let tx_load_chartpreview =
         handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
     let tx_load_heatmap = handle_heatmap_load(tx_events.clone());
+    let tx_load_mchart = handle_mchart_load(tx_events.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -156,7 +157,7 @@ pub(super) fn prepare_app<'a>(
             pending_external_change: false,
         },
         compatibility_mode: runtime_config.compatibility_mode,
-        multi_chart: MultiChartState::new(picker.clone()),
+        multi_chart: MultiChartState::new(picker.clone(), tx_load_mchart),
         segment_state,
         edit_pause: edit_pause.clone(),
         command_state,

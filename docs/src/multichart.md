@@ -31,6 +31,10 @@ Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` 
 
 The editor validates expressions live and suggests chart item ids, dataset paths, and attribute references.
 
+Raw dataset references such as `!/big_dataset[..]` are queued and loaded in the background when submitted.
+Zoomed dataset-backed views can request a denser viewport sample in the background while the coarse overview stays visible.
+Derived series can also refine to viewport detail when their referenced chart-item inputs share the same loaded detail window.
+
 ## Visibility and organization
 
 - move through chart items with `j` / `k`
