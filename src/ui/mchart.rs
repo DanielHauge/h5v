@@ -1460,13 +1460,7 @@ impl MultiChartState {
             }
         };
 
-        let mut input_ids = refs
-            .item_refs
-            .iter()
-            .map(|item_ref| item_ref.id)
-            .collect::<Vec<_>>();
-        input_ids.sort_by_key(|id| id.0);
-        input_ids.dedup();
+        let input_ids = collect_expression_input_ids(&refs);
 
         Ok(EvaluatedExpression {
             points,
@@ -2837,6 +2831,33 @@ fn collect_parsed_expression_refs(expr: &ParsedExpression, out: &mut ExpressionR
             collect_expression_refs(y_ast, out);
         }
     }
+}
+
+fn collect_expression_input_ids(refs: &ExpressionRefs) -> Vec<ChartItemId> {
+    let mut input_ids = refs
+        .item_refs
+        .iter()
+        .map(|item_ref| item_ref.id)
+        .chain(
+            refs.series_refs
+                .iter()
+                .filter_map(|series_ref| match &series_ref.target {
+                    ExpressionObjectTarget::ItemRef(id) => Some(*id),
+                    ExpressionObjectTarget::AbsolutePath(_) => None,
+                }),
+        )
+        .chain(
+            refs.scalar_refs
+                .iter()
+                .filter_map(|scalar_ref| match &scalar_ref.target {
+                    ExpressionObjectTarget::ItemRef(id) => Some(*id),
+                    ExpressionObjectTarget::AbsolutePath(_) => None,
+                }),
+        )
+        .collect::<Vec<_>>();
+    input_ids.sort_by_key(|id| id.0);
+    input_ids.dedup();
+    input_ids
 }
 
 #[derive(Debug, Clone)]
@@ -4955,6 +4976,86 @@ mod tests {
         assert_eq!(
             state.item_by_id(ChartItemId(2)).unwrap().series.points,
             vec![(0.0, 2.0), (1.0, 3.0)]
+        );
+    }
+
+    #[test]
+    fn updating_series_recomputes_xy_dependents_when_used_on_x_axis() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0)],
+        );
+        state
+            .create_expression_derived("($1 * 10, $2 + 1)".to_string())
+            .expect("create xy series");
+
+        state
+            .update_expression_item_with_file(ChartItemId(1), "$2 + 5".to_string(), None)
+            .expect("update $1");
+
+        assert_eq!(
+            state.item_by_id(ChartItemId(3)).unwrap().series.points,
+            vec![(150.0, 11.0), (250.0, 21.0)]
+        );
+    }
+
+    #[test]
+    fn updating_xy_series_recomputes_downstream_y_dependents() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0)],
+        );
+        state.add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0)],
+        );
+        state
+            .create_expression_derived("($1 * 10, $2 + 1)".to_string())
+            .expect("create xy series");
+        state
+            .create_expression_derived("$3 + 1".to_string())
+            .expect("create downstream series");
+
+        state
+            .update_expression_item_with_file(ChartItemId(1), "$2 + 5".to_string(), None)
+            .expect("update $1");
+
+        assert_eq!(
+            state.item_by_id(ChartItemId(3)).unwrap().series.points,
+            vec![(150.0, 11.0), (250.0, 21.0)]
+        );
+        assert_eq!(
+            state.item_by_id(ChartItemId(4)).unwrap().series.points,
+            vec![(150.0, 12.0), (250.0, 22.0)]
+        );
+    }
+
+    #[test]
+    fn collect_expression_input_ids_includes_item_targeted_series_refs() {
+        let tokens = tokenize_expression("(!$1, $2 + 1)").expect("tokenize");
+        let parsed = parse_derived_expression(&tokens).expect("parse");
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+
+        assert_eq!(
+            collect_expression_input_ids(&refs),
+            vec![ChartItemId(1), ChartItemId(2)]
         );
     }
 
