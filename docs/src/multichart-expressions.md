@@ -57,6 +57,8 @@ Open the expression prompt with:
 
 The editor stays below the chart, so opening it does not change the plot viewport.
 
+`Enter` starts a new expression. `e` loads the selected series expression so you can update it in place.
+
 - `Enter` submits
 - `Tab` applies the selected suggestion
 - `Up` and `Down` move through suggestions

@@ -14,7 +14,7 @@ Sources:
 
 1. Add a series with `m` or `mchart add ...`.
 2. Press `M` or run `mchart open` to enter the workspace.
-3. Press `Enter` or `e` to open the expression editor.
+3. Press `Enter` to open a new expression, or `e` to edit the selected series.
 4. Build derived series with expressions such as `$1 - $2`, `($1, !/time[..])`, or `$1[0..256]`.
 5. Use zoom and pan to inspect the area of interest.
 
@@ -22,7 +22,8 @@ Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` 
 
 ## Expression editor
 
-- `Enter` or `e` opens the editor without changing the chart viewport
+- `Enter` opens a new expression without changing the chart viewport
+- `e` edits the selected series in place
 - `Enter` submits the current expression
 - `Tab` completes the selected suggestion
 - `Up` and `Down` move through suggestions while editing
@@ -34,7 +35,7 @@ The editor validates expressions live and suggests chart item ids, dataset paths
 
 - move through chart items with `j` / `k`
 - hide or show an item with `Space` or `v`
-- remove the selected item with `d`, `Backspace`, or `Delete`
+- remove the selected item with `d`, `Backspace`, or `Delete` when nothing depends on it
 - clear the whole workspace with `C`
 - open multichart help with `?`
 

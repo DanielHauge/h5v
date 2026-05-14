@@ -119,10 +119,11 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | --- | --- |
 | `M`, `Esc` | Leave multichart mode |
 | `j`, `k` | Move through chart items |
-| `Enter`, `e` | Open the expression editor |
+| `Enter` | Open a new expression |
+| `e` | Edit the selected series |
 | `Space`, `v` | Toggle selected item visibility |
 | `?` | Open multichart help |
-| `d`, `Backspace`, `Delete` | Remove the selected item |
+| `d`, `Backspace`, `Delete` | Remove the selected item when nothing depends on it |
 | `C` | Clear all chart items |
 | `c` | Reset zoom |
 | `+`, `=`, `Shift+Up` | Zoom in |
