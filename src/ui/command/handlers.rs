@@ -6,7 +6,7 @@ use crate::{
         state::{HeatmapRangeBound, HeatmapRangeMode},
     },
 };
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::Event;
 
 use super::super::{
     input::{handle_input_event, EventResult},
@@ -17,6 +17,8 @@ use super::{
     parsing::{describe_command_descriptor, legacy_descriptor_for_input},
     CommandArgValue, CommandInvocation,
 };
+
+pub(crate) use crate::ui::input::keymap::parse_simulated_key;
 
 pub(super) fn handle_seek(
     state: &mut AppState<'_>,
@@ -653,86 +655,4 @@ fn parse_word_f64(word: Option<&str>, default: f64, command_name: &str) -> Resul
 
 fn parse_heatmap_range_bound(word: &str) -> Result<HeatmapRangeBound, AppError> {
     HeatmapRangeBound::parse(word).map_err(AppError::InvalidCommand)
-}
-
-pub(super) fn parse_simulated_key(key_spec: &str) -> Result<KeyEvent, AppError> {
-    let normalized = key_spec.trim();
-    if normalized.is_empty() {
-        return Err(AppError::InvalidCommand(
-            "Key spec cannot be empty".to_string(),
-        ));
-    }
-
-    let mut modifiers = KeyModifiers::NONE;
-    let mut parts = normalized.split('+').peekable();
-    let mut base = None;
-    while let Some(part) = parts.next() {
-        let part = part.trim();
-        if part.is_empty() {
-            return Err(AppError::InvalidCommand(format!(
-                "Invalid key spec '{}'",
-                key_spec
-            )));
-        }
-        let lower = part.to_ascii_lowercase();
-        if parts.peek().is_some() {
-            match lower.as_str() {
-                "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
-                "alt" | "meta" => modifiers |= KeyModifiers::ALT,
-                "shift" => modifiers |= KeyModifiers::SHIFT,
-                _ => {
-                    return Err(AppError::InvalidCommand(format!(
-                        "Unknown key modifier '{}' in '{}'",
-                        part, key_spec
-                    )))
-                }
-            }
-        } else {
-            base = Some(part);
-        }
-    }
-
-    let base = base
-        .ok_or_else(|| AppError::InvalidCommand(format!("Missing base key in '{}'", key_spec)))?;
-    let key_code = match base.to_ascii_lowercase().as_str() {
-        "enter" | "return" => KeyCode::Enter,
-        "esc" | "escape" => KeyCode::Esc,
-        "tab" => KeyCode::Tab,
-        "backtab" | "shift-tab" => {
-            modifiers |= KeyModifiers::SHIFT;
-            KeyCode::BackTab
-        }
-        "space" => KeyCode::Char(' '),
-        "left" => KeyCode::Left,
-        "right" => KeyCode::Right,
-        "up" => KeyCode::Up,
-        "down" => KeyCode::Down,
-        "home" => KeyCode::Home,
-        "end" => KeyCode::End,
-        "pageup" | "page-up" | "pgup" => KeyCode::PageUp,
-        "pagedown" | "page-down" | "pgdown" => KeyCode::PageDown,
-        "backspace" => KeyCode::Backspace,
-        "delete" | "del" => KeyCode::Delete,
-        "insert" | "ins" => KeyCode::Insert,
-        value if value.len() == 1 => {
-            let ch = base.chars().next().ok_or_else(|| {
-                AppError::InvalidCommand(format!("Invalid key spec '{}'", key_spec))
-            })?;
-            KeyCode::Char(ch)
-        }
-        _ => {
-            return Err(AppError::InvalidCommand(format!(
-                "Unknown key '{}' in '{}'",
-                base, key_spec
-            )))
-        }
-    };
-
-    let key_code = if key_code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT) {
-        KeyCode::BackTab
-    } else {
-        key_code
-    };
-
-    Ok(KeyEvent::new(key_code, modifiers))
 }

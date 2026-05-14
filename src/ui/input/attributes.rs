@@ -31,7 +31,8 @@ use crate::{
 };
 
 use super::{
-    keymap::{attributes_action, AttributesAction, Direction},
+    execute_bound_command, execute_bound_lua_callback, execute_bound_script,
+    keymap::{attributes_action, AttributesAction, BoundAction, Direction, EffectiveKeymaps},
     EventResult,
 };
 
@@ -445,11 +446,12 @@ pub fn apply_attribute_edit_request(
 pub fn handle_normal_attributes(
     state: &mut AppState<'_>,
     event: Event,
+    keymaps: &EffectiveKeymaps,
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => match attributes_action(&key_event) {
-                Some(AttributesAction::Move(Direction::Up, amount)) => {
+            KeyEventKind::Press => match attributes_action(&key_event, keymaps) {
+                Some(BoundAction::Action(AttributesAction::Move(Direction::Up, amount))) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let Some(current_index) = node.normalize_attribute_selection()? else {
@@ -489,7 +491,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(AttributesAction::Move(Direction::Down, amount)) => {
+                Some(BoundAction::Action(AttributesAction::Move(Direction::Down, amount))) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let Some(current_index) = node.normalize_attribute_selection()? else {
@@ -529,7 +531,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(AttributesAction::Move(Direction::Left, _)) => {
+                Some(BoundAction::Action(AttributesAction::Move(Direction::Left, _))) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let Some(current_index) = node.normalize_attribute_selection()? else {
@@ -560,7 +562,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(AttributesAction::Move(Direction::Right, _)) => {
+                Some(BoundAction::Action(AttributesAction::Move(Direction::Right, _))) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     let mut node = tree_item.node.borrow_mut();
                     let Some(current_index) = node.normalize_attribute_selection()? else {
@@ -591,7 +593,7 @@ pub fn handle_normal_attributes(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(AttributesAction::Edit) => {
+                Some(BoundAction::Action(AttributesAction::Edit)) => {
                     match navigate_reference_attribute_value(state) {
                         Ok(Some(event_result)) => return Ok(event_result),
                         Ok(None) => {}
@@ -614,7 +616,7 @@ pub fn handle_normal_attributes(
 
                     apply_attribute_edit_request(state, &request)
                 }
-                Some(AttributesAction::Copy) => {
+                Some(BoundAction::Action(AttributesAction::Copy)) => {
                     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
                     let Some(row_index) = node.normalize_attribute_selection()? else {
                         return Ok(EventResult::Toast(
@@ -672,7 +674,7 @@ pub fn handle_normal_attributes(
                         )),
                     }
                 }
-                Some(AttributesAction::Create) => {
+                Some(BoundAction::Action(AttributesAction::Create)) => {
                     if state.readonly {
                         return Ok(EventResult::Toast(
                             AppToast::Warning(
@@ -693,7 +695,7 @@ pub fn handle_normal_attributes(
                     state.mode = Mode::AttributeCreateDialog;
                     Ok(EventResult::Redraw)
                 }
-                Some(AttributesAction::Delete) => {
+                Some(BoundAction::Action(AttributesAction::Delete)) => {
                     if state.readonly {
                         return Ok(EventResult::Toast(
                             AppToast::Warning(
@@ -712,6 +714,13 @@ pub fn handle_normal_attributes(
                     Ok(EventResult::Redraw)
                 }
 
+                Some(BoundAction::Command(command)) => execute_bound_command(state, &command),
+                Some(BoundAction::Script(script)) => {
+                    execute_bound_script(state, &script, "keybinding script")
+                }
+                Some(BoundAction::LuaCallback(callback_id)) => {
+                    execute_bound_lua_callback(state, &callback_id)
+                }
                 _ => Ok(EventResult::Continue),
             },
             KeyEventKind::Repeat => Ok(EventResult::Continue),

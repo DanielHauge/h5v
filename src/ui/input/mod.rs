@@ -1,15 +1,22 @@
+use std::cell::RefCell;
+
 use attributes::handle_normal_attributes;
 use content::handle_normal_content_event;
-use keymap::{normal_action, window_action, Direction, NormalAction, WindowAction};
+use keymap::{
+    global_action, normal_action, window_action, BoundAction, Direction, GlobalAction,
+    NormalAction, WindowAction,
+};
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
 };
 use tree::handle_normal_tree_event;
 
 use crate::{
+    configure,
     error::AppError,
     h5f::{FixedStringRewrite, Node},
     search::{full_traversal, Searcher},
+    ui::command::{execute_command, parse_command_text, parse_startup_commands},
     ui::state::{AppToast, AttributeCreateField, FixedStringOverflowChoice},
 };
 
@@ -38,6 +45,144 @@ fn is_handled_key_press(key_event: &KeyEvent) -> bool {
     matches!(key_event.kind, KeyEventKind::Press)
 }
 
+pub(crate) fn execute_bound_command(
+    state: &mut AppState<'_>,
+    command_text: &str,
+) -> Result<EventResult, AppError> {
+    if state.binding_command_depth >= 8 {
+        return Err(AppError::InvalidCommand(
+            "Keybinding command recursion limit reached".to_string(),
+        ));
+    }
+    state.binding_command_depth += 1;
+    let result = (|| {
+        let command = parse_command_text(command_text)?;
+        execute_command(state, &command)
+    })();
+    state.binding_command_depth = state.binding_command_depth.saturating_sub(1);
+    result
+}
+
+pub(crate) fn execute_bound_script(
+    state: &mut AppState<'_>,
+    script_text: &str,
+    origin: &str,
+) -> Result<EventResult, AppError> {
+    if state.binding_command_depth >= 8 {
+        return Err(AppError::InvalidCommand(
+            "Keybinding command recursion limit reached".to_string(),
+        ));
+    }
+    state.binding_command_depth += 1;
+    let result = (|| {
+        let mut last_result = EventResult::Continue;
+        for command in parse_startup_commands(script_text, origin) {
+            let invocation = parse_command_text(&command.command_text).map_err(|error| {
+                AppError::InvalidCommand(format!("{}: {}", command.origin, error))
+            })?;
+            let event_result = execute_command(state, &invocation)?;
+            match event_result {
+                EventResult::Continue | EventResult::Redraw | EventResult::Copying => {
+                    last_result = event_result;
+                }
+                EventResult::Toast(_, _) => {
+                    last_result = event_result;
+                }
+                EventResult::Quit
+                | EventResult::ReloadFile { .. }
+                | EventResult::Configure { .. }
+                | EventResult::Error(_) => return Ok(event_result),
+            }
+        }
+        Ok(last_result)
+    })();
+    state.binding_command_depth = state.binding_command_depth.saturating_sub(1);
+    result
+}
+
+pub(crate) fn execute_bound_lua_callback(
+    state: &mut AppState<'_>,
+    callback_id: &str,
+) -> Result<EventResult, AppError> {
+    if state.binding_command_depth >= 8 {
+        return Err(AppError::InvalidCommand(
+            "Keybinding command recursion limit reached".to_string(),
+        ));
+    }
+    state.binding_command_depth += 1;
+    let result = configure::with_keymap_lua_callback(callback_id, |lua, callback| {
+        let callback_result = RefCell::new(EventResult::Continue);
+        let state_cell = RefCell::new(&mut *state);
+        lua.scope(|scope| {
+            let command_fn = scope.create_function_mut(|_, command: String| {
+                let mut state = state_cell.borrow_mut();
+                *callback_result.borrow_mut() = execute_bound_command(*state, &command)
+                    .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+                Ok(())
+            })?;
+            let commands_fn = scope.create_function_mut(|_, commands: mlua::Table| {
+                let mut parts = Vec::new();
+                for value in commands.sequence_values::<String>() {
+                    parts.push(value?);
+                }
+                let script = parts.join("\n");
+                let mut state = state_cell.borrow_mut();
+                *callback_result.borrow_mut() =
+                    execute_bound_script(*state, &script, "lua keybinding commands")
+                        .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+                Ok(())
+            })?;
+            let script_fn = scope.create_function_mut(|_, script: String| {
+                let mut state = state_cell.borrow_mut();
+                *callback_result.borrow_mut() =
+                    execute_bound_script(*state, &script, "lua keybinding script")
+                        .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+                Ok(())
+            })?;
+            let ctx = lua.create_table()?;
+            ctx.set("command", command_fn)?;
+            ctx.set("commands", commands_fn)?;
+            ctx.set("script", script_fn)?;
+            callback.call::<()>(ctx)?;
+            Ok(())
+        })
+        .map_err(|error| AppError::InvalidCommand(error.to_string()))?;
+        Ok(callback_result.into_inner())
+    });
+    state.binding_command_depth = state.binding_command_depth.saturating_sub(1);
+    result
+}
+
+fn handle_global_action(
+    state: &mut AppState<'_>,
+    action: GlobalAction,
+) -> Result<EventResult, AppError> {
+    match action {
+        GlobalAction::EnterCommand => {
+            state.command_return_mode = state.mode.clone();
+            state.mode = Mode::Command;
+            state.command_state.begin_new_entry();
+            Ok(EventResult::Redraw)
+        }
+        GlobalAction::ShowHelp => {
+            state.mode = Mode::Help;
+            Ok(EventResult::Redraw)
+        }
+        GlobalAction::Quit => Ok(EventResult::Quit),
+        GlobalAction::ReloadFile => Ok(EventResult::ReloadFile {
+            write: !state.readonly,
+        }),
+        GlobalAction::ToggleMultiChart => {
+            state.mode = if matches!(state.mode, Mode::MultiChart) {
+                Mode::Normal
+            } else {
+                Mode::MultiChart
+            };
+            Ok(EventResult::Redraw)
+        }
+    }
+}
+
 pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {
     if let Event::Resize(_, __) = event {
         return Ok(EventResult::Redraw);
@@ -56,33 +201,58 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                     return Ok(EventResult::Continue);
                 }
 
+                let keymaps = configure::current_keymaps();
                 if state.pending_chord == Some(PendingChord::CtrlW) {
                     state.pending_chord = None;
-                    if let Some(action) = window_action(&key_event) {
+                    if let Some(action) = window_action(&key_event, &keymaps) {
                         return match action {
-                            WindowAction::Focus(direction) => {
+                            BoundAction::Action(WindowAction::Focus(direction)) => {
                                 apply_focus_action(state, direction);
                                 Ok(EventResult::Redraw)
                             }
-                            WindowAction::ToggleTreeView => {
+                            BoundAction::Action(WindowAction::ToggleTreeView) => {
                                 state.toggle_tree_view();
                                 Ok(EventResult::Redraw)
+                            }
+                            BoundAction::Command(command) => execute_bound_command(state, &command),
+                            BoundAction::Script(script) => {
+                                execute_bound_script(state, &script, "keybinding script")
+                            }
+                            BoundAction::LuaCallback(callback_id) => {
+                                execute_bound_lua_callback(state, &callback_id)
                             }
                         };
                     }
                     return Ok(EventResult::Continue);
                 }
 
-                if let Some(action) = normal_action(&key_event) {
+                let focused_result = match state.focus {
+                    Focus::Tree(_) => {
+                        handle_normal_tree_event(state, Event::Key(key_event), &keymaps)?
+                    }
+                    Focus::Attributes => {
+                        handle_normal_attributes(state, Event::Key(key_event), &keymaps)?
+                    }
+                    Focus::Content => {
+                        handle_normal_content_event(state, Event::Key(key_event), &keymaps)?
+                    }
+                };
+                if !matches!(focused_result, EventResult::Continue) {
+                    return Ok(focused_result);
+                }
+
+                if let Some(action) = normal_action(&key_event, &keymaps) {
                     return match action {
-                        NormalAction::EnterCommand => {
+                        BoundAction::Action(NormalAction::EnterCommand) => {
                             state.command_return_mode = Mode::Normal;
                             state.mode = Mode::Command;
                             state.command_state.begin_new_entry();
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::RepeatCommand => state.reexecute_command(),
-                        NormalAction::EnterSearch => {
+                        BoundAction::Action(NormalAction::RepeatCommand) => {
+                            state.reexecute_command()
+                        }
+                        BoundAction::Action(NormalAction::EnterSearch) => {
                             if state.searcher.is_none() {
                                 let Node::File(ref file) = state.root.borrow().node else {
                                     return Ok(EventResult::Error(
@@ -105,8 +275,8 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             state.mode = Mode::Search;
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::Quit => Ok(EventResult::Quit),
-                        NormalAction::ToggleContentMode => {
+                        BoundAction::Action(NormalAction::Quit) => Ok(EventResult::Quit),
+                        BoundAction::Action(NormalAction::ToggleContentMode) => {
                             let available = state.treeview[state.tree_view_cursor]
                                 .node
                                 .borrow_mut()
@@ -116,52 +286,76 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             );
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::ShowHelp => {
+                        BoundAction::Action(NormalAction::ShowHelp) => {
                             state.mode = Mode::Help;
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::ToggleMultiChart => {
+                        BoundAction::Action(NormalAction::ToggleMultiChart) => {
                             state.mode = Mode::MultiChart;
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::ToggleTreeView => {
+                        BoundAction::Action(NormalAction::ToggleTreeView) => {
                             state.toggle_tree_view();
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::ReloadFile => Ok(EventResult::ReloadFile {
-                            write: !state.readonly,
-                        }),
-                        NormalAction::Focus(direction) => {
+                        BoundAction::Action(NormalAction::ReloadFile) => {
+                            Ok(EventResult::ReloadFile {
+                                write: !state.readonly,
+                            })
+                        }
+                        BoundAction::Action(NormalAction::Focus(direction)) => {
                             apply_focus_action(state, direction);
                             Ok(EventResult::Redraw)
                         }
-                        NormalAction::StartWindowChord => {
+                        BoundAction::Action(NormalAction::StartWindowChord) => {
                             state.pending_chord = Some(PendingChord::CtrlW);
                             Ok(EventResult::Continue)
                         }
-                        NormalAction::ChangeX(delta) => state.change_x(delta),
-                        NormalAction::ChangeRow(delta) => state.change_row(delta),
-                        NormalAction::ChangeCol(delta) => state.change_col(delta),
-                        NormalAction::ChangeSelectedIndex(delta) => {
+                        BoundAction::Action(NormalAction::ChangeX(delta)) => state.change_x(delta),
+                        BoundAction::Action(NormalAction::ChangeRow(delta)) => {
+                            state.change_row(delta)
+                        }
+                        BoundAction::Action(NormalAction::ChangeCol(delta)) => {
+                            state.change_col(delta)
+                        }
+                        BoundAction::Action(NormalAction::ChangeSelectedIndex(delta)) => {
                             state.change_selected_index(delta)
                         }
-                        NormalAction::ChangeSelectedDimension(delta) => {
+                        BoundAction::Action(NormalAction::ChangeSelectedDimension(delta)) => {
                             state.change_selected_dimension(delta)
                         }
-                        NormalAction::Scroll(direction, amount) => match direction {
-                            Direction::Left => state.left(amount as isize),
-                            Direction::Right => state.right(amount as isize),
-                            Direction::Up => state.up(amount),
-                            Direction::Down => state.down(amount),
-                        },
+                        BoundAction::Action(NormalAction::Scroll(direction, amount)) => {
+                            match direction {
+                                Direction::Left => state.left(amount as isize),
+                                Direction::Right => state.right(amount as isize),
+                                Direction::Up => state.up(amount),
+                                Direction::Down => state.down(amount),
+                            }
+                        }
+                        BoundAction::Command(command) => execute_bound_command(state, &command),
+                        BoundAction::Script(script) => {
+                            execute_bound_script(state, &script, "keybinding script")
+                        }
+                        BoundAction::LuaCallback(callback_id) => {
+                            execute_bound_lua_callback(state, &callback_id)
+                        }
                     };
                 }
 
-                match state.focus {
-                    Focus::Tree(_) => handle_normal_tree_event(state, Event::Key(key_event)),
-                    Focus::Attributes => handle_normal_attributes(state, Event::Key(key_event)),
-                    Focus::Content => handle_normal_content_event(state, Event::Key(key_event)),
+                if let Some(action) = global_action(&key_event, &keymaps) {
+                    return match action {
+                        BoundAction::Action(action) => handle_global_action(state, action),
+                        BoundAction::Command(command) => execute_bound_command(state, &command),
+                        BoundAction::Script(script) => {
+                            execute_bound_script(state, &script, "keybinding script")
+                        }
+                        BoundAction::LuaCallback(callback_id) => {
+                            execute_bound_lua_callback(state, &callback_id)
+                        }
+                    };
                 }
+
+                Ok(EventResult::Continue)
             }
             Event::Mouse(mouse_event) => handle_normal_mouse_event(state, mouse_event),
             _ => Ok(EventResult::Continue),
@@ -190,6 +384,19 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 if key_event.code == KeyCode::Esc {
                     state.mode = Mode::Normal;
                     return Ok(EventResult::Redraw);
+                }
+                let keymaps = configure::current_keymaps();
+                if let Some(action) = global_action(&key_event, &keymaps) {
+                    return match action {
+                        BoundAction::Action(action) => handle_global_action(state, action),
+                        BoundAction::Command(command) => execute_bound_command(state, &command),
+                        BoundAction::Script(script) => {
+                            execute_bound_script(state, &script, "keybinding script")
+                        }
+                        BoundAction::LuaCallback(callback_id) => {
+                            execute_bound_lua_callback(state, &callback_id)
+                        }
+                    };
                 }
             }
             Ok(EventResult::Continue)

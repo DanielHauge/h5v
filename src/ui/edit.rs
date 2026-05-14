@@ -38,14 +38,9 @@ pub fn reenter_h5v() -> Result<(), AppError> {
 }
 
 fn drain_terminal_events() {
-    loop {
-        match event::poll(std::time::Duration::from_millis(0)) {
-            Ok(true) => {
-                if event::read().is_err() {
-                    break;
-                }
-            }
-            Ok(false) | Err(_) => break,
+    while let Ok(true) = event::poll(std::time::Duration::from_millis(0)) {
+        if event::read().is_err() {
+            break;
         }
     }
 }

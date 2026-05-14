@@ -452,29 +452,6 @@ fn render_file_preview(
     f.render_widget(table, inner);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::truncate_left_line;
-    use ratatui::{
-        style::{Color, Style},
-        text::{Line, Span},
-    };
-
-    #[test]
-    fn truncate_left_line_preserves_remaining_styles() {
-        let line = Line::from(vec![
-            Span::raw("1000"),
-            Span::styled(" (archie)", Style::default().fg(Color::Yellow)),
-        ]);
-
-        let truncated = truncate_left_line(&line, 5);
-
-        assert_eq!(truncated.spans.len(), 1);
-        assert_eq!(truncated.spans[0].content.as_ref(), "(archie)");
-        assert_eq!(truncated.spans[0].style.fg, Some(Color::Yellow));
-    }
-}
-
 fn compound_schema_preview_text(attr: &crate::h5f::DatasetMeta) -> String {
     let path = attr.virtual_path().unwrap_or(attr.display_name.as_str());
     format!(
@@ -641,4 +618,27 @@ pub fn render_string_preview(
 pub fn preview_text_for_compound_schema(meta: &crate::h5f::DatasetMeta) -> Option<String> {
     meta.is_compound_container()
         .then(|| compound_schema_preview_text(meta))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_left_line;
+    use ratatui::{
+        style::{Color, Style},
+        text::{Line, Span},
+    };
+
+    #[test]
+    fn truncate_left_line_preserves_remaining_styles() {
+        let line = Line::from(vec![
+            Span::raw("1000"),
+            Span::styled(" (archie)", Style::default().fg(Color::Yellow)),
+        ]);
+
+        let truncated = truncate_left_line(&line, 5);
+
+        assert_eq!(truncated.spans.len(), 1);
+        assert_eq!(truncated.spans[0].content.as_ref(), "(archie)");
+        assert_eq!(truncated.spans[0].style.fg, Some(Color::Yellow));
+    }
 }

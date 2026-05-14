@@ -5,36 +5,38 @@ use ratatui::crossterm::event::{Event, KeyEventKind};
 use crate::{error::AppError, ui::state::AppState};
 
 use super::{
-    keymap::{tree_action, TreeAction},
+    execute_bound_command, execute_bound_lua_callback, execute_bound_script,
+    keymap::{tree_action, BoundAction, EffectiveKeymaps, TreeAction},
     EventResult,
 };
 
 pub fn handle_normal_tree_event(
     state: &mut AppState<'_>,
     event: Event,
+    keymaps: &EffectiveKeymaps,
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
-            KeyEventKind::Press => match tree_action(&key_event) {
-                Some(TreeAction::MoveUp(step)) => {
+            KeyEventKind::Press => match tree_action(&key_event, keymaps) {
+                Some(BoundAction::Action(TreeAction::MoveUp(step))) => {
                     state.tree_view_cursor =
                         max(state.tree_view_cursor as isize - step as isize, 0) as usize;
                     Ok(EventResult::Redraw)
                 }
-                Some(TreeAction::MoveDown(step)) => {
+                Some(BoundAction::Action(TreeAction::MoveDown(step))) => {
                     state.tree_view_cursor =
                         min(state.tree_view_cursor + step, state.treeview.len() - 1);
                     Ok(EventResult::Redraw)
                 }
-                Some(TreeAction::MoveTop) => {
+                Some(BoundAction::Action(TreeAction::MoveTop)) => {
                     state.tree_view_cursor = 0;
                     Ok(EventResult::Redraw)
                 }
-                Some(TreeAction::MoveBottom) => {
+                Some(BoundAction::Action(TreeAction::MoveBottom)) => {
                     state.tree_view_cursor = state.treeview.len() - 1;
                     Ok(EventResult::Redraw)
                 }
-                Some(TreeAction::Collapse) => {
+                Some(BoundAction::Action(TreeAction::Collapse)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if tree_item.node.borrow().expanded {
                         tree_item.node.borrow_mut().collapse();
@@ -44,7 +46,7 @@ pub fn handle_normal_tree_event(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(TreeAction::Expand) => {
+                Some(BoundAction::Action(TreeAction::Expand)) => {
                     if state.treeview[state.tree_view_cursor].load_more {
                         return Ok(EventResult::Continue);
                     }
@@ -58,7 +60,7 @@ pub fn handle_normal_tree_event(
                         Ok(EventResult::Continue)
                     }
                 }
-                Some(TreeAction::Toggle) => {
+                Some(BoundAction::Action(TreeAction::Toggle)) => {
                     if state.treeview[state.tree_view_cursor].load_more {
                         let tree_item = &state.treeview[state.tree_view_cursor];
                         tree_item.node.borrow_mut().view_loaded += 50;
@@ -71,13 +73,20 @@ pub fn handle_normal_tree_event(
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
                 }
-                Some(TreeAction::AddToMultiChart) => {
+                Some(BoundAction::Action(TreeAction::AddToMultiChart)) => {
                     let Some((source, points)) = state.capture_multichart_item()? else {
                         return Ok(EventResult::Continue);
                     };
                     state.multi_chart.add_chart_item(source, points);
                     state.compute_tree_view();
                     Ok(EventResult::Redraw)
+                }
+                Some(BoundAction::Command(command)) => execute_bound_command(state, &command),
+                Some(BoundAction::Script(script)) => {
+                    execute_bound_script(state, &script, "keybinding script")
+                }
+                Some(BoundAction::LuaCallback(callback_id)) => {
+                    execute_bound_lua_callback(state, &callback_id)
                 }
                 _ => Ok(EventResult::Continue),
             },

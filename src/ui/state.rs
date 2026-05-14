@@ -687,12 +687,21 @@ fn heatmap_partition(total: usize, cells: usize, index: usize) -> (usize, usize)
     (start, end)
 }
 
+fn heatmap_anchor_fraction(index: usize, cells: usize, inverted: bool) -> f64 {
+    let display_fraction = (index as f64 + 0.5) / cells.max(1) as f64;
+    if inverted {
+        1.0 - display_fraction
+    } else {
+        display_fraction
+    }
+}
+
 fn format_heatmap_percent(bps: u16) -> String {
     let whole = bps / 100;
     let frac = bps % 100;
     if frac == 0 {
         whole.to_string()
-    } else if frac % 10 == 0 {
+    } else if frac.is_multiple_of(10) {
         format!("{whole}.{}", frac / 10)
     } else {
         format!("{whole}.{frac:02}")
@@ -704,9 +713,9 @@ fn format_heatmap_thousandths(value: u16) -> String {
     let frac = value % 1000;
     if frac == 0 {
         whole.to_string()
-    } else if frac % 100 == 0 {
+    } else if frac.is_multiple_of(100) {
         format!("{whole}.{}", frac / 100)
-    } else if frac % 10 == 0 {
+    } else if frac.is_multiple_of(10) {
         format!("{whole}.{:02}", frac / 10)
     } else {
         format!("{whole}.{frac:03}")
@@ -1020,6 +1029,7 @@ pub struct AppState<'a> {
     pub command_return_mode: Mode,
     pub searcher: Option<Searcher>,
     pub pending_chord: Option<PendingChord>,
+    pub binding_command_depth: usize,
     pub show_tree_view: bool,
     pub stacked_tree_layout: bool,
     pub image_protocol_enabled: bool,
@@ -1325,8 +1335,16 @@ impl AppState<'_> {
                     (
                         cell_view.row_start + cell_view.row_len / 2,
                         cell_view.col_start + cell_view.col_len / 2,
-                        (row as f64 + 0.5) / viewport_rows as f64,
-                        (col as f64 + 0.5) / viewport_cols as f64,
+                        heatmap_anchor_fraction(
+                            row,
+                            viewport_rows,
+                            self.heatmap_render.settings.invert_y,
+                        ),
+                        heatmap_anchor_fraction(
+                            col,
+                            viewport_cols,
+                            self.heatmap_render.settings.invert_x,
+                        ),
                     )
                 } else {
                     (
@@ -2458,5 +2476,22 @@ impl AppState<'_> {
                 Ok(EventResult::Redraw)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::heatmap_anchor_fraction;
+
+    #[test]
+    fn heatmap_anchor_fraction_uses_display_position_when_not_inverted() {
+        assert!((heatmap_anchor_fraction(0, 10, false) - 0.05).abs() < f64::EPSILON);
+        assert!((heatmap_anchor_fraction(9, 10, false) - 0.95).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heatmap_anchor_fraction_flips_for_inverted_axes() {
+        assert!((heatmap_anchor_fraction(0, 10, true) - 0.95).abs() < f64::EPSILON);
+        assert!((heatmap_anchor_fraction(9, 10, true) - 0.05).abs() < f64::EPSILON);
     }
 }

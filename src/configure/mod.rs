@@ -21,9 +21,9 @@ pub use presentation::reset_symbol_theme;
 #[allow(unused_imports)]
 pub use presentation::{
     current_content_mode_order, current_heatmap_default_range, current_heatmap_default_settings,
-    current_heatmap_range_modes, ordered_content_modes, reset_config, restore_config,
-    set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges, snapshot_config,
-    ConfigSnapshot,
+    current_heatmap_range_modes, current_keymaps, ordered_content_modes, reset_config,
+    restore_config, set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges,
+    set_keymap_config, snapshot_config, ConfigSnapshot,
 };
 pub(crate) use symbols::configured_symbol;
 #[allow(unused_imports)]
@@ -40,4 +40,4 @@ pub fn reset_config_path() -> Result<PathBuf, ConfigureErrors> {
     loading::reset_config_to_default()
 }
 
-pub use lua::{load_config_compatibility, run_lua_engine};
+pub use lua::{load_config_compatibility, run_lua_engine, with_keymap_lua_callback};

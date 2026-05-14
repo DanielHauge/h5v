@@ -33,6 +33,10 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect) {
         .title_bottom(Line::from(vec![
             Span::styled(" Esc ", help_key_style()),
             Span::styled(" close ", help_desc_style()),
+            Span::styled(
+                "  defaults shown; keymaps configurable ",
+                help_muted_style(),
+            ),
         ]))
         .title_alignment(Alignment::Center)
         .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));

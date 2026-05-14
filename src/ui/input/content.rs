@@ -27,7 +27,10 @@ use crate::{
 };
 
 use super::{
-    keymap::{content_action, ContentAction, Direction},
+    execute_bound_command, execute_bound_lua_callback, execute_bound_script,
+    keymap::{
+        content_action, heatmap_action, BoundAction, ContentAction, Direction, EffectiveKeymaps,
+    },
     EventResult,
 };
 
@@ -608,14 +611,21 @@ fn apply_content_edit_request(
 pub fn handle_normal_content_event(
     state: &mut AppState<'_>,
     event: Event,
+    keymaps: &EffectiveKeymaps,
 ) -> Result<EventResult, AppError> {
     match event {
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => {
                 let content_mode = state.active_content_mode();
-                match (content_action(&key_event), content_mode) {
+                let action = if matches!(content_mode, ContentShowMode::Heatmap) {
+                    heatmap_action(&key_event, keymaps)
+                        .or_else(|| content_action(&key_event, keymaps))
+                } else {
+                    content_action(&key_event, keymaps)
+                };
+                match (action, content_mode) {
                     (
-                        Some(ContentAction::Move(Direction::Left, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Left, amount))),
                         ContentShowMode::Matrix,
                     ) => {
                         let max = state
@@ -638,11 +648,11 @@ pub fn handle_normal_content_event(
                         Ok(EventResult::Redraw)
                     }
                     (
-                        Some(ContentAction::Move(Direction::Left, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Left, amount))),
                         ContentShowMode::Heatmap,
                     ) => state.left(amount as isize),
                     (
-                        Some(ContentAction::Move(Direction::Right, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Right, amount))),
                         ContentShowMode::Matrix,
                     ) => {
                         let max = state
@@ -666,10 +676,13 @@ pub fn handle_normal_content_event(
                         Ok(EventResult::Redraw)
                     }
                     (
-                        Some(ContentAction::Move(Direction::Right, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Right, amount))),
                         ContentShowMode::Heatmap,
                     ) => state.right(amount as isize),
-                    (Some(ContentAction::Move(Direction::Up, amount)), ContentShowMode::Matrix) => {
+                    (
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Up, amount))),
+                        ContentShowMode::Matrix,
+                    ) => {
                         let max = state
                             .matrix_view_state
                             .rows_currently_available
@@ -689,11 +702,11 @@ pub fn handle_normal_content_event(
                         Ok(EventResult::Redraw)
                     }
                     (
-                        Some(ContentAction::Move(Direction::Up, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Up, amount))),
                         ContentShowMode::Heatmap,
                     ) => state.up(amount),
                     (
-                        Some(ContentAction::Move(Direction::Down, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Down, amount))),
                         ContentShowMode::Matrix,
                     ) => {
                         let max = state
@@ -717,26 +730,26 @@ pub fn handle_normal_content_event(
                         Ok(EventResult::Redraw)
                     }
                     (
-                        Some(ContentAction::Move(Direction::Down, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Down, amount))),
                         ContentShowMode::Heatmap,
                     ) => state.down(amount),
                     (
-                        Some(ContentAction::Move(Direction::Down, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Down, amount))),
                         ContentShowMode::Preview,
                     ) => state.down(amount),
                     (
-                        Some(ContentAction::Move(Direction::Up, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Up, amount))),
                         ContentShowMode::Preview,
                     ) => state.up(amount),
                     (
-                        Some(ContentAction::Move(Direction::Right, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Right, amount))),
                         ContentShowMode::Preview,
                     ) => state.right(amount as isize),
                     (
-                        Some(ContentAction::Move(Direction::Left, amount)),
+                        Some(BoundAction::Action(ContentAction::Move(Direction::Left, amount))),
                         ContentShowMode::Preview,
                     ) => state.left(amount as isize),
-                    (Some(ContentAction::Edit), _) => {
+                    (Some(BoundAction::Action(ContentAction::Edit)), _) => {
                         if matches!(content_mode, ContentShowMode::Heatmap) {
                             return Ok(EventResult::Toast(
                                 AppToast::Info(
@@ -752,50 +765,64 @@ pub fn handle_normal_content_event(
                         };
                         apply_content_edit_request(state, &request)
                     }
-                    (Some(ContentAction::Copy), ContentShowMode::Preview) => {
+                    (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Preview) => {
                         copy_preview_content(state)
                     }
-                    (Some(ContentAction::Copy), ContentShowMode::Matrix) => {
+                    (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Matrix) => {
                         let text = match selected_matrix_copy_text(state) {
                             Ok(text) => text,
                             Err(event_result) => return Ok(event_result),
                         };
                         copy_text_to_clipboard(state, text, "Copied matrix value to clipboard")
                     }
-                    (Some(ContentAction::Copy), ContentShowMode::Heatmap) => {
+                    (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Heatmap) => {
                         let text = match selected_heatmap_copy_text(state) {
                             Ok(text) => text,
                             Err(event_result) => return Ok(event_result),
                         };
                         copy_text_to_clipboard(state, text, "Copied heatmap region to clipboard")
                     }
-                    (Some(ContentAction::HeatmapZoomIn), ContentShowMode::Heatmap) => {
-                        Ok(redraw_if(state.zoom_heatmap(None, true)))
-                    }
-                    (Some(ContentAction::HeatmapZoomOut), ContentShowMode::Heatmap) => {
-                        Ok(redraw_if(state.zoom_heatmap(None, false)))
-                    }
-                    (Some(ContentAction::HeatmapResetView), ContentShowMode::Heatmap) => {
-                        Ok(redraw_if(state.reset_heatmap_view()))
-                    }
-                    (Some(ContentAction::HeatmapClearSelection), ContentShowMode::Heatmap) => {
-                        Ok(redraw_if(state.clear_heatmap_selection()))
-                    }
                     (
-                        Some(ContentAction::HeatmapPan(Direction::Left)),
+                        Some(BoundAction::Action(ContentAction::HeatmapZoomIn)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.zoom_heatmap(None, true))),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapZoomOut)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.zoom_heatmap(None, false))),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapResetView)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.reset_heatmap_view())),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapClearSelection)),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.clear_heatmap_selection())),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Left))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(-1, 0))),
                     (
-                        Some(ContentAction::HeatmapPan(Direction::Right)),
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Right))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(1, 0))),
-                    (Some(ContentAction::HeatmapPan(Direction::Up)), ContentShowMode::Heatmap) => {
-                        Ok(redraw_if(state.pan_heatmap_by(0, -1)))
-                    }
                     (
-                        Some(ContentAction::HeatmapPan(Direction::Down)),
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Up))),
+                        ContentShowMode::Heatmap,
+                    ) => Ok(redraw_if(state.pan_heatmap_by(0, -1))),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Down))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(0, 1))),
+                    (Some(BoundAction::Command(command)), _) => {
+                        execute_bound_command(state, &command)
+                    }
+                    (Some(BoundAction::Script(script)), _) => {
+                        execute_bound_script(state, &script, "keybinding script")
+                    }
+                    (Some(BoundAction::LuaCallback(callback_id)), _) => {
+                        execute_bound_lua_callback(state, &callback_id)
+                    }
                     _ => Ok(EventResult::Continue),
                 }
             }

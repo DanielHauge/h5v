@@ -6,7 +6,11 @@ use crate::{
 };
 
 use super::{
-    keymap::{command_action, multichart_action, CommandAction, MultiChartAction},
+    execute_bound_command, execute_bound_lua_callback, execute_bound_script,
+    keymap::{
+        command_action, global_action, multichart_action, BoundAction, CommandAction,
+        MultiChartAction,
+    },
     EventResult,
 };
 
@@ -64,57 +68,58 @@ pub(crate) fn handle_mchart_event(
                     };
                 }
 
-                match multichart_action(&key_event) {
-                    Some(MultiChartAction::EnterCommand) => {
+                let keymaps = crate::configure::current_keymaps();
+                match multichart_action(&key_event, &keymaps) {
+                    Some(BoundAction::Action(MultiChartAction::EnterCommand)) => {
                         state.command_return_mode = Mode::MultiChart;
                         state.mode = Mode::Command;
                         state.command_state.begin_new_entry();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::Exit) => {
+                    Some(BoundAction::Action(MultiChartAction::Exit)) => {
                         state.mode = Mode::Normal;
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::Quit) => Ok(EventResult::Quit),
-                    Some(MultiChartAction::ZoomIn) => {
+                    Some(BoundAction::Action(MultiChartAction::Quit)) => Ok(EventResult::Quit),
+                    Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
                         state.multi_chart.zoom_in(10.0);
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::ZoomOut) => {
+                    Some(BoundAction::Action(MultiChartAction::ZoomOut)) => {
                         state.multi_chart.zoom_out(10.0);
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::PanLeft) => {
+                    Some(BoundAction::Action(MultiChartAction::PanLeft)) => {
                         state.multi_chart.pan_left(10.0);
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::PanRight) => {
+                    Some(BoundAction::Action(MultiChartAction::PanRight)) => {
                         state.multi_chart.pan_right(10.0);
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::ClearZoom) => {
+                    Some(BoundAction::Action(MultiChartAction::ClearZoom)) => {
                         state.multi_chart.clear_zoom();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::DeleteSelected) => {
+                    Some(BoundAction::Action(MultiChartAction::DeleteSelected)) => {
                         state.multi_chart.clear_selected();
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::ClearAll) => {
+                    Some(BoundAction::Action(MultiChartAction::ClearAll)) => {
                         state.multi_chart.clear_all();
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::ToggleSelectedVisible) => {
+                    Some(BoundAction::Action(MultiChartAction::ToggleSelectedVisible)) => {
                         state.multi_chart.toggle_selected_visible();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::OpenExpressionPrompt) => {
+                    Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt)) => {
                         state.multi_chart.open_expression_prompt();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::ToggleMarkedBase) => {
+                    Some(BoundAction::Action(MultiChartAction::ToggleMarkedBase)) => {
                         match state.multi_chart.toggle_marked_base() {
                             Ok(_) => Ok(EventResult::Redraw),
                             Err(message) => {
@@ -122,7 +127,7 @@ pub(crate) fn handle_mchart_event(
                             }
                         }
                     }
-                    Some(MultiChartAction::CreateDerived(operation)) => {
+                    Some(BoundAction::Action(MultiChartAction::CreateDerived(operation))) => {
                         match state.multi_chart.create_builtin_derived(operation) {
                             Ok(_) => Ok(EventResult::Redraw),
                             Err(message) => {
@@ -130,15 +135,42 @@ pub(crate) fn handle_mchart_event(
                             }
                         }
                     }
-                    Some(MultiChartAction::MoveDown) => {
+                    Some(BoundAction::Action(MultiChartAction::MoveDown)) => {
                         state.multi_chart.move_down();
                         Ok(EventResult::Redraw)
                     }
-                    Some(MultiChartAction::MoveUp) => {
+                    Some(BoundAction::Action(MultiChartAction::MoveUp)) => {
                         state.multi_chart.move_up();
                         Ok(EventResult::Redraw)
                     }
-                    None => Ok(EventResult::Continue),
+                    Some(BoundAction::Command(command)) => execute_bound_command(state, &command),
+                    Some(BoundAction::Script(script)) => {
+                        execute_bound_script(state, &script, "keybinding script")
+                    }
+                    Some(BoundAction::LuaCallback(callback_id)) => {
+                        execute_bound_lua_callback(state, &callback_id)
+                    }
+                    None => match global_action(&key_event, &keymaps) {
+                        Some(BoundAction::Action(super::keymap::GlobalAction::EnterCommand)) => {
+                            state.command_return_mode = Mode::MultiChart;
+                            state.mode = Mode::Command;
+                            state.command_state.begin_new_entry();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(BoundAction::Action(action)) => {
+                            super::handle_global_action(state, action)
+                        }
+                        Some(BoundAction::Command(command)) => {
+                            execute_bound_command(state, &command)
+                        }
+                        Some(BoundAction::Script(script)) => {
+                            execute_bound_script(state, &script, "keybinding script")
+                        }
+                        Some(BoundAction::LuaCallback(callback_id)) => {
+                            execute_bound_lua_callback(state, &callback_id)
+                        }
+                        None => Ok(EventResult::Continue),
+                    },
                 }
             }
             KeyEventKind::Repeat => Ok(EventResult::Continue),

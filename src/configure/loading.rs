@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     configure::errors::ConfigureErrors,
@@ -81,6 +84,27 @@ fn default_config_contents() -> String {
         "--     { label = \"2.5..5.5\", min = 2.5, max = 5.5 },".to_string(),
         "--   },".to_string(),
         "-- }".to_string(),
+        "-- Keymaps are layered: heatmap/content/tree/attributes/mchart > normal > global."
+            .to_string(),
+        "-- Use bind(mode, key, action[, description]), bind_command(...), bind_script(...), bind_commands(...), bind_lua(...), and unbind(mode, key)."
+            .to_string(),
+        "-- Constants live under h5v.modes and h5v.actions."
+            .to_string(),
+        "-- Scope tables still support clear_defaults, bind, unbind, and command-backed entries."
+            .to_string(),
+        "-- bind(h5v.modes.Global, \"ctrl+h\", h5v.actions.ShowHelp, \"Show help\")"
+            .to_string(),
+        "-- unbind(h5v.modes.Heatmap, \"v\")".to_string(),
+        "-- bind_command(h5v.modes.Heatmap, \"ctrl+alt+r\", \"heatmap range use \\\"Clip 1-99%\\\"\")"
+            .to_string(),
+        "-- bind_commands(h5v.modes.Global, \"ctrl+k\", { \"down 2\", \"up 1\" })".to_string(),
+        "-- bind_lua(h5v.modes.Global, \"ctrl+l\", function(ctx) ctx.command(\"help reload\") end)"
+            .to_string(),
+        "-- h5v.keymaps.heatmap = {".to_string(),
+        "--   bind = {".to_string(),
+        "--     { key = \"ctrl+z\", action = h5v.actions.HeatmapZoomIn },".to_string(),
+        "--   },".to_string(),
+        "-- }".to_string(),
         "--".to_string(),
         format!(
             "-- LuaLS support files are generated beside this config under {LUA_LS_LIBRARY_DIR}/."
@@ -139,6 +163,14 @@ fn pascal_case(name: &str) -> String {
         .collect::<String>()
 }
 
+fn lua_string_union<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
+    values
+        .into_iter()
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn color_group_class_name(group: &str) -> String {
     format!("H5vColor{}", pascal_case(group))
 }
@@ -158,6 +190,16 @@ fn lua_ls_stub_contents() -> String {
             .into_iter()
             .map(|(name, value)| (name, value.to_string())),
     );
+    let mode_codes: Vec<&'static str> = crate::ui::input::keymap::exported_mode_codes()
+        .iter()
+        .map(|(_, code)| *code)
+        .collect();
+    let action_codes: Vec<&'static str> = crate::ui::input::keymap::exported_action_codes()
+        .into_iter()
+        .map(|action| action.code)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     let mut lines = vec![
         "---@meta".to_string(),
@@ -165,8 +207,17 @@ fn lua_ls_stub_contents() -> String {
         "---@alias H5vThemeName \"dark\"|\"light\"".to_string(),
         "---@alias H5vSymbolThemeName \"rich\"|\"compatibility\"".to_string(),
         "---@alias H5vContentMode \"preview\"|\"matrix\"|\"heatmap\"".to_string(),
+        format!("---@alias H5vModeCode {}", lua_string_union(mode_codes.iter().copied())),
+        format!(
+            "---@alias H5vActionCode {}",
+            lua_string_union(action_codes.iter().copied())
+        ),
         "---@alias H5vHeatmapColormap \"turbo\"|\"grayscale\"|\"inferno\"".to_string(),
         "---@alias H5vHeatmapNormalization \"linear\"|\"log\"|\"sqrt\"".to_string(),
+        "---@class H5vKeymapLuaContext".to_string(),
+        "---@field command fun(command: string)".to_string(),
+        "---@field commands fun(commands: string[])".to_string(),
+        "---@field script fun(script: string)".to_string(),
         "---@class H5vHeatmapRangePreset".to_string(),
         "---@field label? string".to_string(),
         "---@field min string|number".to_string(),
@@ -179,14 +230,54 @@ fn lua_ls_stub_contents() -> String {
         "---@field default_invert_y boolean".to_string(),
         "---@field default_invert_c boolean".to_string(),
         "---@field range_modes H5vHeatmapRangePreset[]".to_string(),
-        "---@class H5vColorOverrides".to_string(),
+        "---@class H5vKeymapBinding".to_string(),
+        "---@field key string".to_string(),
+        "---@field action? H5vActionCode".to_string(),
+        "---@field command? string".to_string(),
+        "---@field commands? string[]".to_string(),
+        "---@field script? string".to_string(),
+        "---@field lua? fun(ctx: H5vKeymapLuaContext)".to_string(),
+        "---@field description? string".to_string(),
+        "---@class H5vKeymapScope".to_string(),
+        "---@field clear_defaults? boolean".to_string(),
+        "---@field unbind? string[]".to_string(),
+        "---@field bind? H5vKeymapBinding[]".to_string(),
+        "---@class H5vKeymaps".to_string(),
+        "---@field bind fun(mode: H5vModeCode, key: string, action: H5vActionCode, description?: string)"
+            .to_string(),
+        "---@field bind_command fun(mode: H5vModeCode, key: string, command: string, description?: string)"
+            .to_string(),
+        "---@field bind_commands fun(mode: H5vModeCode, key: string, commands: string[], description?: string)"
+            .to_string(),
+        "---@field bind_script fun(mode: H5vModeCode, key: string, script: string, description?: string)"
+            .to_string(),
+        "---@field bind_lua fun(mode: H5vModeCode, key: string, callback: fun(ctx: H5vKeymapLuaContext), description?: string)"
+            .to_string(),
+        "---@field unbind fun(mode: H5vModeCode, key: string)".to_string(),
+        "---@field global? H5vKeymapScope".to_string(),
+        "---@field normal? H5vKeymapScope".to_string(),
+        "---@field window? H5vKeymapScope".to_string(),
+        "---@field tree? H5vKeymapScope".to_string(),
+        "---@field content? H5vKeymapScope".to_string(),
+        "---@field heatmap? H5vKeymapScope".to_string(),
+        "---@field attributes? H5vKeymapScope".to_string(),
+        "---@field mchart? H5vKeymapScope".to_string(),
+        "---@class H5vModes".to_string(),
     ];
+    for (symbol, code) in crate::ui::input::keymap::exported_mode_codes() {
+        lines.push(format!("---@field {} \"{}\"", symbol, code));
+    }
+    lines.push("---@class H5vColorOverrides".to_string());
     for (group, _) in &color_groups {
         lines.push(format!(
             "---@field {}? {}",
             group,
             color_group_class_name(group)
         ));
+    }
+    lines.push("---@class H5vActions".to_string());
+    for action in crate::ui::input::keymap::exported_action_codes() {
+        lines.push(format!("---@field {} \"{}\"", action.symbol, action.code));
     }
     lines.push("---@class H5vSymbolOverrides".to_string());
     for (group, _) in &symbol_groups {
@@ -211,6 +302,9 @@ fn lua_ls_stub_contents() -> String {
     lines.push("---@field theme H5vThemeName".to_string());
     lines.push("---@field symbol_theme H5vSymbolThemeName".to_string());
     lines.push("---@field heatmap H5vHeatmapConfig".to_string());
+    lines.push("---@field keymaps H5vKeymaps".to_string());
+    lines.push("---@field modes H5vModes".to_string());
+    lines.push("---@field actions H5vActions".to_string());
     lines.push("---@field colors H5vColorOverrides".to_string());
     lines.push("---@field symbols H5vSymbolOverrides".to_string());
     lines.push("---@field themes H5vThemeCatalog".to_string());
@@ -230,6 +324,33 @@ fn lua_ls_stub_contents() -> String {
     }
     lines.push("---@type H5vConfig".to_string());
     lines.push("h5v = h5v".to_string());
+    lines.push(
+        "---@type fun(mode: H5vModeCode, key: string, action: H5vActionCode, description?: string)"
+            .to_string(),
+    );
+    lines.push("bind = bind".to_string());
+    lines.push(
+        "---@type fun(mode: H5vModeCode, key: string, command: string, description?: string)"
+            .to_string(),
+    );
+    lines.push("bind_command = bind_command".to_string());
+    lines.push(
+        "---@type fun(mode: H5vModeCode, key: string, commands: string[], description?: string)"
+            .to_string(),
+    );
+    lines.push("bind_commands = bind_commands".to_string());
+    lines.push(
+        "---@type fun(mode: H5vModeCode, key: string, script: string, description?: string)"
+            .to_string(),
+    );
+    lines.push("bind_script = bind_script".to_string());
+    lines.push(
+        "---@type fun(mode: H5vModeCode, key: string, callback: fun(ctx: H5vKeymapLuaContext), description?: string)"
+            .to_string(),
+    );
+    lines.push("bind_lua = bind_lua".to_string());
+    lines.push("---@type fun(mode: H5vModeCode, key: string)".to_string());
+    lines.push("unbind = unbind".to_string());
     lines.join("\n")
 }
 
@@ -240,7 +361,7 @@ fn lua_ls_config_json() -> Value {
             "library": [LUA_LS_LIBRARY_DIR]
         },
         "diagnostics": {
-            "globals": ["h5v"]
+            "globals": ["h5v", "bind", "bind_command", "bind_commands", "bind_script", "bind_lua", "unbind"]
         },
         "h5v": {
             "kind": LUA_LS_GENERATED_KIND,
@@ -277,9 +398,39 @@ fn should_refresh_lua_ls_config(existing: &str) -> bool {
                 "library": [LUA_LS_LIBRARY_DIR]
             },
             "diagnostics": {
-                "globals": ["h5v"]
+                "globals": ["h5v", "bind", "bind_command", "bind_commands", "bind_script", "bind_lua", "unbind"]
             }
         })
+        || parsed
+            == json!({
+                "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+                "workspace": {
+                    "library": [LUA_LS_LIBRARY_DIR]
+                },
+                "diagnostics": {
+                    "globals": ["h5v"]
+                }
+            })
+        || parsed
+            == json!({
+                "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+                "workspace": {
+                    "library": [LUA_LS_LIBRARY_DIR]
+                },
+                "diagnostics": {
+                    "globals": ["h5v", "h5v_modes", "h5v_actions"]
+                }
+            })
+        || parsed
+            == json!({
+                "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+                "workspace": {
+                    "library": [LUA_LS_LIBRARY_DIR]
+                },
+                "diagnostics": {
+                    "globals": ["h5v", "bind", "bind_command", "unbind"]
+                }
+            })
 }
 
 fn append_grouped_color_examples(lines: &mut Vec<String>) {
@@ -408,6 +559,21 @@ mod tests {
         assert!(stub.contains("---@class H5vConfig"));
         assert!(stub.contains("---@field content_mode_order H5vContentMode[]"));
         assert!(stub.contains("h5v = h5v"));
+    }
+
+    #[test]
+    fn lua_ls_stub_attaches_mode_fields_to_h5v_modes() {
+        let stub = lua_ls_stub_contents();
+        let modes_index = stub.find("---@class H5vModes").expect("H5vModes class");
+        let global_index = stub
+            .find("---@field Global \"global\"")
+            .expect("Global mode field");
+        let color_index = stub
+            .find("---@class H5vColorOverrides")
+            .expect("H5vColorOverrides class");
+
+        assert!(modes_index < global_index);
+        assert!(global_index < color_index);
     }
 
     #[test]

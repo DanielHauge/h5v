@@ -263,6 +263,7 @@ pub(super) fn viewport_partition(total: usize, cells: usize, index: usize) -> (u
     (start, end)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_region_selection<T: HeatmapNumber>(
     data: &Array2<T>,
     transpose: bool,
@@ -343,6 +344,7 @@ pub(super) fn compute_region_selection<T: HeatmapNumber>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_heatmap_image<T: HeatmapNumber>(
     buffer: &mut [u8],
     width: u32,
