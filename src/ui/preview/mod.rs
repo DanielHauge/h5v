@@ -635,6 +635,8 @@ pub fn preview_text_for_compound_schema(meta: &crate::h5f::DatasetMeta) -> Optio
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::truncate_left_line;
     use ratatui::{

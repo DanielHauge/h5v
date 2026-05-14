@@ -584,6 +584,8 @@ pub fn render_info_attributes(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{
         build_display_rows, display_row_index, navigate_metadata_grid, selected_attribute_bg_color,

@@ -1,4 +1,3 @@
-#![allow(clippy::expect_used)]
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 use super::handlers::parse_simulated_key;

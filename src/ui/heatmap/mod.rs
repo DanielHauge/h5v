@@ -34,6 +34,8 @@ mod load;
 mod panels;
 mod render;
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests;
 
 const SMART_HEATMAP_PAGE_MIN_CLIPPED_FRACTION: f32 = 0.5;

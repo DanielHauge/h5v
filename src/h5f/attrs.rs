@@ -524,6 +524,8 @@ impl H5FNode {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{ComputedAttributes, RenderedAttributeRow};
     use ratatui::text::Line;

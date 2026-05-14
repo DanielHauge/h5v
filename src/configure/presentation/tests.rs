@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-#![allow(clippy::expect_used)]
 use ratatui::style::Color;
 
 use crate::configure::{

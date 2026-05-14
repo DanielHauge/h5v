@@ -938,7 +938,7 @@ pub fn handle_chartpreview_load(
                     ds,
                     meta,
                     selection,
-                } => match plot_projected(&ds, &meta, &selection) {
+                } => match plot_projected(&ds, meta.as_ref(), &selection) {
                     Ok(data_preview) => data_preview,
                     Err(e) => {
                         send_chart_failure(

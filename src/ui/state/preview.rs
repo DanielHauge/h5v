@@ -29,7 +29,7 @@ pub enum ChartPreviewSource {
     },
     ProjectedDataset {
         ds: Dataset,
-        meta: DatasetMeta,
+        meta: Box<DatasetMeta>,
         selection: PreviewSelection,
     },
     Precomputed {

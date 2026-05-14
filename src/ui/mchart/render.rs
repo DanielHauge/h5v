@@ -108,10 +108,7 @@ impl MultiChartState {
                 .min(x_max)
                 .clamp(item.series.sample_min, item.series.sample_max);
             let points = super::model::sanitize_chart_points(
-                item.series.points[local_x_min..local_x_max]
-                    .iter()
-                    .copied()
-                    .collect::<Vec<_>>(),
+                item.series.points[local_x_min..local_x_max].to_vec(),
             );
             if points.is_empty() {
                 continue;
@@ -946,9 +943,11 @@ impl MultiChartState {
                                 configure::themed_color(|colors| colors.text.primary),
                             ),
                         };
-                        let selected_bg = (prompt.selected_suggestion == Some(idx))
-                            .then(|| configure::themed_color(|colors| colors.surface.focus_bg))
-                            .unwrap_or(panel_bg);
+                        let selected_bg = if prompt.selected_suggestion == Some(idx) {
+                            configure::themed_color(|colors| colors.surface.focus_bg)
+                        } else {
+                            panel_bg
+                        };
                         let symbol_style = Style::default().fg(symbol_color).bg(selected_bg);
                         let label_style = Style::default().fg(label_color).bg(selected_bg);
                         let highlight_style = Style::default()
@@ -1063,6 +1062,8 @@ pub(super) fn chart_plot_area_in_rect(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{mchart_body_span, mchart_body_style};
 

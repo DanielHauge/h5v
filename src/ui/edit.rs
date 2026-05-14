@@ -283,6 +283,8 @@ fn normalize_edited_content(mut content: String) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{normalize_edited_content, shell_quote};
 

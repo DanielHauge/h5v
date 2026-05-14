@@ -225,6 +225,8 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     state.treeview.clear();
     state.searcher = None;
     let old_root = std::mem::replace(&mut state.root, placeholder_root(&file_path));
+    state.tree_view_cursor = 0;
+    state.compute_tree_view();
     let old_file = state.file.take();
     drop(old_root);
     if let Some(old_file) = old_file {

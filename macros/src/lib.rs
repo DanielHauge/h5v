@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
+use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, Type};
 
 // ─── type helpers ─────────────────────────────────────────────────────────────
 
@@ -44,6 +44,18 @@ fn array_symbol_len(ty: &Type) -> Option<usize> {
     None
 }
 
+fn derive_error(ast: &DeriveInput, message: &str) -> TokenStream {
+    syn::Error::new_spanned(ast, message)
+        .to_compile_error()
+        .into()
+}
+
+fn field_ident<'a>(field: &'a Field, derive_name: &str) -> Result<&'a syn::Ident, syn::Error> {
+    field.ident.as_ref().ok_or_else(|| {
+        syn::Error::new_spanned(field, format!("{derive_name} requires named fields"))
+    })
+}
+
 // ─── #[derive(ColorGroup)] ────────────────────────────────────────────────────
 
 #[proc_macro_derive(ColorGroup)]
@@ -54,9 +66,9 @@ pub fn derive_color_group(input: TokenStream) -> TokenStream {
     let fields = match &ast.data {
         Data::Struct(ds) => match &ds.fields {
             Fields::Named(f) => &f.named,
-            _ => panic!("ColorGroup requires named fields"),
+            _ => return derive_error(&ast, "ColorGroup requires named fields"),
         },
-        _ => panic!("ColorGroup requires a struct"),
+        _ => return derive_error(&ast, "ColorGroup requires a struct"),
     };
 
     // For each field, emit code blocks for each of the four generated methods.
@@ -68,7 +80,10 @@ pub fn derive_color_group(input: TokenStream) -> TokenStream {
     let mut names_stmts = Vec::<TokenStream2>::new();
 
     for field in fields {
-        let ident = field.ident.as_ref().unwrap();
+        let ident = match field_ident(field, "ColorGroup") {
+            Ok(ident) => ident,
+            Err(error) => return error.to_compile_error().into(),
+        };
         let raw = ident.to_string(); // e.g. "chart_axis", "title"
         let ty = &field.ty;
 
@@ -225,9 +240,9 @@ pub fn derive_symbol_group(input: TokenStream) -> TokenStream {
     let fields = match &ast.data {
         Data::Struct(ds) => match &ds.fields {
             Fields::Named(f) => &f.named,
-            _ => panic!("SymbolGroup requires named fields"),
+            _ => return derive_error(&ast, "SymbolGroup requires named fields"),
         },
-        _ => panic!("SymbolGroup requires a struct"),
+        _ => return derive_error(&ast, "SymbolGroup requires a struct"),
     };
 
     let mut entries_stmts = Vec::<TokenStream2>::new();
@@ -236,7 +251,10 @@ pub fn derive_symbol_group(input: TokenStream) -> TokenStream {
     let mut names_stmts = Vec::<TokenStream2>::new();
 
     for field in fields {
-        let ident = field.ident.as_ref().unwrap();
+        let ident = match field_ident(field, "SymbolGroup") {
+            Ok(ident) => ident,
+            Err(error) => return error.to_compile_error().into(),
+        };
         let raw = ident.to_string();
         let ty = &field.ty;
 
@@ -375,25 +393,28 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
     let fields = match &ast.data {
         Data::Struct(ds) => match &ds.fields {
             Fields::Named(f) => &f.named,
-            _ => panic!("ThemeColorCatalog requires named fields"),
+            _ => return derive_error(&ast, "ThemeColorCatalog requires named fields"),
         },
-        _ => panic!("ThemeColorCatalog requires a struct"),
+        _ => return derive_error(&ast, "ThemeColorCatalog requires a struct"),
     };
 
-    // Collect (ident, group_name_string) for each sub-struct field.
-    let groups: Vec<(syn::Ident, String)> = fields
+    // Collect (ident, ty, group_name_string) for each sub-struct field.
+    let groups = match fields
         .iter()
-        .map(|f| {
-            let id = f.ident.as_ref().unwrap().clone();
-            let g = id.to_string();
-            (id, g)
+        .map(|field| {
+            let ident = field_ident(field, "ThemeColorCatalog")?.clone();
+            Ok((ident.clone(), field.ty.clone(), ident.to_string()))
         })
-        .collect();
+        .collect::<Result<Vec<(syn::Ident, syn::Type, String)>, syn::Error>>()
+    {
+        Ok(groups) => groups,
+        Err(error) => return error.to_compile_error().into(),
+    };
 
     // named_color: match "group.*" arms, then bare-key fallback
     let named_arms: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 k if k.starts_with(concat!(#g, ".")) => {
                     self.#id.get_color(#g, &k[#g.len() + 1..])
@@ -405,7 +426,7 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
     // set_named_color: same structure
     let set_arms: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 k if k.starts_with(concat!(#g, ".")) => {
                     self.#id.set_color(#g, &k[#g.len() + 1..], color)
@@ -417,7 +438,7 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
     // Fallback linear scan for legacy bare keys ("title", "bg", etc.)
     let fallback_get: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 if let Some(c) = self.#id.get_color(#g, bare) { return Some(c); }
             }
@@ -426,7 +447,7 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
 
     let fallback_set: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 if self.#id.set_color(#g, bare, color) { return true; }
             }
@@ -436,14 +457,7 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
     // all_color_names / all_color_entries: just call each sub-struct
     let names_stmts: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
-            // We need the concrete type to call the associated fn ::key_names.
-            // Extract the type from the field.
-            let ty = &fields
-                .iter()
-                .find(|f| f.ident.as_ref().unwrap() == id)
-                .unwrap()
-                .ty;
+        .map(|(_, ty, g)| {
             quote! {
                 out.extend(#ty::key_names(#g));
             }
@@ -452,7 +466,7 @@ pub fn derive_theme_color_catalog(input: TokenStream) -> TokenStream {
 
     let entries_stmts: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 out.extend(self.#id.color_entries(#g));
             }
@@ -518,23 +532,26 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
     let fields = match &ast.data {
         Data::Struct(ds) => match &ds.fields {
             Fields::Named(f) => &f.named,
-            _ => panic!("ThemeSymbolCatalog requires named fields"),
+            _ => return derive_error(&ast, "ThemeSymbolCatalog requires named fields"),
         },
-        _ => panic!("ThemeSymbolCatalog requires a struct"),
+        _ => return derive_error(&ast, "ThemeSymbolCatalog requires a struct"),
     };
 
-    let groups: Vec<(syn::Ident, String)> = fields
+    let groups = match fields
         .iter()
-        .map(|f| {
-            let id = f.ident.as_ref().unwrap().clone();
-            let g = id.to_string();
-            (id, g)
+        .map(|field| {
+            let ident = field_ident(field, "ThemeSymbolCatalog")?.clone();
+            Ok((ident.clone(), field.ty.clone(), ident.to_string()))
         })
-        .collect();
+        .collect::<Result<Vec<(syn::Ident, syn::Type, String)>, syn::Error>>()
+    {
+        Ok(groups) => groups,
+        Err(error) => return error.to_compile_error().into(),
+    };
 
     let named_arms: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 k if k.starts_with(concat!(#g, ".")) => {
                     self.#id.get_symbol(#g, &k[#g.len() + 1..])
@@ -545,7 +562,7 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
 
     let set_arms: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 k if k.starts_with(concat!(#g, ".")) => {
                     self.#id.set_symbol(#g, &k[#g.len() + 1..], value)
@@ -556,7 +573,7 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
 
     let fallback_get: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 if let Some(symbol) = self.#id.get_symbol(#g, bare) { return Some(symbol); }
             }
@@ -565,7 +582,7 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
 
     let fallback_set: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 if self.#id.set_symbol(#g, bare, value) { return true; }
             }
@@ -574,12 +591,7 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
 
     let names_stmts: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
-            let ty = &fields
-                .iter()
-                .find(|f| f.ident.as_ref().unwrap() == id)
-                .unwrap()
-                .ty;
+        .map(|(_, ty, g)| {
             quote! {
                 out.extend(#ty::key_names(#g));
             }
@@ -588,7 +600,7 @@ pub fn derive_theme_symbol_catalog(input: TokenStream) -> TokenStream {
 
     let entries_stmts: Vec<TokenStream2> = groups
         .iter()
-        .map(|(id, g)| {
+        .map(|(id, _, g)| {
             quote! {
                 out.extend(self.#id.symbol_entries(#g));
             }

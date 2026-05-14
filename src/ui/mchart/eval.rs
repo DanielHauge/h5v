@@ -243,7 +243,7 @@ pub(super) fn resolve_expression_series_value(
             read_expression_numeric_series_attr(&attr, &series_ref.render())
         }
         (ExpressionObjectTarget::AbsolutePath(path), None) => {
-            let object_path = normalize_absolute_object_path(&path)?;
+            let object_path = normalize_absolute_object_path(path)?;
             let dataset = file.dataset(&object_path).map_err(|error| {
                 format!(
                     "Series reference {} could not open dataset '{}': {}",

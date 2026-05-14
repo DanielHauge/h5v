@@ -873,7 +873,7 @@ mod tests {
         .expect("expected linked dataset node");
 
         let Node::Dataset(_, meta) = node else {
-            panic!("expected dataset node");
+            unreachable!("expected dataset node");
         };
         assert!(meta.is_link);
         assert_eq!(meta.link_name.as_deref(), Some("alias"));

@@ -91,6 +91,8 @@ pub(super) fn is_crostini_env(cros_container: Option<&str>) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{configuration_warning_message, is_crostini_env, should_use_alternate_screen};
     use crate::compat::RuntimeConfig;

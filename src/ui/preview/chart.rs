@@ -702,7 +702,7 @@ fn render_projected_chart_preview(
             ds_path: node.node.path(),
             source: ChartPreviewSource::ProjectedDataset {
                 ds,
-                meta: ds_meta,
+                meta: Box::new(ds_meta),
                 selection: data_preview_selection.clone(),
             },
             selection: data_preview_selection.clone(),
@@ -881,6 +881,8 @@ fn preview_x_axis_max(data_preview: &DatasetPlotingData) -> f64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::preview_x_axis_max;
     use crate::data::DatasetPlotingData;

@@ -547,6 +547,8 @@ fn render_matrix_with_reader<T: Display>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::ui::state::{Focus, LastFocused};

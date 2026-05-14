@@ -8,6 +8,8 @@ mod catalog;
 mod handlers;
 mod parsing;
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests;
 mod view;
 

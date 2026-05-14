@@ -518,6 +518,8 @@ fn ensure_lua_ls_support_files(config_path: &Path) -> Result<(), ConfigureErrors
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{
         default_config_contents, lua_ls_config_contents, lua_ls_stub_contents,

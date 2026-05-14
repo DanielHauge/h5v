@@ -218,6 +218,7 @@ pub(crate) fn plot_sampling_step(length: usize) -> usize {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{
         plot_sampling_step, validate_preview_selection_shape, DatasetTableData, PreviewSelection,

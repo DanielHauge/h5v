@@ -51,7 +51,7 @@ fn selected_metadata_row(
     EventResult,
 > {
     let mut node = state.treeview[state.tree_view_cursor].node.borrow_mut();
-    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+    let selection = node.attributes_view_cursor.attribute_view_selection;
     let Some(row_index) = (match node.normalize_attribute_selection() {
         Ok(index) => index,
         Err(error) => {
@@ -463,13 +463,13 @@ pub fn handle_normal_attributes(
                         .as_ref()
                         .map(|hitbox| hitbox.outer.width)
                         .unwrap_or(0);
-                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let selection = node.attributes_view_cursor.attribute_view_selection;
                     let destination = {
                         let attributes = node.read_attributes()?;
                         let mut destination = None;
                         for _ in 0..amount {
                             let (row_index, next_selection) =
-                                destination.unwrap_or((current_index, selection.clone()));
+                                destination.unwrap_or((current_index, selection));
                             destination = navigate_metadata_grid(
                                 attributes,
                                 outer_width,
@@ -503,13 +503,13 @@ pub fn handle_normal_attributes(
                         .as_ref()
                         .map(|hitbox| hitbox.outer.width)
                         .unwrap_or(0);
-                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let selection = node.attributes_view_cursor.attribute_view_selection;
                     let destination = {
                         let attributes = node.read_attributes()?;
                         let mut destination = None;
                         for _ in 0..amount {
                             let (row_index, next_selection) =
-                                destination.unwrap_or((current_index, selection.clone()));
+                                destination.unwrap_or((current_index, selection));
                             destination = navigate_metadata_grid(
                                 attributes,
                                 outer_width,
@@ -543,7 +543,7 @@ pub fn handle_normal_attributes(
                         .as_ref()
                         .map(|hitbox| hitbox.outer.width)
                         .unwrap_or(0);
-                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let selection = node.attributes_view_cursor.attribute_view_selection;
                     let destination = {
                         let attributes = node.read_attributes()?;
                         navigate_metadata_grid(
@@ -574,7 +574,7 @@ pub fn handle_normal_attributes(
                         .as_ref()
                         .map(|hitbox| hitbox.outer.width)
                         .unwrap_or(0);
-                    let selection = node.attributes_view_cursor.attribute_view_selection.clone();
+                    let selection = node.attributes_view_cursor.attribute_view_selection;
                     let destination = {
                         let attributes = node.read_attributes()?;
                         navigate_metadata_grid(

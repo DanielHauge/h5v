@@ -196,7 +196,14 @@ fn main_recover_loop(
             | Mode::AttributeDeleteDialog
             | Mode::FixedStringOverflowDialog
             | Mode::FixedStringResizeDialog => {
-                let selected_node = state.treeview[state.tree_view_cursor].node.clone();
+                let Some(selected_node) = state
+                    .treeview
+                    .get(state.tree_view_cursor)
+                    .map(|item| item.node.clone())
+                else {
+                    render_error(frame, "Error: no tree node is currently selected");
+                    return;
+                };
                 match render_main_display(frame, &main_display_area, &selected_node, state) {
                     Ok(()) => {}
                     Err(e) => render_error(frame, &format!("Error: {}", e)),
@@ -822,6 +829,8 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::update::{
         resolve_available_update, update_check_cache_is_fresh, write_update_check_cache,

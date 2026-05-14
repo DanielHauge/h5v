@@ -566,11 +566,22 @@ fn apply_content_edit_request(
         ));
     }
 
-    let edited_content = perform_edit(
+    state.editing = true;
+    let edited_content = match perform_edit(
         state,
         request.content.clone(),
         Some(&request.edit_name_hint),
-    )?;
+    ) {
+        Ok(content) => content,
+        Err(error) => {
+            state.editing = false;
+            return Ok(EventResult::Toast(
+                AppToast::Error(format!("Failed to edit content: {}", error)),
+                true,
+            ));
+        }
+    };
+    state.editing = false;
     if edited_content == request.content {
         return Ok(EventResult::Continue);
     }
@@ -604,6 +615,12 @@ fn apply_content_edit_request(
     state.heatmap_render.cached_pages.clear();
     state.heatmap_render.pending_keys.clear();
     state.acknowledge_file_write();
+
+    if matches!(request.meta.matrixable, Some(MatrixRenderType::ByteArray)) {
+        return Ok(EventResult::ReloadFile {
+            write: !state.readonly,
+        });
+    }
 
     Ok(EventResult::Toast(
         AppToast::Info("Updated content value".to_string()),
