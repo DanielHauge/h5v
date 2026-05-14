@@ -27,6 +27,19 @@ fn source(path: &str, selection: PreviewSelection) -> ChartSource {
     })
 }
 
+fn assert_viewport(state: &MultiChartState, expected: Option<(f64, f64, f64, f64)>) {
+    match (state.viewport, expected) {
+        (None, None) => {}
+        (Some(actual), Some((x_min, x_max, y_min, y_max))) => {
+            assert!((actual.x_min - x_min).abs() < 1e-9, "{actual:?}");
+            assert!((actual.x_max - x_max).abs() < 1e-9, "{actual:?}");
+            assert!((actual.y_min - y_min).abs() < 1e-9, "{actual:?}");
+            assert!((actual.y_max - y_max).abs() < 1e-9, "{actual:?}");
+        }
+        other => panic!("unexpected viewport state: {other:?}"),
+    }
+}
+
 #[test]
 fn compact_selection_summary_uses_concise_array_notation() {
     let one_d = DatasetChartSource {
@@ -981,19 +994,16 @@ fn zoom_in_anchor_ratio_biases_toward_hovered_side() {
         (0..100).map(|i| (i as f64, i as f64)).collect(),
     );
 
-    state.zoom_with_anchor_ratio(10.0, 0.0, true);
-    assert_eq!(state.aoi_from, None);
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(state.zoom_in_x(10.0));
+    assert_viewport(&state, Some((9.9, 89.1, 0.0, 99.0)));
 
     state.clear_zoom();
-    state.zoom_with_anchor_ratio(10.0, 1.0, true);
-    assert_eq!(state.aoi_from, Some(20));
-    assert_eq!(state.aoi_to, None);
+    assert!(state.zoom_with_anchor(10.0, 0.0, 0.0, true, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
 
     state.clear_zoom();
-    state.zoom_with_anchor_ratio(10.0, 0.5, true);
-    assert_eq!(state.aoi_from, Some(10));
-    assert_eq!(state.aoi_to, Some(90));
+    assert!(state.zoom_with_anchor(10.0, 1.0, 0.0, true, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((19.8, 99.0, 0.0, 99.0)));
 }
 
 #[test]
@@ -1010,13 +1020,11 @@ fn zoom_at_position_only_applies_inside_chart_area() {
     );
     state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
 
-    assert!(!state.zoom_in_at_position(5, 6, 10.0));
-    assert_eq!(state.aoi_from, None);
-    assert_eq!(state.aoi_to, None);
+    assert!(!state.zoom_in_at_position(5, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, None);
 
-    assert!(state.zoom_in_at_position(10, 6, 10.0));
-    assert_eq!(state.aoi_from, None);
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(state.zoom_in_at_position(10, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
 }
 
 #[test]
@@ -1041,17 +1049,15 @@ fn zoom_at_position_ignores_chart_padding() {
     state.last_chart_area =
         chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, 40..180, 10..70);
 
-    assert!(!state.zoom_in_at_position(11, 6, 10.0));
-    assert_eq!(state.aoi_from, None);
-    assert_eq!(state.aoi_to, None);
+    assert!(!state.zoom_in_at_position(11, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, None);
 
-    assert!(state.zoom_in_at_position(14, 6, 10.0));
-    assert_eq!(state.aoi_from, None);
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(state.zoom_in_at_position(14, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
 }
 
 #[test]
-fn drag_pan_moves_zoomed_viewport_horizontally() {
+fn drag_pan_applies_snapshot_on_release_in_both_axes() {
     let mut state = make_state();
     let selection = PreviewSelection {
         index: vec![0],
@@ -1062,23 +1068,31 @@ fn drag_pan_moves_zoomed_viewport_horizontally() {
         source("/group/a", selection),
         (0..100).map(|i| (i as f64, i as f64)).collect(),
     );
-    state.aoi_from = Some(20);
-    state.aoi_to = Some(80);
+    state.viewport = Some(ChartViewport {
+        x_min: 20.0,
+        x_max: 80.0,
+        y_min: 20.0,
+        y_max: 80.0,
+    });
     state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
 
     assert!(state.start_drag_at_position(20, 6));
-    assert!(!state.drag_to_position(15));
-    assert_eq!(state.aoi_from, Some(20));
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(!state.drag_to_position(15, 4));
+    assert_viewport(&state, Some((20.0, 80.0, 20.0, 80.0)));
 
-    assert!(state.finish_drag_at_position(15));
-    assert_eq!(state.aoi_from, Some(36));
-    assert_eq!(state.aoi_to, Some(96));
+    assert!(state.finish_drag_at_position(15, 4));
+    assert_viewport(
+        &state,
+        Some((
+            35.78947368421053,
+            95.78947368421052,
+            2.8571428571428577,
+            62.85714285714286,
+        )),
+    );
 
     state.end_drag();
-    assert!(!state.drag_to_position(25));
-    assert_eq!(state.aoi_from, Some(36));
-    assert_eq!(state.aoi_to, Some(96));
+    assert!(!state.drag_to_position(25, 4));
 }
 
 #[test]
@@ -1093,18 +1107,21 @@ fn drag_pan_only_starts_inside_chart_area() {
         source("/group/a", selection),
         (0..100).map(|i| (i as f64, i as f64)).collect(),
     );
-    state.aoi_from = Some(20);
-    state.aoi_to = Some(80);
+    state.viewport = Some(ChartViewport {
+        x_min: 20.0,
+        x_max: 80.0,
+        y_min: 20.0,
+        y_max: 80.0,
+    });
     state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
 
     assert!(!state.start_drag_at_position(5, 6));
-    assert!(!state.drag_to_position(15));
-    assert_eq!(state.aoi_from, Some(20));
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(!state.drag_to_position(15, 5));
+    assert_viewport(&state, Some((20.0, 80.0, 20.0, 80.0)));
 }
 
 #[test]
-fn drag_pan_applies_only_on_release() {
+fn fit_selected_uses_selected_series_bounds() {
     let mut state = make_state();
     let selection = PreviewSelection {
         index: vec![0],
@@ -1115,21 +1132,44 @@ fn drag_pan_applies_only_on_release() {
         source("/group/a", selection),
         (0..100).map(|i| (i as f64, i as f64)).collect(),
     );
-    state.aoi_from = Some(20);
-    state.aoi_to = Some(80);
-    state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
+    state.add_chart_item(
+        source(
+            "/group/b",
+            PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+        ),
+        vec![(-10.0, -5.0), (5.0, 10.0)],
+    );
+    state.idx = 1;
 
-    assert!(state.start_drag_at_position(20, 6));
-    assert!(!state.drag_to_position(18));
-    assert_eq!(state.aoi_from, Some(20));
-    assert_eq!(state.aoi_to, Some(80));
-    assert!(!state.drag_to_position(15));
-    assert_eq!(state.aoi_from, Some(20));
-    assert_eq!(state.aoi_to, Some(80));
+    assert!(state.fit_selected());
+    assert_viewport(&state, Some((-10.0, 5.0, -5.0, 10.0)));
+}
 
-    assert!(state.finish_drag_at_position(15));
-    assert_eq!(state.aoi_from, Some(36));
-    assert_eq!(state.aoi_to, Some(96));
+#[test]
+fn fit_all_clears_explicit_viewport() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 20.0,
+        y_min: 10.0,
+        y_max: 20.0,
+    });
+
+    assert!(state.fit_all());
+    assert_viewport(&state, None);
 }
 
 #[test]
@@ -1198,8 +1238,12 @@ fn prepared_chart_data_respects_visibility_and_viewport() {
         (0..6).map(|i| (i as f64, (i * 10) as f64)).collect(),
     );
     state.items[1].visible = false;
-    state.aoi_from = Some(1);
-    state.aoi_to = Some(4);
+    state.viewport = Some(ChartViewport {
+        x_min: 1.0,
+        x_max: 3.0,
+        y_min: 100.0,
+        y_max: 200.0,
+    });
 
     let prepared = state.prepared_chart_data().expect("prepared chart data");
     assert_eq!(prepared.series.len(), 1);
@@ -1209,6 +1253,6 @@ fn prepared_chart_data_respects_visibility_and_viewport() {
     );
     assert_eq!(prepared.plot_x_min, 1.0);
     assert_eq!(prepared.plot_x_max, 3.0);
-    assert_eq!(prepared.y_min, 1.0);
-    assert_eq!(prepared.y_max, 3.0);
+    assert_eq!(prepared.y_min, 100.0);
+    assert_eq!(prepared.y_max, 200.0);
 }

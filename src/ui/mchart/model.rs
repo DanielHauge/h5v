@@ -225,8 +225,6 @@ pub struct ChartSeries {
     pub(super) points: Vec<Point>,
     pub(super) y_max: f64,
     pub(super) y_min: f64,
-    pub(super) sample_max: usize,
-    pub(super) sample_min: usize,
 }
 
 fn is_finite_chart_point((x, y): Point) -> bool {
@@ -253,13 +251,10 @@ impl ChartSeries {
             .fold((first_y, first_y), |(min, max), (_, y)| {
                 (min.min(*y), max.max(*y))
             });
-        let points_len = points.len();
         Some(Self {
             points,
             y_max,
             y_min,
-            sample_min: 0,
-            sample_max: points_len,
         })
     }
 

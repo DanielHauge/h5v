@@ -1,7 +1,8 @@
-use ratatui::crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
+use ratatui::crossterm::event::{Event, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 
 use crate::{
     error::AppError,
+    ui::mchart::ChartZoomMode,
     ui::state::{AppState, AppToast, Mode},
 };
 
@@ -121,24 +122,53 @@ pub(crate) fn handle_mchart_event(
                         Ok(EventResult::Redraw)
                     }
                     Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
-                        state.multi_chart.zoom_in(10.0);
-                        Ok(EventResult::Redraw)
+                        Ok(if state.multi_chart.zoom_in(10.0) {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
                     }
                     Some(BoundAction::Action(MultiChartAction::ZoomOut)) => {
-                        state.multi_chart.zoom_out(10.0);
-                        Ok(EventResult::Redraw)
+                        Ok(if state.multi_chart.zoom_out(10.0) {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
                     }
                     Some(BoundAction::Action(MultiChartAction::PanLeft)) => {
-                        state.multi_chart.pan_left(10.0);
-                        Ok(EventResult::Redraw)
+                        Ok(if state.multi_chart.pan_left(10.0) {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
                     }
                     Some(BoundAction::Action(MultiChartAction::PanRight)) => {
-                        state.multi_chart.pan_right(10.0);
-                        Ok(EventResult::Redraw)
+                        Ok(if state.multi_chart.pan_right(10.0) {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
                     }
                     Some(BoundAction::Action(MultiChartAction::ClearZoom)) => {
-                        state.multi_chart.clear_zoom();
-                        Ok(EventResult::Redraw)
+                        Ok(if state.multi_chart.clear_zoom() {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
+                    }
+                    Some(BoundAction::Action(MultiChartAction::FitAll)) => {
+                        Ok(if state.multi_chart.fit_all() {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
+                    }
+                    Some(BoundAction::Action(MultiChartAction::FitSelected)) => {
+                        Ok(if state.multi_chart.fit_selected() {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
                     }
                     Some(BoundAction::Action(MultiChartAction::DeleteSelected)) => {
                         if let Err(error) = state.multi_chart.clear_selected() {
@@ -219,7 +249,10 @@ pub(crate) fn handle_mchart_event(
                 Ok(EventResult::Continue)
             }
             MouseEventKind::Drag(MouseButton::Right) => {
-                if state.multi_chart.drag_to_position(mouse_event.column) {
+                if state
+                    .multi_chart
+                    .drag_to_position(mouse_event.column, mouse_event.row)
+                {
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Continue)
@@ -228,7 +261,7 @@ pub(crate) fn handle_mchart_event(
             MouseEventKind::Up(MouseButton::Right) => {
                 if state
                     .multi_chart
-                    .finish_drag_at_position(mouse_event.column)
+                    .finish_drag_at_position(mouse_event.column, mouse_event.row)
                 {
                     Ok(EventResult::Redraw)
                 } else {
@@ -237,20 +270,26 @@ pub(crate) fn handle_mchart_event(
                 }
             }
             MouseEventKind::ScrollUp => {
-                if state
-                    .multi_chart
-                    .zoom_in_at_position(mouse_event.column, mouse_event.row, 10.0)
-                {
+                let zoom_mode = mouse_zoom_mode(mouse_event.modifiers);
+                if state.multi_chart.zoom_in_at_position(
+                    mouse_event.column,
+                    mouse_event.row,
+                    10.0,
+                    zoom_mode,
+                ) {
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Continue)
                 }
             }
             MouseEventKind::ScrollDown => {
-                if state
-                    .multi_chart
-                    .zoom_out_at_position(mouse_event.column, mouse_event.row, 10.0)
-                {
+                let zoom_mode = mouse_zoom_mode(mouse_event.modifiers);
+                if state.multi_chart.zoom_out_at_position(
+                    mouse_event.column,
+                    mouse_event.row,
+                    10.0,
+                    zoom_mode,
+                ) {
                     Ok(EventResult::Redraw)
                 } else {
                     Ok(EventResult::Continue)
@@ -260,5 +299,15 @@ pub(crate) fn handle_mchart_event(
         },
         Event::Resize(_, _) => Ok(EventResult::Redraw),
         _ => Ok(EventResult::Continue),
+    }
+}
+
+fn mouse_zoom_mode(modifiers: KeyModifiers) -> ChartZoomMode {
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        ChartZoomMode::XOnly
+    } else if modifiers.contains(KeyModifiers::SHIFT) {
+        ChartZoomMode::YOnly
+    } else {
+        ChartZoomMode::Uniform
     }
 }

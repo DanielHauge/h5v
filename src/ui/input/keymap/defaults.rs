@@ -343,6 +343,8 @@ pub(super) fn default_multichart_bindings() -> Vec<KeyBinding<MultiChartAction>>
         ),
         binding("l", BoundAction::Action(MultiChartAction::PanRight)),
         binding("c", BoundAction::Action(MultiChartAction::ClearZoom)),
+        binding("f", BoundAction::Action(MultiChartAction::FitAll)),
+        binding("F", BoundAction::Action(MultiChartAction::FitSelected)),
         binding("C", BoundAction::Action(MultiChartAction::ClearAll)),
         binding(
             "e",

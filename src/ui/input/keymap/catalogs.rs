@@ -460,6 +460,16 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::ClearZoom,
     },
     ActionCode {
+        symbol: "FitAll",
+        code: "fit-all",
+        action: MultiChartAction::FitAll,
+    },
+    ActionCode {
+        symbol: "FitSelected",
+        code: "fit-selected",
+        action: MultiChartAction::FitSelected,
+    },
+    ActionCode {
         symbol: "DeleteSelected",
         code: "delete-selected",
         action: MultiChartAction::DeleteSelected,

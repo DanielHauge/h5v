@@ -1,6 +1,7 @@
 use crate::{
     error::AppError,
     h5f::AttributeCreateType,
+    ui::mchart::ChartZoomMode,
     ui::state::{HeatmapRangeBound, HeatmapRangeMode},
 };
 use ratatui::crossterm::event::Event;
@@ -329,24 +330,74 @@ pub(super) fn handle_mchart(
                 other
             ))),
         },
+        "fit" => match command
+            .word_arg_optional(1)?
+            .map(|arg| arg.to_ascii_lowercase())
+            .as_deref()
+        {
+            None | Some("all") | Some("visible") => Ok(if state.multi_chart.fit_all() {
+                EventResult::Redraw
+            } else {
+                EventResult::Continue
+            }),
+            Some("selected") | Some("active") => Ok(if state.multi_chart.fit_selected() {
+                EventResult::Redraw
+            } else {
+                EventResult::Continue
+            }),
+            Some(other) => Err(AppError::InvalidCommand(format!(
+                "Unknown mchart fit target '{}'. Expected all or selected",
+                other
+            ))),
+        },
         "zoom" => {
-            let target = command.word_arg_optional(1)?.unwrap_or("reset");
+            let first = command.word_arg_optional(1)?.unwrap_or("reset");
+            let (mode, target, amount_index) = match first.to_ascii_lowercase().as_str() {
+                "x" => (ChartZoomMode::XOnly, command.word_arg_optional(2)?.unwrap_or("reset"), 3),
+                "y" => (ChartZoomMode::YOnly, command.word_arg_optional(2)?.unwrap_or("reset"), 3),
+                "xy" | "both" | "uniform" => (
+                    ChartZoomMode::Uniform,
+                    command.word_arg_optional(2)?.unwrap_or("reset"),
+                    3,
+                ),
+                _ => (ChartZoomMode::Uniform, first, 2),
+            };
+            let amount = parse_word_f64(command.word_arg_optional(amount_index)?, 10.0, "mchart")?;
             match target.to_ascii_lowercase().as_str() {
                 "in" => {
-                    state
-                        .multi_chart
-                        .zoom_in(parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?);
-                    Ok(EventResult::Redraw)
+                    Ok(match mode {
+                        ChartZoomMode::Uniform if state.multi_chart.zoom_in(amount) => {
+                            EventResult::Redraw
+                        }
+                        ChartZoomMode::XOnly if state.multi_chart.zoom_in_x(amount) => {
+                            EventResult::Redraw
+                        }
+                        ChartZoomMode::YOnly if state.multi_chart.zoom_in_y(amount) => {
+                            EventResult::Redraw
+                        }
+                        _ => EventResult::Continue,
+                    })
                 }
                 "out" => {
-                    state
-                        .multi_chart
-                        .zoom_out(parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?);
-                    Ok(EventResult::Redraw)
+                    Ok(match mode {
+                        ChartZoomMode::Uniform if state.multi_chart.zoom_out(amount) => {
+                            EventResult::Redraw
+                        }
+                        ChartZoomMode::XOnly if state.multi_chart.zoom_out_x(amount) => {
+                            EventResult::Redraw
+                        }
+                        ChartZoomMode::YOnly if state.multi_chart.zoom_out_y(amount) => {
+                            EventResult::Redraw
+                        }
+                        _ => EventResult::Continue,
+                    })
                 }
                 "reset" | "clear" => {
-                    state.multi_chart.clear_zoom();
-                    Ok(EventResult::Redraw)
+                    Ok(if state.multi_chart.clear_zoom() {
+                        EventResult::Redraw
+                    } else {
+                        EventResult::Continue
+                    })
                 }
                 other => Err(AppError::InvalidCommand(format!(
                     "Unknown mchart zoom action '{}'. Expected in, out, or reset",
@@ -359,12 +410,18 @@ pub(super) fn handle_mchart(
             let amount = parse_word_f64(command.word_arg_optional(2)?, 10.0, "mchart")?;
             match direction.to_ascii_lowercase().as_str() {
                 "left" => {
-                    state.multi_chart.pan_left(amount);
-                    Ok(EventResult::Redraw)
+                    Ok(if state.multi_chart.pan_left(amount) {
+                        EventResult::Redraw
+                    } else {
+                        EventResult::Continue
+                    })
                 }
                 "right" => {
-                    state.multi_chart.pan_right(amount);
-                    Ok(EventResult::Redraw)
+                    Ok(if state.multi_chart.pan_right(amount) {
+                        EventResult::Redraw
+                    } else {
+                        EventResult::Continue
+                    })
                 }
                 other => Err(AppError::InvalidCommand(format!(
                     "Unknown mchart pan direction '{}'. Expected left or right",
@@ -373,7 +430,7 @@ pub(super) fn handle_mchart(
             }
         }
         other => Err(AppError::InvalidCommand(format!(
-            "Unknown mchart action '{}'. Expected open, close, add, expr, prompt, select, visible, remove, clear, zoom, or pan",
+            "Unknown mchart action '{}'. Expected open, close, add, expr, prompt, select, visible, remove, clear, fit, zoom, or pan",
             other
         ))),
     }

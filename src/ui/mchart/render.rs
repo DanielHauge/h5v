@@ -77,46 +77,27 @@ impl MultiChartState {
             return None;
         }
 
-        let (global_x_min, global_x_max) = self.global_x_bounds().unwrap_or((0, 1));
-        let (x_min, x_max) = match (self.aoi_from, self.aoi_to) {
-            (None, None) => (global_x_min, global_x_max),
-            (Some(from), None) => (from, global_x_max.max(from)),
-            (None, Some(to)) => (global_x_min.min(to), to),
-            (Some(from), Some(to)) if from < to => (from, to),
-            _ => return None,
-        };
+        let viewport = self.effective_viewport()?;
 
         let selected_item_id = self.selected_item().map(|item| item.id);
-        let mut global_y_max = f64::MIN;
-        let mut global_y_min = f64::MAX;
         let mut plot_x_min = f64::MAX;
         let mut plot_x_max = f64::MIN;
         let mut series = Vec::new();
 
         for item in visible_items {
-            if x_max <= item.series.sample_min || x_min >= item.series.sample_max {
-                continue;
-            }
-            let local_x_min = item
-                .series
-                .sample_min
-                .max(x_min)
-                .clamp(item.series.sample_min, item.series.sample_max);
-            let local_x_max = item
-                .series
-                .sample_max
-                .min(x_max)
-                .clamp(item.series.sample_min, item.series.sample_max);
             let points = super::model::sanitize_chart_points(
-                item.series.points[local_x_min..local_x_max].to_vec(),
+                item.series
+                    .points
+                    .iter()
+                    .copied()
+                    .filter(|(x, _)| *x >= viewport.x_min && *x <= viewport.x_max)
+                    .collect(),
             );
             if points.is_empty() {
                 continue;
             }
 
-            for &(x, y) in &points {
-                global_y_max = global_y_max.max(y);
-                global_y_min = global_y_min.min(y);
+            for &(x, _) in &points {
                 plot_x_min = plot_x_min.min(x);
                 plot_x_max = plot_x_max.max(x);
             }
@@ -129,31 +110,50 @@ impl MultiChartState {
             });
         }
 
-        if series.is_empty() || !global_y_min.is_finite() || !global_y_max.is_finite() {
+        if series.is_empty() {
             return None;
         }
-        let (y_min, y_max) = if (global_y_max - global_y_min).abs() < f64::EPSILON {
-            let pad = if global_y_min == 0.0 {
-                1.0
-            } else {
-                global_y_min.abs() * 0.05
-            };
-            (global_y_min - pad, global_y_max + pad)
+        let (plot_x_min, plot_x_max) = if let Some(viewport) = self.viewport {
+            (viewport.x_min, viewport.x_max)
         } else {
-            (global_y_min, global_y_max)
+            if !plot_x_min.is_finite() || !plot_x_max.is_finite() {
+                return None;
+            }
+            if (plot_x_max - plot_x_min).abs() < f64::EPSILON {
+                let pad = if plot_x_min == 0.0 {
+                    1.0
+                } else {
+                    plot_x_min.abs() * 0.05
+                };
+                (plot_x_min - pad, plot_x_max + pad)
+            } else {
+                (plot_x_min, plot_x_max)
+            }
         };
-        if !plot_x_min.is_finite() || !plot_x_max.is_finite() {
-            return None;
-        }
-        let (plot_x_min, plot_x_max) = if (plot_x_max - plot_x_min).abs() < f64::EPSILON {
-            let pad = if plot_x_min == 0.0 {
-                1.0
-            } else {
-                plot_x_min.abs() * 0.05
-            };
-            (plot_x_min - pad, plot_x_max + pad)
+        let (y_min, y_max) = if let Some(viewport) = self.viewport {
+            (viewport.y_min, viewport.y_max)
         } else {
-            (plot_x_min, plot_x_max)
+            let mut y_min = f64::MAX;
+            let mut y_max = f64::MIN;
+            for prepared in &series {
+                for &(_, y) in &prepared.points {
+                    y_min = y_min.min(y);
+                    y_max = y_max.max(y);
+                }
+            }
+            if !y_min.is_finite() || !y_max.is_finite() {
+                return None;
+            }
+            if (y_max - y_min).abs() < f64::EPSILON {
+                let pad = if y_min == 0.0 {
+                    1.0
+                } else {
+                    y_min.abs() * 0.05
+                };
+                (y_min - pad, y_max + pad)
+            } else {
+                (y_min, y_max)
+            }
         };
 
         Some(super::PreparedChartData {
@@ -470,12 +470,7 @@ impl MultiChartState {
             return;
         };
 
-        let viewport = match (self.aoi_from, self.aoi_to) {
-            (None, None) => "full range".to_string(),
-            (Some(from), Some(to)) => format!("{from}..{to}"),
-            (Some(from), None) => format!("{from}..end"),
-            (None, Some(to)) => format!("start..{to}"),
-        };
+        let viewport = self.viewport_summary();
         let lines = match &item.source {
             ChartSource::DatasetSelection(source) => vec![
                 Line::from(vec![
@@ -518,7 +513,7 @@ impl MultiChartState {
                     mchart_body_span(self.x_axis_policy.label()),
                     mchart_body_span("  "),
                     Span::styled(
-                        "zoom ",
+                        "view ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
@@ -551,7 +546,7 @@ impl MultiChartState {
                     mchart_body_span(self.x_axis_policy.label()),
                     mchart_body_span("  "),
                     Span::styled(
-                        "zoom ",
+                        "view ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),

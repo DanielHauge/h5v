@@ -294,6 +294,8 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::PanLeft => "Pan left".to_string(),
             MultiChartAction::PanRight => "Pan right".to_string(),
             MultiChartAction::ClearZoom => "Reset zoom".to_string(),
+            MultiChartAction::FitAll => "Fit the viewport to all visible series".to_string(),
+            MultiChartAction::FitSelected => "Fit the viewport to the selected series".to_string(),
             MultiChartAction::DeleteSelected => "Remove the selected series".to_string(),
             MultiChartAction::ClearAll => "Remove all series".to_string(),
             MultiChartAction::ToggleSelectedVisible => {

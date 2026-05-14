@@ -115,6 +115,8 @@ pub enum MultiChartAction {
     PanLeft,
     PanRight,
     ClearZoom,
+    FitAll,
+    FitSelected,
     DeleteSelected,
     ClearAll,
     ToggleSelectedVisible,

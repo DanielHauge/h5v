@@ -37,11 +37,26 @@ use prompt::{
 #[allow(unused_imports)]
 use render::chart_plot_area_in_rect;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ChartViewport {
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChartZoomMode {
+    Uniform,
+    XOnly,
+    YOnly,
+}
+
 #[derive(Debug, Clone)]
 struct ChartDragState {
     anchor_column: u16,
-    viewport_from: usize,
-    viewport_to: usize,
+    anchor_row: u16,
+    viewport: ChartViewport,
 }
 
 #[derive(Debug, Clone)]
@@ -69,8 +84,7 @@ pub struct MultiChartState {
     pub plot_buffer: Vec<u8>,
     pub picker: Picker,
     pub idx: usize,
-    pub aoi_from: Option<usize>,
-    pub aoi_to: Option<usize>,
+    viewport: Option<ChartViewport>,
     stateful_protocol: Option<StatefulProtocol>,
     next_id: u64,
     next_color_slot: usize,
@@ -90,8 +104,7 @@ impl MultiChartState {
             width: 0,
             plot_buffer: Vec::new(),
             picker,
-            aoi_from: None,
-            aoi_to: None,
+            viewport: None,
             stateful_protocol: None,
             next_id: 1,
             next_color_slot: 0,
