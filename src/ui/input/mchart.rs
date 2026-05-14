@@ -75,10 +75,6 @@ pub(crate) fn handle_mchart_event(
                             state.multi_chart.refresh_expression_prompt(file.as_ref());
                             Ok(EventResult::Redraw)
                         }
-                        Some(CommandAction::Complete) => {
-                            state.multi_chart.expression_select_next_suggestion();
-                            Ok(EventResult::Redraw)
-                        }
                         Some(CommandAction::SelectPrevSuggestion) => {
                             state.multi_chart.expression_select_prev_suggestion();
                             Ok(EventResult::Redraw)

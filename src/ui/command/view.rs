@@ -7,13 +7,11 @@ use ratatui::{
 };
 
 use crate::configure;
+use crate::ui::state::AppState;
 
 use super::{
-    command::{
-        command_keybindings, command_matches, command_usage, current_command_descriptor,
-        selected_command_descriptor,
-    },
-    state::AppState,
+    command_keybindings, command_matches, command_usage, current_command_descriptor,
+    selected_command_descriptor,
 };
 
 fn command_body_style() -> Style {

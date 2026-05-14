@@ -25,19 +25,14 @@ use crate::{
     error::AppError,
     h5f::{H5FNode, ImageType, InterlaceMode, Node},
     ui::{
-        preview_chart::{render_image_chart, MAX_SEGMENT_SIZE},
-        state::{ChartPreviewLoadRequest, ChartPreviewSource},
-    },
-};
-
-use super::app::{ChartPreviewLoadedResult, ImageLoadedResult};
-use super::{
-    app::AppEvent,
-    segment_scroll::render_position_scroll,
-    state::{
-        AppState, ChartPreviewKey, ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey,
-        ImageWindowAxis, ImageWindowState, RawImageLoadRequest, SegmentType,
-        VarLenImageLoadRequest,
+        app::{AppEvent, ChartPreviewLoadedResult, ImageLoadedResult},
+        preview::chart::{render_image_chart, MAX_SEGMENT_SIZE},
+        segment_scroll::render_position_scroll,
+        state::{
+            AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource,
+            ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
+            ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
+        },
     },
 };
 

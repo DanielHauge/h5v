@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::{configure, sprint_typedesc::MatrixRenderType};
+use crate::{configure, ui::render::MatrixRenderType};
 
 use super::RenderedAttributeRow;
 

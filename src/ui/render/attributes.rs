@@ -22,9 +22,10 @@ use ratatui::{
 use crate::{
     configure,
     h5f::{ensure_attr_editable, format_opaque_bytes_for_edit, read_attr_memory_bytes},
-    sprint_typedesc::sprint_typedescriptor,
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
+
+use super::typedesc::sprint_typedescriptor;
 
 pub trait Renderable {
     fn render(self) -> Span<'static>;

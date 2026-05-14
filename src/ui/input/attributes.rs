@@ -17,10 +17,10 @@ use crate::{
     h5f::{
         format_attr_for_edit, read_attr_memory_bytes, AttributeCreateType, HasPath, MetadataRowKind,
     },
-    sprint_attributes::{attribute_type_descriptor, AttributeEditable},
     ui::{
         attributes::navigate_metadata_grid,
         edit::perform_edit,
+        render::{attribute_type_descriptor, AttributeEditable},
         state::{
             AppState, AppToast, AttributeCreateDialogState, AttributeCreateField,
             AttributeDeleteDialogState, AttributeEditRequest,

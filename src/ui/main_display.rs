@@ -13,11 +13,11 @@ use crate::{
     configure,
     error::AppError,
     h5f::{H5FNode, Node},
-    sprint_typedesc::MatrixRenderType,
     ui::{
         self,
         heatmap::render_heatmap,
         matrix::{DefaultMatrixResultRenderIntercept, EnumRenderer},
+        render::MatrixRenderType,
     },
 };
 

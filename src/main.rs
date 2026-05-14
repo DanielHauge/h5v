@@ -13,8 +13,6 @@ mod error;
 mod h5f;
 mod linking;
 mod search;
-mod sprint_attributes;
-mod sprint_typedesc;
 mod ui;
 use git_version::git_version;
 

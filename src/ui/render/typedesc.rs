@@ -3,10 +3,9 @@ use hdf5_metno::{
     Dataset,
 };
 
-use crate::{
-    h5f::{Encoding, ImageType, InterlaceMode},
-    sprint_attributes::sprint_attribute,
-};
+use crate::h5f::{Encoding, ImageType, InterlaceMode};
+
+use super::attributes::sprint_attribute;
 
 pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
     match type_desc {

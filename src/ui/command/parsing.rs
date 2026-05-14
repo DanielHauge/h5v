@@ -304,13 +304,6 @@ pub(super) fn tokenize_command_text(command_text: &str) -> Result<Vec<CommandTok
     Ok(tokens)
 }
 
-pub(super) fn command_tail(buffer: &str) -> Option<&str> {
-    let trimmed = buffer.trim_start();
-    let token = first_token(trimmed)?;
-    let rest = &trimmed[token.len()..];
-    Some(rest)
-}
-
 fn parse_legacy_numeric_alias(command_text: &str) -> Result<Option<CommandInvocation>, AppError> {
     let Some(first) = command_text.chars().next() else {
         return Ok(Some(CommandInvocation::noop(command_text)));

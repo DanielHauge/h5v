@@ -14,9 +14,9 @@ use ratatui_image::StatefulImage;
 use crate::{
     error::AppError,
     h5f::{DatasetMeta, H5FNode, Node},
-    sprint_typedesc::MatrixRenderType,
     ui::{
         app::{AppEvent, HeatmapLoadedResult},
+        render::MatrixRenderType,
         segment_scroll::SegmentDisplayInfo,
         state::{
             AppState, HeatmapLoadPriority, HeatmapLoadRequest, HeatmapPageWindow, HeatmapRenderKey,

@@ -35,13 +35,6 @@ pub fn handle_command_event(
                         )),
                     }
                 }
-                Some(CommandAction::Complete) => {
-                    if state.command_state.apply_selected_completion() {
-                        Ok(EventResult::Redraw)
-                    } else {
-                        Ok(EventResult::Continue)
-                    }
-                }
                 Some(CommandAction::SelectPrevSuggestion) => {
                     state.command_state.select_previous_suggestion();
                     Ok(EventResult::Redraw)

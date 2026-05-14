@@ -20,8 +20,9 @@ use crate::{
     },
     ui::{
         edit::perform_edit,
+        preview::chart::render_image_chart,
         preview::preview_text_for_compound_schema,
-        preview_chart::render_image_chart,
+        render::MatrixRenderType,
         state::{preview_selection_for_node, AppState, AppToast, ContentShowMode},
     },
 };
@@ -244,7 +245,7 @@ fn preview_text_value(
 
     let Some(_) = chart_preview_selection(node, &dataset.shape(), 0) else {
         return match meta.matrixable {
-            Some(crate::sprint_typedesc::MatrixRenderType::Float64) => {
+            Some(MatrixRenderType::Float64) => {
                 if meta.is_compound_leaf() {
                     Ok(Some(
                         read_projected_scalar::<f64>(dataset, meta)?.to_string(),
@@ -253,7 +254,7 @@ fn preview_text_value(
                     Ok(Some(read_single_value_dataset::<f64>(dataset)?.to_string()))
                 }
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Uint64) => {
+            Some(MatrixRenderType::Uint64) => {
                 if meta.is_compound_leaf() {
                     Ok(Some(
                         read_projected_scalar::<u64>(dataset, meta)?.to_string(),
@@ -262,7 +263,7 @@ fn preview_text_value(
                     Ok(Some(read_single_value_dataset::<u64>(dataset)?.to_string()))
                 }
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Int64) => {
+            Some(MatrixRenderType::Int64) => {
                 if meta.is_compound_leaf() {
                     Ok(Some(
                         read_projected_scalar::<i64>(dataset, meta)?.to_string(),
@@ -271,17 +272,17 @@ fn preview_text_value(
                     Ok(Some(read_single_value_dataset::<i64>(dataset)?.to_string()))
                 }
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Opaque) => {
+            Some(MatrixRenderType::Opaque) => {
                 Ok(Some(format_dataset_value_for_edit(dataset, meta, None)?))
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
+            Some(MatrixRenderType::Strings) => {
                 if meta.is_compound_leaf() {
                     Ok(Some(read_projected_scalar::<String>(dataset, meta)?))
                 } else {
                     Ok(Some(read_scalar_string_dataset(dataset, &meta.encoding)?))
                 }
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
+            Some(MatrixRenderType::Enum) => {
                 let TypeDescriptor::Enum(enum_type) = &meta.type_descriptor else {
                     return Err(AppError::EditError(
                         "Enum preview lost its enum type descriptor".to_string(),

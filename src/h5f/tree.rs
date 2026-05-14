@@ -10,7 +10,9 @@ use ratatui::style::Color;
 use crate::{
     error::AppError,
     h5f::read_string_attr_values,
-    sprint_typedesc::{encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor},
+    ui::render::{
+        encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
+    },
 };
 
 use super::{
@@ -535,11 +537,9 @@ fn build_dataset_meta(
 ) -> Result<DatasetMeta, hdf5_metno::Error> {
     fn projected_matrixable(
         type_descriptor: &hdf5_metno::types::TypeDescriptor,
-    ) -> Option<crate::sprint_typedesc::MatrixRenderType> {
+    ) -> Option<MatrixRenderType> {
         match type_descriptor {
-            hdf5_metno::types::TypeDescriptor::FixedArray(_, _) => {
-                Some(crate::sprint_typedesc::MatrixRenderType::Strings)
-            }
+            hdf5_metno::types::TypeDescriptor::FixedArray(_, _) => Some(MatrixRenderType::Strings),
             _ => is_type_matrixable(type_descriptor),
         }
     }
@@ -592,7 +592,7 @@ fn build_dataset_meta(
         link_name,
         chunk_shape,
         matrixable: if is_unsupported {
-            Some(crate::sprint_typedesc::MatrixRenderType::Opaque)
+            Some(MatrixRenderType::Opaque)
         } else if is_compound_container {
             None
         } else if compound_projection.is_some() {
@@ -655,6 +655,7 @@ mod tests {
         build_dataset_meta, enum_render_attr_names, highlight_hint_from_name, parse_enum_color,
         resolve_enum_render_overrides, resolve_highlight_hint,
     };
+    use crate::ui::render::MatrixRenderType;
 
     fn sample_enum() -> EnumType {
         EnumType {
@@ -824,10 +825,7 @@ mod tests {
             meta.unsupported_reason.as_deref(),
             Some("Unsupported datatype class")
         );
-        assert_eq!(
-            meta.matrixable,
-            Some(crate::sprint_typedesc::MatrixRenderType::Opaque)
-        );
+        assert_eq!(meta.matrixable, Some(MatrixRenderType::Opaque));
         assert!(meta.image.is_none());
         assert!(meta.enum_render_overrides.is_none());
     }

@@ -318,47 +318,6 @@ impl MultiChartState {
                     mchart_body_span(viewport),
                 ]),
             ],
-            ChartSource::BuiltinDerived(source) => vec![
-                Line::from(vec![
-                    Span::styled(
-                        "expr ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(source.expression()),
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        "lhs ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(source.lhs_view.clone()),
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        "rhs ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(source.rhs_view.clone()),
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        "align ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(source.alignment_summary()),
-                    mchart_body_span("  "),
-                    Span::styled(
-                        "zoom ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(viewport),
-                ]),
-            ],
             ChartSource::DerivedExpression { expression, .. } => vec![
                 Line::from(vec![
                     Span::styled(
@@ -605,7 +564,7 @@ impl MultiChartState {
                 let mut style = Style::default().fg(configure::themed_color(|colors| {
                     colors.chart.series[series.color_slot % colors.chart.series.len()]
                 }));
-                if series.is_base || series.is_selected {
+                if series.is_selected {
                     style = style.bold();
                 }
                 Dataset::default()

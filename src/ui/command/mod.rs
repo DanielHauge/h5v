@@ -9,6 +9,7 @@ mod handlers;
 mod parsing;
 #[cfg(test)]
 mod tests;
+mod view;
 
 #[allow(unused_imports)]
 pub use catalog::{command_catalog, find_command_descriptor, find_command_descriptor_by_id};
@@ -18,6 +19,7 @@ pub use parsing::{
     describe_command_descriptor, describe_command_invocation, format_command_invocation,
     parse_command_text, parse_startup_commands, selected_command_descriptor,
 };
+pub use view::render_command_dialog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandCategory {
@@ -238,31 +240,6 @@ impl CommandState {
         } else {
             self.selected_suggestion -= 1;
         }
-    }
-
-    pub fn apply_selected_completion(&mut self) -> bool {
-        let Some(descriptor) =
-            selected_command_descriptor(&self.command_buffer, self.selected_suggestion)
-        else {
-            return false;
-        };
-
-        let remainder = parsing::command_tail(&self.command_buffer)
-            .map(str::trim_start)
-            .unwrap_or_default();
-        self.command_buffer = if remainder.is_empty() {
-            if descriptor.args.is_empty() {
-                descriptor.name.to_string()
-            } else {
-                format!("{} ", descriptor.name)
-            }
-        } else {
-            format!("{} {}", descriptor.name, remainder)
-        };
-        self.cursor = self.command_buffer.len();
-        self.selected_suggestion = 0;
-        self.history_cursor = None;
-        true
     }
 
     pub fn record_successful_command(&mut self, invocation: &CommandInvocation) {

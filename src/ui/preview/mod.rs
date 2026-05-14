@@ -1,3 +1,6 @@
+pub mod chart;
+pub mod image;
+
 use std::{fs, path::Path, time::SystemTime};
 
 use ratatui::{
@@ -18,8 +21,6 @@ use std::{
 };
 
 use super::{
-    image_preview::render_img,
-    preview_chart::{render_chart_preview, render_precomputed_chart_preview},
     state::AppState,
     std_comp_render::{
         render_empty_dataset, render_error, render_string, render_unsupported_rendering,
@@ -29,7 +30,12 @@ use crate::{
     configure,
     error::AppError,
     h5f::{read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, Node},
-    sprint_typedesc::sprint_type_schema,
+    ui::render::sprint_type_schema,
+};
+
+use self::{
+    chart::{render_chart_preview, render_precomputed_chart_preview},
+    image::render_img,
 };
 
 fn format_size(bytes: u64) -> String {

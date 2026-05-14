@@ -7,8 +7,10 @@ use ratatui::{
 use crate::{
     configure,
     error::AppError,
-    sprint_attributes::{attribute_type_description, sprint_attribute},
-    ui::state::AttributeViewSelection,
+    ui::{
+        render::{attribute_type_description, sprint_attribute},
+        state::AttributeViewSelection,
+    },
 };
 
 use super::{

@@ -26,13 +26,15 @@ use crate::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
         preview::render_string_preview,
+        render::MatrixRenderType,
         segment_scroll::SegmentDisplayInfo,
-        state::{ChartPreviewLoadRequest, ChartPreviewSource, IsFromDs, SegmentType},
+        state::{
+            AppState, ChartPreviewLoadRequest, ChartPreviewSource, Focus, IsFromDs, Mode,
+            SegmentType,
+        },
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
 };
-
-use super::state::AppState;
 
 pub const MAX_SEGMENT_SIZE: usize = 250000;
 
@@ -136,12 +138,7 @@ pub fn render_chart_preview(
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
     };
-    if ds_meta.is_compound_leaf()
-        && matches!(
-            ds_meta.matrixable,
-            Some(crate::sprint_typedesc::MatrixRenderType::Strings)
-        )
-    {
+    if ds_meta.is_compound_leaf() && matches!(ds_meta.matrixable, Some(MatrixRenderType::Strings)) {
         let shape = ds.shape();
         if shape.iter().any(|len| *len > 1) {
             render_unsupported_rendering(
@@ -156,10 +153,7 @@ pub fn render_chart_preview(
     if ds_meta.is_compound_leaf() {
         return render_projected_chart_preview(f, area, node, state, ds, ds_meta);
     }
-    if matches!(
-        ds_meta.matrixable,
-        Some(crate::sprint_typedesc::MatrixRenderType::Strings)
-    ) {
+    if matches!(ds_meta.matrixable, Some(MatrixRenderType::Strings)) {
         return render_string_preview(f, area, node);
     }
 
@@ -177,7 +171,7 @@ pub fn render_chart_preview(
     if x_selectable_dims.is_empty() {
         match ds_meta.matrixable {
             Some(t) => match t {
-                crate::sprint_typedesc::MatrixRenderType::Float64 => {
+                MatrixRenderType::Float64 => {
                     let ds = read_single_value_dataset::<f64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
@@ -188,7 +182,7 @@ pub fn render_chart_preview(
                     };
                     render_string(f, area, node, ds, None);
                 }
-                crate::sprint_typedesc::MatrixRenderType::Uint64 => {
+                MatrixRenderType::Uint64 => {
                     let ds = read_single_value_dataset::<u64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
@@ -199,7 +193,7 @@ pub fn render_chart_preview(
                     };
                     render_string(f, area, node, ds, None);
                 }
-                crate::sprint_typedesc::MatrixRenderType::Int64 => {
+                MatrixRenderType::Int64 => {
                     let ds = read_single_value_dataset::<i64>(&ds);
                     let ds = match ds {
                         Ok(ds) => ds,
@@ -210,11 +204,11 @@ pub fn render_chart_preview(
                     };
                     render_string(f, area, node, ds, None);
                 }
-                crate::sprint_typedesc::MatrixRenderType::Opaque => {
+                MatrixRenderType::Opaque => {
                     render_string_preview(f, area, node)?;
                     return Ok(());
                 }
-                crate::sprint_typedesc::MatrixRenderType::Compound => {
+                MatrixRenderType::Compound => {
                     render_unsupported_rendering(
                         f,
                         area,
@@ -223,11 +217,11 @@ pub fn render_chart_preview(
                     );
                     return Ok(());
                 }
-                crate::sprint_typedesc::MatrixRenderType::Strings => {
+                MatrixRenderType::Strings => {
                     render_string_preview(f, area, node)?;
                     return Ok(());
                 }
-                crate::sprint_typedesc::MatrixRenderType::Enum => {
+                MatrixRenderType::Enum => {
                     let TypeDescriptor::Enum(et) = ds.dtype()?.to_descriptor()? else {
                         render_error(
                             f,
@@ -469,7 +463,7 @@ fn render_projected_chart_preview(
 
     if x_selectable_dims.is_empty() {
         match ds_meta.matrixable {
-            Some(crate::sprint_typedesc::MatrixRenderType::Float64) => {
+            Some(MatrixRenderType::Float64) => {
                 render_string(
                     f,
                     area,
@@ -478,7 +472,7 @@ fn render_projected_chart_preview(
                     None,
                 );
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Uint64) => {
+            Some(MatrixRenderType::Uint64) => {
                 render_string(
                     f,
                     area,
@@ -487,7 +481,7 @@ fn render_projected_chart_preview(
                     None,
                 );
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Int64) => {
+            Some(MatrixRenderType::Int64) => {
                 render_string(
                     f,
                     area,
@@ -496,10 +490,10 @@ fn render_projected_chart_preview(
                     None,
                 );
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Opaque) => {
+            Some(MatrixRenderType::Opaque) => {
                 render_string_preview(f, area, node)?;
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Enum) => {
+            Some(MatrixRenderType::Enum) => {
                 let hdf5_metno::types::TypeDescriptor::Enum(et) = &ds_meta.type_descriptor else {
                     render_error(
                         f,
@@ -523,20 +517,18 @@ fn render_projected_chart_preview(
                     *area,
                 );
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Strings) => {
+            Some(MatrixRenderType::Strings) => {
                 match read_projected_scalar::<String>(&ds, &ds_meta) {
                     Ok(value) => render_string(f, area, node, value, None),
                     Err(e) => render_error(f, area, format!("Error reading scalar string: {e}")),
                 };
             }
-            Some(crate::sprint_typedesc::MatrixRenderType::Compound) => {
-                render_unsupported_rendering(
-                    f,
-                    area,
-                    selected_node,
-                    "Compound field containers are not previewable",
-                )
-            }
+            Some(MatrixRenderType::Compound) => render_unsupported_rendering(
+                f,
+                area,
+                selected_node,
+                "Compound field containers are not previewable",
+            ),
             None => render_unsupported_rendering(
                 f,
                 area,
@@ -777,12 +769,12 @@ fn render_chart_widget(
         .data(data);
     let bg = match (&state.focus, &state.mode) {
         (
-            super::state::Focus::Content,
-            super::state::Mode::Normal
-            | super::state::Mode::AttributeCreateDialog
-            | super::state::Mode::AttributeDeleteDialog
-            | super::state::Mode::FixedStringOverflowDialog
-            | super::state::Mode::FixedStringResizeDialog,
+            Focus::Content,
+            Mode::Normal
+            | Mode::AttributeCreateDialog
+            | Mode::AttributeDeleteDialog
+            | Mode::FixedStringOverflowDialog
+            | Mode::FixedStringResizeDialog,
         ) => configure::themed_color(|colors| colors.surface.focus_bg),
         _ => configure::themed_color(|colors| colors.surface.bg),
     };

@@ -115,7 +115,6 @@ pub enum MultiChartAction {
 pub enum CommandAction {
     Submit,
     Cancel,
-    Complete,
     SelectPrevSuggestion,
     SelectNextSuggestion,
     SelectPrevHistory,
@@ -1104,6 +1103,18 @@ pub fn parse_attributes_action_name(value: &str) -> Option<AttributesAction> {
 
 pub fn parse_multichart_action_name(value: &str) -> Option<MultiChartAction> {
     parse_action_code(MULTICHART_ACTION_CODES, value)
+}
+
+pub fn is_valid_action_name_for_scope(scope: KeymapScope, value: &str) -> bool {
+    match scope {
+        KeymapScope::Global => parse_global_action_name(value).is_some(),
+        KeymapScope::Normal => parse_normal_action_name(value).is_some(),
+        KeymapScope::Window => parse_window_action_name(value).is_some(),
+        KeymapScope::Tree => parse_tree_action_name(value).is_some(),
+        KeymapScope::Content | KeymapScope::Heatmap => parse_content_action_name(value).is_some(),
+        KeymapScope::Attributes => parse_attributes_action_name(value).is_some(),
+        KeymapScope::MultiChart => parse_multichart_action_name(value).is_some(),
+    }
 }
 
 fn find_binding<T: Clone>(bindings: &[KeyBinding<T>], key: &KeyEvent) -> Option<BoundAction<T>> {

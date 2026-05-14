@@ -6,8 +6,10 @@ use super::{
 };
 use crate::{
     h5f::{DatasetMeta, Encoding},
-    sprint_typedesc::MatrixRenderType,
-    ui::state::{HeatmapRangeMode, HeatmapSelectedCells},
+    ui::{
+        render::MatrixRenderType,
+        state::{HeatmapRangeMode, HeatmapSelectedCells},
+    },
 };
 use hdf5_metno::types::{IntSize, TypeDescriptor};
 

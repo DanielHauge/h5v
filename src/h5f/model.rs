@@ -8,8 +8,10 @@ use ratatui::{
 
 use crate::{
     configure,
-    sprint_typedesc::MatrixRenderType,
-    ui::state::{AttributeCursor, ContentShowMode},
+    ui::{
+        render::MatrixRenderType,
+        state::{AttributeCursor, ContentShowMode},
+    },
 };
 
 use super::{
@@ -312,8 +314,7 @@ mod tests {
     use super::{H5FNode, Node};
     use crate::{
         h5f::{CompoundFieldProjection, DatasetMeta, Encoding},
-        sprint_typedesc::MatrixRenderType,
-        ui::state::ContentShowMode,
+        ui::{render::MatrixRenderType, state::ContentShowMode},
     };
     use hdf5_metno::types::TypeDescriptor;
     use ndarray::arr2;

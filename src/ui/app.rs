@@ -1,16 +1,11 @@
 use std::{
-    env, fs,
+    env,
     io::stdout,
-    path::{Path, PathBuf},
     rc::Rc,
-    sync::{
-        mpsc::{channel, Sender},
-        Arc, RwLock,
-    },
+    sync::{mpsc::channel, Arc, RwLock},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
-use update_informer::{registry, Check};
 
 use arboard::Clipboard;
 use image::Rgba;
@@ -21,52 +16,65 @@ use ratatui::{
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     prelude::CrosstermBackend,
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 use ratatui_image::picker::{Picker, ProtocolType};
-use serde_json::{json, Value};
 
 use crate::{
     compat::RuntimeConfig,
     configure,
-    configure::{ensure_config_path, reset_config_path, run_lua_engine},
+    configure::run_lua_engine,
     error::{log_error, AppError},
-    h5f::{self, HasPath, Node, NodeType},
+    h5f,
     ui::{
-        edit::edit_existing_file,
         heatmap::{handle_heatmap_load, HEATMAP_CACHE_CAPACITY},
-        image_preview::{handle_chartpreview_load, handle_chartpreview_resize},
         input::EventResult,
         mchart::MultiChartState,
+        preview::image::{handle_chartpreview_load, handle_chartpreview_resize},
         state::{AppToast, ChartPreviwState, FileWatchState},
     },
-    GIT_VERSION, GIT_VERSION_SHORT,
+    GIT_VERSION,
 };
 
+use self::config::{
+    configuration_warning_message, log_configuration_error, open_configuration_and_reload,
+    should_use_alternate_screen,
+};
+use self::dialogs::{
+    render_attribute_create_dialog, render_attribute_delete_dialog,
+    render_fixed_string_overflow_dialog, render_fixed_string_resize_dialog,
+};
+use self::events::{handle_file_watch_events, handle_term_events, schedule_preview_debounce};
+use self::reload::reload_current_file;
+use self::update::check_for_available_update;
 use super::state::{ChartPreviewKey, HeatmapLoadedPage, HeatmapRenderKey, ImageLoadKey};
 use super::{
-    command::{execute_command, parse_command_text, CommandState, StartupCommand},
-    command_view::render_command_dialog,
-    help::{centered_rect, render_help},
-    image_preview::{
+    command::{
+        execute_command, parse_command_text, render_command_dialog, CommandState, StartupCommand,
+    },
+    help::render_help,
+    input::handle_input_event,
+    main_display::render_main_display,
+    preview::image::{
         handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
         ImageResizeResult,
     },
-    input::handle_input_event,
-    main_display::render_main_display,
-    state::{
-        self, AppState, AttributeCursor, ContentShowMode, FixedStringOverflowChoice, Focus,
-        ImgState, LastFocused, MatrixViewState, Mode,
-    },
+    state::{self, AppState, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState, Mode},
     tree_view::render_tree,
 };
 
-fn primary_text_style() -> Style {
+mod config;
+mod dialogs;
+mod events;
+mod reload;
+mod update;
+
+pub(super) fn primary_text_style() -> Style {
     let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
     if configure::prefers_strong_text() {
         style = style.bold();
@@ -106,495 +114,6 @@ pub struct IntendedMainLoopBreak {}
 
 const HEADER_HEIGHT: u16 = 1;
 const COMMAND_BAR_HEIGHT: u16 = 6;
-const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct UpdateCheckCache {
-    current_version: String,
-    checked_at_unix_secs: u64,
-    available_version: Option<String>,
-}
-
-fn is_crostini_env(cros_container: Option<&str>) -> bool {
-    cros_container.map(str::trim).is_some_and(|value| {
-        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
-    })
-}
-
-fn should_use_alternate_screen(
-    runtime_config: RuntimeConfig,
-    cros_container: Option<&str>,
-) -> bool {
-    runtime_config.terminal_graphics || !is_crostini_env(cros_container)
-}
-
-fn update_check_cache_path() -> Option<PathBuf> {
-    dirs::cache_dir().map(|path| path.join("h5v").join("update-check.json"))
-}
-
-fn parse_update_check_cache(value: Value) -> Option<UpdateCheckCache> {
-    let object = value.as_object()?;
-    Some(UpdateCheckCache {
-        current_version: object.get("current_version")?.as_str()?.to_string(),
-        checked_at_unix_secs: object.get("checked_at_unix_secs")?.as_u64()?,
-        available_version: object
-            .get("available_version")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-    })
-}
-
-fn load_update_check_cache(path: &Path) -> Option<UpdateCheckCache> {
-    let contents = fs::read_to_string(path).ok()?;
-    let value = serde_json::from_str(&contents).ok()?;
-    parse_update_check_cache(value)
-}
-
-fn write_update_check_cache(path: &Path, cache: &UpdateCheckCache) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let contents = serde_json::to_string(&json!({
-        "current_version": cache.current_version,
-        "checked_at_unix_secs": cache.checked_at_unix_secs,
-        "available_version": cache.available_version,
-    }))
-    .map_err(std::io::Error::other)?;
-    fs::write(path, contents)
-}
-
-fn update_check_cache_is_fresh(
-    cache: &UpdateCheckCache,
-    current_version: &str,
-    now: SystemTime,
-) -> bool {
-    if cache.current_version != current_version {
-        return false;
-    }
-    let now_unix_secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    now_unix_secs.saturating_sub(cache.checked_at_unix_secs) < UPDATE_CHECK_INTERVAL.as_secs()
-}
-
-fn fetch_latest_h5v_version() -> std::result::Result<Option<String>, String> {
-    let informer =
-        update_informer::new(registry::Crates, "h5v", GIT_VERSION_SHORT).interval(Duration::ZERO);
-    informer
-        .check_version()
-        .map(|version| version.map(|version| version.to_string()))
-        .map_err(|error| error.to_string())
-}
-
-fn resolve_available_update<F>(
-    cache_path: Option<&Path>,
-    current_version: &str,
-    now: SystemTime,
-    fetch_latest: F,
-) -> Option<String>
-where
-    F: FnOnce() -> std::result::Result<Option<String>, String>,
-{
-    let existing_cache = cache_path.and_then(load_update_check_cache);
-    if let Some(cache) = existing_cache.as_ref() {
-        if update_check_cache_is_fresh(cache, current_version, now) {
-            return cache.available_version.clone();
-        }
-    }
-
-    let fallback_version = existing_cache
-        .as_ref()
-        .filter(|cache| cache.current_version == current_version)
-        .and_then(|cache| cache.available_version.clone());
-    let available_version = match fetch_latest() {
-        Ok(version) => version,
-        Err(error) => {
-            log_error(format!("Update check failed: {error}"));
-            fallback_version
-        }
-    };
-
-    if let Some(cache_path) = cache_path {
-        let checked_at_unix_secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        let cache = UpdateCheckCache {
-            current_version: current_version.to_string(),
-            checked_at_unix_secs,
-            available_version: available_version.clone(),
-        };
-        if let Err(error) = write_update_check_cache(cache_path, &cache) {
-            log_error(format!(
-                "Failed to write update-check cache '{}': {error}",
-                cache_path.display()
-            ));
-        }
-    }
-
-    available_version
-}
-
-fn check_for_available_update(now: SystemTime) -> Option<String> {
-    resolve_available_update(
-        update_check_cache_path().as_deref(),
-        GIT_VERSION_SHORT,
-        now,
-        fetch_latest_h5v_version,
-    )
-}
-
-#[derive(Clone)]
-struct SelectedNodeSnapshot {
-    path: String,
-    selected_dim: usize,
-    selected_x: usize,
-    selected_row: usize,
-    selected_col: usize,
-    line_offset: usize,
-    col_offset: isize,
-    selected_indexes: Vec<usize>,
-    attributes_view_cursor: AttributeCursor,
-}
-
-#[derive(Clone)]
-struct ReloadSnapshot {
-    root_selected: bool,
-    selected_path: Option<String>,
-    expanded_paths: Vec<String>,
-    selected_node: Option<SelectedNodeSnapshot>,
-    focus: Focus,
-    show_tree_view: bool,
-    content_mode: ContentShowMode,
-    segment_state: state::SegmentState,
-    matrix_view_state: MatrixViewState,
-    img_idx_to_load: i32,
-}
-
-fn normalized_node_path(path: &str) -> &str {
-    path.trim_start_matches('/')
-}
-
-fn same_node_path(lhs: &str, rhs: &str) -> bool {
-    normalized_node_path(lhs) == normalized_node_path(rhs)
-}
-
-fn collect_expanded_paths(node: &Rc<std::cell::RefCell<h5f::H5FNode>>, out: &mut Vec<String>) {
-    let node_ref = node.borrow();
-    for child in &node_ref.children {
-        let child_ref = child.borrow();
-        if child_ref.is_expandable() && child_ref.expanded {
-            out.push(child_ref.node.path());
-        }
-        drop(child_ref);
-        collect_expanded_paths(child, out);
-    }
-}
-
-fn snapshot_selected_node(state: &AppState<'_>) -> Option<SelectedNodeSnapshot> {
-    let tree_item = state.treeview.get(state.tree_view_cursor)?;
-    let node = tree_item.node.borrow();
-    Some(SelectedNodeSnapshot {
-        path: node.node.path(),
-        selected_dim: node.selected_dim,
-        selected_x: node.selected_x,
-        selected_row: node.selected_row,
-        selected_col: node.selected_col,
-        line_offset: node.line_offset,
-        col_offset: node.col_offset,
-        selected_indexes: node.selected_indexes.clone(),
-        attributes_view_cursor: node.attributes_view_cursor.clone(),
-    })
-}
-
-fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
-    let mut expanded_paths = Vec::new();
-    collect_expanded_paths(&state.root, &mut expanded_paths);
-    expanded_paths.sort_by_key(|path| normalized_node_path(path).matches('/').count());
-
-    ReloadSnapshot {
-        root_selected: state.tree_view_cursor == 0,
-        selected_path: state.selected_tree_path(),
-        expanded_paths,
-        selected_node: snapshot_selected_node(state),
-        focus: state.focus.clone(),
-        show_tree_view: state.show_tree_view,
-        content_mode: state.content_mode,
-        segment_state: state.segment_state.clone(),
-        matrix_view_state: state.matrix_view_state.clone(),
-        img_idx_to_load: state.img_state.idx_to_load,
-    }
-}
-
-fn restore_tree_selection(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
-    if snapshot.root_selected {
-        state.tree_view_cursor = 0;
-        return;
-    }
-
-    let Some(selected_path) = snapshot.selected_path.as_deref() else {
-        state.tree_view_cursor = 0;
-        return;
-    };
-
-    if let Some((idx, _)) = state
-        .treeview
-        .iter()
-        .enumerate()
-        .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), selected_path))
-    {
-        state.tree_view_cursor = idx;
-        return;
-    }
-
-    let mut fallback = selected_path.to_string();
-    while let Some((prefix, _)) = normalized_node_path(&fallback).rsplit_once('/') {
-        if prefix.is_empty() {
-            break;
-        }
-        fallback = prefix.to_string();
-        if let Some((idx, _)) = state
-            .treeview
-            .iter()
-            .enumerate()
-            .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), &fallback))
-        {
-            state.tree_view_cursor = idx;
-            return;
-        }
-    }
-
-    state.tree_view_cursor = 0;
-}
-
-fn restore_selected_node_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
-    let Some(selected_snapshot) = snapshot.selected_node.as_ref() else {
-        return;
-    };
-    let Some(tree_item) = state.treeview.get(state.tree_view_cursor) else {
-        return;
-    };
-    if !same_node_path(
-        &tree_item.node.borrow().node.path(),
-        &selected_snapshot.path,
-    ) {
-        return;
-    }
-
-    let mut node = tree_item.node.borrow_mut();
-    let shape = match &node.node {
-        Node::Dataset(_, meta) => meta.shape.clone(),
-        _ => Vec::new(),
-    };
-    let rank = shape.len();
-    node.sync_selection_rank(rank);
-    for ((dst, src), dim_len) in node
-        .selected_indexes
-        .iter_mut()
-        .zip(selected_snapshot.selected_indexes.iter().copied())
-        .zip(shape.iter().copied())
-    {
-        *dst = src.min(dim_len.saturating_sub(1));
-    }
-    node.selected_dim = node.selected_dim.min(rank.saturating_sub(1));
-    node.selected_x = selected_snapshot.selected_x.min(rank.saturating_sub(1));
-    node.selected_row = selected_snapshot.selected_row.min(rank.saturating_sub(1));
-    node.selected_col = if rank > 1 {
-        selected_snapshot.selected_col.min(rank.saturating_sub(1))
-    } else {
-        0
-    };
-    node.selected_dim = selected_snapshot.selected_dim.min(rank.saturating_sub(1));
-    node.line_offset = selected_snapshot.line_offset;
-    node.col_offset = selected_snapshot.col_offset.max(0);
-    node.attributes_view_cursor = selected_snapshot.attributes_view_cursor.clone();
-}
-
-fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
-    state.clear_preview_debounce();
-    state.segment_state = snapshot.segment_state.clone();
-    state.matrix_view_state = snapshot.matrix_view_state.clone();
-    state.img_state.protocol = None;
-    state.img_state.clipboard_image = None;
-    state.img_state.ds = None;
-    state.img_state.current_key = None;
-    state.img_state.window = None;
-    state.img_state.idx_loaded = -1;
-    state.img_state.idx_to_load = snapshot.img_idx_to_load;
-    state.img_state.error = None;
-    state.chart_preview_state.ds_loaded = None;
-    state.chart_preview_state.protocol = None;
-    state.chart_preview_state.clipboard_image = None;
-    state.chart_preview_state.error = None;
-    state.chart_preview_state.ds_selection = None;
-    state.heatmap_viewport_region = None;
-    state.heatmap_region = None;
-    state.heatmap_render.current_key = None;
-    state.heatmap_render.current_selection = None;
-    state.heatmap_render.current_slice_summary = None;
-    state.heatmap_render.viewport = None;
-    state.heatmap_render.selected_cells = None;
-    state.heatmap_render.drag_state = None;
-    state.heatmap_render.segment = None;
-    state.heatmap_render.cached_pages.clear();
-    state.heatmap_render.pending_keys.clear();
-}
-
-fn placeholder_root(path: &str) -> Rc<std::cell::RefCell<h5f::H5FNode>> {
-    Rc::new(std::cell::RefCell::new(h5f::H5FNode::new(Node::Broken(
-        NodeType::Group,
-        path.to_string(),
-        String::new(),
-    ))))
-}
-
-fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> {
-    let snapshot = snapshot_reload_state(state);
-    let file_path = state.file_watch.path.clone();
-    let linked = state.file_watch.linked;
-    let previous_write = !state.readonly;
-
-    clear_preview_state(state, &snapshot);
-    state.treeview.clear();
-    state.searcher = None;
-    let old_root = std::mem::replace(&mut state.root, placeholder_root(&file_path));
-    let old_file = state.file.take();
-    drop(old_root);
-    if let Some(old_file) = old_file {
-        old_file.close().map_err(|e| {
-            AppError::Hdf5(hdf5_metno::Error::from(format!(
-                "Failed to close HDF5 file '{}' before reload: {}",
-                file_path, e
-            )))
-        })?;
-    }
-
-    let reopened = match h5f::H5F::open(file_path.clone(), linked, write) {
-        Ok(reopened) => reopened,
-        Err(target_error) => {
-            let fallback = h5f::H5F::open(file_path.clone(), linked, previous_write).map_err(
-                |fallback_error| {
-                    AppError::Hdf5(hdf5_metno::Error::from(format!(
-                        "Failed to reopen HDF5 file '{}' in {:?} mode after reload error (reload error: {}; fallback error: {})",
-                        file_path,
-                        if previous_write { "write" } else { "read-only" },
-                        target_error,
-                        fallback_error
-                    )))
-                },
-            )?;
-            state.file = Some(fallback.file);
-            state.root = fallback.root;
-            state.readonly = !previous_write;
-            state.focus = snapshot.focus.clone();
-            state.show_tree_view = snapshot.show_tree_view;
-            state.content_mode = snapshot.content_mode;
-            for path in &snapshot.expanded_paths {
-                let relative = normalized_node_path(path);
-                if relative.is_empty() {
-                    continue;
-                }
-                let _ = state.root.borrow_mut().expand_path(relative);
-            }
-            state.compute_tree_view();
-            restore_tree_selection(state, &snapshot);
-            restore_selected_node_state(state, &snapshot);
-            state.compute_tree_view();
-            restore_tree_selection(state, &snapshot);
-            state.sync_file_watch();
-            return Err(AppError::Hdf5(hdf5_metno::Error::from(format!(
-                "Failed to reopen HDF5 file '{}' in {} mode: {}",
-                file_path,
-                if write { "write" } else { "read-only" },
-                target_error
-            ))));
-        }
-    };
-
-    state.file = Some(reopened.file);
-    state.root = reopened.root;
-    state.readonly = !write;
-    state.focus = snapshot.focus.clone();
-    state.show_tree_view = snapshot.show_tree_view;
-    state.content_mode = snapshot.content_mode;
-
-    for path in &snapshot.expanded_paths {
-        let relative = normalized_node_path(path);
-        if relative.is_empty() {
-            continue;
-        }
-        let _ = state.root.borrow_mut().expand_path(relative);
-    }
-
-    state.compute_tree_view();
-    restore_tree_selection(state, &snapshot);
-    restore_selected_node_state(state, &snapshot);
-    state.compute_tree_view();
-    restore_tree_selection(state, &snapshot);
-    state.sync_file_watch();
-
-    Ok(if write {
-        "Reloaded file in write mode".to_string()
-    } else {
-        "Reloaded file".to_string()
-    })
-}
-
-fn configuration_warning_message(error: &impl std::fmt::Display, keeping_previous: bool) -> String {
-    if keeping_previous {
-        format!("Configuration warning: {error}. Keeping previous settings.")
-    } else {
-        format!("Configuration warning: {error}. Using built-in settings.")
-    }
-}
-
-fn open_configuration_and_reload(
-    state: &mut AppState<'_>,
-    tx_events: Sender<AppEvent>,
-    reset: bool,
-) -> Result<AppToast> {
-    let config_path = if reset {
-        reset_config_path()?
-    } else {
-        let config_path = ensure_config_path()?;
-        state.editing = true;
-        let edit_result = edit_existing_file(state, &config_path);
-        state.editing = false;
-        edit_result?;
-        config_path
-    };
-
-    if let Err(error) = run_lua_engine(tx_events, state.compatibility_mode) {
-        log_configuration_error(&error);
-        let message = configuration_warning_message(&error, true);
-        state.configuration_warning = Some(message.clone());
-        return Ok(AppToast::Warning(message));
-    }
-    if let Ok(Some(compatibility_mode)) =
-        configure::load_config_compatibility(state.compatibility_mode)
-    {
-        state.compatibility_mode = compatibility_mode;
-        if compatibility_mode {
-            state.image_protocol_enabled = false;
-        }
-    }
-    state.configuration_warning = None;
-    if let Some(preferred_mode) = configure::current_content_mode_order().first().copied() {
-        state.content_mode = preferred_mode;
-    }
-    state.sync_heatmap_configuration();
-    state.compute_tree_view();
-    let config_path = config_path.display();
-    if reset {
-        Ok(AppToast::Info(format!(
-            "Reset configuration to default at {config_path}"
-        )))
-    } else {
-        Ok(AppToast::Info(format!(
-            "Reloaded configuration from {config_path}"
-        )))
-    }
-}
-
-fn log_configuration_error(error: &impl std::fmt::Display) {
-    log_error(format!("Configuration error: {error}\n"));
-}
-
 pub fn init(
     filename: String,
     link: bool,
@@ -1297,34 +816,6 @@ pub enum AppEvent {
     FileChanged,
 }
 
-fn schedule_preview_debounce(tx_events: Sender<AppEvent>, generation: u64) {
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(95));
-        let _ = tx_events.send(AppEvent::PreviewDebounceExpired(generation));
-    });
-}
-
-fn handle_file_watch_events(tx_events: Sender<AppEvent>, path: String) {
-    thread::spawn(move || {
-        let mut last_modified = fs::metadata(&path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        loop {
-            thread::sleep(Duration::from_millis(500));
-            let current_modified = fs::metadata(&path)
-                .ok()
-                .and_then(|metadata| metadata.modified().ok());
-            if current_modified == last_modified {
-                continue;
-            }
-            last_modified = current_modified;
-            if tx_events.send(AppEvent::FileChanged).is_err() {
-                return;
-            }
-        }
-    });
-}
-
 #[allow(clippy::large_enum_variant)]
 pub enum ImageLoadedResult {
     Success {
@@ -1549,26 +1040,6 @@ fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
     }
 }
 
-fn handle_term_events(tx_events: Sender<AppEvent>, paused: Arc<RwLock<()>>) {
-    thread::spawn(move || loop {
-        if event::poll(std::time::Duration::from_millis(16)).is_ok() {
-            let Ok(pause) = paused.read() else {
-                tx_events
-                    .send(AppEvent::TermEvent(event::Event::Resize(0, 0)))
-                    .unwrap_or_else(log_error);
-                return;
-            };
-            drop(pause);
-            if let Ok(event) = event::read() {
-                match tx_events.send(AppEvent::TermEvent(event)) {
-                    Ok(_) => {}
-                    Err(e) => log_error(e),
-                }
-            }
-        }
-    });
-}
-
 fn render_error(frame: &mut Frame<'_>, error: &str) {
     let error_text = Text::from(error);
     let error_paragraph = Paragraph::new(error_text)
@@ -1591,352 +1062,17 @@ fn render_error(frame: &mut Frame<'_>, error: &str) {
     frame.render_widget(error_paragraph, frame.area());
 }
 
-fn render_attribute_create_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
-    let Some(dialog) = state.attribute_create_dialog.as_ref() else {
-        return;
-    };
-
-    let popup = centered_rect(area, 84, 13);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Block::default()
-            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3))),
-        popup,
-    );
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(configure::configured_symbol(|symbols| {
-            symbols.title.create_attribute
-        }))
-        .title_alignment(Alignment::Center)
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));
-    frame.render_widget(block, popup);
-
-    let inner = popup.inner(Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(2),
-        Constraint::Length(1),
-        Constraint::Length(2),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(inner);
-
-    frame.render_widget(
-        Paragraph::new("Tab/Shift-Tab switch fields, Left/Right changes type, Enter creates")
-            .style(Style::default().fg(configure::themed_color(|colors| colors.text.type_desc))),
-        rows[0],
-    );
-
-    let active_style = Style::default()
-        .fg(configure::themed_color(|colors| colors.accent.selection_fg))
-        .bg(configure::themed_color(|colors| colors.accent.selection_bg))
-        .bold();
-    let idle_style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
-    let name_style = if dialog.active_field == state::AttributeCreateField::Name {
-        active_style
-    } else {
-        idle_style
-    };
-    let type_style = if dialog.active_field == state::AttributeCreateField::Type {
-        active_style
-    } else {
-        idle_style
-    };
-    let value_style = if dialog.active_field == state::AttributeCreateField::Value {
-        active_style
-    } else {
-        idle_style
-    };
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Name: ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(dialog.name.clone(), name_style),
-        ])),
-        rows[1],
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Type: ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(
-                format!(
-                    "< {} >  ({})",
-                    dialog.attr_type.label(),
-                    dialog.attr_type.description()
-                ),
-                type_style,
-            ),
-        ])),
-        rows[2],
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Value: ",
-                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
-            ),
-            Span::styled(dialog.value.clone(), value_style),
-        ]))
-        .wrap(Wrap { trim: false }),
-        rows[3],
-    );
-    frame.render_widget(
-        Paragraph::new("Types: bool, i64, u64, f64, string, ascii")
-            .style(Style::default().fg(configure::themed_color(|colors| colors.text.type_desc))),
-        rows[5],
-    );
-
-    match dialog.active_field {
-        state::AttributeCreateField::Name => frame.set_cursor_position(
-            ratatui::layout::Position::new(rows[1].x + 6 + dialog.name_cursor as u16, rows[1].y),
-        ),
-        state::AttributeCreateField::Type => {}
-        state::AttributeCreateField::Value => frame.set_cursor_position(
-            ratatui::layout::Position::new(rows[3].x + 7 + dialog.value_cursor as u16, rows[3].y),
-        ),
-    }
-}
-
-fn render_attribute_delete_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
-    let Some(dialog) = state.attribute_delete_dialog.as_ref() else {
-        return;
-    };
-
-    let popup = centered_rect(area, 64, 9);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Block::default()
-            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3))),
-        popup,
-    );
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(configure::configured_symbol(|symbols| {
-            symbols.title.delete_attribute
-        }))
-        .title_alignment(Alignment::Center)
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));
-    frame.render_widget(block, popup);
-
-    let inner = popup.inner(Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-    let rows = Layout::vertical([Constraint::Length(2), Constraint::Length(1)]).split(inner);
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Delete attribute '{}'?\nPress Enter to confirm or Esc to cancel.",
-            dialog.attr_name
-        ))
-        .style(primary_text_style())
-        .wrap(Wrap { trim: true }),
-        rows[0],
-    );
-}
-
-fn render_fixed_string_overflow_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
-    let Some(dialog) = state.fixed_string_overflow_dialog.as_ref() else {
-        return;
-    };
-
-    let popup = centered_rect(area, 72, 12);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Block::default()
-            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3))),
-        popup,
-    );
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(configure::configured_symbol(|symbols| {
-            symbols.title.fixed_string_overflow
-        }))
-        .title_alignment(Alignment::Center)
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));
-    let inner = popup.inner(Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-    frame.render_widget(block, popup);
-
-    let rows = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(3),
-    ])
-    .split(inner);
-
-    let message = Paragraph::new(format!(
-        "{} needs {} bytes, current fixed size is {} bytes.",
-        dialog.overflow.kind, dialog.overflow.required_size, dialog.overflow.current_size
-    ))
-    .style(primary_text_style())
-    .wrap(Wrap { trim: true });
-    frame.render_widget(message, rows[0]);
-
-    let choices = [
-        (FixedStringOverflowChoice::Cancel, "Cancel"),
-        (FixedStringOverflowChoice::ChangeToVarLen, "Change to Vlen"),
-        (FixedStringOverflowChoice::ChangeSize, "Change size"),
-    ]
-    .into_iter()
-    .map(|(choice, label)| {
-        let style = if dialog.selected_choice == choice {
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.accent.selection_fg))
-                .bg(configure::themed_color(|colors| colors.accent.selection_bg))
-                .bold()
-        } else {
-            Style::default().fg(configure::themed_color(|colors| colors.text.primary))
-        };
-        Span::styled(format!(" {label} "), style)
-    })
-    .collect::<Vec<_>>();
-    frame.render_widget(
-        Paragraph::new(Line::from(choices))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: false }),
-        rows[2],
-    );
-}
-
-fn render_fixed_string_resize_dialog(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
-    let Some(dialog) = state.fixed_string_overflow_dialog.as_ref() else {
-        return;
-    };
-
-    let popup = centered_rect(area, 56, 10);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Block::default()
-            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg_val3))),
-        popup,
-    );
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(configure::configured_symbol(|symbols| {
-            symbols.title.fixed_string_resize
-        }))
-        .title_alignment(Alignment::Center)
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)));
-    frame.render_widget(block, popup);
-
-    let inner = popup.inner(Margin {
-        horizontal: 2,
-        vertical: 1,
-    });
-    let rows = Layout::vertical([Constraint::Length(2), Constraint::Length(1)]).split(inner);
-
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Enter new byte size (minimum {}).",
-            dialog.overflow.required_size
-        ))
-        .style(primary_text_style()),
-        rows[0],
-    );
-    frame.render_widget(
-        Paragraph::new(format!("> {}", dialog.size_input)).style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.text.primary))
-                .bold(),
-        ),
-        rows[1],
-    );
-    frame.set_cursor_position(ratatui::layout::Position::new(
-        rows[1].x + 2 + dialog.size_input.len() as u16,
-        rows[1].y,
-    ));
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        configuration_warning_message, is_crostini_env, resolve_available_update,
-        should_use_alternate_screen, update_check_cache_is_fresh, write_update_check_cache,
-        RuntimeConfig, UpdateCheckCache, UPDATE_CHECK_INTERVAL,
+    use super::update::{
+        resolve_available_update, update_check_cache_is_fresh, write_update_check_cache,
+        UpdateCheckCache, UPDATE_CHECK_INTERVAL,
     };
     use std::{
         cell::Cell,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
     use tempfile::tempdir;
-
-    #[test]
-    fn detects_crostini_from_cros_container() {
-        assert!(is_crostini_env(Some("1")));
-        assert!(is_crostini_env(Some("penguin")));
-    }
-
-    #[test]
-    fn ignores_empty_or_false_cros_container() {
-        assert!(!is_crostini_env(None));
-        assert!(!is_crostini_env(Some("")));
-        assert!(!is_crostini_env(Some("0")));
-        assert!(!is_crostini_env(Some("false")));
-    }
-
-    #[test]
-    fn keeps_alternate_screen_without_safe_flag() {
-        assert!(should_use_alternate_screen(
-            RuntimeConfig::default(),
-            Some("1")
-        ));
-    }
-
-    #[test]
-    fn disables_alternate_screen_for_crostini_safe_mode() {
-        assert!(!should_use_alternate_screen(
-            RuntimeConfig {
-                compatibility_mode: true,
-                terminal_graphics: false,
-            },
-            Some("1"),
-        ));
-    }
-
-    #[test]
-    fn formats_configuration_warning_by_context() {
-        assert_eq!(
-            configuration_warning_message(&"bad config", true),
-            "Configuration warning: bad config. Keeping previous settings."
-        );
-        assert_eq!(
-            configuration_warning_message(&"bad config", false),
-            "Configuration warning: bad config. Using built-in settings."
-        );
-    }
 
     #[test]
     fn uses_fresh_cached_update_without_fetching() {

@@ -5,7 +5,7 @@ use crate::{
     data::MatrixTable,
     error::AppError,
     h5f::{read_projected_values_2d, DatasetMeta},
-    sprint_typedesc::MatrixRenderType,
+    ui::render::MatrixRenderType,
     ui::state::{
         HeatmapLoadedPage, HeatmapRenderKey, HeatmapSegmentAxis, HeatmapSliceSummary,
         HeatmapViewport,
