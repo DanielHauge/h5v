@@ -1,81 +1,21 @@
 use std::sync::mpsc::Sender;
 
-use mlua::{Lua, Table, Value};
+use mlua::{Table, Value};
 
 use crate::{
-    configure::{self, current_content_mode_order, SymbolThemeName, ThemeName},
-    ui::{
-        app::AppEvent,
-        state::{AppToast, ContentShowMode},
-    },
+    configure::{self, SymbolThemeName, ThemeName},
+    ui::{app::AppEvent, state::ContentShowMode},
 };
 
-use super::{errors::ConfigureErrors, loading};
+use super::errors::ConfigureErrors;
+mod bootstrap;
 mod heatmap;
 mod keymaps;
 mod themes;
-use heatmap::{build_heatmap_table, parse_heatmap_config};
+use bootstrap::{default_symbol_theme_for_compatibility, execute_config_chunk, prepare_lua_config};
+use heatmap::parse_heatmap_config;
 pub use keymaps::with_keymap_lua_callback;
-use keymaps::{
-    build_action_constants_table, build_keymaps_table, build_mode_constants_table,
-    parse_keymaps_config, store_keymap_lua_runtime,
-};
-use themes::{build_empty_nested_table, build_symbol_theme_table, build_theme_table};
-
-fn default_symbol_theme_for_compatibility(compatibility: bool) -> SymbolThemeName {
-    if compatibility {
-        SymbolThemeName::Compatibility
-    } else {
-        SymbolThemeName::Rich
-    }
-}
-
-fn build_h5v_table(
-    lua: &Lua,
-    events: Option<Sender<AppEvent>>,
-    default_compatibility: bool,
-) -> Result<Table, ConfigureErrors> {
-    let h5v = lua.create_table()?;
-
-    let log_fn = match events {
-        Some(events) => lua.create_function(move |_, msg: String| {
-            let _ = events.send(AppEvent::Toast(AppToast::Info(msg)));
-            Ok(())
-        })?,
-        None => lua.create_function(|_, _: String| Ok(()))?,
-    };
-
-    h5v.set("log", log_fn)?;
-    h5v.set("compatibility", default_compatibility)?;
-    h5v.set("theme", ThemeName::Dark.as_str())?;
-    h5v.set(
-        "content_mode_order",
-        lua.create_sequence_from(
-            current_content_mode_order()
-                .into_iter()
-                .map(ContentShowMode::as_str),
-        )?,
-    )?;
-    h5v.set(
-        "symbol_theme",
-        default_symbol_theme_for_compatibility(default_compatibility).as_str(),
-    )?;
-    h5v.set(
-        "colors",
-        build_empty_nested_table(lua, configure::available_color_names().iter().copied())?,
-    )?;
-    h5v.set(
-        "symbols",
-        build_empty_nested_table(lua, configure::available_symbol_names().iter().copied())?,
-    )?;
-    h5v.set("themes", build_theme_table(lua)?)?;
-    h5v.set("symbol_themes", build_symbol_theme_table(lua)?)?;
-    h5v.set("heatmap", build_heatmap_table(lua)?)?;
-    h5v.set("modes", build_mode_constants_table(lua)?)?;
-    h5v.set("actions", build_action_constants_table(lua)?)?;
-    h5v.set("keymaps", build_keymaps_table(lua)?)?;
-    Ok(h5v)
-}
+use keymaps::{parse_keymaps_config, store_keymap_lua_runtime};
 
 fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureErrors> {
     match h5v.get::<Value>("compatibility")? {
@@ -128,23 +68,14 @@ fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>,
     }
 }
 
-fn execute_config_chunk(lua: &Lua, chunk_name: &str, config: &str) -> Result<(), ConfigureErrors> {
-    lua.load(config).set_name(chunk_name).exec()?;
-    Ok(())
-}
-
 pub fn load_config_compatibility(
     default_compatibility: bool,
 ) -> Result<Option<bool>, ConfigureErrors> {
-    let lua = Lua::new();
-    let h5v = build_h5v_table(&lua, None, default_compatibility)?;
-    lua.globals().set("h5v", h5v.clone())?;
-    lua.globals().set("h5v_modes", h5v.get::<Table>("modes")?)?;
-    lua.globals()
-        .set("h5v_actions", h5v.get::<Table>("actions")?)?;
-    let config_path = loading::config_path()?;
-    let chunk_name = format!("@{}", config_path.display());
-    let config = loading::load_or_create_config()?;
+    let prepared = prepare_lua_config(None, default_compatibility)?;
+    let lua = prepared.lua;
+    let h5v = prepared.h5v;
+    let chunk_name = prepared.chunk_name;
+    let config = prepared.config;
     execute_config_chunk(&lua, &chunk_name, &config)?;
     parse_compatibility_override(&h5v)
 }
@@ -153,15 +84,11 @@ pub fn run_lua_engine(
     events: Sender<AppEvent>,
     default_compatibility: bool,
 ) -> Result<(), ConfigureErrors> {
-    let lua = Lua::new();
-    let h5v = build_h5v_table(&lua, Some(events), default_compatibility)?;
-    lua.globals().set("h5v", h5v.clone())?;
-    lua.globals().set("h5v_modes", h5v.get::<Table>("modes")?)?;
-    lua.globals()
-        .set("h5v_actions", h5v.get::<Table>("actions")?)?;
-    let config_path = loading::config_path()?;
-    let chunk_name = format!("@{}", config_path.display());
-    let config = loading::load_or_create_config()?;
+    let prepared = prepare_lua_config(Some(events), default_compatibility)?;
+    let lua = prepared.lua;
+    let h5v = prepared.h5v;
+    let chunk_name = prepared.chunk_name;
+    let config = prepared.config;
     let previous_config = configure::snapshot_config();
 
     configure::reset_config(ThemeName::Dark);
@@ -343,9 +270,11 @@ fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Con
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        apply_lua_config, build_h5v_table, build_symbol_theme_table, build_theme_table,
-        execute_config_chunk, parse_compatibility_override, parse_content_mode_order,
-        parse_heatmap_config,
+        apply_lua_config,
+        bootstrap::{build_h5v_table, execute_config_chunk},
+        heatmap::parse_heatmap_config,
+        parse_compatibility_override, parse_content_mode_order,
+        themes::{build_symbol_theme_table, build_theme_table},
     };
     use crate::configure::{
         self, configured_symbol, current_content_mode_order, current_heatmap_default_settings,

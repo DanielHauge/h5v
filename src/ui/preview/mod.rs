@@ -1,5 +1,6 @@
 pub mod chart;
 pub mod image;
+mod pipeline;
 
 use std::{fs, path::Path, time::SystemTime};
 

@@ -108,6 +108,240 @@ impl ExpressionPromptState {
     }
 }
 
+impl MultiChartState {
+    pub fn open_expression_prompt(&mut self) {
+        let buffer = String::new();
+        let cursor = buffer.len();
+        self.expression_prompt = Some(ExpressionPromptState::new(
+            buffer,
+            cursor,
+            ExpressionPromptMode::New,
+        ));
+        self.modified = true;
+    }
+
+    pub fn open_selected_item_for_edit(&mut self) -> Result<(), String> {
+        let selected = self
+            .selected_item()
+            .ok_or_else(|| "No chart item selected".to_string())?;
+        let buffer = selected.editable_expression().ok_or_else(|| {
+            format!(
+                "Selected series ${} cannot be edited as an expression",
+                selected.id.0
+            )
+        })?;
+        let cursor = buffer.len();
+        self.expression_prompt = Some(ExpressionPromptState::new(
+            buffer,
+            cursor,
+            ExpressionPromptMode::EditExisting(selected.id),
+        ));
+        self.modified = true;
+        Ok(())
+    }
+
+    pub fn close_expression_prompt(&mut self) {
+        self.expression_prompt = None;
+        self.modified = true;
+    }
+
+    pub fn expression_insert_char(&mut self, ch: char) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.buffer.insert(prompt.cursor, ch);
+            prompt.cursor += 1;
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_backspace(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor > 0 {
+                prompt.cursor -= 1;
+                prompt.buffer.remove(prompt.cursor);
+                prompt.selected_suggestion = None;
+            }
+        }
+    }
+
+    pub fn expression_delete(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor < prompt.buffer.len() {
+                prompt.buffer.remove(prompt.cursor);
+                prompt.selected_suggestion = None;
+            }
+        }
+    }
+
+    pub fn expression_move_left(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor > 0 {
+                prompt.cursor -= 1;
+            }
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_move_right(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.cursor < prompt.buffer.len() {
+                prompt.cursor += 1;
+            }
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_move_to_start(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.cursor = 0;
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_move_to_end(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.cursor = prompt.buffer.len();
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_clear(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.buffer.clear();
+            prompt.cursor = 0;
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_select_next_suggestion(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if !prompt.suggestions.is_empty() {
+                let visible = prompt
+                    .suggestions
+                    .len()
+                    .min(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS);
+                prompt.selected_suggestion = Some(match prompt.selected_suggestion {
+                    Some(selected) => (selected + 1) % visible,
+                    None => 0,
+                });
+            }
+        }
+    }
+
+    pub fn expression_select_prev_suggestion(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if !prompt.suggestions.is_empty() {
+                let visible = prompt
+                    .suggestions
+                    .len()
+                    .min(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS);
+                prompt.selected_suggestion = Some(match prompt.selected_suggestion {
+                    Some(0) | None => visible - 1,
+                    Some(selected) => selected - 1,
+                });
+            }
+        }
+    }
+
+    pub fn expression_deselect_suggestion(&mut self) -> bool {
+        let Some(prompt) = self.expression_prompt.as_mut() else {
+            return false;
+        };
+        prompt.selected_suggestion.take().is_some()
+    }
+
+    pub fn expression_has_selected_suggestion(&self) -> bool {
+        self.expression_prompt
+            .as_ref()
+            .and_then(|prompt| prompt.selected_suggestion)
+            .is_some()
+    }
+
+    pub fn expression_apply_selected_suggestion(&mut self) -> bool {
+        let Some(prompt) = self.expression_prompt.as_mut() else {
+            return false;
+        };
+        let Some((start, end, suggestion)) = current_expression_completion(prompt)
+            .map(|(start, end, _, suggestion)| (start, end, suggestion.clone()))
+        else {
+            return false;
+        };
+        prompt
+            .buffer
+            .replace_range(start..end, &suggestion.insert_text);
+        prompt.cursor = start + suggestion.insert_text.len();
+        prompt.selected_suggestion = None;
+        true
+    }
+
+    pub fn refresh_expression_prompt(&mut self, file: Option<&File>) {
+        let Some((buffer, cursor, selected_suggestion)) =
+            self.expression_prompt.as_ref().map(|prompt| {
+                (
+                    prompt.buffer.clone(),
+                    prompt.cursor,
+                    prompt.selected_suggestion,
+                )
+            })
+        else {
+            return;
+        };
+        let messages = expression_prompt_messages(self, file, &buffer);
+        let suggestions = expression_prompt_suggestions(self, file, &buffer, cursor);
+        let input_segments = expression_prompt_input_segments(self, file, &buffer);
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.messages = messages;
+            prompt.suggestions = suggestions;
+            prompt.selected_suggestion =
+                selected_suggestion.filter(|selected| *selected < prompt.suggestions.len());
+            prompt.input_segments = input_segments;
+        }
+    }
+
+    pub fn submit_expression_prompt(&mut self, file: Option<&File>) -> Result<(), String> {
+        let (expression, mode) = self
+            .expression_prompt
+            .as_ref()
+            .map(|prompt| (prompt.buffer.trim().to_string(), prompt.mode.clone()))
+            .ok_or_else(|| "Expression prompt is not active".to_string())?;
+        if expression.is_empty() {
+            self.set_expression_messages(vec![ExpressionPromptMessage {
+                kind: ExpressionPromptMessageKind::Error,
+                text: "Enter an expression before submitting".to_string(),
+            }]);
+            return Ok(());
+        }
+
+        let result = match mode {
+            ExpressionPromptMode::New => self
+                .create_expression_derived_with_file(expression.clone(), file)
+                .map(|_| ()),
+            ExpressionPromptMode::EditExisting(id) => {
+                self.update_expression_item_with_file(id, expression.clone(), file)
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                self.close_expression_prompt();
+                Ok(())
+            }
+            Err(error) => {
+                self.set_expression_messages(vec![ExpressionPromptMessage {
+                    kind: ExpressionPromptMessageKind::Error,
+                    text: error,
+                }]);
+                Ok(())
+            }
+        }
+    }
+
+    pub(super) fn set_expression_messages(&mut self, messages: Vec<ExpressionPromptMessage>) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.messages = messages;
+        }
+    }
+}
+
 pub(super) fn expression_prompt_messages(
     state: &MultiChartState,
     file: Option<&File>,

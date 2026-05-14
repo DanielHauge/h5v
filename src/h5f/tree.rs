@@ -27,12 +27,18 @@ pub trait HasChildren {
     fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
     fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
     fn get_externals(&self) -> Result<Vec<ExternalObject>, hdf5_metno::Error>;
-    fn get_soft_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
+    fn get_soft_datasets(&self) -> Result<Vec<LinkedDataset>, hdf5_metno::Error>;
+}
+
+#[derive(Debug)]
+pub struct LinkedDataset {
+    dataset: Dataset,
+    link_name: String,
 }
 
 #[derive(Debug)]
 pub enum ExternalObject {
-    Dataset(Dataset),
+    Dataset(LinkedDataset),
     Group(Group),
     LinkBroken(String, String),
 }
@@ -164,11 +170,14 @@ impl HasChildren for Group {
         Ok(soft_groups)
     }
 
-    fn get_soft_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
+    fn get_soft_datasets(&self) -> Result<Vec<LinkedDataset>, hdf5_metno::Error> {
         let soft_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
             if LinkType::Soft == link.link_type {
                 match group.dataset(name) {
-                    Ok(ds) => objects.push(ds),
+                    Ok(dataset) => objects.push(LinkedDataset {
+                        dataset,
+                        link_name: name.to_string(),
+                    }),
                     Err(_) => return true,
                 }
             }
@@ -207,7 +216,10 @@ impl HasChildren for Group {
         let external_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
             if LinkType::External == link.link_type {
                 if let Ok(ds) = group.dataset(name) {
-                    objects.push(ExternalObject::Dataset(ds));
+                    objects.push(ExternalObject::Dataset(LinkedDataset {
+                        dataset: ds,
+                        link_name: name.to_string(),
+                    }));
                 } else if let Ok(grp) = group.group(name) {
                     objects.push(ExternalObject::Group(grp));
                 } else {
@@ -224,9 +236,8 @@ impl HasChildren for Group {
 }
 
 pub enum DSType {
-    Soft(Dataset),
+    Linked(LinkedDataset),
     Hard(Dataset),
-    External(Dataset),
     BrokenLink(String, String),
 }
 
@@ -372,7 +383,7 @@ impl H5FNode {
 
         for external in has_children.get_externals()? {
             match external {
-                ExternalObject::Dataset(dataset) => datasets.push(DSType::External(dataset)),
+                ExternalObject::Dataset(dataset) => datasets.push(DSType::Linked(dataset)),
                 ExternalObject::Group(group) => groups.push(GrpType::External(group)),
                 ExternalObject::LinkBroken(fname, name) => {
                     datasets.push(DSType::BrokenLink(fname, name))
@@ -386,7 +397,7 @@ impl H5FNode {
             datasets.push(DSType::Hard(d));
         }
         for d in has_children.get_soft_datasets()? {
-            datasets.push(DSType::Soft(d));
+            datasets.push(DSType::Linked(d));
         }
 
         let mut children = Vec::new();
@@ -427,65 +438,77 @@ impl H5FNode {
             children.push(Rc::new(RefCell::new(H5FNode::new(Node::Group(g, meta)))));
         }
         for wrapped_ds in datasets {
-            let (d, is_link, is_broken) = match wrapped_ds {
-                DSType::Hard(ds) => (Some(ds), false, None),
-                DSType::External(ds) => (Some(ds), true, None),
-                DSType::Soft(ds) => (Some(ds), true, None),
-                DSType::BrokenLink(name, fname) => (
-                    None,
-                    true,
-                    Some(Node::Broken(NodeType::Dataset, name, fname)),
-                ),
-            };
-            if let Some(broken_node) = is_broken {
-                children.push(Rc::new(RefCell::new(H5FNode::new(broken_node))));
+            let Some(node) = build_dataset_node(wrapped_ds)? else {
                 continue;
-            }
-            let d = match d {
-                Some(ds) => ds,
-                None => continue,
             };
-            let display_name = d.name().split('/').next_back().unwrap_or("").to_string();
-
-            let link_name = None; // TODO: Handle link names for datasets
-            let d = d.to_owned();
-            let dtype = d.dtype()?;
-            let data_bytesize = dtype.size();
-            let (dtype_desc, unsupported_reason) = match dtype.to_descriptor() {
-                Ok(dtype_desc) => (dtype_desc, None),
-                Err(err) => (TypeDescriptor::VarLenAscii, Some(err.to_string())),
-            };
-
-            let mut shape = d.shape();
-            let total_elems = d.size();
-            if shape.is_empty() {
-                shape.push(total_elems);
-                shape.push(1);
-            }
-            let compound_projection = match (&dtype_desc, unsupported_reason.as_ref()) {
-                (_, Some(_)) => None,
-                (hdf5_metno::types::TypeDescriptor::Compound(compound), None) => {
-                    Some(root_compound_projection(&d.name(), compound.clone()))
-                }
-                _ => None,
-            };
-            let meta = build_dataset_meta(
-                &d,
-                display_name,
-                is_link,
-                link_name,
-                dtype_desc,
-                compound_projection,
-                shape,
-                data_bytesize,
-                total_elems,
-                unsupported_reason,
-            )?;
-            children.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(d, meta)))));
+            children.push(Rc::new(RefCell::new(H5FNode::new(node))));
         }
         self.children = children;
         Ok(())
     }
+}
+
+fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Error> {
+    let (dataset, is_link, link_name, broken_node) = match wrapped_ds {
+        DSType::Hard(dataset) => (Some(dataset), false, None, None),
+        DSType::Linked(LinkedDataset { dataset, link_name }) => {
+            (Some(dataset), true, Some(link_name), None)
+        }
+        DSType::BrokenLink(name, fname) => (
+            None,
+            true,
+            None,
+            Some(Node::Broken(NodeType::Dataset, name, fname)),
+        ),
+    };
+
+    if let Some(broken_node) = broken_node {
+        return Ok(Some(broken_node));
+    }
+
+    let Some(dataset) = dataset else {
+        return Ok(None);
+    };
+    let display_name = dataset
+        .name()
+        .split('/')
+        .next_back()
+        .unwrap_or("")
+        .to_string();
+
+    let dtype = dataset.dtype()?;
+    let data_bytesize = dtype.size();
+    let (dtype_desc, unsupported_reason) = match dtype.to_descriptor() {
+        Ok(dtype_desc) => (dtype_desc, None),
+        Err(err) => (TypeDescriptor::VarLenAscii, Some(err.to_string())),
+    };
+
+    let mut shape = dataset.shape();
+    let total_elems = dataset.size();
+    if shape.is_empty() {
+        shape.push(total_elems);
+        shape.push(1);
+    }
+    let compound_projection = match (&dtype_desc, unsupported_reason.as_ref()) {
+        (_, Some(_)) => None,
+        (hdf5_metno::types::TypeDescriptor::Compound(compound), None) => {
+            Some(root_compound_projection(&dataset.name(), compound.clone()))
+        }
+        _ => None,
+    };
+    let meta = build_dataset_meta(
+        &dataset,
+        display_name,
+        is_link,
+        link_name,
+        dtype_desc,
+        compound_projection,
+        shape,
+        data_bytesize,
+        total_elems,
+        unsupported_reason,
+    )?;
+    Ok(Some(Node::Dataset(dataset, meta)))
 }
 
 fn synthetic_compound_children(
@@ -652,9 +675,11 @@ mod tests {
     use ratatui::style::Color;
 
     use super::{
-        build_dataset_meta, enum_render_attr_names, highlight_hint_from_name, parse_enum_color,
-        resolve_enum_render_overrides, resolve_highlight_hint,
+        build_dataset_meta, build_dataset_node, enum_render_attr_names, highlight_hint_from_name,
+        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType,
+        LinkedDataset,
     };
+    use crate::h5f::Node;
     use crate::ui::render::MatrixRenderType;
 
     fn sample_enum() -> EnumType {
@@ -828,5 +853,29 @@ mod tests {
         assert_eq!(meta.matrixable, Some(MatrixRenderType::Opaque));
         assert!(meta.image.is_none());
         assert!(meta.enum_render_overrides.is_none());
+    }
+
+    #[test]
+    fn linked_dataset_nodes_preserve_link_name_metadata() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_u8, 2_u8, 3_u8])
+            .create("target")
+            .expect("failed to create dataset");
+
+        let node = build_dataset_node(DSType::Linked(LinkedDataset {
+            dataset,
+            link_name: "alias".to_string(),
+        }))
+        .expect("failed to build linked dataset node")
+        .expect("expected linked dataset node");
+
+        let Node::Dataset(_, meta) = node else {
+            panic!("expected dataset node");
+        };
+        assert!(meta.is_link);
+        assert_eq!(meta.link_name.as_deref(), Some("alias"));
     }
 }

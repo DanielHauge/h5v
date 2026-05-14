@@ -25,15 +25,20 @@ use crate::{
     error::AppError,
     h5f::{H5FNode, ImageType, InterlaceMode, Node},
     ui::{
-        app::{AppEvent, ChartPreviewLoadedResult, ImageLoadedResult},
+        app::AppEvent,
         preview::chart::{render_image_chart, MAX_SEGMENT_SIZE},
         segment_scroll::render_position_scroll,
         state::{
             AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource,
-            ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
-            ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
+            DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
+            RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
         },
     },
+};
+
+use super::pipeline::{
+    clipboard_image_from_dynamic, send_chart_failure, send_chart_success, send_image_failure,
+    send_image_success,
 };
 
 const SMART_IMAGE_WINDOW_MIN_CLIPPED_FRACTION: f32 = 0.5;
@@ -48,75 +53,6 @@ fn image_text_style() -> Style {
         style = style.bold();
     }
     style
-}
-
-fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
-    let _ = tx_events.send(event);
-}
-
-fn send_image_failure(tx_events: &Sender<AppEvent>, key: ImageLoadKey, message: impl Into<String>) {
-    send_event(
-        tx_events,
-        AppEvent::ImageLoad(ImageLoadedResult::Failure {
-            key,
-            message: message.into(),
-        }),
-    );
-}
-
-fn clipboard_image_from_dynamic(dyn_img: &DynamicImage) -> ClipboardImageData {
-    let rgba = dyn_img.to_rgba8();
-    ClipboardImageData {
-        width: rgba.width() as usize,
-        height: rgba.height() as usize,
-        bytes: rgba.into_raw(),
-    }
-}
-
-fn send_image_success(
-    tx_events: &Sender<AppEvent>,
-    key: ImageLoadKey,
-    protocol: ThreadProtocol,
-    clipboard_image: ClipboardImageData,
-) {
-    send_event(
-        tx_events,
-        AppEvent::ImageLoad(ImageLoadedResult::Success {
-            key,
-            protocol,
-            clipboard_image,
-        }),
-    );
-}
-
-fn send_chart_failure(
-    tx_events: &Sender<AppEvent>,
-    key: ChartPreviewKey,
-    message: impl Into<String>,
-) {
-    send_event(
-        tx_events,
-        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Failure {
-            key,
-            message: message.into(),
-        }),
-    );
-}
-
-fn send_chart_success(
-    tx_events: &Sender<AppEvent>,
-    key: ChartPreviewKey,
-    protocol: ThreadProtocol,
-    clipboard_image: ClipboardImageData,
-) {
-    send_event(
-        tx_events,
-        AppEvent::PreviewChartLoad(ChartPreviewLoadedResult::Success {
-            key,
-            protocol,
-            clipboard_image,
-        }),
-    );
 }
 
 fn dataset_image_dims(image_type: &ImageType, ds: &Dataset) -> Option<(usize, usize, usize)> {

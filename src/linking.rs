@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use hdf5_metno::File;
 use tempfile::Builder;
 
-use crate::error::AppError;
+use crate::{error::AppError, h5f::copy_attr_to_group};
 
 pub fn link(paths: &[String]) -> Result<String, AppError> {
     let paths_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
@@ -62,8 +62,9 @@ pub fn link(paths: &[String]) -> Result<String, AppError> {
                 format!("/{}/{}", fname, grp.name()).as_ref(),
             )?;
         }
-        for _attr_name in hdf5_file.attr_names()? {
-            //TODO: Gotta implement attr copying/linking
+        for attr_name in hdf5_file.attr_names()? {
+            let attr = hdf5_file.attr(&attr_name)?;
+            copy_attr_to_group(&attr, &fgroup, &attr_name)?;
         }
     }
 

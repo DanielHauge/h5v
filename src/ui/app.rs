@@ -1,76 +1,51 @@
-use std::{
-    env,
-    io::stdout,
-    rc::Rc,
-    sync::{mpsc::channel, Arc, RwLock},
-    thread,
-    time::SystemTime,
-};
+use std::{rc::Rc, thread, time::SystemTime};
 
-use arboard::Clipboard;
-use image::Rgba;
 use ratatui::{
-    crossterm::{
-        cursor::{Hide, Show},
-        event::{self, DisableMouseCapture, EnableMouseCapture},
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-        ExecutableCommand,
-    },
+    crossterm::event::{self},
     layout::{Alignment, Constraint, Layout, Rect},
-    prelude::CrosstermBackend,
     style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame, Terminal,
+    Frame,
 };
-use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::{
     compat::RuntimeConfig,
     configure,
-    configure::run_lua_engine,
     error::{log_error, AppError},
-    h5f,
-    ui::{
-        heatmap::{handle_heatmap_load, HEATMAP_CACHE_CAPACITY},
-        input::EventResult,
-        mchart::MultiChartState,
-        preview::image::{handle_chartpreview_load, handle_chartpreview_resize},
-        state::{AppToast, ChartPreviwState, FileWatchState},
-    },
+    ui::{heatmap::HEATMAP_CACHE_CAPACITY, input::EventResult, state::AppToast},
     GIT_VERSION,
 };
 
-use self::config::{
-    configuration_warning_message, log_configuration_error, open_configuration_and_reload,
-    should_use_alternate_screen,
-};
+use self::boot::prepare_app;
+use self::config::open_configuration_and_reload;
 use self::dialogs::{
     render_attribute_create_dialog, render_attribute_delete_dialog,
     render_fixed_string_overflow_dialog, render_fixed_string_resize_dialog,
 };
 use self::events::{handle_file_watch_events, handle_term_events, schedule_preview_debounce};
+use self::lifecycle::{
+    classify_recover_loop_error, init_terminal, resolve_alternate_screen, restore_terminal,
+    AppTerminal, RecoverLoopAction,
+};
 use self::reload::reload_current_file;
 use self::update::check_for_available_update;
 use super::state::{ChartPreviewKey, HeatmapLoadedPage, HeatmapRenderKey, ImageLoadKey};
 use super::{
-    command::{
-        execute_command, parse_command_text, render_command_dialog, CommandState, StartupCommand,
-    },
+    command::{execute_command, parse_command_text, render_command_dialog, StartupCommand},
     help::render_help,
     input::handle_input_event,
     main_display::render_main_display,
-    preview::image::{
-        handle_image_load, handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
-        ImageResizeResult,
-    },
-    state::{self, AppState, ContentShowMode, Focus, ImgState, LastFocused, MatrixViewState, Mode},
+    preview::image::ImageResizeResult,
+    state::{self, AppState, Mode},
     tree_view::render_tree,
 };
 
+mod boot;
 mod config;
 mod dialogs;
 mod events;
+mod lifecycle;
 mod reload;
 mod update;
 
@@ -121,17 +96,8 @@ pub fn init(
     runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
-    let use_alternate_screen =
-        should_use_alternate_screen(runtime_config, env::var("CROS_CONTAINER").ok().as_deref());
-
-    if use_alternate_screen {
-        stdout().execute(EnterAlternateScreen)?;
-    }
-    stdout().execute(EnableMouseCapture)?;
-    stdout().execute(Hide)?;
-    enable_raw_mode()?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    terminal.clear()?;
+    let use_alternate_screen = resolve_alternate_screen(runtime_config);
+    let mut terminal = init_terminal(use_alternate_screen)?;
 
     let new_ver = check_for_available_update(SystemTime::now());
 
@@ -148,78 +114,21 @@ pub fn init(
             new_ver.as_deref(),
         ) {
             Ok(_) => break,
-            Err(e) => match e {
-                AppError::FileError(_) => {
-                    last_message = Some("No files given error".to_string());
-                }
-                AppError::Io(error) => {
-                    last_message = Some(format!("IO Error: - {error}"));
-                }
-                AppError::Hdf5(error) => match error {
-                    hdf5_metno::Error::HDF5(_) => {
-                        last_message = Some("HDF5 Error".to_string());
-                        break;
-                    }
-                    hdf5_metno::Error::Internal(e) => {
-                        last_message = Some(format!("HDF5 Internal: - {e}"));
-                        break;
-                    }
-                },
-                AppError::ChannelError(c) => last_message = Some(format!("Channel Error: - {c}")),
-                AppError::ClipboardError(msg) => {
-                    last_message = Some(format!("Clipboard Error: - {msg}"));
-                    break;
-                }
-                AppError::InvalidCommand(cmd) => {
-                    last_message = Some(format!("Invalid Command: - {cmd}"));
-                    break;
-                }
-                AppError::EditError(e) => {
-                    last_message = Some(format!("Edit Error: - {e}"));
-                    break;
-                }
-                AppError::EditWarning(e) => {
-                    last_message = Some(format!("Edit Warning: - {e}"));
-                    break;
-                }
-                AppError::FixedStringOverflow(e) => {
-                    last_message = Some(format!("Edit Error: - {e}"));
-                    break;
-                }
-                AppError::ChildNotFound(e) => {
-                    last_message = Some(format!("Child not found: - {e}"));
-                    break;
-                }
-                AppError::PoisionedLockError(e) => {
-                    last_message = Some(format!("Poisioned lock error: - {e}"));
-                    break;
-                }
-                AppError::DrawingError(e) => {
-                    last_message = Some(format!("Drawing error: - {e}"));
-                    break;
-                }
-                AppError::LuaError(e) => {
-                    last_message = Some(format!("Lua error: - {e}"));
+            Err(error) => match classify_recover_loop_error(error) {
+                RecoverLoopAction::Retry(message) => last_message = Some(message),
+                RecoverLoopAction::Break(message) => {
+                    last_message = Some(message);
                     break;
                 }
             },
         }
     }
 
-    stdout().execute(Show)?;
-    stdout().execute(DisableMouseCapture)?;
-    if use_alternate_screen {
-        stdout().execute(LeaveAlternateScreen)?;
-    }
-    disable_raw_mode()?;
-    if let Some(message) = last_message {
-        eprintln!("Unrecoverable AppError: {}", message);
-    }
-    Ok(())
+    restore_terminal(use_alternate_screen, last_message)
 }
 
 fn main_recover_loop(
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    terminal: &mut AppTerminal,
     filename: String,
     link: bool,
     writable: bool,
@@ -227,170 +136,11 @@ fn main_recover_loop(
     startup_commands: &[StartupCommand],
     new_version: Option<&str>,
 ) -> Result<IntendedMainLoopBreak> {
-    let h5f = h5f::H5F::open(filename.clone(), link, writable).map_err(|e| {
-        AppError::Hdf5(hdf5_metno::Error::from(format!(
-            "Failed to open HDF5 file: {}",
-            e
-        )))
-    })?;
-
-    let (tx_events, rx_events) = channel();
-    let startup_config_error = run_lua_engine(tx_events.clone(), runtime_config.compatibility_mode)
-        .err()
-        .map(|error| {
-            log_configuration_error(&error);
-            configuration_warning_message(&error, false)
-        });
-
-    #[allow(deprecated)]
-    let mut picker = if runtime_config.terminal_graphics {
-        Picker::from_query_stdio().unwrap_or(Picker::halfblocks())
-    } else {
-        Picker::halfblocks()
-    };
-    let (bg_r, bg_g, bg_b) =
-        configure::rgb_channels(configure::themed_color(|colors| colors.surface.bg));
-    picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
-    let image_cell_size = picker.font_size();
-    let tx_events_2 = tx_events.clone();
-    let tx_load_img = handle_image_resize(tx_events_2);
-    let tx_load_imgfs = handle_imagefs_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
-    let tx_load_imgfsvlen =
-        handle_imagefsvlen_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
-    let tx_load_img = handle_image_load(tx_events.clone(), tx_load_img.clone(), picker.clone());
-    let tx_chart_preview_resize = handle_chartpreview_resize(tx_events.clone());
-    let tx_load_chartpreview =
-        handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
-    let tx_load_heatmap = handle_heatmap_load(tx_events.clone());
-
-    let img_state = ImgState {
-        protocol: None,
-        tx_load_imgfs,
-        tx_load_imgfsvlen,
-        tx_load_img,
-        ds: None,
-        current_key: None,
-        clipboard_image: None,
-        window: None,
-        idx_to_load: 0,
-        idx_loaded: -1,
-        error: None,
-    };
-
-    let chart_preview_state = ChartPreviwState {
-        ds_loaded: None,
-        protocol: None,
-        clipboard_image: None,
-        error: None,
-        ds_selection: None,
-        tx_load_chartpreview,
-    };
-
-    let matrix_view_state = MatrixViewState {
-        col_offset: 0,
-        row_offset: 0,
-        rows_currently_available: 0,
-        cols_currently_available: 0,
-        cursor_row: 0,
-        cursor_col: 0,
-    };
-    let (clipboard, clipboard_init_error) = match Clipboard::new() {
-        Ok(clipboard) => (Some(clipboard), None),
-        Err(error) => (None, Some(error.to_string())),
-    };
-
-    let segment_state = state::SegmentState {
-        idx: 0,
-        segment_count: 0,
-        segumented: state::SegmentType::NoSegment,
-    };
-
-    let command_state = CommandState {
-        command_buffer: String::new(),
-        last_command: None,
-        cursor: 0,
-        selected_suggestion: 0,
-        history: Default::default(),
-        history_cursor: None,
-        history_draft: None,
-    };
-    let edit_pause = Arc::new(RwLock::new(()));
-
-    let root_node = h5f.root.clone();
-    let mut state = AppState {
-        readonly: !writable,
-        root: root_node,
-        editing: false,
-        file: Some(h5f.file),
-        toast: AppToast::Empty,
-        configuration_warning: startup_config_error.clone(),
-        file_watch: FileWatchState {
-            path: filename.clone(),
-            linked: link,
-            last_known_modified: None,
-            pending_external_change: false,
-        },
-        compatibility_mode: runtime_config.compatibility_mode,
-        multi_chart: MultiChartState::new(picker.clone()),
-        segment_state,
-        edit_pause: edit_pause.clone(),
-        command_state,
-        attribute_create_dialog: None,
-        attribute_delete_dialog: None,
-        fixed_string_overflow_dialog: None,
-        treeview: vec![],
-        tree_view_cursor: 0,
-        focus: Focus::Tree(LastFocused::Attributes),
-        clipboard,
-        clipboard_init_error,
-        mode: Mode::Normal,
-        command_return_mode: Mode::Normal,
-        help_return_mode: Mode::Normal,
-        copying: false,
-        searcher: None,
-        help: state::HelpViewState::default(),
-        pending_chord: None,
-        binding_command_depth: 0,
-        show_tree_view: true,
-        stacked_tree_layout: false,
-        image_protocol_enabled: picker.protocol_type() != ProtocolType::Halfblocks,
-        image_cell_size,
-        preview_debounce_generation: 0,
-        preview_debounce_until: None,
-        preview_debounce_path: None,
-        content_mode: configure::current_content_mode_order()
-            .first()
-            .copied()
-            .unwrap_or(ContentShowMode::Preview),
-        img_state,
-        matrix_view_state,
-        heatmap_viewport_region: None,
-        heatmap_region: None,
-        heatmap_render: state::HeatmapRenderState {
-            current_key: None,
-            current_selection: None,
-            current_slice_summary: None,
-            viewport: None,
-            selected_cells: None,
-            drag_state: None,
-            segment: None,
-            cached_pages: Default::default(),
-            pending_keys: Default::default(),
-            tx_load_heatmap,
-            settings: configure::current_heatmap_default_settings(),
-            selected_setting: 0,
-            session_range_modes: Vec::new(),
-        },
-        chart_preview_state,
-        ui_layout: state::UiLayoutState::default(),
-    };
-    if let Some(message) = startup_config_error {
-        state.toast = AppToast::Warning(message);
-    }
-    state.sync_heatmap_configuration();
-
-    state.sync_file_watch();
-    state.compute_tree_view();
+    let boot::PreparedApp {
+        mut state,
+        tx_events,
+        rx_events,
+    } = prepare_app(&filename, link, writable, runtime_config)?;
 
     if run_startup_commands(&mut state, startup_commands)? {
         return Ok(IntendedMainLoopBreak {});
@@ -477,7 +227,7 @@ fn main_recover_loop(
     // First time draw nice state
     terminal.draw(|f| draw_closure(f, &mut state))?;
 
-    handle_term_events(tx_events.clone(), edit_pause);
+    handle_term_events(tx_events.clone(), state.edit_pause.clone());
     handle_file_watch_events(tx_events.clone(), state.file_watch.path.clone());
 
     loop {

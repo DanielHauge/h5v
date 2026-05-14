@@ -1,4 +1,10 @@
+use std::ops::Range;
+
 use image::{DynamicImage, ImageBuffer, Rgb};
+use plotters::{
+    prelude::{BitMapBackend, IntoDrawingArea},
+    style::{Color as _, IntoFont, RGBColor, ShapeStyle},
+};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Style, Stylize},
@@ -61,6 +67,208 @@ fn render_suggestion_label(
 }
 
 impl MultiChartState {
+    pub(super) fn prepared_chart_data(&self) -> Option<super::PreparedChartData> {
+        let visible_items = self
+            .items
+            .iter()
+            .filter(|item| item.visible)
+            .collect::<Vec<_>>();
+        if visible_items.is_empty() {
+            return None;
+        }
+
+        let (global_x_min, global_x_max) = self.global_x_bounds().unwrap_or((0, 1));
+        let (x_min, x_max) = match (self.aoi_from, self.aoi_to) {
+            (None, None) => (global_x_min, global_x_max),
+            (Some(from), None) => (from, global_x_max.max(from)),
+            (None, Some(to)) => (global_x_min.min(to), to),
+            (Some(from), Some(to)) if from < to => (from, to),
+            _ => return None,
+        };
+
+        let selected_item_id = self.selected_item().map(|item| item.id);
+        let mut global_y_max = f64::MIN;
+        let mut global_y_min = f64::MAX;
+        let mut plot_x_min = f64::MAX;
+        let mut plot_x_max = f64::MIN;
+        let mut series = Vec::new();
+
+        for item in visible_items {
+            if x_max <= item.series.sample_min || x_min >= item.series.sample_max {
+                continue;
+            }
+            let local_x_min = item
+                .series
+                .sample_min
+                .max(x_min)
+                .clamp(item.series.sample_min, item.series.sample_max);
+            let local_x_max = item
+                .series
+                .sample_max
+                .min(x_max)
+                .clamp(item.series.sample_min, item.series.sample_max);
+            let points = super::model::sanitize_chart_points(
+                item.series.points[local_x_min..local_x_max]
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>(),
+            );
+            if points.is_empty() {
+                continue;
+            }
+
+            for &(x, y) in &points {
+                global_y_max = global_y_max.max(y);
+                global_y_min = global_y_min.min(y);
+                plot_x_min = plot_x_min.min(x);
+                plot_x_max = plot_x_max.max(x);
+            }
+
+            series.push(super::PreparedChartSeries {
+                label: item.label.clone(),
+                color_slot: item.color_slot,
+                points,
+                is_selected: selected_item_id == Some(item.id),
+            });
+        }
+
+        if series.is_empty() || !global_y_min.is_finite() || !global_y_max.is_finite() {
+            return None;
+        }
+        let (y_min, y_max) = if (global_y_max - global_y_min).abs() < f64::EPSILON {
+            let pad = if global_y_min == 0.0 {
+                1.0
+            } else {
+                global_y_min.abs() * 0.05
+            };
+            (global_y_min - pad, global_y_max + pad)
+        } else {
+            (global_y_min, global_y_max)
+        };
+        if !plot_x_min.is_finite() || !plot_x_max.is_finite() {
+            return None;
+        }
+        let (plot_x_min, plot_x_max) = if (plot_x_max - plot_x_min).abs() < f64::EPSILON {
+            let pad = if plot_x_min == 0.0 {
+                1.0
+            } else {
+                plot_x_min.abs() * 0.05
+            };
+            (plot_x_min - pad, plot_x_max + pad)
+        } else {
+            (plot_x_min, plot_x_max)
+        };
+
+        Some(super::PreparedChartData {
+            plot_x_min,
+            plot_x_max,
+            y_min,
+            y_max,
+            series,
+        })
+    }
+
+    fn render_chart_with_area(&mut self, chart_area: Option<Rect>) -> bool {
+        if !self.modified {
+            return false;
+        }
+        self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
+        self.modified = false;
+        let Some(prepared) = self.prepared_chart_data() else {
+            return false;
+        };
+
+        let width = self.width;
+        let height = self.height;
+        self.plot_buffer = vec![0; (width * height * 3) as usize];
+        let root =
+            BitMapBackend::with_buffer(&mut self.plot_buffer, (width, height)).into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(error) = root.fill(&plot_bg) {
+            log_error(error);
+            return false;
+        }
+        let y_label_area_size = format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30;
+        let chart = plotters::prelude::ChartBuilder::on(&root)
+            .margin(10)
+            .x_label_area_size(30)
+            .y_label_area_size(y_label_area_size)
+            .build_cartesian_2d(
+                prepared.plot_x_min..prepared.plot_x_max,
+                prepared.y_min..prepared.y_max,
+            );
+
+        let mut chart = match chart {
+            Ok(chart) => chart,
+            Err(error) => {
+                log_error(error);
+                return false;
+            }
+        };
+        if let Some(chart_area) = chart_area {
+            let (plot_x_range, plot_y_range) = chart.plotting_area().get_pixel_range();
+            self.last_chart_area =
+                chart_plot_area_in_rect(chart_area, width, height, plot_x_range, plot_y_range);
+        }
+
+        if let Err(error) = chart
+            .configure_mesh()
+            .x_desc(self.x_axis_policy.label())
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+        {
+            log_error(error);
+        }
+
+        for series in prepared.series {
+            let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+                colors.chart.series[series.color_slot % colors.chart.series.len()]
+            }));
+            let color = RGBColor(r, g, b);
+            let stroke_width = if series.is_selected { 4 } else { 3 };
+            let line_series = plotters::prelude::LineSeries::new(
+                series.points.iter().copied(),
+                ShapeStyle::from(&color).stroke_width(stroke_width),
+            );
+            let series_label = series.label.clone();
+            let drawn_series = match chart.draw_series(line_series) {
+                Ok(series) => series,
+                Err(error) => {
+                    log_error(error);
+                    continue;
+                }
+            };
+            drawn_series.label(series_label).legend(move |(x, y)| {
+                plotters::prelude::PathElement::new(
+                    vec![(x, y), (x + 20, y)],
+                    plotters::prelude::ShapeStyle {
+                        filled: true,
+                        stroke_width,
+                        color: plotters::style::Color::to_rgba(&color),
+                    },
+                )
+            });
+        }
+
+        if let Err(error) = root.present() {
+            log_error(error);
+        }
+
+        true
+    }
+
     pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let header_block = Block::default()
             .borders(Borders::ALL)
@@ -111,6 +319,7 @@ impl MultiChartState {
             } else {
                 self.render_chart_panel(f, main_chunks[0]);
             }
+
             self.render_expression_prompt(f, main_chunks[1]);
             return;
         }
@@ -127,6 +336,7 @@ impl MultiChartState {
                 self.render_expression_prompt(f, prompt_area);
                 return;
             }
+
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -805,6 +1015,51 @@ impl MultiChartState {
             f.set_cursor_position(cursor);
         }
     }
+}
+
+pub(super) fn chart_plot_area_in_rect(
+    outer_area: Rect,
+    width_px: u32,
+    height_px: u32,
+    plot_x_range: Range<i32>,
+    plot_y_range: Range<i32>,
+) -> Option<Rect> {
+    if outer_area.width == 0 || outer_area.height == 0 || width_px == 0 || height_px == 0 {
+        return None;
+    }
+    let x_start = plot_x_range.start.max(0) as u32;
+    let x_end = plot_x_range.end.max(plot_x_range.start).max(0) as u32;
+    let y_start = plot_y_range.start.max(0) as u32;
+    let y_end = plot_y_range.end.max(plot_y_range.start).max(0) as u32;
+    if x_end <= x_start || y_end <= y_start {
+        return None;
+    }
+
+    let left = x_start
+        .saturating_mul(outer_area.width as u32)
+        .checked_div(width_px)
+        .unwrap_or(0);
+    let right = ((x_end.saturating_mul(outer_area.width as u32)) + width_px.saturating_sub(1))
+        .checked_div(width_px)
+        .unwrap_or(outer_area.width as u32)
+        .min(outer_area.width as u32);
+    let top = y_start
+        .saturating_mul(outer_area.height as u32)
+        .checked_div(height_px)
+        .unwrap_or(0);
+    let bottom = ((y_end.saturating_mul(outer_area.height as u32)) + height_px.saturating_sub(1))
+        .checked_div(height_px)
+        .unwrap_or(outer_area.height as u32)
+        .min(outer_area.height as u32);
+
+    let width = right.saturating_sub(left).max(1) as u16;
+    let height = bottom.saturating_sub(top).max(1) as u16;
+    Some(Rect::new(
+        outer_area.x.saturating_add(left as u16),
+        outer_area.y.saturating_add(top as u16),
+        width.min(outer_area.width.saturating_sub(left as u16)),
+        height.min(outer_area.height.saturating_sub(top as u16)),
+    ))
 }
 
 #[cfg(test)]

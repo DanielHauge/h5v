@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::mpsc::SendError;
 use std::sync::PoisonError;
 
@@ -111,9 +112,15 @@ impl<T> From<SendError<T>> for AppError {
 }
 
 pub fn log_error(str: impl Display) {
-    // TODO: Maybe fallback logpath with "dirs"
-    let log_path_opt = option_env!("H5V_LOGPATH");
-    if let Some(log_path) = log_path_opt {
+    let log_path = option_env!("H5V_LOGPATH")
+        .map(PathBuf::from)
+        .or_else(|| dirs::cache_dir().map(|path| path.join("h5v").join("error.log")));
+
+    if let Some(log_path) = log_path {
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
         if let Ok(mut log_file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
