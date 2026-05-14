@@ -3,9 +3,9 @@ use std::{cell::RefCell, rc::Rc};
 use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
@@ -125,27 +125,34 @@ pub fn render_main_display(
             }
             ContentShowMode::Heatmap => "# Heatmap",
         };
-        tab_layout.push((*x, title, Line::from(title).width() as u16));
+        let padded = format!(" {title} ");
+        tab_layout.push((
+            *x,
+            padded.clone(),
+            Line::from(padded.as_str()).width() as u16,
+        ));
 
         if i == display_index {
-            tab_titles.push(
-                Span::styled(
-                    title,
-                    configure::themed_color(|colors| colors.content.tab_active),
-                )
-                .bold()
-                .underlined(),
-            );
+            tab_titles.push(Span::styled(
+                padded,
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+                    .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+                    .bold(),
+            ));
         } else {
             tab_titles.push(Span::styled(
-                title,
-                configure::themed_color(|colors| colors.content.tab_inactive),
+                padded,
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.help.description))
+                    .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
+                    .bold(),
             ));
         }
         if i != supported_modes_count - 1 {
             tab_titles.push(Span::styled(
-                " | ",
-                configure::themed_color(|colors| colors.surface.panel_border),
+                "  ",
+                configure::themed_color(|colors| colors.help.muted),
             ));
         }
     }
@@ -156,7 +163,7 @@ pub fn render_main_display(
         .x
         .saturating_add(content_area.width.saturating_sub(title_width) / 2);
     let mut current_x = title_start_x;
-    let separator_width = Line::from(" | ").width() as u16;
+    let separator_width = Line::from("  ").width() as u16;
     for (i, (mode, _, width)) in tab_layout.iter().enumerate() {
         state
             .ui_layout
@@ -187,18 +194,12 @@ pub fn render_main_display(
         ) => configure::themed_color(|colors| colors.surface.focus_bg),
         _ => configure::themed_color(|colors| colors.surface.bg),
     };
-    let break_line = Block::default()
-        .title(title)
-        .borders(ratatui::widgets::Borders::TOP)
-        .border_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
-        )
-        .title_alignment(Alignment::Center)
-        .title_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .style(Style::default().bg(bg_color));
-    f.render_widget(break_line, content_area);
+    f.render_widget(
+        Paragraph::new(title)
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(bg_color)),
+        content_area,
+    );
     match state.content_show_mode_eval(available) {
         ContentShowMode::Preview => render_preview(f, &content_area, &mut node, state),
         ContentShowMode::Matrix => {
