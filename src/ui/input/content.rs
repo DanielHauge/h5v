@@ -608,9 +608,12 @@ fn apply_content_edit_request(
     state.heatmap_region = None;
     state.heatmap_render.current_key = None;
     state.heatmap_render.current_selection = None;
+    state.heatmap_render.current_line_profile = None;
+    state.heatmap_render.current_legend_summary = None;
     state.heatmap_render.current_slice_summary = None;
     state.heatmap_render.viewport = None;
     state.heatmap_render.selected_cells = None;
+    state.heatmap_render.selected_line = None;
     state.heatmap_render.segment = None;
     state.heatmap_render.cached_pages.clear();
     state.heatmap_render.pending_keys.clear();

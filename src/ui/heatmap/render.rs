@@ -1,8 +1,10 @@
 use hdf5_metno::types::{FloatSize, IntSize, TypeDescriptor};
 use ndarray::Array2;
 use plotters::{
-    prelude::{BitMapBackend, IntoDrawingArea, Rectangle as PlotRectangle},
-    style::{RGBColor, ShapeStyle},
+    prelude::{
+        BitMapBackend, Circle, IntoDrawingArea, PathElement, Rectangle as PlotRectangle, Text,
+    },
+    style::{IntoFont, RGBColor, ShapeStyle},
 };
 use ratatui::layout::Rect;
 
@@ -11,8 +13,8 @@ use crate::{
     error::AppError,
     h5f::DatasetMeta,
     ui::state::{
-        AppState, HeatmapColormap, HeatmapNormalization, HeatmapRangeBound, HeatmapRangeMode,
-        HeatmapRegionSelection, HeatmapSelectedCells, HeatmapSettings,
+        AppState, HeatmapColormap, HeatmapLineSelection, HeatmapNormalization, HeatmapRangeBound,
+        HeatmapRangeMode, HeatmapRegionSelection, HeatmapSelectedCells, HeatmapSettings,
     },
 };
 
@@ -302,7 +304,7 @@ pub(super) fn compute_heatmap_histogram<T: HeatmapNumber>(
     histogram
 }
 
-fn heatmap_value<T: HeatmapNumber>(
+pub(super) fn heatmap_value<T: HeatmapNumber>(
     data: &Array2<T>,
     transpose: bool,
     row: usize,
@@ -314,6 +316,7 @@ fn heatmap_value<T: HeatmapNumber>(
         .unwrap_or(f64::NAN)
 }
 
+#[cfg(test)]
 pub(super) fn viewport_partition(total: usize, cells: usize, index: usize) -> (usize, usize) {
     let start = (index * total) / cells;
     let mut end = ((index + 1) * total) / cells;
@@ -329,38 +332,32 @@ pub(super) fn compute_region_selection<T: HeatmapNumber>(
     transpose: bool,
     rows: usize,
     cols: usize,
-    viewport_rows: usize,
-    viewport_cols: usize,
     selected_cells: Option<HeatmapSelectedCells>,
     y_offset: usize,
     x_offset: usize,
-    invert_y: bool,
-    invert_x: bool,
 ) -> HeatmapRegionSelection {
-    let (display_y0, display_y1, display_x0, display_x1) = if let Some(selected) = selected_cells {
-        let (display_y0, _) = viewport_partition(rows, viewport_rows, selected.row_start);
-        let (_, display_y1) = viewport_partition(rows, viewport_rows, selected.row_end);
-        let (display_x0, _) = viewport_partition(cols, viewport_cols, selected.col_start);
-        let (_, display_x1) = viewport_partition(cols, viewport_cols, selected.col_end);
-        (display_y0, display_y1, display_x0, display_x1)
+    let (y0, y1, x0, x1) = if let Some(selected) = selected_cells {
+        let y0 = selected
+            .row_start
+            .saturating_sub(y_offset)
+            .min(rows.saturating_sub(1));
+        let y1 = selected
+            .row_end
+            .saturating_sub(y_offset)
+            .saturating_add(1)
+            .min(rows.max(1));
+        let x0 = selected
+            .col_start
+            .saturating_sub(x_offset)
+            .min(cols.saturating_sub(1));
+        let x1 = selected
+            .col_end
+            .saturating_sub(x_offset)
+            .saturating_add(1)
+            .min(cols.max(1));
+        (y0, y1.max(y0 + 1), x0, x1.max(x0 + 1))
     } else {
         (0, rows, 0, cols)
-    };
-    let (y0, y1) = if invert_y {
-        (
-            rows.saturating_sub(display_y1),
-            rows.saturating_sub(display_y0),
-        )
-    } else {
-        (display_y0, display_y1)
-    };
-    let (x0, x1) = if invert_x {
-        (
-            cols.saturating_sub(display_x1),
-            cols.saturating_sub(display_x0),
-        )
-    } else {
-        (display_x0, display_x1)
     };
 
     let mut min = f64::INFINITY;
@@ -411,9 +408,12 @@ pub(super) fn render_heatmap_image<T: HeatmapNumber>(
     height: u32,
     data: &Array2<T>,
     transpose: bool,
-    viewport_rows: usize,
-    viewport_cols: usize,
+    row_offset: usize,
+    col_offset: usize,
+    visible_rows: usize,
+    visible_cols: usize,
     selected_cells: Option<HeatmapSelectedCells>,
+    line_selection: Option<HeatmapLineSelection>,
     color_scale: HeatmapColorScale,
     settings: &HeatmapSettings,
 ) -> Result<(), AppError> {
@@ -423,6 +423,14 @@ pub(super) fn render_heatmap_image<T: HeatmapNumber>(
         configure::rgb_channels(configure::themed_color(|colors| {
             colors.surface.panel_border
         }));
+    let (line_r, line_g, line_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.file.section_title));
+    let (end_r, end_g, end_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.text.type_desc));
+    let (origin_r, origin_g, origin_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.file.label));
+    let (origin_text_r, origin_text_g, origin_text_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.text.primary));
     let rows = if transpose {
         data.shape()[1]
     } else {
@@ -471,19 +479,144 @@ pub(super) fn render_heatmap_image<T: HeatmapNumber>(
 
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     if let Some(selected) = selected_cells {
-        let left = ((selected.col_start * draw_width) / viewport_cols.max(1)) as i32;
-        let right = (((selected.col_end + 1) * draw_width) / viewport_cols.max(1)) as i32;
-        let top = ((selected.row_start * draw_height) / viewport_rows.max(1)) as i32;
-        let bottom = (((selected.row_end + 1) * draw_height) / viewport_rows.max(1)) as i32;
+        let (left, right) = source_span_to_display(
+            selected.col_start,
+            selected.col_end,
+            col_offset,
+            visible_cols,
+            draw_width,
+            settings.invert_x,
+        );
+        let (top, bottom) = source_span_to_display(
+            selected.row_start,
+            selected.row_end,
+            row_offset,
+            visible_rows,
+            draw_height,
+            settings.invert_y,
+        );
         root.draw(&PlotRectangle::new(
-            [(left, top), (right.max(left + 1), bottom.max(top + 1))],
+            [(left, top), (right, bottom)],
             ShapeStyle::from(&RGBColor(cursor_r, cursor_g, cursor_b)).stroke_width(2),
         ))
         .map_err(|e| AppError::DrawingError(format!("Error drawing heatmap selection: {e}")))?;
     }
+    if let Some(line) = line_selection {
+        let start = source_point_to_display(
+            line.start_row,
+            line.start_col,
+            row_offset,
+            col_offset,
+            visible_rows,
+            visible_cols,
+            draw_height,
+            draw_width,
+            settings.invert_y,
+            settings.invert_x,
+        );
+        let end = source_point_to_display(
+            line.end_row,
+            line.end_col,
+            row_offset,
+            col_offset,
+            visible_rows,
+            visible_cols,
+            draw_height,
+            draw_width,
+            settings.invert_y,
+            settings.invert_x,
+        );
+        root.draw(&PathElement::new(
+            vec![start, end],
+            ShapeStyle::from(&RGBColor(line_r, line_g, line_b)).stroke_width(2),
+        ))
+        .map_err(|e| AppError::DrawingError(format!("Error drawing heatmap line: {e}")))?;
+        let origin_style = ShapeStyle::from(&RGBColor(origin_r, origin_g, origin_b)).filled();
+        root.draw(&Circle::new(start, 6, origin_style))
+            .map_err(|e| {
+                AppError::DrawingError(format!("Error drawing heatmap start point: {e}"))
+            })?;
+        root.draw(&Circle::new(
+            start,
+            9,
+            ShapeStyle::from(&RGBColor(origin_r, origin_g, origin_b)).stroke_width(2),
+        ))
+        .map_err(|e| AppError::DrawingError(format!("Error drawing heatmap origin ring: {e}")))?;
+        let end_style = ShapeStyle::from(&RGBColor(end_r, end_g, end_b)).filled();
+        root.draw(&Circle::new(end, 4, end_style))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing heatmap end point: {e}")))?;
+        root.draw(&Text::new(
+            "x=0",
+            (start.0 + 10, start.1 - 10),
+            ("sans-serif", 18).into_font().color(&RGBColor(
+                origin_text_r,
+                origin_text_g,
+                origin_text_b,
+            )),
+        ))
+        .map_err(|e| AppError::DrawingError(format!("Error drawing heatmap origin label: {e}")))?;
+    }
     root.present()
         .map_err(|e| AppError::DrawingError(format!("Error presenting heatmap image: {e}")))?;
     Ok(())
+}
+
+fn source_span_to_display(
+    start: usize,
+    end: usize,
+    offset: usize,
+    visible: usize,
+    draw_extent: usize,
+    inverted: bool,
+) -> (i32, i32) {
+    let local_start = start.saturating_sub(offset).min(visible.saturating_sub(1));
+    let local_end = end.saturating_sub(offset).min(visible.saturating_sub(1));
+    let (display_start, display_end) = if inverted {
+        (
+            visible.saturating_sub(local_end + 1),
+            visible.saturating_sub(local_start),
+        )
+    } else {
+        (local_start, local_end + 1)
+    };
+    let left = ((display_start * draw_extent) / visible.max(1)) as i32;
+    let right = ((display_end * draw_extent) / visible.max(1)) as i32;
+    (left, right.max(left + 1))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn source_point_to_display(
+    row: usize,
+    col: usize,
+    row_offset: usize,
+    col_offset: usize,
+    visible_rows: usize,
+    visible_cols: usize,
+    draw_height: usize,
+    draw_width: usize,
+    invert_y: bool,
+    invert_x: bool,
+) -> (i32, i32) {
+    let local_row = row
+        .saturating_sub(row_offset)
+        .min(visible_rows.saturating_sub(1));
+    let local_col = col
+        .saturating_sub(col_offset)
+        .min(visible_cols.saturating_sub(1));
+    let display_row = if invert_y {
+        visible_rows.saturating_sub(local_row + 1)
+    } else {
+        local_row
+    };
+    let display_col = if invert_x {
+        visible_cols.saturating_sub(local_col + 1)
+    } else {
+        local_col
+    };
+    (
+        (((display_col * 2 + 1) * draw_width) / (visible_cols.max(1) * 2)) as i32,
+        (((display_row * 2 + 1) * draw_height) / (visible_rows.max(1) * 2)) as i32,
+    )
 }
 
 fn write_rgb(buffer: &mut [u8], width: usize, x: usize, y: usize, rgb: (u8, u8, u8)) {
@@ -526,7 +659,7 @@ fn turbo_rgb(value: f64) -> (u8, u8, u8) {
     STOPS[STOPS.len() - 1].1
 }
 
-fn normalize_heatmap_value(
+pub(super) fn normalize_heatmap_value(
     value: f64,
     min: f64,
     max: f64,

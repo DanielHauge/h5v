@@ -198,9 +198,12 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.heatmap_region = None;
     state.heatmap_render.current_key = None;
     state.heatmap_render.current_selection = None;
+    state.heatmap_render.current_line_profile = None;
+    state.heatmap_render.current_legend_summary = None;
     state.heatmap_render.current_slice_summary = None;
     state.heatmap_render.viewport = None;
     state.heatmap_render.selected_cells = None;
+    state.heatmap_render.selected_line = None;
     state.heatmap_render.drag_state = None;
     state.heatmap_render.segment = None;
     state.heatmap_render.cached_pages.clear();

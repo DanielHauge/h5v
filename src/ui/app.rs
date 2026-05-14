@@ -471,6 +471,7 @@ fn main_recover_loop(
                                 legend_summary: page.legend_summary,
                                 viewport_selection: page.viewport_selection,
                                 selection: page.selection,
+                                line_profile: page.line_profile,
                             });
                         while state.heatmap_render.cached_pages.len() > HEATMAP_CACHE_CAPACITY {
                             state.heatmap_render.cached_pages.pop_front();

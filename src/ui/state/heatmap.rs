@@ -31,6 +31,50 @@ pub struct HeatmapSelectedCells {
     pub col_end: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HeatmapLineSelection {
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+impl HeatmapLineSelection {
+    pub fn new(start_row: usize, start_col: usize, end_row: usize, end_col: usize) -> Self {
+        Self {
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        }
+    }
+
+    pub fn bounds(self) -> HeatmapSelectedCells {
+        HeatmapSelectedCells::normalized(self.start_row, self.start_col, self.end_row, self.end_col)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeatmapProfileSample {
+    pub distance: f64,
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeatmapLineProfile {
+    pub start_x: usize,
+    pub start_y: usize,
+    pub end_x: usize,
+    pub end_y: usize,
+    pub sample_count: usize,
+    pub finite_count: usize,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub stddev: f64,
+    pub samples: Vec<HeatmapProfileSample>,
+}
+
 impl HeatmapSelectedCells {
     pub fn single(row: usize, col: usize) -> Self {
         Self {
@@ -438,6 +482,7 @@ pub struct HeatmapRenderKey {
     pub selected_col: usize,
     pub selected_indexes: Vec<usize>,
     pub selected_cells: Option<HeatmapSelectedCells>,
+    pub line_selection: Option<HeatmapLineSelection>,
     pub settings: HeatmapSettings,
 }
 
@@ -463,6 +508,7 @@ pub struct HeatmapLoadedPage {
     pub legend_summary: HeatmapLegendSummary,
     pub viewport_selection: HeatmapRegionSelection,
     pub selection: Option<HeatmapRegionSelection>,
+    pub line_profile: Option<HeatmapLineProfile>,
 }
 
 pub struct HeatmapCachedPage {
@@ -472,6 +518,7 @@ pub struct HeatmapCachedPage {
     pub legend_summary: HeatmapLegendSummary,
     pub viewport_selection: HeatmapRegionSelection,
     pub selection: Option<HeatmapRegionSelection>,
+    pub line_profile: Option<HeatmapLineProfile>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -484,9 +531,12 @@ pub struct HeatmapDragState {
 pub struct HeatmapRenderState {
     pub current_key: Option<HeatmapRenderKey>,
     pub current_selection: Option<HeatmapRegionSelection>,
+    pub current_line_profile: Option<HeatmapLineProfile>,
+    pub current_legend_summary: Option<HeatmapLegendSummary>,
     pub current_slice_summary: Option<HeatmapSliceSummary>,
     pub viewport: Option<HeatmapViewport>,
     pub selected_cells: Option<HeatmapSelectedCells>,
+    pub selected_line: Option<HeatmapLineSelection>,
     pub drag_state: Option<HeatmapDragState>,
     pub segment: Option<HeatmapPageWindow>,
     pub cached_pages: VecDeque<HeatmapCachedPage>,
@@ -498,10 +548,24 @@ pub struct HeatmapRenderState {
 }
 
 impl HeatmapRegionSelection {
+    pub fn value_summary(&self) -> String {
+        if self.width == 1 || self.height == 1 {
+            format!("value={:.6}", self.mean)
+        } else {
+            format!("mean={:.6} stddev={:.6}", self.mean, self.stddev)
+        }
+    }
+
     pub fn summary(&self) -> String {
         format!(
-            "x={} y={} width={} height={} mean={:.6} stddev={:.6} min={:.6} max={:.6}",
-            self.x, self.y, self.width, self.height, self.mean, self.stddev, self.min, self.max
+            "x={} y={} width={} height={} {} min={:.6} max={:.6}",
+            self.x,
+            self.y,
+            self.width,
+            self.height,
+            self.value_summary(),
+            self.min,
+            self.max
         )
     }
 }
@@ -625,6 +689,8 @@ impl AppState<'_> {
         self.heatmap_render.drag_state = None;
         self.heatmap_render.current_key = None;
         self.heatmap_render.current_selection = None;
+        self.heatmap_render.current_line_profile = None;
+        self.heatmap_render.current_legend_summary = None;
         self.heatmap_render.current_slice_summary = None;
         if clear_segment {
             self.heatmap_render.segment = None;
@@ -661,6 +727,14 @@ impl AppState<'_> {
         })
     }
 
+    fn heatmap_source_point_for_cell(&self, row: usize, col: usize) -> Option<(usize, usize)> {
+        let cell_view = self.heatmap_viewport_for_cell(row, col)?;
+        Some((
+            cell_view.row_start + cell_view.row_len.saturating_sub(1) / 2,
+            cell_view.col_start + cell_view.col_len.saturating_sub(1) / 2,
+        ))
+    }
+
     fn centered_heatmap_viewport(
         &self,
         current: HeatmapViewport,
@@ -684,25 +758,45 @@ impl AppState<'_> {
     }
 
     pub fn heatmap_select_cell(&mut self, row: usize, col: usize) -> bool {
-        let next = match self.heatmap_render.selected_cells {
-            None => HeatmapSelectedCells::single(row, col),
+        let Some((source_row, source_col)) = self.heatmap_source_point_for_cell(row, col) else {
+            return false;
+        };
+        let (next_cells, next_line) = match self.heatmap_render.selected_cells {
+            None => (HeatmapSelectedCells::single(source_row, source_col), None),
             Some(existing)
                 if existing.is_single()
-                    && (existing.row_start != row || existing.col_start != col) =>
+                    && (existing.row_start != source_row || existing.col_start != source_col) =>
             {
-                HeatmapSelectedCells::normalized(existing.row_start, existing.col_start, row, col)
+                (
+                    HeatmapSelectedCells::normalized(
+                        existing.row_start,
+                        existing.col_start,
+                        source_row,
+                        source_col,
+                    ),
+                    Some(HeatmapLineSelection::new(
+                        existing.row_start,
+                        existing.col_start,
+                        source_row,
+                        source_col,
+                    )),
+                )
             }
             Some(existing) if !existing.is_single() => {
                 self.heatmap_render.selected_cells = None;
+                self.heatmap_render.selected_line = None;
                 self.invalidate_heatmap_render(false);
                 return true;
             }
-            _ => HeatmapSelectedCells::single(row, col),
+            _ => (HeatmapSelectedCells::single(source_row, source_col), None),
         };
-        if self.heatmap_render.selected_cells == Some(next) {
+        if self.heatmap_render.selected_cells == Some(next_cells)
+            && self.heatmap_render.selected_line == next_line
+        {
             return false;
         }
-        self.heatmap_render.selected_cells = Some(next);
+        self.heatmap_render.selected_cells = Some(next_cells);
+        self.heatmap_render.selected_line = next_line;
         self.invalidate_heatmap_render(false);
         true
     }
@@ -712,6 +806,7 @@ impl AppState<'_> {
             return false;
         }
         self.heatmap_render.selected_cells = None;
+        self.heatmap_render.selected_line = None;
         self.invalidate_heatmap_render(false);
         true
     }
@@ -722,6 +817,7 @@ impl AppState<'_> {
         }
         self.heatmap_render.viewport = None;
         self.heatmap_render.selected_cells = None;
+        self.heatmap_render.selected_line = None;
         self.invalidate_heatmap_render(true);
         true
     }
@@ -783,6 +879,7 @@ impl AppState<'_> {
         }
         self.heatmap_render.viewport = next_viewport;
         self.heatmap_render.selected_cells = None;
+        self.heatmap_render.selected_line = None;
         self.invalidate_heatmap_render(true);
         true
     }
@@ -836,12 +933,18 @@ impl AppState<'_> {
         let next_row_len = if zoom_in {
             (visible.row_len.saturating_mul(4) / 5).max(1)
         } else {
-            (visible.row_len.saturating_mul(5) / 4).min(rows.max(1))
+            visible
+                .row_len
+                .saturating_add(visible.row_len.div_ceil(4))
+                .min(rows.max(1))
         };
         let next_col_len = if zoom_in {
             (visible.col_len.saturating_mul(4) / 5).max(1)
         } else {
-            (visible.col_len.saturating_mul(5) / 4).min(cols.max(1))
+            visible
+                .col_len
+                .saturating_add(visible.col_len.div_ceil(4))
+                .min(cols.max(1))
         };
         let next = clamp_heatmap_viewport(
             HeatmapViewport {
@@ -861,6 +964,7 @@ impl AppState<'_> {
         }
         self.heatmap_render.viewport = next_viewport;
         self.heatmap_render.selected_cells = None;
+        self.heatmap_render.selected_line = None;
         self.invalidate_heatmap_render(true);
         true
     }
@@ -902,6 +1006,7 @@ impl AppState<'_> {
         }
         self.heatmap_render.viewport = next_viewport;
         self.heatmap_render.selected_cells = None;
+        self.heatmap_render.selected_line = None;
         self.invalidate_heatmap_render(true);
         true
     }

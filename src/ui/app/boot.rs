@@ -194,9 +194,12 @@ pub(super) fn prepare_app<'a>(
         heatmap_render: state::HeatmapRenderState {
             current_key: None,
             current_selection: None,
+            current_line_profile: None,
+            current_legend_summary: None,
             current_slice_summary: None,
             viewport: None,
             selected_cells: None,
+            selected_line: None,
             drag_state: None,
             segment: None,
             cached_pages: Default::default(),

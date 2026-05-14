@@ -1,7 +1,9 @@
 use image::{DynamicImage, RgbImage};
 use plotters::{
-    prelude::{BitMapBackend, IntoDrawingArea, Rectangle as PlotRectangle},
-    style::{RGBColor, ShapeStyle},
+    prelude::{
+        BitMapBackend, ChartBuilder, IntoDrawingArea, PathElement, Rectangle as PlotRectangle,
+    },
+    style::{Color, IntoFont, RGBColor, ShapeStyle},
 };
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
@@ -21,7 +23,18 @@ use crate::{
     },
 };
 
-use super::render::{apply_invert_colors, heatmap_colormap_rgb};
+use super::render::{apply_invert_colors, heatmap_colormap_rgb, normalize_heatmap_value};
+
+struct HeatmapProfilePlotStyle {
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    value_min: f64,
+    value_max: f64,
+    colormap: HeatmapColormap,
+    invert_colors: bool,
+    normalization: HeatmapNormalization,
+}
 
 pub(super) fn heatmap_frame_inner(area: &Rect) -> Rect {
     area.inner(Margin {
@@ -197,7 +210,7 @@ pub(super) fn render_heatmap_region_panel(
                 Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
             ),
             Span::styled(
-                format!("mean={:.5} std={:.5}", viewport.mean, viewport.stddev),
+                viewport.value_summary(),
                 Style::default().fg(configure::themed_color(|colors| colors.help.description)),
             ),
         ]),
@@ -217,7 +230,7 @@ pub(super) fn render_heatmap_region_panel(
                     Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
                 ),
                 Span::styled(
-                    format!("mean={:.5} std={:.5}", region.mean, region.stddev),
+                    region.value_summary(),
                     Style::default().fg(configure::themed_color(|colors| colors.help.description)),
                 ),
             ],
@@ -263,6 +276,38 @@ pub(super) fn render_heatmap_region_panel(
                 .bold(),
         )));
     }
+    if let Some(profile) = state.heatmap_render.current_line_profile.as_ref() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Line ",
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.file.label))
+                    .bold(),
+            ),
+            Span::styled(
+                format!(
+                    "x={} y={} -> x={} y={}",
+                    profile.start_x, profile.start_y, profile.end_x, profile.end_y
+                ),
+                Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Prof ",
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.file.label))
+                    .bold(),
+            ),
+            Span::styled(
+                format!(
+                    "n={} finite={} mean={:.5}",
+                    profile.sample_count, profile.finite_count, profile.mean
+                ),
+                Style::default().fg(configure::themed_color(|colors| colors.help.description)),
+            ),
+        ]));
+    }
     let block = Block::default()
         .title(" [] Regions ")
         .title_style(
@@ -276,6 +321,178 @@ pub(super) fn render_heatmap_region_panel(
             colors.surface.panel_border
         })));
     f.render_widget(Paragraph::new(lines).block(block), *area);
+}
+
+pub(super) fn render_heatmap_profile_slot(
+    f: &mut Frame,
+    area: &Rect,
+    state: &AppState,
+) -> Result<(), AppError> {
+    if state.heatmap_render.current_line_profile.is_some() {
+        if let Some(legend_summary) = state.heatmap_render.current_legend_summary.as_ref() {
+            return render_heatmap_profile_panel(f, area, state, legend_summary);
+        }
+    }
+
+    let block = Block::default()
+        .title(" / Profile ")
+        .title_style(
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
+                .bold(),
+        )
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })));
+    f.render_widget(block, *area);
+    Ok(())
+}
+
+fn render_heatmap_profile_panel(
+    f: &mut Frame,
+    area: &Rect,
+    state: &AppState,
+    legend_summary: &HeatmapLegendSummary,
+) -> Result<(), AppError> {
+    let block = Block::default()
+        .title(" / Profile ")
+        .title_style(
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
+                .bold(),
+        )
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })));
+    let inner = block.inner(*area);
+    f.render_widget(block, *area);
+    let Some(profile) = state.heatmap_render.current_line_profile.as_ref() else {
+        return Ok(());
+    };
+    if inner.width < 4 || inner.height < 3 {
+        return Ok(());
+    }
+    let points = profile
+        .samples
+        .iter()
+        .filter(|sample| sample.value.is_finite())
+        .map(|sample| (sample.distance, sample.value))
+        .collect::<Vec<_>>();
+    if points.is_empty() {
+        f.render_widget(Paragraph::new("no finite samples"), inner);
+        return Ok(());
+    }
+
+    let mut x_max = points.last().map(|(distance, _)| *distance).unwrap_or(1.0);
+    if x_max <= 0.0 {
+        x_max = 1.0;
+    }
+    let mut y_min = profile.min;
+    let mut y_max = profile.max;
+    if !y_min.is_finite() || !y_max.is_finite() {
+        y_min = 0.0;
+        y_max = 1.0;
+    } else if (y_max - y_min).abs() < f64::EPSILON {
+        let margin = y_min.abs().max(1.0) * 0.1;
+        y_min -= margin;
+        y_max += margin;
+    }
+    let pixel_width = u32::from(inner.width.max(1)) * u32::from(state.image_cell_size.0.max(1));
+    let pixel_height = u32::from(inner.height.max(1)) * u32::from(state.image_cell_size.1.max(1));
+    let mut buffer = vec![0u8; (pixel_width * pixel_height * 3) as usize];
+    render_heatmap_profile_plot(
+        &mut buffer,
+        pixel_width,
+        pixel_height,
+        &points,
+        HeatmapProfilePlotStyle {
+            x_max,
+            y_min,
+            y_max,
+            value_min: legend_summary.min,
+            value_max: legend_summary.max,
+            colormap: state.heatmap_render.settings.colormap,
+            invert_colors: state.heatmap_render.settings.invert_c,
+            normalization: state.heatmap_render.settings.normalization,
+        },
+    )?;
+    if let Some(image) = RgbImage::from_raw(pixel_width, pixel_height, buffer) {
+        let dyn_img = DynamicImage::ImageRgb8(image);
+        let mut protocol = state.multi_chart.picker.new_resize_protocol(dyn_img);
+        f.render_stateful_widget(StatefulImage::default(), inner, &mut protocol);
+    }
+    Ok(())
+}
+
+fn render_heatmap_profile_plot(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    points: &[(f64, f64)],
+    style: HeatmapProfilePlotStyle,
+) -> Result<(), AppError> {
+    let (bg_r, bg_g, bg_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+    let (grid_r, grid_g, grid_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+    let (axis_r, axis_g, axis_b) =
+        configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+    let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+    let grid = RGBColor(grid_r, grid_g, grid_b);
+    let axis = RGBColor(axis_r, axis_g, axis_b);
+
+    let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
+    root.fill(&plot_bg)
+        .map_err(|e| AppError::DrawingError(format!("Error filling profile background: {e}")))?;
+    let y_label_area_size =
+        format!("{:.4}", style.y_max.abs().max(style.y_min.abs())).len() as u32 * 4 + 28;
+
+    let mut chart = ChartBuilder::on(&root)
+        .margin(8)
+        .x_label_area_size(22)
+        .y_label_area_size(y_label_area_size)
+        .build_cartesian_2d(0.0..style.x_max, style.y_min..style.y_max)
+        .map_err(|e| AppError::DrawingError(format!("Error building profile chart: {e}")))?;
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .y_labels(3)
+        .x_label_style(("sans-serif", 16).into_font().color(&axis))
+        .y_label_style(("sans-serif", 16).into_font().color(&axis))
+        .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+        .light_line_style(grid.mix(0.35))
+        .bold_line_style(grid.mix(0.55))
+        .draw()
+        .map_err(|e| AppError::DrawingError(format!("Error drawing profile mesh: {e}")))?;
+
+    chart
+        .draw_series(points.windows(2).map(|window| {
+            let value = (window[0].1 + window[1].1) * 0.5;
+            let normalized = apply_invert_colors(
+                normalize_heatmap_value(
+                    value,
+                    style.value_min,
+                    style.value_max,
+                    style.normalization,
+                ),
+                style.invert_colors,
+            );
+            let (r, g, b) = heatmap_colormap_rgb(normalized, style.colormap);
+            PathElement::new(
+                vec![window[0], window[1]],
+                ShapeStyle::from(&RGBColor(r, g, b)).stroke_width(3),
+            )
+        }))
+        .map_err(|e| AppError::DrawingError(format!("Error drawing profile series: {e}")))?;
+
+    root.present()
+        .map_err(|e| AppError::DrawingError(format!("Error presenting profile chart: {e}")))?;
+    Ok(())
 }
 
 fn render_heatmap_legend_histogram(

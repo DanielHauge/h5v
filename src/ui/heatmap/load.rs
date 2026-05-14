@@ -7,8 +7,8 @@ use crate::{
     h5f::{read_projected_values_2d, DatasetMeta},
     ui::render::MatrixRenderType,
     ui::state::{
-        HeatmapLoadedPage, HeatmapRenderKey, HeatmapSegmentAxis, HeatmapSliceSummary,
-        HeatmapViewport,
+        HeatmapLineProfile, HeatmapLineSelection, HeatmapLoadedPage, HeatmapProfileSample,
+        HeatmapRenderKey, HeatmapSegmentAxis, HeatmapSliceSummary, HeatmapViewport,
     },
 };
 
@@ -173,8 +173,6 @@ fn build_heatmap_page_from_data<T: HeatmapNumber>(
 ) -> Result<HeatmapLoadedPage, AppError> {
     let visible_rows = row_end.saturating_sub(row_start).max(1);
     let visible_cols = col_end.saturating_sub(col_start).max(1);
-    let viewport_rows = usize::from(key.height).min(visible_rows);
-    let viewport_cols = usize::from(key.width).min(visible_cols);
     let (stats, color_scale) = compute_heatmap_metrics(
         &data,
         attr,
@@ -196,13 +194,9 @@ fn build_heatmap_page_from_data<T: HeatmapNumber>(
         transpose,
         visible_rows,
         visible_cols,
-        viewport_rows,
-        viewport_cols,
         None,
         row_start,
         col_start,
-        key.settings.invert_y,
-        key.settings.invert_x,
     );
     let region = key.selected_cells.map(|selected_cells| {
         compute_region_selection(
@@ -210,14 +204,13 @@ fn build_heatmap_page_from_data<T: HeatmapNumber>(
             transpose,
             visible_rows,
             visible_cols,
-            viewport_rows,
-            viewport_cols,
             Some(selected_cells),
             row_start,
             col_start,
-            key.settings.invert_y,
-            key.settings.invert_x,
         )
+    });
+    let line_profile = key.line_selection.map(|line_selection| {
+        compute_line_profile(&data, transpose, line_selection, row_start, col_start)
     });
     let pixel_width = u32::from(key.width.max(1)) * u32::from(key.cell_width.max(1));
     let pixel_height = u32::from(key.height.max(1)) * u32::from(key.cell_height.max(1));
@@ -228,9 +221,12 @@ fn build_heatmap_page_from_data<T: HeatmapNumber>(
         pixel_height,
         &data,
         transpose,
-        viewport_rows,
-        viewport_cols,
+        row_start,
+        col_start,
+        visible_rows,
+        visible_cols,
         key.selected_cells,
+        key.line_selection,
         color_scale,
         &key.settings,
     )?;
@@ -252,5 +248,134 @@ fn build_heatmap_page_from_data<T: HeatmapNumber>(
         },
         viewport_selection: viewport_region,
         selection: region,
+        line_profile,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compute_line_profile<T: HeatmapNumber>(
+    data: &Array2<T>,
+    transpose: bool,
+    line_selection: HeatmapLineSelection,
+    y_offset: usize,
+    x_offset: usize,
+) -> HeatmapLineProfile {
+    let data_rows = if transpose {
+        data.shape()[1]
+    } else {
+        data.shape()[0]
+    };
+    let data_cols = if transpose {
+        data.shape()[0]
+    } else {
+        data.shape()[1]
+    };
+    let max_row = data_rows.saturating_sub(1);
+    let max_col = data_cols.saturating_sub(1);
+    let start_row = line_selection
+        .start_row
+        .saturating_sub(y_offset)
+        .min(max_row);
+    let start_col = line_selection
+        .start_col
+        .saturating_sub(x_offset)
+        .min(max_col);
+    let end_row = line_selection.end_row.saturating_sub(y_offset).min(max_row);
+    let end_col = line_selection.end_col.saturating_sub(x_offset).min(max_col);
+    let points = rasterize_line(start_row, start_col, end_row, end_col);
+
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut sum = 0.0;
+    let mut sum_sq = 0.0;
+    let mut finite_count = 0usize;
+    let mut samples = Vec::with_capacity(points.len());
+    let mut distance = 0.0;
+    let mut previous = None;
+
+    for (row, col) in points.iter().copied() {
+        if let Some((prev_row, prev_col)) = previous {
+            let delta_row = row as f64 - prev_row as f64;
+            let delta_col = col as f64 - prev_col as f64;
+            distance += (delta_row * delta_row + delta_col * delta_col).sqrt();
+        }
+        previous = Some((row, col));
+
+        let value = super::render::heatmap_value(data, transpose, row, col);
+        samples.push(HeatmapProfileSample { distance, value });
+        if value.is_finite() {
+            min = min.min(value);
+            max = max.max(value);
+            sum += value;
+            sum_sq += value * value;
+            finite_count += 1;
+        }
+    }
+
+    let mean = if finite_count == 0 {
+        f64::NAN
+    } else {
+        sum / finite_count as f64
+    };
+    let stddev = if finite_count == 0 {
+        f64::NAN
+    } else {
+        let variance = (sum_sq / finite_count as f64) - mean * mean;
+        variance.max(0.0).sqrt()
+    };
+    let (min, max) = if finite_count == 0 {
+        (f64::NAN, f64::NAN)
+    } else {
+        (min, max)
+    };
+
+    HeatmapLineProfile {
+        start_x: line_selection.start_col,
+        start_y: line_selection.start_row,
+        end_x: line_selection.end_col,
+        end_y: line_selection.end_row,
+        sample_count: samples.len(),
+        finite_count,
+        min,
+        max,
+        mean,
+        stddev,
+        samples,
+    }
+}
+
+fn rasterize_line(
+    start_row: usize,
+    start_col: usize,
+    end_row: usize,
+    end_col: usize,
+) -> Vec<(usize, usize)> {
+    let mut points = Vec::new();
+    let mut x0 = start_col as isize;
+    let mut y0 = start_row as isize;
+    let x1 = end_col as isize;
+    let y1 = end_row as isize;
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut error = dx + dy;
+
+    loop {
+        points.push((y0.max(0) as usize, x0.max(0) as usize));
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let twice_error = 2 * error;
+        if twice_error >= dy {
+            error += dy;
+            x0 += sx;
+        }
+        if twice_error <= dx {
+            error += dx;
+            y0 += sy;
+        }
+    }
+
+    points
 }

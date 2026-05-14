@@ -42,11 +42,12 @@ use heatmap::heatmap_anchor_fraction;
 #[allow(unused_imports)]
 pub use heatmap::{
     HeatmapCachedPage, HeatmapColormap, HeatmapCustomRangeMode, HeatmapDragState,
-    HeatmapLegendSummary, HeatmapLoadPriority, HeatmapLoadRequest, HeatmapLoadedPage,
-    HeatmapNormalization, HeatmapPageWindow, HeatmapRangeBound, HeatmapRangeMode,
-    HeatmapRegionSelection, HeatmapRenderKey, HeatmapRenderState, HeatmapSegmentAxis,
-    HeatmapSelectedCells, HeatmapSettingField, HeatmapSettings, HeatmapSliceSummary,
-    HeatmapStoredFloat, HeatmapViewport, HEATMAP_SETTING_FIELDS,
+    HeatmapLegendSummary, HeatmapLineProfile, HeatmapLineSelection, HeatmapLoadPriority,
+    HeatmapLoadRequest, HeatmapLoadedPage, HeatmapNormalization, HeatmapPageWindow,
+    HeatmapProfileSample, HeatmapRangeBound, HeatmapRangeMode, HeatmapRegionSelection,
+    HeatmapRenderKey, HeatmapRenderState, HeatmapSegmentAxis, HeatmapSelectedCells,
+    HeatmapSettingField, HeatmapSettings, HeatmapSliceSummary, HeatmapStoredFloat, HeatmapViewport,
+    HEATMAP_SETTING_FIELDS,
 };
 pub use help_state::{
     HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab, HelpViewState,

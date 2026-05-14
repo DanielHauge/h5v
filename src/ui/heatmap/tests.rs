@@ -1,6 +1,7 @@
 use ndarray::arr2;
 
 use super::{
+    load::compute_line_profile,
     render::{compute_heatmap_color_scale, compute_region_selection, viewport_partition},
     HeatmapPageWindow, HeatmapSegmentAxis,
 };
@@ -8,7 +9,7 @@ use crate::{
     h5f::{DatasetMeta, Encoding},
     ui::{
         render::MatrixRenderType,
-        state::{HeatmapRangeMode, HeatmapSelectedCells},
+        state::{HeatmapLineSelection, HeatmapRangeMode, HeatmapSelectedCells},
     },
 };
 use hdf5_metno::types::{IntSize, TypeDescriptor};
@@ -43,7 +44,7 @@ fn heatmap_page_window_last_page_clamps_to_tail() {
 #[test]
 fn heatmap_region_defaults_to_visible_viewport_when_nothing_selected() {
     let data = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
-    let region = compute_region_selection(&data, false, 2, 2, 2, 2, None, 10, 20, false, false);
+    let region = compute_region_selection(&data, false, 2, 2, None, 10, 20);
     assert_eq!(region.x, 20);
     assert_eq!(region.y, 10);
     assert_eq!(region.width, 2);
@@ -66,13 +67,9 @@ fn heatmap_region_expands_between_two_selected_cells() {
         false,
         4,
         4,
-        4,
-        4,
         Some(HeatmapSelectedCells::normalized(1, 1, 2, 3)),
         0,
         0,
-        false,
-        false,
     );
     assert_eq!(region.x, 1);
     assert_eq!(region.y, 1);
@@ -136,11 +133,46 @@ fn heatmap_ignores_non_finite_values_in_stats_and_scale() {
         compound_projection: None,
     };
     let scale = compute_heatmap_color_scale(&data, &attr, false, 2, 2, &HeatmapRangeMode::Auto);
-    let region = compute_region_selection(&data, false, 2, 2, 2, 2, None, 0, 0, false, false);
+    let region = compute_region_selection(&data, false, 2, 2, None, 0, 0);
     assert!(scale.has_finite);
     assert_eq!(scale.min, 1.0);
     assert_eq!(scale.max, 4.0);
     assert_eq!(region.min, 1.0);
     assert_eq!(region.max, 4.0);
     assert_eq!(region.mean, 2.5);
+}
+
+#[test]
+fn heatmap_line_profile_samples_selected_endpoints() {
+    let data = arr2(&[
+        [1.0, 2.0, 3.0, 4.0],
+        [5.0, 6.0, 7.0, 8.0],
+        [9.0, 10.0, 11.0, 12.0],
+    ]);
+    let profile = compute_line_profile(&data, false, HeatmapLineSelection::new(1, 0, 1, 3), 0, 0);
+    let values = profile
+        .samples
+        .iter()
+        .map(|sample| sample.value)
+        .collect::<Vec<_>>();
+    assert_eq!(profile.start_x, 0);
+    assert_eq!(profile.start_y, 1);
+    assert_eq!(profile.end_x, 3);
+    assert_eq!(profile.end_y, 1);
+    assert_eq!(profile.sample_count, 4);
+    assert_eq!(profile.finite_count, 4);
+    assert_eq!(values, vec![5.0, 6.0, 7.0, 8.0]);
+    assert_eq!(profile.mean, 6.5);
+}
+
+#[test]
+fn heatmap_line_profile_reports_nan_stats_when_no_finite_values_exist() {
+    let data = arr2(&[[f64::NAN, f64::INFINITY]]);
+    let profile = compute_line_profile(&data, false, HeatmapLineSelection::new(0, 0, 0, 1), 0, 0);
+    assert_eq!(profile.sample_count, 2);
+    assert_eq!(profile.finite_count, 0);
+    assert!(profile.min.is_nan());
+    assert!(profile.max.is_nan());
+    assert!(profile.mean.is_nan());
+    assert!(profile.stddev.is_nan());
 }
