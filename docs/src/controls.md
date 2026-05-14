@@ -119,10 +119,9 @@ Edits use your configured editor through `$EDITOR` and fall back to `vi`.
 | --- | --- |
 | `M`, `Esc` | Leave multichart mode |
 | `j`, `k` | Move through chart items |
-| `Space` | Mark or unmark the base series |
-| `D`, `S`, `R`, `P`, `X` | Create difference, sum, ratio, product, or x/y derived items |
-| `e` | Open the expression prompt |
-| `v`, `Enter` | Toggle selected item visibility |
+| `Enter`, `e` | Open the expression editor |
+| `Space`, `v` | Toggle selected item visibility |
+| `?` | Open multichart help |
 | `d`, `Backspace`, `Delete` | Remove the selected item |
 | `C` | Clear all chart items |
 | `c` | Reset zoom |

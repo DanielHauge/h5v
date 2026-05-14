@@ -108,9 +108,7 @@ These actions are available from the keymap and can be scripted with `press ...`
 | --- | --- |
 | open/show/close/hide/toggle | `mchart open` |
 | add | `mchart add !/signals/sine_wave` |
-| expr/expression/prompt | `mchart expr "($1, !/signals/cosine_wave)"` |
-| base toggle / clear | `mchart base toggle` |
-| derive | `mchart derive difference` |
+| expr/expression/prompt | `mchart expr "($1[0..512], !/signals/cosine_wave[..512])"` |
 | select / move | `mchart select next` |
 | visible toggle / show / hide | `mchart visible hide` |
 | remove / delete | `mchart delete` |

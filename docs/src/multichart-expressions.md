@@ -7,6 +7,7 @@ Multichart expressions can refer to existing chart items, datasets, and attribut
 | Syntax | Meaning |
 | --- | --- |
 | `$1` | Chart item series by workspace id |
+| `$1[0..256]` | Chart item series slice by sample range |
 | `!/dataset` | Dataset series |
 | `!/dataset[..,0]` | Dataset series with explicit slicing |
 | `!/group:trace` | Series-valued attribute on a group or dataset |
@@ -27,6 +28,7 @@ Examples:
 ```text
 $1 * #$1:SCALE
 !/signals/sine_wave + #/group_preview/offset
+$1[0..512] - $2[128..640]
 ($1 * #/group_preview:scale, !/group_preview/time)
 ```
 
@@ -50,13 +52,21 @@ Here is an example of a parametric x/y series using sine and cosine signals to f
 
 Open the expression prompt with:
 
-- `e` in multichart mode, or
+- `Enter` or `e` in multichart mode, or
 - `mchart prompt`
 
-Submit with `Enter` and cancel with `Esc`. Invalid expressions are reported inline so you can fix them without leaving the workspace.
+The editor stays below the chart, so opening it does not change the plot viewport.
+
+- `Enter` submits
+- `Tab` applies the selected suggestion
+- `Up` and `Down` move through suggestions
+- `Esc` closes the editor
+
+Invalid expressions are reported inline. Suggestions include chart item ids, dataset paths, and attribute names when they can be resolved from the current file.
 
 ## Practical tips
 
 - add a raw dataset first so you have stable `$1`, `$2`, and `$3` references to build from
+- use `$id[start..end]` when you want to align or compare only part of an existing chart item
 - use `:ATTR` only when you want an explicit attribute lookup on an object or dataset-backed chart item
 - prefer explicit dataset slicing when the same dataset can be interpreted several ways

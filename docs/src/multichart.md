@@ -8,37 +8,35 @@ Sources:
 
 - the currently selected previewable tree selection
 - an explicit dataset reference
-- a built-in derived operation
 - an expression-defined series
 
 ## Basic workflow
 
 1. Add a series with `m` or `mchart add ...`.
 2. Press `M` or run `mchart open` to enter the workspace.
-3. Mark one series as the base with `Space` if you plan to derive comparisons.
-4. Create derived items with `D`, `S`, `R`, `P`, or `X`.
+3. Press `Enter` or `e` to open the expression editor.
+4. Build derived series with expressions such as `$1 - $2`, `($1, !/time[..])`, or `$1[0..256]`.
 5. Use zoom and pan to inspect the area of interest.
 
 Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` adds the group preview expression as a chart item.
 
-## Derived operations
+## Expression editor
 
-| Key / command | Operation | Notes |
-| --- | --- | --- |
-| `D` / `mchart derive difference` | Difference | Subtract selected from base |
-| `S` / `mchart derive sum` | Sum | Adds base and selected |
-| `R` / `mchart derive ratio` | Ratio | Errors if a divisor is zero |
-| `P` / `mchart derive product` | Product | Multiplies pointwise |
-| `X` / `mchart derive xy` | X/Y pair | Requires exact length match |
+- `Enter` or `e` opens the editor without changing the chart viewport
+- `Enter` submits the current expression
+- `Tab` completes the selected suggestion
+- `Up` and `Down` move through suggestions while editing
+- `Esc` closes the editor
 
-Difference, sum, ratio, and product align by the shorter series length. X/Y requires an exact match.
+The editor validates expressions live and suggests chart item ids, dataset paths, and attribute references.
 
 ## Visibility and organization
 
 - move through chart items with `j` / `k`
-- hide or show an item with `v` or `Enter`
+- hide or show an item with `Space` or `v`
 - remove the selected item with `d`, `Backspace`, or `Delete`
 - clear the whole workspace with `C`
+- open multichart help with `?`
 
 ## Zoom and pan
 

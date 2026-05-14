@@ -94,10 +94,9 @@ Multichart:
 mchart open
 mchart add !/signals/sine_wave
 mchart visible
-mchart base toggle
 mchart select next
-mchart expr "($1, !/signals/cosine_wave)"
-mchart derive difference
+mchart prompt
+mchart expr "($1[0..512], !/signals/cosine_wave[..512])"
 mchart zoom in 25
 mchart pan right 10
 ```

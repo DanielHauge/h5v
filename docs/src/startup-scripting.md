@@ -92,10 +92,9 @@ mchart add
 mchart open
 mchart select prev
 mchart visible
-mchart base toggle
 mchart select next
-mchart visible
-mchart derive difference
+mchart prompt
+mchart expr "$1 - $2"
 mchart zoom in 20
 ```
 
