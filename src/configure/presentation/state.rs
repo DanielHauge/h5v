@@ -41,6 +41,7 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
         content_mode_order: default_content_mode_order(),
         heatmap_range_modes: Vec::new(),
         heatmap_default_settings: HeatmapSettings::default(),
+        multichart_settings: super::types::MultiChartSettings::default(),
         keymap_config: KeymapConfig::default(),
         keymaps: EffectiveKeymaps::default(),
     })
@@ -57,6 +58,7 @@ pub fn reset_config(theme: ThemeName) {
         state.content_mode_order = default_content_mode_order();
         state.heatmap_range_modes = Vec::new();
         state.heatmap_default_settings = HeatmapSettings::default();
+        state.multichart_settings = super::types::MultiChartSettings::default();
         state.keymap_config = KeymapConfig::default();
         state.keymaps = EffectiveKeymaps::default();
     });
@@ -79,6 +81,7 @@ pub fn snapshot_config() -> ConfigSnapshot {
         content_mode_order: state.content_mode_order.clone(),
         heatmap_range_modes: state.heatmap_range_modes.clone(),
         heatmap_default_settings: state.heatmap_default_settings.clone(),
+        multichart_settings: state.multichart_settings.clone(),
         keymap_config: state.keymap_config.clone(),
         keymaps: state.keymaps.clone(),
     })
@@ -94,6 +97,7 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
         state.content_mode_order = snapshot.content_mode_order;
         state.heatmap_range_modes = snapshot.heatmap_range_modes;
         state.heatmap_default_settings = snapshot.heatmap_default_settings;
+        state.multichart_settings = snapshot.multichart_settings;
         state.keymap_config = snapshot.keymap_config;
         state.keymaps = snapshot.keymaps;
     });
@@ -188,6 +192,17 @@ pub fn current_heatmap_default_settings() -> HeatmapSettings {
 
 pub fn current_heatmap_default_range() -> HeatmapRangeMode {
     with_config_read(|state| state.heatmap_default_settings.range.clone())
+}
+
+pub fn set_multichart_settings(settings: &super::types::MultiChartSettings) {
+    with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
+        state.multichart_settings = settings.clone();
+    });
+}
+
+pub fn current_multichart_settings() -> super::types::MultiChartSettings {
+    with_config_read(|state| state.multichart_settings.clone())
 }
 
 pub fn set_keymap_config(keymap_config: &KeymapConfig) -> Result<(), String> {

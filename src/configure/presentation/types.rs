@@ -150,6 +150,31 @@ pub(crate) struct ToastColors {
     pub(crate) neutral: Color,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultiChartSettings {
+    pub overview_max_samples: usize,
+    pub detail_enabled: bool,
+    pub detail_samples_per_column: usize,
+    pub detail_min_samples: usize,
+    pub detail_max_samples: usize,
+    pub detail_padding_ratio: f64,
+    pub derived_detail_enabled: bool,
+}
+
+impl Default for MultiChartSettings {
+    fn default() -> Self {
+        Self {
+            overview_max_samples: crate::data::MAX_PLOT_SAMPLES,
+            detail_enabled: true,
+            detail_samples_per_column: 4,
+            detail_min_samples: 512,
+            detail_max_samples: 16_384,
+            detail_padding_ratio: 0.2,
+            derived_detail_enabled: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, ThemeColorCatalog)]
 pub(crate) struct ThemeColors {
     pub(crate) text: TextColors,
@@ -176,6 +201,7 @@ pub struct ConfigSnapshot {
     pub(crate) content_mode_order: Vec<ContentShowMode>,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
+    pub(crate) multichart_settings: MultiChartSettings,
     pub(crate) keymap_config: KeymapConfig,
     pub(crate) keymaps: EffectiveKeymaps,
 }
@@ -190,6 +216,7 @@ pub(crate) struct ConfigState {
     pub(crate) content_mode_order: Vec<ContentShowMode>,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
+    pub(crate) multichart_settings: MultiChartSettings,
     pub(crate) keymap_config: KeymapConfig,
     pub(crate) keymaps: EffectiveKeymaps,
 }

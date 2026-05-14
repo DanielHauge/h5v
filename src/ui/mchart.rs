@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::{
+    configure,
     data::{plot_dataset_with_cap, DatasetPlotingData, PreviewSelection, SliceSelection},
     h5f::{plot_projected, plot_projected_with_cap, DatasetMeta},
     ui::app::AppEvent,
@@ -156,14 +157,18 @@ pub fn handle_mchart_load(tx_events: Sender<AppEvent>) -> Sender<MultiChartLoadR
             (
                 MultiChartLoadKind::Overview { .. },
                 MultiChartLoadSource::Dataset { dataset, selection },
-            ) => plot_dataset_with_cap(&dataset, &selection, crate::data::MAX_PLOT_SAMPLES)
-                .map(|preview| MultiChartLoadResult::Success {
-                    item_id: request.item_id,
-                    kind: request.kind,
-                    points: preview.data,
-                    source_len: preview.length,
-                })
-                .map_err(|error| format!("Failed loading sampled series: {error}")),
+            ) => plot_dataset_with_cap(
+                &dataset,
+                &selection,
+                configure::current_multichart_settings().overview_max_samples,
+            )
+            .map(|preview| MultiChartLoadResult::Success {
+                item_id: request.item_id,
+                kind: request.kind,
+                points: preview.data,
+                source_len: preview.length,
+            })
+            .map_err(|error| format!("Failed loading sampled series: {error}")),
             (
                 MultiChartLoadKind::Overview { .. },
                 MultiChartLoadSource::CompoundLeaf {
@@ -777,6 +782,17 @@ impl MultiChartState {
         &mut self,
         file: Option<&File>,
     ) -> Result<(), String> {
+        if !configure::current_multichart_settings().derived_detail_enabled {
+            for item in self
+                .items
+                .iter_mut()
+                .filter(|item| matches!(item.source, ChartSource::DerivedExpression { .. }))
+            {
+                item.clear_detail_state(true);
+            }
+            self.modified = true;
+            return Ok(());
+        }
         let derived_ids = self
             .items
             .iter()
@@ -1018,6 +1034,7 @@ impl MultiChartState {
         viewport: ChartViewport,
         sample_cap: usize,
     ) -> Option<ChartLodWindow> {
+        let settings = configure::current_multichart_settings();
         let total_len = Self::dataset_selection_len(source);
         if total_len <= sample_cap {
             return None;
@@ -1030,7 +1047,7 @@ impl MultiChartState {
         if span >= total_len {
             return None;
         }
-        let pad = span / 5;
+        let pad = ((span as f64) * settings.detail_padding_ratio).round() as usize;
         let start = viewport_start.saturating_sub(pad);
         let end = viewport_end.saturating_add(pad).min(total_len);
         Some(ChartLodWindow {
@@ -1041,11 +1058,15 @@ impl MultiChartState {
     }
 
     fn viewport_sample_cap(&self) -> Option<usize> {
+        let settings = configure::current_multichart_settings();
+        if !settings.detail_enabled {
+            return None;
+        }
         let chart_area = self.last_chart_area?;
         Some(
             (chart_area.width as usize)
-                .saturating_mul(4)
-                .clamp(512, 16_384),
+                .saturating_mul(settings.detail_samples_per_column)
+                .clamp(settings.detail_min_samples, settings.detail_max_samples),
         )
     }
 

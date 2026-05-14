@@ -84,6 +84,17 @@ fn default_config_contents() -> String {
         "--     { label = \"2.5..5.5\", min = 2.5, max = 5.5 },".to_string(),
         "--   },".to_string(),
         "-- }".to_string(),
+        "-- Multichart large-series tuning controls overview sampling and viewport refinement."
+            .to_string(),
+        "-- h5v.multichart = {".to_string(),
+        "--   overview_max_samples = 4096,".to_string(),
+        "--   detail_enabled = true,".to_string(),
+        "--   detail_samples_per_column = 4,".to_string(),
+        "--   detail_min_samples = 512,".to_string(),
+        "--   detail_max_samples = 16384,".to_string(),
+        "--   detail_padding_ratio = 0.2,".to_string(),
+        "--   derived_detail_enabled = true,".to_string(),
+        "-- }".to_string(),
         "-- Keymaps are layered: heatmap/content/tree/attributes/mchart > normal > global."
             .to_string(),
         "-- Use bind(mode, key, action[, description]), bind_command(...), bind_script(...), bind_commands(...), bind_lua(...), and unbind(mode, key)."
@@ -230,6 +241,14 @@ fn lua_ls_stub_contents() -> String {
         "---@field default_invert_y boolean".to_string(),
         "---@field default_invert_c boolean".to_string(),
         "---@field range_modes H5vHeatmapRangePreset[]".to_string(),
+        "---@class H5vMultiChartConfig".to_string(),
+        "---@field overview_max_samples integer".to_string(),
+        "---@field detail_enabled boolean".to_string(),
+        "---@field detail_samples_per_column integer".to_string(),
+        "---@field detail_min_samples integer".to_string(),
+        "---@field detail_max_samples integer".to_string(),
+        "---@field detail_padding_ratio number".to_string(),
+        "---@field derived_detail_enabled boolean".to_string(),
         "---@class H5vKeymapBinding".to_string(),
         "---@field key string".to_string(),
         "---@field action? H5vActionCode".to_string(),
@@ -302,6 +321,7 @@ fn lua_ls_stub_contents() -> String {
     lines.push("---@field theme H5vThemeName".to_string());
     lines.push("---@field symbol_theme H5vSymbolThemeName".to_string());
     lines.push("---@field heatmap H5vHeatmapConfig".to_string());
+    lines.push("---@field multichart H5vMultiChartConfig".to_string());
     lines.push("---@field keymaps H5vKeymaps".to_string());
     lines.push("---@field modes H5vModes".to_string());
     lines.push("---@field actions H5vActions".to_string());

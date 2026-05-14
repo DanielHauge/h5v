@@ -22,10 +22,10 @@ pub(crate) use state::themed_color;
 pub use state::{
     current_config_generation, current_content_mode_order, current_heatmap_default_range,
     current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
-    current_symbol_theme_name, current_theme_name, ordered_content_modes, prefers_strong_text,
-    reset_config, reset_symbol_theme, restore_config, set_color_override, set_content_mode_order,
-    set_heatmap_default_settings, set_heatmap_ranges, set_keymap_config, set_symbol_override,
-    snapshot_config,
+    current_multichart_settings, current_symbol_theme_name, current_theme_name,
+    ordered_content_modes, prefers_strong_text, reset_config, reset_symbol_theme, restore_config,
+    set_color_override, set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges,
+    set_keymap_config, set_multichart_settings, set_symbol_override, snapshot_config,
 };
 #[allow(unused_imports)]
-pub use types::ConfigSnapshot;
+pub use types::{ConfigSnapshot, MultiChartSettings};

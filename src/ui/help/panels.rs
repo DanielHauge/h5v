@@ -400,6 +400,15 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
                 "Right-drag snapshots on press and pans on release.",
             ],
         ),
+        (
+            "Config",
+            &[
+                "Use h5v.multichart in Lua to tune large-series behavior.",
+                "overview_max_samples sets the background overview cap, and detail_enabled toggles viewport refinement.",
+                "detail_samples_per_column with detail_min_samples and detail_max_samples controls detail density.",
+                "detail_padding_ratio loads extra x-range around the viewport, and derived_detail_enabled lets derived series refine from shared detail windows.",
+            ],
+        ),
     ])
 }
 

@@ -11,11 +11,13 @@ use super::errors::ConfigureErrors;
 mod bootstrap;
 mod heatmap;
 mod keymaps;
+mod mchart;
 mod themes;
 use bootstrap::{default_symbol_theme_for_compatibility, execute_config_chunk, prepare_lua_config};
 use heatmap::parse_heatmap_config;
 pub use keymaps::with_keymap_lua_callback;
 use keymaps::{parse_keymaps_config, store_keymap_lua_runtime};
+use mchart::parse_multichart_config;
 
 fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureErrors> {
     match h5v.get::<Value>("compatibility")? {
@@ -109,6 +111,7 @@ fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
     let compatibility_override = parse_compatibility_override(h5v)?;
     let content_mode_order = parse_content_mode_order(h5v)?;
     let heatmap_config = parse_heatmap_config(h5v)?;
+    let multichart_config = parse_multichart_config(h5v)?;
     let keymap_config = parse_keymaps_config(h5v)?;
     let selected_theme = match h5v.get::<Value>("theme")? {
         Value::Nil => ThemeName::Dark,
@@ -136,6 +139,9 @@ fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
     if let Some((range_modes, default_settings)) = heatmap_config {
         configure::set_heatmap_ranges(&range_modes, &default_settings.range);
         configure::set_heatmap_default_settings(&default_settings);
+    }
+    if let Some(multichart_settings) = multichart_config {
+        configure::set_multichart_settings(&multichart_settings);
     }
     if let Some(keymap_config) = keymap_config {
         configure::set_keymap_config(&keymap_config).map_err(mlua::Error::runtime)?;

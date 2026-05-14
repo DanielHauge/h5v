@@ -35,6 +35,17 @@ Raw dataset references such as `!/big_dataset[..]` are queued and loaded in the 
 Zoomed dataset-backed views can request a denser viewport sample in the background while the coarse overview stays visible.
 Derived series can also refine to viewport detail when their referenced chart-item inputs share the same loaded detail window.
 
+## Config
+
+Use `h5v.multichart = { ... }` in Lua to tune large-series behavior.
+
+- `overview_max_samples` limits the initial background overview sample
+- `detail_enabled` turns viewport-driven detail refinement on or off
+- `detail_samples_per_column` scales viewport detail against chart width
+- `detail_min_samples` and `detail_max_samples` clamp viewport detail size
+- `detail_padding_ratio` loads extra x-range around the visible viewport
+- `derived_detail_enabled` lets derived series refine when inputs share the same detail window
+
 ## Visibility and organization
 
 - move through chart items with `j` / `k`

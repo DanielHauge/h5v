@@ -9,6 +9,7 @@
 | `h5v.compatibility` | boolean | Compatibility mode override from config |
 | `h5v.content_mode_order` | string array | Ordered content-mode preference |
 | `h5v.heatmap` | table | Preferred heatmap defaults and custom range presets |
+| `h5v.multichart` | table | Multichart overview sampling and viewport-refinement tuning |
 | `h5v.keymaps` | table | Scoped keymap overrides and command bindings |
 | `h5v.colors` | table | Per-key color overrides |
 | `h5v.symbols` | table | Per-key symbol overrides |
@@ -156,6 +157,32 @@ h5v.heatmap.default_invert_y = true
 h5v.heatmap.default_invert_c = true
 h5v.heatmap.range_modes = {
   { label = "5-80%", min = "5%", max = "80%" },
+}
+```
+
+## Multichart config
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `h5v.multichart.overview_max_samples` | integer | Cap for the initial background overview sample |
+| `h5v.multichart.detail_enabled` | boolean | Enable viewport-driven detail refinement |
+| `h5v.multichart.detail_samples_per_column` | integer | Width multiplier used to pick detail sample count |
+| `h5v.multichart.detail_min_samples` | integer | Lower clamp for viewport detail samples |
+| `h5v.multichart.detail_max_samples` | integer | Upper clamp for viewport detail samples |
+| `h5v.multichart.detail_padding_ratio` | number | Extra x-range loaded around the visible viewport |
+| `h5v.multichart.derived_detail_enabled` | boolean | Allow derived series to refine when inputs share detail windows |
+
+Example:
+
+```lua
+h5v.multichart = {
+  overview_max_samples = 2048,
+  detail_enabled = true,
+  detail_samples_per_column = 6,
+  detail_min_samples = 1024,
+  detail_max_samples = 32768,
+  detail_padding_ratio = 0.1,
+  derived_detail_enabled = true,
 }
 ```
 
