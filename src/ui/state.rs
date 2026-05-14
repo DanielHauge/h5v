@@ -1167,6 +1167,7 @@ pub struct AppState<'a> {
     pub multi_chart: MultiChartState,
     pub mode: Mode,
     pub command_return_mode: Mode,
+    pub help_return_mode: Mode,
     pub searcher: Option<Searcher>,
     pub help: HelpViewState,
     pub pending_chord: Option<PendingChord>,

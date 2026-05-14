@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind
 
 use crate::{
     error::AppError,
-    ui::state::{AppState, AppToast, Mode},
+    ui::state::{AppState, Mode},
 };
 
 use super::{
@@ -24,20 +24,33 @@ pub(crate) fn handle_mchart_event(
                 if state.multi_chart.is_expression_prompt_active() {
                     return match command_action(&key_event) {
                         Some(CommandAction::Submit) => {
-                            let file = state.file.clone();
-                            let _ = state.multi_chart.submit_expression_prompt(file.as_ref());
+                            if state.multi_chart.expression_has_selected_suggestion() {
+                                if state.multi_chart.expression_apply_selected_suggestion() {
+                                    let file = state.file.clone();
+                                    state.multi_chart.refresh_expression_prompt(file.as_ref());
+                                }
+                            } else {
+                                let file = state.file.clone();
+                                let _ = state.multi_chart.submit_expression_prompt(file.as_ref());
+                            }
                             Ok(EventResult::Redraw)
                         }
                         Some(CommandAction::Cancel) => {
-                            state.multi_chart.close_expression_prompt();
+                            if !state.multi_chart.expression_deselect_suggestion() {
+                                state.multi_chart.close_expression_prompt();
+                            }
                             Ok(EventResult::Redraw)
                         }
                         Some(CommandAction::Backspace) => {
                             state.multi_chart.expression_backspace();
+                            let file = state.file.clone();
+                            state.multi_chart.refresh_expression_prompt(file.as_ref());
                             Ok(EventResult::Redraw)
                         }
                         Some(CommandAction::Delete) => {
                             state.multi_chart.expression_delete();
+                            let file = state.file.clone();
+                            state.multi_chart.refresh_expression_prompt(file.as_ref());
                             Ok(EventResult::Redraw)
                         }
                         Some(CommandAction::MoveLeft) => {
@@ -58,10 +71,34 @@ pub(crate) fn handle_mchart_event(
                         }
                         Some(CommandAction::Clear) | Some(CommandAction::ClearWord) => {
                             state.multi_chart.expression_clear();
+                            let file = state.file.clone();
+                            state.multi_chart.refresh_expression_prompt(file.as_ref());
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::Complete) => {
+                            state.multi_chart.expression_select_next_suggestion();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::SelectPrevSuggestion) => {
+                            state.multi_chart.expression_select_prev_suggestion();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::SelectNextSuggestion) => {
+                            state.multi_chart.expression_select_next_suggestion();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::SelectPrevHistory) => {
+                            state.multi_chart.expression_select_prev_suggestion();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::SelectNextHistory) => {
+                            state.multi_chart.expression_select_next_suggestion();
                             Ok(EventResult::Redraw)
                         }
                         Some(CommandAction::InsertChar(c)) => {
                             state.multi_chart.expression_insert_char(c);
+                            let file = state.file.clone();
+                            state.multi_chart.refresh_expression_prompt(file.as_ref());
                             Ok(EventResult::Redraw)
                         }
                         _ => Ok(EventResult::Continue),
@@ -81,6 +118,12 @@ pub(crate) fn handle_mchart_event(
                         Ok(EventResult::Redraw)
                     }
                     Some(BoundAction::Action(MultiChartAction::Quit)) => Ok(EventResult::Quit),
+                    Some(BoundAction::Action(MultiChartAction::ShowHelp)) => {
+                        state.help_return_mode = Mode::MultiChart;
+                        state.mode = Mode::Help;
+                        state.help.selected_tab = crate::ui::state::HelpTab::MultiChart;
+                        Ok(EventResult::Redraw)
+                    }
                     Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
                         state.multi_chart.zoom_in(10.0);
                         Ok(EventResult::Redraw)
@@ -117,23 +160,9 @@ pub(crate) fn handle_mchart_event(
                     }
                     Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt)) => {
                         state.multi_chart.open_expression_prompt();
+                        let file = state.file.clone();
+                        state.multi_chart.refresh_expression_prompt(file.as_ref());
                         Ok(EventResult::Redraw)
-                    }
-                    Some(BoundAction::Action(MultiChartAction::ToggleMarkedBase)) => {
-                        match state.multi_chart.toggle_marked_base() {
-                            Ok(_) => Ok(EventResult::Redraw),
-                            Err(message) => {
-                                Ok(EventResult::Toast(AppToast::Warning(message), false))
-                            }
-                        }
-                    }
-                    Some(BoundAction::Action(MultiChartAction::CreateDerived(operation))) => {
-                        match state.multi_chart.create_builtin_derived(operation) {
-                            Ok(_) => Ok(EventResult::Redraw),
-                            Err(message) => {
-                                Ok(EventResult::Toast(AppToast::Warning(message), false))
-                            }
-                        }
                     }
                     Some(BoundAction::Action(MultiChartAction::MoveDown)) => {
                         state.multi_chart.move_down();

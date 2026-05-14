@@ -10,7 +10,10 @@ use ratatui_image::{picker::ProtocolType, StatefulImage};
 
 use crate::{configure, error::log_error};
 
-use super::{ChartSource, MultiChartState};
+use super::{
+    ChartSource, ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
+    ExpressionPromptSuggestionKind, MultiChartState,
+};
 
 fn mchart_body_style() -> Style {
     let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
@@ -46,47 +49,72 @@ impl MultiChartState {
             horizontal: 1,
             vertical: 1,
         });
-        let (workspace_area, prompt_area) = if self.expression_prompt.is_some() {
-            let split = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(6)])
-                .split(inner_area);
-            (split[0], Some(split[1]))
-        } else {
-            (inner_area, None)
-        };
+        let wide_layout = inner_area.width >= 110;
 
-        if self.items.is_empty() {
-            self.render_empty(f, workspace_area);
-            if let Some(prompt_area) = prompt_area {
-                self.render_expression_prompt(f, prompt_area);
+        if wide_layout {
+            let panes = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(42), Constraint::Min(20)])
+                .split(inner_area);
+            let sidebar_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(10),
+                    Constraint::Length(8),
+                    Constraint::Length(8),
+                ])
+                .split(panes[0]);
+            let main_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .split(panes[1]);
+
+            self.render_item_list(f, sidebar_chunks[0]);
+            self.render_selected_details(f, sidebar_chunks[1]);
+            self.render_selected_statistics(f, sidebar_chunks[2]);
+
+            if self.items.is_empty() {
+                self.render_empty(f, main_chunks[0]);
+            } else {
+                self.render_chart_panel(f, main_chunks[0]);
             }
+            self.render_expression_prompt(f, main_chunks[1]);
             return;
         }
 
-        let panes = if workspace_area.width < 110 {
+        let panes = {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .split(inner_area);
+            let workspace_area = split[0];
+            let prompt_area = split[1];
+            if self.items.is_empty() {
+                self.render_empty(f, workspace_area);
+                self.render_expression_prompt(f, prompt_area);
+                return;
+            }
             Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(11), Constraint::Min(12)])
-                .split(workspace_area)
-        } else {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(42), Constraint::Min(20)])
+                .constraints([
+                    Constraint::Length(11),
+                    Constraint::Min(12),
+                    Constraint::Length(8),
+                    Constraint::Length(8),
+                ])
                 .split(workspace_area)
         };
-
-        let (sidebar_area, chart_area) = (panes[0], panes[1]);
-        let sidebar_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(6)])
-            .split(sidebar_area);
-        self.render_item_list(f, sidebar_chunks[0]);
-        self.render_selected_details(f, sidebar_chunks[1]);
-        self.render_chart_panel(f, chart_area);
-        if let Some(prompt_area) = prompt_area {
-            self.render_expression_prompt(f, prompt_area);
-        }
+        self.render_item_list(f, panes[0]);
+        self.render_chart_panel(f, panes[1]);
+        self.render_selected_details(f, panes[2]);
+        self.render_selected_statistics(f, panes[3]);
+        self.render_expression_prompt(
+            f,
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(10)])
+                .split(inner_area)[1],
+        );
     }
 
     fn render_empty(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
@@ -96,7 +124,7 @@ impl MultiChartState {
             "No chart items yet.\n\n",
             "Press 'm' on any previewable dataset view to add it here.\n",
             "The same dataset can appear multiple times with different x dimensions or fixed indices.\n",
-            "Use Space to mark a base series, then D/S/R/P to derive difference, sum, ratio, or product."
+            "Press Enter or 'e' to create an expression from the current selection."
         );
         let paragraph = Paragraph::new(no_data_message)
             .alignment(Alignment::Center)
@@ -140,6 +168,7 @@ impl MultiChartState {
             .enumerate()
             .map(|(offset, item)| {
                 let absolute_idx = start + offset;
+                let is_selected = absolute_idx == self.idx;
                 let marker_color = configure::themed_color(|colors| {
                     colors.chart.series[item.color_slot % colors.chart.series.len()]
                 });
@@ -148,27 +177,14 @@ impl MultiChartState {
                 } else {
                     configure::configured_symbol(|symbols| symbols.chart.visibility_hidden)
                 };
-                let prefix = if absolute_idx == self.idx { "> " } else { "  " };
-                let is_selected = absolute_idx == self.idx;
-                let is_base = self.marked_base_item == Some(item.id);
-                let id_style = if is_selected {
-                    Style::default()
-                        .fg(configure::themed_color(|colors| colors.mchart.detail_label))
-                        .bold()
-                } else {
-                    Style::default()
-                        .fg(configure::themed_color(|colors| colors.mchart.detail_label))
-                };
-                let label_style = match (is_selected, item.visible) {
+                let row_style = match (is_selected, item.visible) {
                     (true, true) => Style::default()
-                        .fg(configure::themed_color(|colors| {
-                            colors.mchart.item_selected
-                        }))
+                        .fg(configure::themed_color(|colors| colors.text.primary))
+                        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
                         .bold(),
                     (true, false) => Style::default()
-                        .fg(configure::themed_color(|colors| {
-                            colors.mchart.item_selected_hidden
-                        }))
+                        .fg(configure::themed_color(|colors| colors.text.primary))
+                        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
                         .bold()
                         .dim(),
                     (false, true) => Style::default()
@@ -177,29 +193,12 @@ impl MultiChartState {
                         .fg(configure::themed_color(|colors| colors.mchart.item_hidden))
                         .dim(),
                 };
-                let label_style = if is_base {
-                    label_style.underlined()
-                } else {
-                    label_style
-                };
                 Line::from(vec![
-                    Span::styled(
-                        prefix,
-                        if is_selected {
-                            Style::default()
-                                .fg(configure::themed_color(|colors| {
-                                    colors.mchart.prefix_selected
-                                }))
-                                .bold()
-                        } else {
-                            Style::default()
-                                .fg(configure::themed_color(|colors| colors.mchart.prefix))
-                        },
-                    ),
-                    Span::styled(marker, Style::default().fg(marker_color).bold()),
-                    mchart_body_span(" "),
-                    Span::styled(format!("(${}) ", item.id.0), id_style),
-                    Span::styled(item.list_label(), label_style),
+                    Span::styled(" ", row_style),
+                    Span::styled(marker, row_style.fg(marker_color).bold()),
+                    Span::styled(" ", row_style),
+                    Span::styled(format!("${} ", item.id.0), row_style),
+                    Span::styled(item.list_label(), row_style),
                 ])
             })
             .collect::<Vec<_>>();
@@ -237,21 +236,8 @@ impl MultiChartState {
             (Some(from), None) => format!("{from}..end"),
             (None, Some(to)) => format!("start..{to}"),
         };
-        let base_line = self
-            .marked_base_item_ref()
-            .map(|item| item.reference_label())
-            .unwrap_or_else(|| "none".to_string());
-
         let lines = match &item.source {
             ChartSource::DatasetSelection(source) => vec![
-                Line::from(vec![
-                    Span::styled(
-                        "base ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(base_line),
-                ]),
                 Line::from(vec![
                     Span::styled(
                         "path ",
@@ -284,13 +270,6 @@ impl MultiChartState {
                     mchart_body_span(source.selection_summary()),
                 ]),
                 Line::from(vec![
-                    Span::styled(
-                        "stats ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(item.stats_summary()),
-                    mchart_body_span("  "),
                     Span::styled(
                         "align ",
                         Style::default()
@@ -358,14 +337,6 @@ impl MultiChartState {
                 ]),
                 Line::from(vec![
                     Span::styled(
-                        "base ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(base_line),
-                ]),
-                Line::from(vec![
-                    Span::styled(
                         "type ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
@@ -374,20 +345,12 @@ impl MultiChartState {
                 ]),
                 Line::from(vec![
                     Span::styled(
-                        "stats ",
-                        Style::default()
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                    ),
-                    mchart_body_span(item.stats_summary()),
-                    mchart_body_span("  "),
-                    Span::styled(
                         "align ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
                     ),
                     mchart_body_span(self.x_axis_policy.label()),
-                ]),
-                Line::from(vec![
+                    mchart_body_span("  "),
                     Span::styled(
                         "zoom ",
                         Style::default()
@@ -398,6 +361,82 @@ impl MultiChartState {
             ],
         };
 
+        f.render_widget(
+            Paragraph::new(Text::from(lines))
+                .style(mchart_body_style())
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+    }
+
+    fn render_selected_statistics(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
+        let block = Block::default()
+            .title("Statistics")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(
+                Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+            )
+            .title_style(
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.surface.panel_title))
+                    .bold(),
+            );
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let Some(item) = self.selected_item() else {
+            return;
+        };
+        let stats = item.statistics();
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "samples ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(stats.samples.to_string()),
+                mchart_body_span("  "),
+                Span::styled(
+                    "x ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(format!("[{:.4}, {:.4}]", stats.x_min, stats.x_max)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "y ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(format!("[{:.4}, {:.4}]", stats.y_min, stats.y_max)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "mean ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(format!("{:.4}", stats.mean)),
+                mchart_body_span("  "),
+                Span::styled(
+                    "median ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(format!("{:.4}", stats.median)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "stddev ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                ),
+                mchart_body_span(format!("{:.4}", stats.stddev)),
+            ]),
+        ];
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .style(mchart_body_style())
@@ -420,13 +459,12 @@ impl MultiChartState {
                     .bold(),
             );
         let chart_area = block.inner(area);
-        self.last_chart_area =
-            (chart_area.width > 0 && chart_area.height > 0).then_some(chart_area);
         f.render_widget(block, area);
 
         if self.visible_item_count() == 0 {
+            self.last_chart_area = None;
             let paragraph = Paragraph::new(format!(
-                "All chart items are hidden.\nPress 'v' to toggle the selected item back on.\nCurrent alignment: {}.",
+                "All chart items are hidden.\nPress Space or 'v' to toggle the selected item back on.\nCurrent alignment: {}.",
                 self.x_axis_policy.description()
             ))
             .style(Style::default().fg(configure::themed_color(|colors| colors.mchart.empty_state)))
@@ -436,9 +474,11 @@ impl MultiChartState {
             return;
         }
         if chart_area.width == 0 || chart_area.height == 0 {
+            self.last_chart_area = None;
             return;
         }
         if self.picker.protocol_type() == ProtocolType::Halfblocks {
+            self.last_chart_area = Some(chart_area);
             if !self.render_braille_chart_panel(f, chart_area) {
                 let paragraph = Paragraph::new("Rendering failed")
                     .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
@@ -459,7 +499,7 @@ impl MultiChartState {
             self.stateful_protocol = None;
         }
 
-        if self.render_chart() {
+        if self.render_chart_with_area(Some(chart_area)) {
             let image = ImageBuffer::<Rgb<u8>, _>::from_raw(
                 self.width,
                 self.height,
@@ -564,17 +604,28 @@ impl MultiChartState {
     }
 
     fn render_expression_prompt(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
-        let Some(prompt) = self.expression_prompt.as_ref() else {
-            return;
-        };
-        let title = match &prompt.error {
-            Some(_) => "Expression prompt [invalid]",
-            None => "Expression prompt",
+        let prompt = self.expression_prompt.as_ref();
+        let panel_bg = configure::themed_color(|colors| colors.surface.bg);
+        let title = match prompt {
+            Some(prompt)
+                if prompt
+                    .messages
+                    .iter()
+                    .any(|message| message.kind == ExpressionPromptMessageKind::Error) =>
+            {
+                "Expression editor [invalid]"
+            }
+            Some(prompt) if matches!(prompt.mode, ExpressionPromptMode::EditExisting(_)) => {
+                "Expression editor [edit]"
+            }
+            Some(_) => "Expression editor",
+            None => "Expression editor",
         };
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
+            .style(Style::default().bg(panel_bg))
             .border_style(
                 Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
             )
@@ -586,70 +637,169 @@ impl MultiChartState {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let mut lines = vec![
-            Line::from(vec![
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Length(3)])
+            .split(inner);
+
+        let input_text = match prompt {
+            Some(prompt) if prompt.buffer.is_empty() => Line::from(vec![
                 Span::styled(
                     "= ",
                     Style::default()
-                        .fg(configure::themed_color(|colors| colors.mchart.prompt_prefix))
-                        .bold(),
-                ),
-                mchart_body_span(prompt.buffer.clone()),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "Syntax ",
-                    Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                ),
-                mchart_body_span(
-                    "$1 + !/ds[..,0] * #/cal:scale   or   (!/x_ticks, $2 + #/cal/offset)",
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "Rules ",
-                    Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-                ),
-                mchart_body_span(
-                    "single expr => y-series; (x,y) => x/y series. Use $id or !/path[..] for series, #/path for scalar datasets, and :ATTR on ! or # for explicit attributes",
-                ),
-            ]),
-        ];
-        if let Some(error) = &prompt.error {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "Error ",
-                    Style::default()
-                        .fg(configure::themed_color(|colors| colors.text.error))
+                        .fg(configure::themed_color(|colors| {
+                            colors.mchart.prompt_prefix
+                        }))
                         .bold(),
                 ),
                 Span::styled(
-                    error.clone(),
-                    Style::default().fg(configure::themed_color(|colors| colors.text.error)),
-                ),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "Keys ",
+                    "$1 + !/path[..,0]",
                     Style::default()
-                        .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                        .fg(configure::themed_color(|colors| colors.text.type_desc))
+                        .italic(),
                 ),
-                mchart_body_span("Enter create  Esc cancel"),
-            ]));
-        }
+            ]),
+            Some(prompt) => {
+                let mut spans = vec![Span::styled(
+                    "= ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| {
+                            colors.mchart.prompt_prefix
+                        }))
+                        .bold(),
+                )];
+                spans.extend(prompt.input_segments.iter().map(|segment| {
+                    let style = match segment.kind {
+                        ExpressionPromptInputKind::Plain => mchart_body_style(),
+                        ExpressionPromptInputKind::ValidReference => Style::default()
+                            .fg(configure::themed_color(|colors| {
+                                colors.mchart.prompt_prefix
+                            }))
+                            .bold(),
+                        ExpressionPromptInputKind::InvalidReference => Style::default()
+                            .fg(configure::themed_color(|colors| colors.text.error))
+                            .bold(),
+                    };
+                    Span::styled(segment.text.clone(), style)
+                }));
+                Line::from(spans)
+            }
+            None => Line::from(vec![
+                Span::styled(
+                    "= ",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| {
+                            colors.mchart.prompt_prefix
+                        }))
+                        .bold(),
+                ),
+                Span::styled(
+                    "expression editor inactive",
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.text.type_desc))
+                        .italic(),
+                ),
+            ]),
+        };
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(panel_bg))
+            .border_style(
+                Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
+            );
+        f.render_widget(input_block.clone(), chunks[0]);
+        f.render_widget(
+            Paragraph::new(input_text).style(mchart_body_style().bg(panel_bg)),
+            input_block.inner(chunks[0]),
+        );
 
+        let mut lines = Vec::new();
+        if let Some(prompt) = prompt {
+            if !prompt.suggestions.is_empty() {
+                let suggestion_line = prompt
+                    .suggestions
+                    .iter()
+                    .take(4)
+                    .enumerate()
+                    .flat_map(|(idx, suggestion)| {
+                        let (symbol_color, label_color) = match suggestion.kind {
+                            ExpressionPromptSuggestionKind::Group => (
+                                configure::themed_color(|colors| colors.tree.group),
+                                configure::themed_color(|colors| colors.tree.group_name),
+                            ),
+                            ExpressionPromptSuggestionKind::Dataset => (
+                                configure::themed_color(|colors| colors.tree.dataset_file),
+                                configure::themed_color(|colors| colors.tree.dataset),
+                            ),
+                            ExpressionPromptSuggestionKind::CompoundLeaf => (
+                                configure::themed_color(|colors| colors.tree.compound),
+                                configure::themed_color(|colors| colors.tree.compound_name),
+                            ),
+                            ExpressionPromptSuggestionKind::Attribute => (
+                                configure::themed_color(|colors| colors.mchart.detail_label),
+                                configure::themed_color(|colors| colors.text.type_desc),
+                            ),
+                            ExpressionPromptSuggestionKind::ItemRef => (
+                                configure::themed_color(|colors| colors.mchart.detail_label),
+                                configure::themed_color(|colors| colors.text.primary),
+                            ),
+                        };
+                        let selected_bg = (prompt.selected_suggestion == Some(idx))
+                            .then(|| configure::themed_color(|colors| colors.surface.focus_bg))
+                            .unwrap_or(panel_bg);
+                        let symbol_style = Style::default().fg(symbol_color).bg(selected_bg);
+                        let label_style = Style::default().fg(label_color).bg(selected_bg);
+                        let detail_style = Style::default()
+                            .fg(configure::themed_color(|colors| colors.text.type_desc))
+                            .bg(selected_bg);
+                        [
+                            Span::styled(format!(" {} ", suggestion.symbol), symbol_style),
+                            Span::styled(suggestion.label.clone(), label_style),
+                            Span::styled(suggestion.detail.clone(), detail_style),
+                            Span::raw(" "),
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                lines.push(Line::from(suggestion_line));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "(none)",
+                    Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+                )));
+            }
+
+            if let Some(message) = prompt.messages.first() {
+                let color = match message.kind {
+                    ExpressionPromptMessageKind::Error => {
+                        configure::themed_color(|colors| colors.text.error)
+                    }
+                    ExpressionPromptMessageKind::Valid => {
+                        configure::themed_color(|colors| colors.mchart.prompt_prefix)
+                    }
+                    ExpressionPromptMessageKind::Hint => {
+                        configure::themed_color(|colors| colors.text.type_desc)
+                    }
+                };
+                lines.push(Line::from(Span::styled(
+                    message.text.clone(),
+                    Style::default().fg(color),
+                )));
+            }
+        }
         f.render_widget(
             Paragraph::new(Text::from(lines))
-                .style(mchart_body_style())
+                .style(mchart_body_style().bg(panel_bg))
                 .wrap(Wrap { trim: true }),
-            inner,
+            chunks[1],
         );
-        let cursor = ratatui::layout::Position::new(
-            inner.x.saturating_add(2 + prompt.cursor as u16),
-            inner.y,
-        );
-        f.set_cursor_position(cursor);
+
+        if let Some(prompt) = prompt {
+            let cursor = ratatui::layout::Position::new(
+                chunks[0].x.saturating_add(3 + prompt.cursor as u16),
+                chunks[0].y.saturating_add(1),
+            );
+            f.set_cursor_position(cursor);
+        }
     }
 }
 

@@ -1,10 +1,7 @@
 use crate::{
     error::AppError,
     h5f::AttributeCreateType,
-    ui::{
-        mchart::BuiltinDerivedOp,
-        state::{HeatmapRangeBound, HeatmapRangeMode},
-    },
+    ui::state::{HeatmapRangeBound, HeatmapRangeMode},
 };
 use ratatui::crossterm::event::Event;
 
@@ -263,38 +260,8 @@ pub(super) fn handle_mchart(
         "prompt" => {
             state.mode = Mode::MultiChart;
             state.multi_chart.open_expression_prompt();
-            Ok(EventResult::Redraw)
-        }
-        "base" => match command.word_arg_optional(1)?.map(|arg| arg.to_ascii_lowercase()) {
-            None => {
-                state
-                    .multi_chart
-                    .toggle_marked_base()
-                    .map_err(AppError::InvalidCommand)?;
-                Ok(EventResult::Redraw)
-            }
-            Some(action) if action == "toggle" => {
-                state
-                    .multi_chart
-                    .toggle_marked_base()
-                    .map_err(AppError::InvalidCommand)?;
-                Ok(EventResult::Redraw)
-            }
-            Some(action) if action == "clear" => {
-                state.multi_chart.clear_marked_base();
-                Ok(EventResult::Redraw)
-            }
-            Some(other) => Err(AppError::InvalidCommand(format!(
-                "Unknown mchart base action '{}'. Expected toggle or clear",
-                other
-            ))),
-        },
-        "derive" => {
-            let operation = parse_multichart_derived_op(command.word_arg(1)?)?;
-            state
-                .multi_chart
-                .create_builtin_derived(operation)
-                .map_err(AppError::InvalidCommand)?;
+            let file = state.file.clone();
+            state.multi_chart.refresh_expression_prompt(file.as_ref());
             Ok(EventResult::Redraw)
         }
         "select" | "move" => {
@@ -403,7 +370,7 @@ pub(super) fn handle_mchart(
             }
         }
         other => Err(AppError::InvalidCommand(format!(
-            "Unknown mchart action '{}'. Expected open, close, add, expr, derive, select, visible, remove, clear, zoom, or pan",
+            "Unknown mchart action '{}'. Expected open, close, add, expr, prompt, select, visible, remove, clear, zoom, or pan",
             other
         ))),
     }
@@ -414,6 +381,7 @@ pub(super) fn handle_help(
     command: &CommandInvocation,
 ) -> Result<EventResult, AppError> {
     let Some(CommandArgValue::Word(target)) = command.args.first() else {
+        state.help_return_mode = state.command_return_mode.clone();
         state.mode = Mode::Help;
         return Ok(EventResult::Redraw);
     };
@@ -606,20 +574,6 @@ fn parse_direction_delta(word: &str) -> Result<isize, AppError> {
         "prev" | "previous" | "back" | "left" | "up" => Ok(-1),
         other => Err(AppError::InvalidCommand(format!(
             "Unknown direction '{}'. Expected next or prev",
-            other
-        ))),
-    }
-}
-
-fn parse_multichart_derived_op(word: &str) -> Result<BuiltinDerivedOp, AppError> {
-    match word.to_ascii_lowercase().as_str() {
-        "diff" | "difference" => Ok(BuiltinDerivedOp::Difference),
-        "sum" => Ok(BuiltinDerivedOp::Sum),
-        "ratio" => Ok(BuiltinDerivedOp::Ratio),
-        "product" | "mul" | "multiply" => Ok(BuiltinDerivedOp::Product),
-        "xy" | "x-y" | "pair" => Ok(BuiltinDerivedOp::Xy),
-        other => Err(AppError::InvalidCommand(format!(
-            "Unknown multichart derived operation '{}'. Expected difference, sum, ratio, product, or xy",
             other
         ))),
     }

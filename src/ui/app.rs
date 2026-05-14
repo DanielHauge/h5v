@@ -826,6 +826,7 @@ fn main_recover_loop(
         clipboard_init_error,
         mode: Mode::Normal,
         command_return_mode: Mode::Normal,
+        help_return_mode: Mode::Normal,
         copying: false,
         searcher: None,
         help: state::HelpViewState::default(),

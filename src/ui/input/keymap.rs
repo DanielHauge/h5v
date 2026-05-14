@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::{error::AppError, ui::mchart::BuiltinDerivedOp};
+use crate::error::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -96,6 +96,7 @@ pub enum MultiChartAction {
     EnterCommand,
     Exit,
     Quit,
+    ShowHelp,
     ZoomIn,
     ZoomOut,
     PanLeft,
@@ -104,9 +105,7 @@ pub enum MultiChartAction {
     DeleteSelected,
     ClearAll,
     ToggleSelectedVisible,
-    ToggleMarkedBase,
     OpenExpressionPrompt,
-    CreateDerived(BuiltinDerivedOp),
     MoveUp,
     MoveDown,
 }
@@ -449,9 +448,8 @@ pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
     match (key.code, key.modifiers) {
         (KeyCode::Enter, _) => Some(CommandAction::Submit),
         (KeyCode::Esc, _) => Some(CommandAction::Cancel),
-        (KeyCode::Tab, _) => Some(CommandAction::Complete),
+        (KeyCode::Tab, _) | (KeyCode::Down, _) => Some(CommandAction::SelectNextSuggestion),
         (KeyCode::BackTab, _) | (KeyCode::Up, _) => Some(CommandAction::SelectPrevSuggestion),
-        (KeyCode::Down, _) => Some(CommandAction::SelectNextSuggestion),
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => Some(CommandAction::SelectPrevHistory),
         (KeyCode::Char('n'), KeyModifiers::CONTROL) => Some(CommandAction::SelectNextHistory),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => Some(CommandAction::ClearWord),
@@ -900,6 +898,11 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::Quit,
     },
     ActionCode {
+        symbol: "ShowHelp",
+        code: "show-help",
+        action: MultiChartAction::ShowHelp,
+    },
+    ActionCode {
         symbol: "ZoomIn",
         code: "zoom-in",
         action: MultiChartAction::ZoomIn,
@@ -940,39 +943,9 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::ToggleSelectedVisible,
     },
     ActionCode {
-        symbol: "ToggleMarkedBase",
-        code: "toggle-marked-base",
-        action: MultiChartAction::ToggleMarkedBase,
-    },
-    ActionCode {
         symbol: "OpenExpressionPrompt",
         code: "open-expression-prompt",
         action: MultiChartAction::OpenExpressionPrompt,
-    },
-    ActionCode {
-        symbol: "CreateDerivedDifference",
-        code: "create-derived-difference",
-        action: MultiChartAction::CreateDerived(BuiltinDerivedOp::Difference),
-    },
-    ActionCode {
-        symbol: "CreateDerivedSum",
-        code: "create-derived-sum",
-        action: MultiChartAction::CreateDerived(BuiltinDerivedOp::Sum),
-    },
-    ActionCode {
-        symbol: "CreateDerivedRatio",
-        code: "create-derived-ratio",
-        action: MultiChartAction::CreateDerived(BuiltinDerivedOp::Ratio),
-    },
-    ActionCode {
-        symbol: "CreateDerivedProduct",
-        code: "create-derived-product",
-        action: MultiChartAction::CreateDerived(BuiltinDerivedOp::Product),
-    },
-    ActionCode {
-        symbol: "CreateDerivedXy",
-        code: "create-derived-xy",
-        action: MultiChartAction::CreateDerived(BuiltinDerivedOp::Xy),
     },
     ActionCode {
         symbol: "MoveUp",
@@ -1537,39 +1510,18 @@ fn default_multichart_bindings() -> Vec<KeyBinding<MultiChartAction>> {
             "e",
             BoundAction::Action(MultiChartAction::OpenExpressionPrompt),
         ),
+        binding("?", BoundAction::Action(MultiChartAction::ShowHelp)),
         binding(
             "Enter",
+            BoundAction::Action(MultiChartAction::OpenExpressionPrompt),
+        ),
+        binding(
+            "Space",
             BoundAction::Action(MultiChartAction::ToggleSelectedVisible),
         ),
         binding(
             "v",
             BoundAction::Action(MultiChartAction::ToggleSelectedVisible),
-        ),
-        binding(
-            "Space",
-            BoundAction::Action(MultiChartAction::ToggleMarkedBase),
-        ),
-        binding(
-            "D",
-            BoundAction::Action(MultiChartAction::CreateDerived(
-                BuiltinDerivedOp::Difference,
-            )),
-        ),
-        binding(
-            "S",
-            BoundAction::Action(MultiChartAction::CreateDerived(BuiltinDerivedOp::Sum)),
-        ),
-        binding(
-            "R",
-            BoundAction::Action(MultiChartAction::CreateDerived(BuiltinDerivedOp::Ratio)),
-        ),
-        binding(
-            "P",
-            BoundAction::Action(MultiChartAction::CreateDerived(BuiltinDerivedOp::Product)),
-        ),
-        binding(
-            "X",
-            BoundAction::Action(MultiChartAction::CreateDerived(BuiltinDerivedOp::Xy)),
         ),
         binding(
             "Delete",
@@ -1601,12 +1553,32 @@ mod tests {
     }
 
     #[test]
-    fn multichart_enter_toggles_selected_visibility() {
+    fn multichart_enter_opens_expression_prompt() {
         let keymaps = EffectiveKeymaps::default();
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(
             multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt))
+        );
+    }
+
+    #[test]
+    fn multichart_space_toggles_selected_visibility() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
             Some(BoundAction::Action(MultiChartAction::ToggleSelectedVisible))
+        );
+    }
+
+    #[test]
+    fn multichart_question_mark_opens_help() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::ShowHelp))
         );
     }
 

@@ -719,6 +719,7 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::EnterCommand => "Open command mode over multichart".to_string(),
             MultiChartAction::Exit => "Close multichart".to_string(),
             MultiChartAction::Quit => "Quit the app".to_string(),
+            MultiChartAction::ShowHelp => "Open the multichart help page".to_string(),
             MultiChartAction::ZoomIn => "Zoom in".to_string(),
             MultiChartAction::ZoomOut => "Zoom out".to_string(),
             MultiChartAction::PanLeft => "Pan left".to_string(),
@@ -729,11 +730,7 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::ToggleSelectedVisible => {
                 "Show or hide the selected series".to_string()
             }
-            MultiChartAction::ToggleMarkedBase => "Mark or unmark the base series".to_string(),
-            MultiChartAction::OpenExpressionPrompt => "Open the expression prompt".to_string(),
-            MultiChartAction::CreateDerived(op) => {
-                format!("Create a derived {} series", op_label(*op))
-            }
+            MultiChartAction::OpenExpressionPrompt => "Open the expression editor".to_string(),
             MultiChartAction::MoveUp => "Select the previous series".to_string(),
             MultiChartAction::MoveDown => "Select the next series".to_string(),
         }
@@ -785,16 +782,6 @@ fn step_description(label: &str, delta: isize) -> String {
     }
 }
 
-fn op_label(op: crate::ui::mchart::BuiltinDerivedOp) -> &'static str {
-    match op {
-        crate::ui::mchart::BuiltinDerivedOp::Difference => "difference",
-        crate::ui::mchart::BuiltinDerivedOp::Sum => "sum",
-        crate::ui::mchart::BuiltinDerivedOp::Ratio => "ratio",
-        crate::ui::mchart::BuiltinDerivedOp::Product => "product",
-        crate::ui::mchart::BuiltinDerivedOp::Xy => "x-y",
-    }
-}
-
 fn multichart_help_lines() -> Vec<Line<'static>> {
     guide_text(&[
         (
@@ -807,15 +794,15 @@ fn multichart_help_lines() -> Vec<Line<'static>> {
         (
             "Expressions",
             &[
-                "Press e to open the expression prompt.",
-                "Use dataset references like !/group/data[..,0], attributes like !/path:attr, or constants via #/path.",
-                "You can also build derived series from marked bases with D, S, R, P, and X.",
+                "Press Enter or e to open the expression editor below the chart. Enter submits, Tab completes, and Esc closes it.",
+                "Use $1 for an existing item, $1[0..128] for an item slice, !/group/data[..,0] for a dataset series, and #/group/value for a scalar.",
+                "Tuple expressions make explicit x/y plots, for example (!/time[..], $2 * #/calibration:scale).",
             ],
         ),
         (
             "Navigation",
             &[
-                "j/k select series, Enter or v toggles visibility, Space marks the base series.",
+                "j/k select series, Space or v toggles visibility, and ? opens this help page directly from multichart.",
                 "Use h/l or Shift+Left/Right to pan and + / - (or Shift+Up/Down) to zoom.",
                 "c resets zoom, d/Delete removes the selected series, and C clears everything.",
             ],

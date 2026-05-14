@@ -165,6 +165,7 @@ fn handle_global_action(
             Ok(EventResult::Redraw)
         }
         GlobalAction::ShowHelp => {
+            state.help_return_mode = state.mode.clone();
             state.mode = Mode::Help;
             Ok(EventResult::Redraw)
         }
@@ -287,6 +288,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                             Ok(EventResult::Redraw)
                         }
                         BoundAction::Action(NormalAction::ShowHelp) => {
+                            state.help_return_mode = Mode::Normal;
                             state.mode = Mode::Help;
                             Ok(EventResult::Redraw)
                         }
@@ -368,7 +370,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 match key_event.code {
                     KeyCode::Char('q') => return Ok(EventResult::Quit),
                     KeyCode::Esc => {
-                        state.mode = Mode::Normal;
+                        state.mode = state.help_return_mode.clone();
                         return Ok(EventResult::Redraw);
                     }
                     _ => {}
@@ -383,7 +385,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 }
                 match key_event.code {
                     KeyCode::Esc => {
-                        state.mode = Mode::Normal;
+                        state.mode = state.help_return_mode.clone();
                         return Ok(EventResult::Redraw);
                     }
                     KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {

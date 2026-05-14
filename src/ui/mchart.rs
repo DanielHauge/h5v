@@ -8,6 +8,7 @@ use plotters::{
 };
 use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use std::ops::Range;
 
 use crate::{
     configure,
@@ -15,6 +16,7 @@ use crate::{
         validate_preview_selection_shape, DatasetPlotingData, PreviewSelection, SliceSelection,
     },
     error::log_error,
+    search::full_traversal,
 };
 
 mod render;
@@ -22,18 +24,90 @@ mod render;
 pub type Point = (f64, f64);
 
 #[derive(Debug, Clone, PartialEq)]
+enum ExpressionPromptMode {
+    New,
+    EditExisting(ChartItemId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionPromptMessageKind {
+    Error,
+    Valid,
+    Hint,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExpressionPromptMessage {
+    kind: ExpressionPromptMessageKind,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExpressionPromptSuggestion {
+    symbol: String,
+    insert_text: String,
+    label: String,
+    detail: String,
+    kind: ExpressionPromptSuggestionKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionPromptSuggestionKind {
+    ItemRef,
+    Group,
+    Dataset,
+    CompoundLeaf,
+    Attribute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionPromptInputKind {
+    Plain,
+    ValidReference,
+    InvalidReference,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExpressionPromptInputSegment {
+    text: String,
+    kind: ExpressionPromptInputKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionAbsolutePathKind {
+    Group,
+    Dataset,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpressionAbsolutePathEntry {
+    path: String,
+    kind: ExpressionAbsolutePathKind,
+    shape: Option<Vec<usize>>,
+    detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct ExpressionPromptState {
     buffer: String,
     cursor: usize,
-    error: Option<String>,
+    mode: ExpressionPromptMode,
+    messages: Vec<ExpressionPromptMessage>,
+    suggestions: Vec<ExpressionPromptSuggestion>,
+    selected_suggestion: Option<usize>,
+    input_segments: Vec<ExpressionPromptInputSegment>,
 }
 
 impl ExpressionPromptState {
-    fn new() -> Self {
+    fn new(buffer: String, cursor: usize, mode: ExpressionPromptMode) -> Self {
         Self {
-            buffer: String::new(),
-            cursor: 0,
-            error: None,
+            buffer,
+            cursor,
+            mode,
+            messages: Vec::new(),
+            suggestions: Vec::new(),
+            selected_suggestion: None,
+            input_segments: Vec::new(),
         }
     }
 }
@@ -89,7 +163,7 @@ enum ExprBinaryOp {
 #[derive(Debug, Clone, PartialEq)]
 enum ExpressionAst {
     Number(f64),
-    ItemRef(ChartItemId),
+    ItemRef(ExpressionItemRef),
     SeriesRef(ExpressionSeriesRef),
     ScalarRef(ExpressionScalarRef),
     UnaryMinus(Box<ExpressionAst>),
@@ -102,7 +176,7 @@ enum ExpressionAst {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ExpressionToken {
-    ItemRef(ChartItemId),
+    ItemRef(ExpressionItemRef),
     SeriesRef(ExpressionSeriesRef),
     ScalarRef(ExpressionScalarRef),
     Number(f64),
@@ -131,12 +205,28 @@ enum ParsedExpression {
 enum ExpressionDatasetSelector {
     All,
     Index(usize),
+    Slice {
+        start: Option<usize>,
+        end: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ExpressionObjectTarget {
     AbsolutePath(String),
     ItemRef(ChartItemId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExpressionItemSlice {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExpressionItemRef {
+    id: ChartItemId,
+    slice: Option<ExpressionItemSlice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -161,6 +251,15 @@ impl ExpressionObjectTarget {
     }
 }
 
+impl ExpressionItemRef {
+    fn render(&self) -> String {
+        match &self.slice {
+            Some(slice) => format!("${}[{}..{}]", self.id.0, slice.start, slice.end),
+            None => format!("${}", self.id.0),
+        }
+    }
+}
+
 impl ExpressionSeriesRef {
     fn render(&self) -> String {
         let base = match &self.attr_name {
@@ -175,6 +274,11 @@ impl ExpressionSeriesRef {
                     .map(|selector| match selector {
                         ExpressionDatasetSelector::All => "..".to_string(),
                         ExpressionDatasetSelector::Index(index) => index.to_string(),
+                        ExpressionDatasetSelector::Slice { start, end } => format!(
+                            "{}..{}",
+                            start.map(|value| value.to_string()).unwrap_or_default(),
+                            end.map(|value| value.to_string()).unwrap_or_default()
+                        ),
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -190,7 +294,7 @@ impl ExpressionSeriesRef {
                 "Series reference {reference} must point to a non-scalar array"
             ));
         }
-        let (x, index) = match &self.selectors {
+        let (x, index, slice) = match &self.selectors {
             None => {
                 if shape.len() != 1 {
                     return Err(format!(
@@ -198,7 +302,7 @@ impl ExpressionSeriesRef {
                         shape.len()
                     ));
                 }
-                (0, vec![0])
+                (0, vec![0], SliceSelection::All)
             }
             Some(selectors) => {
                 if selectors.len() != shape.len() {
@@ -210,12 +314,13 @@ impl ExpressionSeriesRef {
                 }
                 let mut x = None;
                 let mut index = vec![0; shape.len()];
+                let mut slice = SliceSelection::All;
                 for (dim, selector) in selectors.iter().enumerate() {
                     match selector {
                         ExpressionDatasetSelector::All => {
                             if x.replace(dim).is_some() {
                                 return Err(format!(
-                                    "Dataset reference {} must contain exactly one '..' axis selector",
+                                    "Dataset reference {} must contain exactly one slice axis selector",
                                     self.render()
                                 ));
                             }
@@ -232,24 +337,49 @@ impl ExpressionSeriesRef {
                             }
                             index[dim] = *selected;
                         }
+                        ExpressionDatasetSelector::Slice { start, end } => {
+                            if x.replace(dim).is_some() {
+                                return Err(format!(
+                                    "Dataset reference {} must contain exactly one slice axis selector",
+                                    self.render()
+                                ));
+                            }
+                            let start = start.unwrap_or(0);
+                            let end = end.unwrap_or(shape[dim]);
+                            if end <= start {
+                                return Err(format!(
+                                    "Dataset reference {} must use an increasing slice for dim {}",
+                                    self.render(),
+                                    dim
+                                ));
+                            }
+                            if end > shape[dim] {
+                                return Err(format!(
+                                    "Dataset reference {} selects slice {}..{} out of bounds for dim {} with length {}",
+                                    self.render(),
+                                    start,
+                                    end,
+                                    dim,
+                                    shape[dim]
+                                ));
+                            }
+                            slice = SliceSelection::FromTo(start, end);
+                        }
                     }
                 }
                 (
                     x.ok_or_else(|| {
                         format!(
-                            "Series reference {reference} must contain exactly one '..' axis selector"
+                            "Series reference {reference} must contain exactly one slice axis selector"
                         )
                     })?,
                     index,
+                    slice,
                 )
             }
         };
 
-        Ok(PreviewSelection {
-            x,
-            index,
-            slice: SliceSelection::All,
-        })
+        Ok(PreviewSelection { x, index, slice })
     }
 }
 
@@ -311,6 +441,14 @@ impl DatasetChartSource {
         }
     }
 
+    pub fn concise_name(&self) -> String {
+        self.display_path
+            .rsplit('/')
+            .find(|segment| !segment.is_empty())
+            .unwrap_or("/")
+            .to_string()
+    }
+
     pub fn shape_summary(&self) -> String {
         if self.shape.is_empty() {
             "scalar".to_string()
@@ -349,7 +487,52 @@ impl DatasetChartSource {
     }
 
     pub fn compact_selection_summary(&self) -> String {
-        format!("x=d{} | {}", self.selection.x, self.fixed_index_summary())
+        if self.shape.is_empty() {
+            return self.concise_name();
+        }
+
+        let axis_selector = match self.selection.slice {
+            SliceSelection::All => "..".to_string(),
+            SliceSelection::FromTo(start, end) => format!("{start}..{end}"),
+        };
+        if self.shape.len() == 1 && axis_selector == ".." {
+            return self.concise_name();
+        }
+
+        let selectors = (0..self.shape.len())
+            .map(|dim| {
+                if dim == self.selection.x {
+                    axis_selector.clone()
+                } else {
+                    self.selection
+                        .index
+                        .get(dim)
+                        .copied()
+                        .unwrap_or_default()
+                        .to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        format!("{}[{}]", self.concise_name(), selectors.join(","))
+    }
+
+    pub fn expression_reference(&self) -> String {
+        if self.shape.is_empty() {
+            return format!("!{}", self.display_path);
+        }
+        let selectors = (0..self.shape.len())
+            .map(|dim| {
+                if dim == self.selection.x {
+                    match self.selection.slice {
+                        SliceSelection::All => "..".to_string(),
+                        SliceSelection::FromTo(start, end) => format!("{start}..{end}"),
+                    }
+                } else {
+                    self.selection.index[dim].to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        format!("!{}[{}]", self.display_path, selectors.join(","))
     }
 
     pub fn slice_summary(&self) -> String {
@@ -426,7 +609,7 @@ impl ChartSource {
 
     fn label(&self) -> String {
         match self {
-            ChartSource::DatasetSelection(source) => source.display_path.clone(),
+            ChartSource::DatasetSelection(source) => source.compact_selection_summary(),
             ChartSource::BuiltinDerived(source) => source.expression(),
             ChartSource::DerivedExpression { expression, .. } => expression.clone(),
         }
@@ -509,6 +692,18 @@ pub struct ChartItem {
     pub visible: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartItemStats {
+    pub samples: usize,
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+    pub mean: f64,
+    pub median: f64,
+    pub stddev: f64,
+}
+
 impl ChartItem {
     pub fn matches_path(&self, path: &str) -> bool {
         self.source.matches_path(path)
@@ -520,9 +715,7 @@ impl ChartItem {
 
     pub fn list_label(&self) -> String {
         match &self.source {
-            ChartSource::DatasetSelection(source) => {
-                format!("{} [{}]", self.label, source.compact_selection_summary())
-            }
+            ChartSource::DatasetSelection(source) => source.expression_reference(),
             ChartSource::BuiltinDerived(source) => {
                 format!("{} [{}]", source.expression(), source.alignment_summary())
             }
@@ -530,13 +723,60 @@ impl ChartItem {
         }
     }
 
-    pub fn stats_summary(&self) -> String {
-        format!(
-            "len {} | y [{:.4}, {:.4}]",
-            self.series.len(),
-            self.series.y_min,
-            self.series.y_max
-        )
+    pub fn statistics(&self) -> ChartItemStats {
+        let mut ys = self
+            .series
+            .points
+            .iter()
+            .map(|(_, y)| *y)
+            .collect::<Vec<_>>();
+        ys.sort_by(f64::total_cmp);
+        let samples = ys.len();
+        let sum = ys.iter().sum::<f64>();
+        let mean = if samples == 0 {
+            0.0
+        } else {
+            sum / samples as f64
+        };
+        let variance = if samples <= 1 {
+            0.0
+        } else {
+            ys.iter()
+                .map(|value| {
+                    let delta = *value - mean;
+                    delta * delta
+                })
+                .sum::<f64>()
+                / samples as f64
+        };
+        let median = match samples {
+            0 => 0.0,
+            n if n % 2 == 1 => ys[n / 2],
+            n => (ys[n / 2 - 1] + ys[n / 2]) / 2.0,
+        };
+        let x_min = self
+            .series
+            .points
+            .first()
+            .map(|(x, _)| *x)
+            .unwrap_or_default();
+        let x_max = self
+            .series
+            .points
+            .last()
+            .map(|(x, _)| *x)
+            .unwrap_or_default();
+
+        ChartItemStats {
+            samples,
+            x_min,
+            x_max,
+            y_min: self.series.y_min,
+            y_max: self.series.y_max,
+            mean,
+            median,
+            stddev: variance.sqrt(),
+        }
     }
 }
 
@@ -634,7 +874,21 @@ impl MultiChartState {
     }
 
     pub fn open_expression_prompt(&mut self) {
-        self.expression_prompt = Some(ExpressionPromptState::new());
+        self.open_expression_prompt_for_selected();
+    }
+
+    pub fn open_expression_prompt_for_selected(&mut self) {
+        let mode = match self.selected_item() {
+            Some(ChartItem {
+                id,
+                source: ChartSource::DerivedExpression { .. },
+                ..
+            }) => ExpressionPromptMode::EditExisting(*id),
+            Some(_) | None => ExpressionPromptMode::New,
+        };
+        let buffer = String::new();
+        let cursor = buffer.len();
+        self.expression_prompt = Some(ExpressionPromptState::new(buffer, cursor, mode));
         self.modified = true;
     }
 
@@ -647,7 +901,7 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             prompt.buffer.insert(prompt.cursor, ch);
             prompt.cursor += 1;
-            prompt.error = None;
+            prompt.selected_suggestion = None;
         }
     }
 
@@ -656,7 +910,7 @@ impl MultiChartState {
             if prompt.cursor > 0 {
                 prompt.cursor -= 1;
                 prompt.buffer.remove(prompt.cursor);
-                prompt.error = None;
+                prompt.selected_suggestion = None;
             }
         }
     }
@@ -665,7 +919,7 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             if prompt.cursor < prompt.buffer.len() {
                 prompt.buffer.remove(prompt.cursor);
-                prompt.error = None;
+                prompt.selected_suggestion = None;
             }
         }
     }
@@ -675,6 +929,7 @@ impl MultiChartState {
             if prompt.cursor > 0 {
                 prompt.cursor -= 1;
             }
+            prompt.selected_suggestion = None;
         }
     }
 
@@ -683,18 +938,21 @@ impl MultiChartState {
             if prompt.cursor < prompt.buffer.len() {
                 prompt.cursor += 1;
             }
+            prompt.selected_suggestion = None;
         }
     }
 
     pub fn expression_move_to_start(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             prompt.cursor = 0;
+            prompt.selected_suggestion = None;
         }
     }
 
     pub fn expression_move_to_end(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             prompt.cursor = prompt.buffer.len();
+            prompt.selected_suggestion = None;
         }
     }
 
@@ -702,36 +960,128 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             prompt.buffer.clear();
             prompt.cursor = 0;
-            prompt.error = None;
+            prompt.selected_suggestion = None;
+        }
+    }
+
+    pub fn expression_select_next_suggestion(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if !prompt.suggestions.is_empty() {
+                prompt.selected_suggestion = Some(match prompt.selected_suggestion {
+                    Some(selected) => (selected + 1).min(prompt.suggestions.len() - 1),
+                    None => 0,
+                });
+            }
+        }
+    }
+
+    pub fn expression_select_prev_suggestion(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            if !prompt.suggestions.is_empty() {
+                prompt.selected_suggestion = Some(match prompt.selected_suggestion {
+                    Some(selected) => selected.saturating_sub(1),
+                    None => prompt.suggestions.len() - 1,
+                });
+            }
+        }
+    }
+
+    pub fn expression_deselect_suggestion(&mut self) -> bool {
+        let Some(prompt) = self.expression_prompt.as_mut() else {
+            return false;
+        };
+        prompt.selected_suggestion.take().is_some()
+    }
+
+    pub fn expression_has_selected_suggestion(&self) -> bool {
+        self.expression_prompt
+            .as_ref()
+            .and_then(|prompt| prompt.selected_suggestion)
+            .is_some()
+    }
+
+    pub fn expression_apply_selected_suggestion(&mut self) -> bool {
+        let Some(prompt) = self.expression_prompt.as_mut() else {
+            return false;
+        };
+        let Some((start, end, suggestion)) = current_expression_completion(prompt)
+            .map(|(start, end, _, suggestion)| (start, end, suggestion.clone()))
+        else {
+            return false;
+        };
+        prompt
+            .buffer
+            .replace_range(start..end, &suggestion.insert_text);
+        prompt.cursor = start + suggestion.insert_text.len();
+        prompt.selected_suggestion = None;
+        true
+    }
+
+    pub fn refresh_expression_prompt(&mut self, file: Option<&File>) {
+        let Some((buffer, cursor, selected_suggestion)) =
+            self.expression_prompt.as_ref().map(|prompt| {
+                (
+                    prompt.buffer.clone(),
+                    prompt.cursor,
+                    prompt.selected_suggestion,
+                )
+            })
+        else {
+            return;
+        };
+        let messages = expression_prompt_messages(self, file, &buffer);
+        let suggestions = expression_prompt_suggestions(self, file, &buffer, cursor);
+        let input_segments = expression_prompt_input_segments(self, file, &buffer);
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.messages = messages;
+            prompt.suggestions = suggestions;
+            prompt.selected_suggestion =
+                selected_suggestion.filter(|selected| *selected < prompt.suggestions.len());
+            prompt.input_segments = input_segments;
         }
     }
 
     pub fn submit_expression_prompt(&mut self, file: Option<&File>) -> Result<(), String> {
-        let expression = self
+        let (expression, mode) = self
             .expression_prompt
             .as_ref()
-            .map(|prompt| prompt.buffer.trim().to_string())
+            .map(|prompt| (prompt.buffer.trim().to_string(), prompt.mode.clone()))
             .ok_or_else(|| "Expression prompt is not active".to_string())?;
         if expression.is_empty() {
-            self.set_expression_error("Enter an expression before submitting".to_string());
+            self.set_expression_messages(vec![ExpressionPromptMessage {
+                kind: ExpressionPromptMessageKind::Error,
+                text: "Enter an expression before submitting".to_string(),
+            }]);
             return Ok(());
         }
 
-        match self.create_expression_derived_with_file(expression.clone(), file) {
+        let result = match mode {
+            ExpressionPromptMode::New => self
+                .create_expression_derived_with_file(expression.clone(), file)
+                .map(|_| ()),
+            ExpressionPromptMode::EditExisting(id) => {
+                self.update_expression_item_with_file(id, expression.clone(), file)
+            }
+        };
+
+        match result {
             Ok(_) => {
                 self.close_expression_prompt();
                 Ok(())
             }
             Err(error) => {
-                self.set_expression_error(error);
+                self.set_expression_messages(vec![ExpressionPromptMessage {
+                    kind: ExpressionPromptMessageKind::Error,
+                    text: error,
+                }]);
                 Ok(())
             }
         }
     }
 
-    fn set_expression_error(&mut self, error: String) {
+    fn set_expression_messages(&mut self, messages: Vec<ExpressionPromptMessage>) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.error = Some(error);
+            prompt.messages = messages;
         }
     }
 
@@ -790,6 +1140,39 @@ impl MultiChartState {
             .ok_or_else(|| "Failed to create expression-derived chart".to_string())
     }
 
+    fn update_expression_item_with_file(
+        &mut self,
+        id: ChartItemId,
+        expression: String,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        let evaluated = self.evaluate_expression_with_file(&expression, file)?;
+        let points = sanitize_chart_points(evaluated.points);
+        if points.is_empty() {
+            return Err("Expression resolved to no finite points".to_string());
+        }
+        let len = points.len();
+        let source = ChartSource::DerivedExpression {
+            expression,
+            input_ids: evaluated.input_ids,
+            len,
+            kind: evaluated.kind,
+        };
+        let series = ChartSeries::from_points(points)
+            .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
+        let index = self
+            .items
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+        self.items[index].label = source.label();
+        self.items[index].source = source;
+        self.items[index].series = series;
+        self.idx = index;
+        self.modified = true;
+        Ok(())
+    }
+
     fn evaluate_expression_with_file(
         &self,
         expression: &str,
@@ -799,37 +1182,46 @@ impl MultiChartState {
         let parsed = parse_derived_expression(&tokens)?;
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
-        refs.item_ids.sort_by_key(|id| id.0);
-        refs.item_ids.dedup();
+        refs.item_refs.sort_by(|lhs, rhs| {
+            lhs.id
+                .0
+                .cmp(&rhs.id.0)
+                .then_with(|| match (&lhs.slice, &rhs.slice) {
+                    (None, None) => std::cmp::Ordering::Equal,
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (Some(lhs), Some(rhs)) => lhs.start.cmp(&rhs.start).then(lhs.end.cmp(&rhs.end)),
+                })
+        });
+        refs.item_refs.dedup();
         refs.series_refs
             .sort_by_key(|series_ref| series_ref.render());
         refs.series_refs.dedup();
         refs.scalar_refs
             .sort_by_key(|scalar_ref| scalar_ref.render());
         refs.scalar_refs.dedup();
-        if refs.item_ids.is_empty() && refs.series_refs.is_empty() {
+        if refs.item_refs.is_empty() && refs.series_refs.is_empty() {
             return Err(
                 "Expression must reference at least one series such as $3, !/group/ds[..,0], or !$3:ATTR"
                     .to_string(),
             );
         }
 
-        let referenced = refs
-            .item_ids
+        let item_values = refs
+            .item_refs
             .iter()
-            .map(|id| {
-                self.item_by_id(*id)
-                    .cloned()
-                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))
+            .map(|item_ref| {
+                resolve_expression_item_value(self, item_ref)
+                    .map(|points| (item_ref.clone(), points))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
 
         let external_series = resolve_expression_series_values(self, file, &refs.series_refs)?;
-        let mut series_inputs = referenced
+        let mut series_inputs = item_values
             .iter()
-            .map(|item| ExpressionSeriesInput {
-                label: format!("${}", item.id.0),
-                points: item.series.points.clone(),
+            .map(|(item_ref, points)| ExpressionSeriesInput {
+                label: item_ref.render(),
+                points: points.clone(),
             })
             .collect::<Vec<_>>();
         for series_ref in &refs.series_refs {
@@ -858,25 +1250,51 @@ impl MultiChartState {
         let kind = match &parsed {
             ParsedExpression::YSeries(ast) => {
                 for idx in 0..expected_len {
-                    let y = eval_expression_at(ast, idx, self, &external_series, &scalar_values)?;
+                    let y = eval_expression_at(
+                        ast,
+                        idx,
+                        &item_values,
+                        &external_series,
+                        &scalar_values,
+                    )?;
                     points.push((first.points[idx].0, y));
                 }
                 DerivedExpressionKind::YSeries
             }
             ParsedExpression::XySeries(x_ast, y_ast) => {
                 for idx in 0..expected_len {
-                    let x = eval_expression_at(x_ast, idx, self, &external_series, &scalar_values)?;
-                    let y = eval_expression_at(y_ast, idx, self, &external_series, &scalar_values)?;
+                    let x = eval_expression_at(
+                        x_ast,
+                        idx,
+                        &item_values,
+                        &external_series,
+                        &scalar_values,
+                    )?;
+                    let y = eval_expression_at(
+                        y_ast,
+                        idx,
+                        &item_values,
+                        &external_series,
+                        &scalar_values,
+                    )?;
                     points.push((x, y));
                 }
                 DerivedExpressionKind::XySeries
             }
         };
 
+        let mut input_ids = refs
+            .item_refs
+            .iter()
+            .map(|item_ref| item_ref.id)
+            .collect::<Vec<_>>();
+        input_ids.sort_by_key(|id| id.0);
+        input_ids.dedup();
+
         Ok(EvaluatedExpression {
             points,
             kind,
-            input_ids: refs.item_ids,
+            input_ids,
         })
     }
 
@@ -940,7 +1358,7 @@ impl MultiChartState {
         operation: BuiltinDerivedOp,
     ) -> Result<ChartItemId, String> {
         let Some(base_id) = self.marked_base_item else {
-            return Err("Mark a base series with Space first".to_string());
+            return Err("Mark a base series first".to_string());
         };
         let selected = self
             .selected_item()
@@ -1530,7 +1948,7 @@ impl MultiChartState {
         })
     }
 
-    fn render_chart(&mut self) -> bool {
+    fn render_chart_with_area(&mut self, chart_area: Option<Rect>) -> bool {
         if !self.modified {
             return false;
         }
@@ -1575,6 +1993,11 @@ impl MultiChartState {
                 return false;
             }
         };
+        if let Some(chart_area) = chart_area {
+            let (plot_x_range, plot_y_range) = chart.plotting_area().get_pixel_range();
+            self.last_chart_area =
+                chart_plot_area_in_rect(chart_area, width, height, plot_x_range, plot_y_range);
+        }
 
         if let Err(e) = chart
             .configure_mesh()
@@ -1631,6 +2054,51 @@ impl MultiChartState {
     }
 }
 
+fn chart_plot_area_in_rect(
+    outer_area: Rect,
+    width_px: u32,
+    height_px: u32,
+    plot_x_range: Range<i32>,
+    plot_y_range: Range<i32>,
+) -> Option<Rect> {
+    if outer_area.width == 0 || outer_area.height == 0 || width_px == 0 || height_px == 0 {
+        return None;
+    }
+    let x_start = plot_x_range.start.max(0) as u32;
+    let x_end = plot_x_range.end.max(plot_x_range.start).max(0) as u32;
+    let y_start = plot_y_range.start.max(0) as u32;
+    let y_end = plot_y_range.end.max(plot_y_range.start).max(0) as u32;
+    if x_end <= x_start || y_end <= y_start {
+        return None;
+    }
+
+    let left = x_start
+        .saturating_mul(outer_area.width as u32)
+        .checked_div(width_px)
+        .unwrap_or(0);
+    let right = ((x_end.saturating_mul(outer_area.width as u32)) + width_px.saturating_sub(1))
+        .checked_div(width_px)
+        .unwrap_or(outer_area.width as u32)
+        .min(outer_area.width as u32);
+    let top = y_start
+        .saturating_mul(outer_area.height as u32)
+        .checked_div(height_px)
+        .unwrap_or(0);
+    let bottom = ((y_end.saturating_mul(outer_area.height as u32)) + height_px.saturating_sub(1))
+        .checked_div(height_px)
+        .unwrap_or(outer_area.height as u32)
+        .min(outer_area.height as u32);
+
+    let width = right.saturating_sub(left).max(1) as u16;
+    let height = bottom.saturating_sub(top).max(1) as u16;
+    Some(Rect::new(
+        outer_area.x.saturating_add(left as u16),
+        outer_area.y.saturating_add(top as u16),
+        width.min(outer_area.width.saturating_sub(left as u16)),
+        height.min(outer_area.height.saturating_sub(top as u16)),
+    ))
+}
+
 fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
     column >= rect.x
         && column < rect.x.saturating_add(rect.width)
@@ -1649,7 +2117,7 @@ fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
             }
             '$' => {
                 chars.next();
-                tokens.push(ExpressionToken::ItemRef(parse_expression_item_id(
+                tokens.push(ExpressionToken::ItemRef(parse_expression_item_ref(
                     &mut chars,
                 )?));
             }
@@ -1744,6 +2212,64 @@ fn parse_expression_item_id(
         .parse::<u64>()
         .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
     Ok(ChartItemId(id))
+}
+
+fn parse_expression_item_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionItemRef, String> {
+    let id = parse_expression_item_id(chars)?;
+    let slice = if chars.peek() == Some(&'[') {
+        chars.next();
+        let mut spec = String::new();
+        let mut closed = false;
+        for next in chars.by_ref() {
+            if next == ']' {
+                closed = true;
+                break;
+            }
+            spec.push(next);
+        }
+        if !closed {
+            return Err(format!(
+                "Chart item reference '${}[{spec}' is missing a closing ']'",
+                id.0
+            ));
+        }
+        Some(parse_expression_item_slice(id, &spec)?)
+    } else {
+        None
+    };
+    Ok(ExpressionItemRef { id, slice })
+}
+
+fn parse_expression_item_slice(id: ChartItemId, spec: &str) -> Result<ExpressionItemSlice, String> {
+    let Some((start, end)) = spec.split_once("..") else {
+        return Err(format!(
+            "Chart item reference '${}[{spec}]' must use a slice like [0..5]",
+            id.0
+        ));
+    };
+    let start = start.trim().parse::<usize>().map_err(|_| {
+        format!(
+            "Chart item reference '${}[{spec}]' has invalid slice start '{}'",
+            id.0,
+            start.trim()
+        )
+    })?;
+    let end = end.trim().parse::<usize>().map_err(|_| {
+        format!(
+            "Chart item reference '${}[{spec}]' has invalid slice end '{}'",
+            id.0,
+            end.trim()
+        )
+    })?;
+    if end <= start {
+        return Err(format!(
+            "Chart item reference '${}[{spec}]' must use an increasing slice",
+            id.0
+        ));
+    }
+    Ok(ExpressionItemSlice { start, end })
 }
 
 fn parse_expression_absolute_path(
@@ -1904,12 +2430,36 @@ fn parse_expression_dataset_selectors(
         .map(|part| {
             if part == ".." {
                 Ok(ExpressionDatasetSelector::All)
+            } else if let Some((start, end)) = part.split_once("..") {
+                let start = if start.trim().is_empty() {
+                    None
+                } else {
+                    Some(start.trim().parse::<usize>().map_err(|_| {
+                        format!(
+                            "Series reference '{reference}[{spec}]' has invalid slice start '{start}'; use '..', 'a..b', '..b', 'a..', or a non-negative integer"
+                        )
+                    })?)
+                };
+                let end = if end.trim().is_empty() {
+                    None
+                } else {
+                    Some(end.trim().parse::<usize>().map_err(|_| {
+                        format!(
+                            "Series reference '{reference}[{spec}]' has invalid slice end '{end}'; use '..', 'a..b', '..b', 'a..', or a non-negative integer"
+                        )
+                    })?)
+                };
+                if start.is_none() && end.is_none() {
+                    Ok(ExpressionDatasetSelector::All)
+                } else {
+                    Ok(ExpressionDatasetSelector::Slice { start, end })
+                }
             } else {
                 part.parse::<usize>()
                     .map(ExpressionDatasetSelector::Index)
                     .map_err(|_| {
                         format!(
-                            "Series reference '{reference}[{spec}]' has invalid selector '{part}'; use '..' or a non-negative integer"
+                            "Series reference '{reference}[{spec}]' has invalid selector '{part}'; use '..', 'a..b', '..b', 'a..', or a non-negative integer"
                         )
                     })
             }
@@ -1978,9 +2528,9 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(ExpressionAst::Number(*value))
             }
-            ExpressionToken::ItemRef(id) => {
+            ExpressionToken::ItemRef(item_ref) => {
                 *pos += 1;
-                Ok(ExpressionAst::ItemRef(*id))
+                Ok(ExpressionAst::ItemRef(item_ref.clone()))
             }
             ExpressionToken::SeriesRef(series_ref) => {
                 *pos += 1;
@@ -2067,7 +2617,7 @@ fn split_top_level_tuple(
 
 #[derive(Debug, Default)]
 struct ExpressionRefs {
-    item_ids: Vec<ChartItemId>,
+    item_refs: Vec<ExpressionItemRef>,
     series_refs: Vec<ExpressionSeriesRef>,
     scalar_refs: Vec<ExpressionScalarRef>,
 }
@@ -2075,7 +2625,7 @@ struct ExpressionRefs {
 fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
     match expr {
         ExpressionAst::Number(_) => {}
-        ExpressionAst::ItemRef(id) => out.item_ids.push(*id),
+        ExpressionAst::ItemRef(item_ref) => out.item_refs.push(item_ref.clone()),
         ExpressionAst::SeriesRef(series_ref) => out.series_refs.push(series_ref.clone()),
         ExpressionAst::ScalarRef(scalar_ref) => out.scalar_refs.push(scalar_ref.clone()),
         ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
@@ -2140,6 +2690,36 @@ fn validate_expression_series_compatibility(
     Ok(())
 }
 
+fn resolve_expression_item_value(
+    state: &MultiChartState,
+    item_ref: &ExpressionItemRef,
+) -> Result<Vec<Point>, String> {
+    let item = state
+        .item_by_id(item_ref.id)
+        .ok_or_else(|| format!("Unknown chart item reference ${}", item_ref.id.0))?;
+    let points = sanitize_chart_points(item.series.points.clone());
+    let points = match &item_ref.slice {
+        Some(slice) => {
+            if slice.end > points.len() {
+                return Err(format!(
+                    "Chart item reference {} is out of bounds for len {}",
+                    item_ref.render(),
+                    points.len()
+                ));
+            }
+            points[slice.start..slice.end].to_vec()
+        }
+        None => points,
+    };
+    if points.is_empty() {
+        return Err(format!(
+            "Chart item reference {} resolved to no finite points",
+            item_ref.render()
+        ));
+    }
+    Ok(points)
+}
+
 fn dataset_ploting_data_from_points(points: Vec<Point>) -> Result<DatasetPlotingData, String> {
     let points = sanitize_chart_points(points);
     let Some((_, first_y)) = points.first().copied() else {
@@ -2161,19 +2741,20 @@ fn dataset_ploting_data_from_points(points: Vec<Point>) -> Result<DatasetPloting
 fn eval_expression_at(
     expr: &ExpressionAst,
     idx: usize,
-    state: &MultiChartState,
+    item_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
     series_values: &std::collections::HashMap<ExpressionSeriesRef, Vec<Point>>,
     scalar_values: &std::collections::HashMap<ExpressionScalarRef, f64>,
 ) -> Result<f64, String> {
     match expr {
         ExpressionAst::Number(value) => Ok(*value),
-        ExpressionAst::ItemRef(id) => state
-            .item_by_id(*id)
-            .and_then(|item| item.series.points.get(idx).map(|(_, y)| *y))
+        ExpressionAst::ItemRef(item_ref) => item_values
+            .get(item_ref)
+            .and_then(|points| points.get(idx).map(|(_, y)| *y))
             .ok_or_else(|| {
                 format!(
-                    "Chart item ${} is unavailable at sample index {}",
-                    id.0, idx
+                    "Chart item {} is unavailable at sample index {}",
+                    item_ref.render(),
+                    idx
                 )
             }),
         ExpressionAst::SeriesRef(series_ref) => series_values
@@ -2193,13 +2774,13 @@ fn eval_expression_at(
         ExpressionAst::UnaryMinus(inner) => Ok(-eval_expression_at(
             inner,
             idx,
-            state,
+            item_values,
             series_values,
             scalar_values,
         )?),
         ExpressionAst::Binary { op, lhs, rhs } => {
-            let lhs = eval_expression_at(lhs, idx, state, series_values, scalar_values)?;
-            let rhs = eval_expression_at(rhs, idx, state, series_values, scalar_values)?;
+            let lhs = eval_expression_at(lhs, idx, item_values, series_values, scalar_values)?;
+            let rhs = eval_expression_at(rhs, idx, item_values, series_values, scalar_values)?;
             match op {
                 ExprBinaryOp::Add => Ok(lhs + rhs),
                 ExprBinaryOp::Sub => Ok(lhs - rhs),
@@ -2577,6 +3158,504 @@ fn open_expression_attribute(
     ))
 }
 
+fn expression_prompt_messages(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+) -> Vec<ExpressionPromptMessage> {
+    let trimmed = buffer.trim();
+    if trimmed.is_empty() {
+        return vec![
+            ExpressionPromptMessage {
+                kind: ExpressionPromptMessageKind::Hint,
+                text: "Use $1, !/path[..,0], #/path:ATTR, or ($1, !/time[..])".to_string(),
+            },
+            ExpressionPromptMessage {
+                kind: ExpressionPromptMessageKind::Hint,
+                text: "Tab applies the selected suggestion.".to_string(),
+            },
+        ];
+    }
+
+    if expression_prompt_has_pending_completion(state, file, trimmed) {
+        return Vec::new();
+    }
+
+    match state.evaluate_expression_with_file(trimmed, file) {
+        Ok(evaluated) => {
+            let result_kind = match evaluated.kind {
+                DerivedExpressionKind::YSeries => "y-series",
+                DerivedExpressionKind::XySeries => "x/y series",
+            };
+            vec![ExpressionPromptMessage {
+                kind: ExpressionPromptMessageKind::Valid,
+                text: format!(
+                    "Valid {result_kind} with {} samples",
+                    evaluated.points.len()
+                ),
+            }]
+        }
+        Err(error) => vec![ExpressionPromptMessage {
+            kind: ExpressionPromptMessageKind::Error,
+            text: error,
+        }],
+    }
+}
+
+fn expression_prompt_has_pending_completion(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+) -> bool {
+    let Some((_, end, fragment)) = current_expression_fragment(buffer, buffer.len()) else {
+        return false;
+    };
+    if end != buffer.len() || fragment.is_empty() {
+        return false;
+    }
+    if fragment.starts_with('$') {
+        return state.items.iter().any(|item| {
+            let candidate = format!("${}", item.id.0);
+            candidate.starts_with(&fragment)
+        });
+    }
+    if fragment.starts_with('!') || fragment.starts_with('#') {
+        let Some(file) = file else {
+            return false;
+        };
+        return !expression_path_suggestions(file, &fragment).is_empty();
+    }
+    false
+}
+
+fn expression_prompt_input_segments(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+) -> Vec<ExpressionPromptInputSegment> {
+    let mut segments = Vec::new();
+    let chars: Vec<(usize, char)> = buffer.char_indices().collect();
+    let mut idx = 0;
+    let mut plain_start = 0;
+
+    while idx < chars.len() {
+        let (start, ch) = chars[idx];
+        if !matches!(ch, '$' | '!' | '#') {
+            idx += 1;
+            continue;
+        }
+        let end = consume_expression_reference_fragment(buffer, &chars, idx);
+        if end <= start + ch.len_utf8() {
+            idx += 1;
+            continue;
+        }
+        if plain_start < start {
+            segments.push(ExpressionPromptInputSegment {
+                text: buffer[plain_start..start].to_string(),
+                kind: ExpressionPromptInputKind::Plain,
+            });
+        }
+        let fragment = &buffer[start..end];
+        let kind = if end == buffer.len() {
+            ExpressionPromptInputKind::Plain
+        } else {
+            match validate_expression_reference_fragment(state, file, fragment) {
+                Ok(()) => ExpressionPromptInputKind::ValidReference,
+                Err(_) => ExpressionPromptInputKind::InvalidReference,
+            }
+        };
+        segments.push(ExpressionPromptInputSegment {
+            text: fragment.to_string(),
+            kind,
+        });
+        plain_start = end;
+        while idx < chars.len() && chars[idx].0 < end {
+            idx += 1;
+        }
+    }
+
+    if plain_start < buffer.len() {
+        segments.push(ExpressionPromptInputSegment {
+            text: buffer[plain_start..].to_string(),
+            kind: ExpressionPromptInputKind::Plain,
+        });
+    }
+
+    if segments.is_empty() {
+        segments.push(ExpressionPromptInputSegment {
+            text: buffer.to_string(),
+            kind: ExpressionPromptInputKind::Plain,
+        });
+    }
+    segments
+}
+
+fn consume_expression_reference_fragment(
+    buffer: &str,
+    chars: &[(usize, char)],
+    start_idx: usize,
+) -> usize {
+    let start_char = chars[start_idx].1;
+    let mut cursor = start_idx + 1;
+    let mut bracket_depth = 0usize;
+    while cursor < chars.len() {
+        let ch = chars[cursor].1;
+        match ch {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ => {}
+        }
+        let is_delimiter = ch.is_whitespace()
+            || (bracket_depth == 0 && matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'))
+            || (start_char == '$' && ch == '/');
+        if is_delimiter {
+            break;
+        }
+        cursor += 1;
+    }
+    chars
+        .get(cursor)
+        .map(|(offset, _)| *offset)
+        .unwrap_or(buffer.len())
+}
+
+fn validate_expression_reference_fragment(
+    state: &MultiChartState,
+    file: Option<&File>,
+    fragment: &str,
+) -> Result<(), String> {
+    match fragment.chars().next() {
+        Some('$') => {
+            let mut chars = fragment[1..].chars().peekable();
+            let item_ref = parse_expression_item_ref(&mut chars)?;
+            if chars.next().is_some() {
+                return Err(format!("Invalid chart item reference {fragment}"));
+            }
+            let _ = resolve_expression_item_value(state, &item_ref)?;
+            Ok(())
+        }
+        Some('!') => {
+            let mut chars = fragment[1..].chars().peekable();
+            let series_ref = parse_expression_series_ref(&mut chars)?;
+            if chars.next().is_some() {
+                return Err(format!("Invalid series reference {fragment}"));
+            }
+            let file = file.ok_or_else(|| "No file loaded for series references".to_string())?;
+            let _ = resolve_expression_series_value(state, file, &series_ref)?;
+            Ok(())
+        }
+        Some('#') => {
+            let mut chars = fragment[1..].chars().peekable();
+            let scalar_ref = parse_expression_scalar_ref(&mut chars)?;
+            if chars.next().is_some() {
+                return Err(format!("Invalid scalar reference {fragment}"));
+            }
+            let file = file.ok_or_else(|| "No file loaded for scalar references".to_string())?;
+            let _ = resolve_expression_scalar_value(state, file, &scalar_ref)?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn current_expression_completion(
+    prompt: &ExpressionPromptState,
+) -> Option<(usize, usize, String, &ExpressionPromptSuggestion)> {
+    let (start, end, fragment) = current_expression_fragment(&prompt.buffer, prompt.cursor)?;
+    let suggestion = prompt
+        .selected_suggestion
+        .and_then(|selected| prompt.suggestions.get(selected))?;
+    Some((start, end, fragment, suggestion))
+}
+
+fn current_expression_fragment(buffer: &str, cursor: usize) -> Option<(usize, usize, String)> {
+    if cursor > buffer.len() {
+        return None;
+    }
+    let chars: Vec<(usize, char)> = buffer.char_indices().collect();
+    let char_cursor = chars
+        .iter()
+        .take_while(|(offset, _)| *offset < cursor)
+        .count();
+    let initial_depth = chars[..char_cursor]
+        .iter()
+        .fold(0usize, |depth, (_, ch)| match ch {
+            '[' => depth + 1,
+            ']' => depth.saturating_sub(1),
+            _ => depth,
+        });
+
+    let mut start = cursor;
+    let mut depth = initial_depth;
+    let mut idx = char_cursor;
+    while idx > 0 {
+        let (offset, ch) = chars[idx - 1];
+        let is_delimiter =
+            depth == 0 && (ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'));
+        if is_delimiter {
+            break;
+        }
+        start = offset;
+        match ch {
+            ']' => depth += 1,
+            '[' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        idx -= 1;
+    }
+
+    let mut end = cursor;
+    let mut depth = initial_depth;
+    let mut idx = char_cursor;
+    while idx < chars.len() {
+        let (_, ch) = chars[idx];
+        let is_delimiter =
+            depth == 0 && (ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'));
+        if is_delimiter {
+            break;
+        }
+        end = chars
+            .get(idx + 1)
+            .map(|(next_offset, _)| *next_offset)
+            .unwrap_or(buffer.len());
+        match ch {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    if start >= end || !matches!(buffer[start..].chars().next(), Some('$' | '!' | '#')) {
+        return None;
+    }
+    Some((start, end, buffer[start..end].to_string()))
+}
+
+fn expression_prompt_suggestions(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+    cursor: usize,
+) -> Vec<ExpressionPromptSuggestion> {
+    let Some((_, _, fragment)) = current_expression_fragment(buffer, cursor) else {
+        return Vec::new();
+    };
+    if fragment.starts_with('$') {
+        return state
+            .items
+            .iter()
+            .take(8)
+            .filter(|item| {
+                let candidate = format!("${}", item.id.0);
+                candidate.starts_with(&fragment)
+            })
+            .map(|item| ExpressionPromptSuggestion {
+                symbol: match &item.source {
+                    ChartSource::DatasetSelection(source) => match source.kind {
+                        DatasetChartKind::Dataset => {
+                            configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
+                                .to_string()
+                        }
+                        DatasetChartKind::CompoundLeaf => {
+                            configure::configured_symbol(|symbols| symbols.tree.compound_leaf_icon)
+                                .to_string()
+                        }
+                    },
+                    ChartSource::DerivedExpression { .. } | ChartSource::BuiltinDerived(_) => {
+                        configure::configured_symbol(|symbols| symbols.chart.membership_marker)
+                            .to_string()
+                    }
+                },
+                insert_text: format!("${}", item.id.0),
+                label: format!("${}", item.id.0),
+                detail: format!("{} | len {}", item.list_label(), item.series.len()),
+                kind: match &item.source {
+                    ChartSource::DatasetSelection(source) => match source.kind {
+                        DatasetChartKind::Dataset => ExpressionPromptSuggestionKind::Dataset,
+                        DatasetChartKind::CompoundLeaf => {
+                            ExpressionPromptSuggestionKind::CompoundLeaf
+                        }
+                    },
+                    ChartSource::DerivedExpression { .. } | ChartSource::BuiltinDerived(_) => {
+                        ExpressionPromptSuggestionKind::ItemRef
+                    }
+                },
+            })
+            .collect();
+    }
+
+    if !(fragment.starts_with('!') || fragment.starts_with('#')) {
+        return Vec::new();
+    }
+
+    let Some(file) = file else {
+        return Vec::new();
+    };
+
+    if let Some((target, attr_prefix)) = fragment.split_once(':') {
+        let object_path = resolve_completion_target_path(state, target);
+        let Some(object_path) = object_path else {
+            return Vec::new();
+        };
+        return expression_attribute_suggestions(file, &object_path, target, attr_prefix);
+    }
+
+    expression_path_suggestions(file, &fragment)
+}
+
+fn resolve_completion_target_path(state: &MultiChartState, target: &str) -> Option<String> {
+    if let Some(path) = target
+        .strip_prefix("!$")
+        .or_else(|| target.strip_prefix("#$"))
+    {
+        let id = path.parse::<u64>().ok()?;
+        return state
+            .item_by_id(ChartItemId(id))
+            .and_then(|item| item.source.dataset_source())
+            .map(|source| source.dataset_path.clone());
+    }
+    if let Some(path) = target
+        .strip_prefix('!')
+        .or_else(|| target.strip_prefix('#'))
+    {
+        return normalize_absolute_object_path(path).ok();
+    }
+    None
+}
+
+fn expression_attribute_suggestions(
+    file: &File,
+    object_path: &str,
+    target: &str,
+    attr_prefix: &str,
+) -> Vec<ExpressionPromptSuggestion> {
+    let names = if object_path == "/" {
+        file.attr_names().ok()
+    } else if let Ok(group) = file.group(object_path) {
+        group.attr_names().ok()
+    } else if let Ok(dataset) = file.dataset(object_path) {
+        dataset.attr_names().ok()
+    } else {
+        None
+    }
+    .unwrap_or_default();
+
+    names
+        .into_iter()
+        .filter(|name| {
+            name.to_ascii_lowercase()
+                .contains(&attr_prefix.to_ascii_lowercase())
+        })
+        .take(8)
+        .map(|name| ExpressionPromptSuggestion {
+            symbol: String::new(),
+            insert_text: format!("{target}:{name}"),
+            label: format!("{target}:{name}"),
+            detail: String::new(),
+            kind: ExpressionPromptSuggestionKind::Attribute,
+        })
+        .collect()
+}
+
+fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPromptSuggestion> {
+    let target_kind = match fragment.chars().next() {
+        Some('!') => Some(ExpressionAbsolutePathKind::Dataset),
+        Some('#') => Some(ExpressionAbsolutePathKind::Dataset),
+        _ => None,
+    };
+    let needle = fragment[1..].to_ascii_lowercase();
+    expression_absolute_path_entries(file)
+        .into_iter()
+        .filter(|entry| {
+            let kind_matches = match target_kind {
+                Some(ExpressionAbsolutePathKind::Dataset) => true,
+                Some(ExpressionAbsolutePathKind::Group) => {
+                    entry.kind == ExpressionAbsolutePathKind::Group
+                }
+                None => true,
+            };
+            kind_matches
+                && (entry.path.to_ascii_lowercase().contains(&needle)
+                    || entry.path.to_ascii_lowercase().starts_with(&needle))
+        })
+        .take(8)
+        .map(|entry| {
+            let label = format!("{}{}", &fragment[..1], entry.path);
+            let insert_text = match (&fragment[..1], entry.kind, entry.shape.as_ref()) {
+                ("!", ExpressionAbsolutePathKind::Dataset, Some(shape)) if !shape.is_empty() => {
+                    format!(
+                        "{}{}[{}]",
+                        &fragment[..1],
+                        entry.path,
+                        vec![".."; shape.len()].join(",")
+                    )
+                }
+                _ => label.clone(),
+            };
+            ExpressionPromptSuggestion {
+                symbol: match entry.kind {
+                    ExpressionAbsolutePathKind::Group => {
+                        configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
+                            .to_string()
+                    }
+                    ExpressionAbsolutePathKind::Dataset => {
+                        configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
+                            .to_string()
+                    }
+                },
+                insert_text,
+                label,
+                detail: entry.detail,
+                kind: match entry.kind {
+                    ExpressionAbsolutePathKind::Group => ExpressionPromptSuggestionKind::Group,
+                    ExpressionAbsolutePathKind::Dataset => ExpressionPromptSuggestionKind::Dataset,
+                },
+            }
+        })
+        .collect()
+}
+
+fn expression_absolute_path_entries(file: &File) -> Vec<ExpressionAbsolutePathEntry> {
+    let Ok(root) = file.as_group() else {
+        return Vec::new();
+    };
+    full_traversal(&root)
+        .into_iter()
+        .filter_map(|path| {
+            if let Ok(dataset) = file.dataset(&path) {
+                let shape = dataset.shape();
+                Some(ExpressionAbsolutePathEntry {
+                    detail: format_shape_suffix(&shape),
+                    path,
+                    kind: ExpressionAbsolutePathKind::Dataset,
+                    shape: Some(shape),
+                })
+            } else if file.group(&path).is_ok() {
+                Some(ExpressionAbsolutePathEntry {
+                    path,
+                    kind: ExpressionAbsolutePathKind::Group,
+                    shape: None,
+                    detail: String::new(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn format_shape_suffix(shape: &[usize]) -> String {
+    format!(
+        "[{}]",
+        shape
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 fn read_expression_numeric_scalar_attr(attr: &Attribute, reference: &str) -> Result<f64, String> {
     if !attr.is_scalar() {
         return Err(format!(
@@ -2826,6 +3905,90 @@ mod tests {
             shape: vec![4, 8],
             kind: DatasetChartKind::Dataset,
         })
+    }
+
+    #[test]
+    fn compact_selection_summary_uses_concise_array_notation() {
+        let one_d = DatasetChartSource {
+            dataset_path: "/raw/ds".to_string(),
+            display_path: "/group/chunked_dataset".to_string(),
+            selection: PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+            shape: vec![64],
+            kind: DatasetChartKind::Dataset,
+        };
+        assert_eq!(one_d.compact_selection_summary(), "chunked_dataset");
+
+        let three_d = DatasetChartSource {
+            dataset_path: "/raw/ds".to_string(),
+            display_path: "/group/chunked_dataset".to_string(),
+            selection: PreviewSelection {
+                index: vec![0, 25, 1],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+            shape: vec![64, 32, 8],
+            kind: DatasetChartKind::Dataset,
+        };
+        assert_eq!(
+            three_d.compact_selection_summary(),
+            "chunked_dataset[..,25,1]"
+        );
+
+        let swapped = DatasetChartSource {
+            selection: PreviewSelection {
+                index: vec![5, 0, 0],
+                x: 2,
+                slice: SliceSelection::All,
+            },
+            ..three_d.clone()
+        };
+        assert_eq!(
+            swapped.compact_selection_summary(),
+            "chunked_dataset[5,0,..]"
+        );
+
+        let sliced = DatasetChartSource {
+            selection: PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::FromTo(5, 12),
+            },
+            shape: vec![64],
+            ..one_d
+        };
+        assert_eq!(sliced.compact_selection_summary(), "chunked_dataset[5..12]");
+    }
+
+    #[test]
+    fn chart_item_statistics_compute_mean_median_and_stddev() {
+        let item = ChartItem {
+            id: ChartItemId(1),
+            color_slot: 0,
+            label: "series".to_string(),
+            source: ChartSource::DerivedExpression {
+                expression: "series".to_string(),
+                input_ids: vec![],
+                len: 4,
+                kind: DerivedExpressionKind::YSeries,
+            },
+            series: ChartSeries::from_points(vec![(1.0, 1.0), (2.0, 3.0), (3.0, 5.0), (4.0, 7.0)])
+                .expect("series"),
+            visible: true,
+        };
+
+        let stats = item.statistics();
+        assert_eq!(stats.samples, 4);
+        assert_eq!(stats.x_min, 1.0);
+        assert_eq!(stats.x_max, 4.0);
+        assert_eq!(stats.y_min, 1.0);
+        assert_eq!(stats.y_max, 7.0);
+        assert_eq!(stats.mean, 4.0);
+        assert_eq!(stats.median, 4.0);
+        assert!((stats.stddev - (5.0_f64).sqrt()).abs() < 1e-9);
     }
 
     fn temp_hdf5_path(name: &str) -> std::path::PathBuf {
@@ -3233,6 +4396,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_dataset_slices_with_explicit_ranges() {
+        let tokens = tokenize_expression("!/matrix[2,..10,0] + !/matrix[5,5..15,0]").unwrap();
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::SeriesRef(ExpressionSeriesRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: None,
+                selectors: Some(selectors),
+            }) if path == "/matrix"
+                    && selectors
+                        == &vec![
+                            ExpressionDatasetSelector::Index(2),
+                            ExpressionDatasetSelector::Slice { start: None, end: Some(10) },
+                            ExpressionDatasetSelector::Index(0),
+                        ]
+        )));
+        assert!(tokens.iter().any(|token| matches!(
+            token,
+            ExpressionToken::SeriesRef(ExpressionSeriesRef {
+                target: ExpressionObjectTarget::AbsolutePath(path),
+                attr_name: None,
+                selectors: Some(selectors),
+            }) if path == "/matrix"
+                    && selectors
+                        == &vec![
+                            ExpressionDatasetSelector::Index(5),
+                            ExpressionDatasetSelector::Slice { start: Some(5), end: Some(15) },
+                            ExpressionDatasetSelector::Index(0),
+                        ]
+        )));
+    }
+
+    #[test]
     fn dataset_path_reference_builds_preview_selection() {
         let dataset_ref = ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath("/matrix".to_string()),
@@ -3250,6 +4446,26 @@ mod tests {
     }
 
     #[test]
+    fn dataset_path_reference_builds_preview_selection_from_range_slice() {
+        let dataset_ref = ExpressionSeriesRef {
+            target: ExpressionObjectTarget::AbsolutePath("/matrix".to_string()),
+            attr_name: None,
+            selectors: Some(vec![
+                ExpressionDatasetSelector::Index(5),
+                ExpressionDatasetSelector::Slice {
+                    start: Some(5),
+                    end: Some(15),
+                },
+                ExpressionDatasetSelector::Index(0),
+            ]),
+        };
+        let selection = dataset_ref.to_preview_selection(&[10, 20, 3]).unwrap();
+        assert_eq!(selection.x, 1);
+        assert_eq!(selection.index, vec![5, 0, 0]);
+        assert_eq!(selection.slice, SliceSelection::FromTo(5, 15));
+    }
+
+    #[test]
     fn dataset_path_reference_requires_exactly_one_axis_selector() {
         let dataset_ref = ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath("/matrix".to_string()),
@@ -3260,7 +4476,23 @@ mod tests {
             ]),
         };
         let err = dataset_ref.to_preview_selection(&[3, 4]).unwrap_err();
-        assert!(err.contains("exactly one '..'"));
+        assert!(err.contains("exactly one slice axis selector"));
+    }
+
+    #[test]
+    fn current_expression_fragment_keeps_commas_inside_dataset_selectors() {
+        let buffer = "!/matrix[..,2,0] + $1";
+        let cursor = buffer.find(",2").unwrap() + 1;
+        let (_, _, fragment) = current_expression_fragment(buffer, cursor).unwrap();
+        assert_eq!(fragment, "!/matrix[..,2,0]");
+    }
+
+    #[test]
+    fn consume_expression_reference_fragment_keeps_commas_inside_dataset_selectors() {
+        let buffer = "!/matrix[5,5..15,0] + $1";
+        let chars: Vec<(usize, char)> = buffer.char_indices().collect();
+        let end = consume_expression_reference_fragment(buffer, &chars, 0);
+        assert_eq!(&buffer[..end], "!/matrix[5,5..15,0]");
     }
 
     #[test]
@@ -3575,6 +4807,37 @@ mod tests {
         assert_eq!(state.aoi_to, None);
 
         assert!(state.zoom_in_at_position(10, 6, 10.0));
+        assert_eq!(state.aoi_from, None);
+        assert_eq!(state.aoi_to, Some(80));
+    }
+
+    #[test]
+    fn chart_plot_area_conversion_respects_padding() {
+        let plot_area =
+            chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, 40..180, 10..70).unwrap();
+        assert_eq!(plot_area, Rect::new(14, 6, 14, 6));
+    }
+
+    #[test]
+    fn zoom_at_position_ignores_chart_padding() {
+        let mut state = make_state();
+        let selection = PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        };
+        state.add_chart_item(
+            source("/group/a", selection),
+            (0..100).map(|i| (i as f64, i as f64)).collect(),
+        );
+        state.last_chart_area =
+            chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, 40..180, 10..70);
+
+        assert!(!state.zoom_in_at_position(11, 6, 10.0));
+        assert_eq!(state.aoi_from, None);
+        assert_eq!(state.aoi_to, None);
+
+        assert!(state.zoom_in_at_position(14, 6, 10.0));
         assert_eq!(state.aoi_from, None);
         assert_eq!(state.aoi_to, Some(80));
     }
