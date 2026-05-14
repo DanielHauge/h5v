@@ -30,7 +30,8 @@ LuaLS sidecar files are generated next to it under `.h5v-luals/`. `h5v.lua` is r
 3. Pick a built-in theme with `h5v.theme`.
 4. Pick a built-in symbol theme with `h5v.symbol_theme`.
 5. Pick preferred heatmap defaults in `h5v.heatmap`.
-6. Override only the values you want in `h5v.colors` and `h5v.symbols`.
+6. Add keymap overrides in `h5v.keymaps`.
+7. Override only the values you want in `h5v.colors` and `h5v.symbols`.
 
 For all keys, categories, themes, and accepted color names, see [Configuration reference](./configuration-reference.md).
 
@@ -44,6 +45,58 @@ Heatmap also supports preferred defaults in `h5v.heatmap`:
 - `default_invert_c`
 - `range_modes` for custom presets
 
+## Keymaps
+
+Keymaps are configurable in `h5v.keymaps`.
+
+Scopes:
+
+- `global`
+- `normal`
+- `window`
+- `tree`
+- `content`
+- `heatmap`
+- `attributes`
+- `mchart`
+
+Precedence:
+
+1. `heatmap`
+2. `content` / `tree` / `attributes` / `mchart` / `window`
+3. `normal`
+4. `global`
+
+Each scope supports:
+
+- `clear_defaults = true` to remove shipped bindings for that scope
+- `unbind = { "key", ... }` to remove selected shipped bindings
+- `bind = { { key = "...", action = "..." }, { key = "...", command = "..." } }`
+- `bind(mode, key, action[, description])`
+- `bind_command(mode, key, command[, description])`
+- `bind_commands(mode, key, commands[, description])`
+- `bind_script(mode, key, script[, description])`
+- `bind_lua(mode, key, callback[, description])`
+- `unbind(mode, key)`
+
+`h5v.modes` and `h5v.actions` expose scope and action constants.
+
+The first pass covers non-text-entry contexts only. Command-line editing, search editing, and the multichart expression prompt keep their built-in editing keys.
+
+Example:
+
+```lua
+bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp, "Show help")
+unbind(h5v.modes.Heatmap, "v")
+bind_command(h5v.modes.Heatmap, "ctrl+alt+r", "heatmap range use \"Clip 1-99%\"")
+bind_commands(h5v.modes.Global, "ctrl+k", { "down 2", "up 1" })
+bind_script(h5v.modes.Global, "ctrl+s", "down 2\nup 1")
+bind_lua(h5v.modes.Global, "ctrl+l", function(ctx)
+  ctx.command("help reload")
+end)
+bind(h5v.modes.Heatmap, "ctrl+z", h5v.actions.HeatmapZoomIn)
+```
+
 ## Example
 
 ```lua
@@ -55,6 +108,8 @@ h5v.compatibility = true
 h5v.heatmap.default_colormap = "inferno"
 h5v.heatmap.default_normalization = "log"
 h5v.heatmap.default_invert_c = true
+
+bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp)
 
 h5v.colors.accent.selection_bg = "#e1c878"
 h5v.colors.tree.group = "#d26c00"

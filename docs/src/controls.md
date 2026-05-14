@@ -1,5 +1,7 @@
 # Controls reference
 
+These are the shipped defaults. `h5v.keymaps` can override them for non-text-entry contexts.
+
 ## Global and pane controls
 
 | Keys | Action |

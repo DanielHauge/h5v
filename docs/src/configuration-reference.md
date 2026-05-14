@@ -9,6 +9,7 @@
 | `h5v.compatibility` | boolean | Compatibility mode override from config |
 | `h5v.content_mode_order` | string array | Ordered content-mode preference |
 | `h5v.heatmap` | table | Preferred heatmap defaults and custom range presets |
+| `h5v.keymaps` | table | Scoped keymap overrides and command bindings |
 | `h5v.colors` | table | Per-key color overrides |
 | `h5v.symbols` | table | Per-key symbol overrides |
 | `h5v.themes.<name>` | table | Built-in color catalogs |
@@ -156,4 +157,63 @@ h5v.heatmap.default_invert_c = true
 h5v.heatmap.range_modes = {
   { label = "5-80%", min = "5%", max = "80%" },
 }
+```
+
+## Keymap config
+
+Scopes:
+
+| Scope | Notes |
+| --- | --- |
+| `h5v.keymaps.global` | Available in non-text-entry modes regardless of focus |
+| `h5v.keymaps.normal` | Normal mode bindings before focus-specific scopes |
+| `h5v.keymaps.window` | Follow-up keys after the window chord action |
+| `h5v.keymaps.tree` | Tree focus in normal mode |
+| `h5v.keymaps.content` | Preview, matrix, and shared content bindings |
+| `h5v.keymaps.heatmap` | Heatmap-only bindings |
+| `h5v.keymaps.attributes` | Attributes focus in normal mode |
+| `h5v.keymaps.mchart` | Multichart navigation/view bindings |
+
+Each scope table accepts:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `clear_defaults` | boolean | Remove the shipped bindings for that scope before applying overrides |
+| `unbind` | string array | Remove specific shipped bindings by key |
+| `bind` | table array | Add built-in actions or command bindings |
+
+Each `bind` entry accepts:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `key` | string | Key spec such as `ctrl+h`, `PageDown`, `?`, or `ctrl+alt+r` |
+| `action` | string | Built-in action id for that scope |
+| `command` | string | Command text executed through the normal command parser |
+| `commands` | string array | Command list executed like a startup script |
+| `script` | string | Startup-script text executed on keypress |
+| `lua` | function | Lua callback receiving `ctx.command`, `ctx.commands`, and `ctx.script` helpers |
+| `description` | string | Optional help text stored with the binding definition |
+
+An entry must set exactly one of `action`, `command`, `commands`, `script`, or `lua`.
+
+Helper functions:
+
+| Function | Notes |
+| --- | --- |
+| `bind(mode, key, action[, description])` | Append a built-in action binding using `h5v.modes.*` and `h5v.actions.*` constants |
+| `bind_command(mode, key, command[, description])` | Append a command-backed binding |
+| `bind_commands(mode, key, commands[, description])` | Append a startup-script-style command list |
+| `bind_script(mode, key, script[, description])` | Append one script string using startup-script parsing |
+| `bind_lua(mode, key, callback[, description])` | Append a Lua callback |
+| `unbind(mode, key)` | Append one key to the scope `unbind` list |
+
+Example:
+
+```lua
+bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp)
+unbind(h5v.modes.Heatmap, "v")
+bind(h5v.modes.Heatmap, "ctrl+z", h5v.actions.HeatmapZoomIn)
+bind_command(h5v.modes.Heatmap, "ctrl+alt+r", "heatmap range use \"Clip 1-99%\"")
+bind_commands(h5v.modes.Global, "ctrl+k", { "down 2", "up 1" })
+bind_lua(h5v.modes.Global, "ctrl+l", function(ctx) ctx.command("help reload") end)
 ```

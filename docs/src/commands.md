@@ -133,6 +133,8 @@ press ctrl+w o
 press M j enter
 ```
 
+If you override keys in `h5v.keymaps`, `press` uses the effective keymaps after config load.
+
 Try commands against the bundled example:
 
 ```bash

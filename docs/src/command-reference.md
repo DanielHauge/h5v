@@ -1,5 +1,7 @@
 # Command reference
 
+Key columns below show the shipped defaults. `h5v.keymaps` can override them for non-text-entry contexts.
+
 ## Top-level commands
 
 | Command | Aliases | Args | Keys | Purpose |
@@ -122,3 +124,5 @@ These actions are available from the keymap and can be scripted with `press ...`
 press ctrl+w o
 press M j enter
 ```
+
+`press` uses the effective keymaps after config load, including custom keymap overrides.

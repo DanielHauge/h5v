@@ -22,6 +22,8 @@ Startup scripts use the same command parser as the minibuffer. That includes:
 
 Heatmap can be scripted with generic movement commands, `heatmap range ...` commands, and `press` for zoom, reset, clear selection, and viewport pan.
 
+`press` uses the effective keymaps after config load, so startup scripts follow any configured key remaps.
+
 ## Validation mode
 
 Use `--script-test` or `-ct` to validate a script without launching the UI:
