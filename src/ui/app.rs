@@ -3,7 +3,7 @@ use std::{rc::Rc, thread, time::SystemTime};
 use ratatui::{
     crossterm::event::{self},
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -150,13 +150,7 @@ fn main_recover_loop(
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
         let command_over_multichart = matches!(state.mode, Mode::Command)
             && matches!(state.command_return_mode, Mode::MultiChart);
-        let frame_area = match state.toast {
-            AppToast::Empty => frame.area(),
-            AppToast::Info(_) | AppToast::Warning(_) | AppToast::Error(_) => {
-                split_render_toast(frame, state)
-            }
-        };
-        let content_area = render_header(frame, frame_area, state, new_version);
+        let content_area = render_header(frame, frame.area(), state, new_version);
         let (content_area, command_area) = match state.mode {
             Mode::Command => split_command_bar(content_area),
             _ => (content_area, Rect::new(0, 0, 0, 0)),
@@ -165,6 +159,7 @@ fn main_recover_loop(
 
         if let Mode::Help = state.mode {
             render_help(frame, content_area, state);
+            render_toast_overlay(frame, state, command_area);
             return;
         }
         if matches!(state.mode, Mode::MultiChart) || command_over_multichart {
@@ -172,6 +167,7 @@ fn main_recover_loop(
             if matches!(state.mode, Mode::Command) {
                 render_command_dialog(frame, command_area, state);
             }
+            render_toast_overlay(frame, state, command_area);
             return;
         }
 
@@ -230,6 +226,7 @@ fn main_recover_loop(
             }
             _ => {}
         }
+        render_toast_overlay(frame, state, command_area);
     };
 
     // First time draw nice state
@@ -803,55 +800,83 @@ fn split_command_bar(area: Rect) -> (Rect, Rect) {
     }
 }
 
-fn split_render_toast(frame: &mut Frame<'_>, state: &AppState) -> Rect {
-    let area = frame.area();
-    match state.toast {
-        AppToast::Empty => area,
-        AppToast::Info(ref msg) | AppToast::Error(ref msg) | AppToast::Warning(ref msg) => {
-            let areas = Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([Constraint::Min(0), Constraint::Length(3)])
-                .split(area);
-
-            let toast_area = areas[1];
-            let toast_text = Text::from(msg.to_string());
-            let toast_paragraph = Paragraph::new(toast_text)
-                .block(
-                    Block::default()
-                        .bg(configure::themed_color(|colors| colors.surface.bg))
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(match state.toast {
-                            AppToast::Info(_) => {
-                                configure::themed_color(|colors| colors.toast.info)
-                            }
-                            AppToast::Error(_) => {
-                                configure::themed_color(|colors| colors.text.error)
-                            }
-                            AppToast::Warning(_) => {
-                                configure::themed_color(|colors| colors.toast.warning)
-                            }
-                            _ => configure::themed_color(|colors| colors.toast.neutral),
-                        }))
-                        .border_type(ratatui::widgets::BorderType::Rounded)
-                        .title(match state.toast {
-                            AppToast::Info(_) => "Info",
-                            AppToast::Error(_) => "Error",
-                            AppToast::Warning(_) => "Warning",
-                            _ => "",
-                        })
-                        .title_style(
-                            Style::default()
-                                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                                .bold(),
-                        )
-                        .title_alignment(Alignment::Center),
-                )
-                .wrap(Wrap { trim: true });
-            frame.render_widget(toast_paragraph, toast_area);
-
-            areas[0]
-        }
+fn render_toast_overlay(frame: &mut Frame<'_>, state: &AppState, command_area: Rect) {
+    let Some((label, message, accent_color)) = toast_parts(&state.toast) else {
+        return;
+    };
+    let area = toast_overlay_area(frame.area(), command_area);
+    if area.width == 0 || area.height == 0 {
+        return;
     }
+
+    let base_bg = configure::themed_color(|colors| colors.surface.title_bg);
+    let base_fg = configure::themed_color(|colors| colors.text.primary);
+    let label_fg = configure::themed_color(|colors| colors.surface.bg);
+    let label_text = format!(" {label} ");
+    let available_message_width = area
+        .width
+        .saturating_sub(label_text.chars().count() as u16)
+        .saturating_sub(1) as usize;
+    let message = truncate_to_width(message, available_message_width);
+
+    let line = Line::from(vec![
+        Span::styled(
+            label_text,
+            Style::default().fg(label_fg).bg(accent_color).bold(),
+        ),
+        Span::styled(" ", Style::default().bg(base_bg)),
+        Span::styled(message, Style::default().fg(base_fg).bg(base_bg)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().bg(base_bg)),
+        area,
+    );
+}
+
+fn toast_overlay_area(frame_area: Rect, command_area: Rect) -> Rect {
+    if frame_area.width == 0 || frame_area.height == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let y = if command_area.height > 0 && command_area.y > frame_area.y {
+        command_area.y.saturating_sub(1)
+    } else {
+        frame_area.bottom().saturating_sub(1)
+    };
+    Rect::new(frame_area.x, y, frame_area.width, 1)
+}
+
+fn toast_parts(toast: &AppToast) -> Option<(&'static str, &str, ratatui::style::Color)> {
+    match toast {
+        AppToast::Empty => None,
+        AppToast::Info(message) => Some((
+            "INFO",
+            message.as_str(),
+            configure::themed_color(|colors| colors.toast.info),
+        )),
+        AppToast::Warning(message) => Some((
+            "WARN",
+            message.as_str(),
+            configure::themed_color(|colors| colors.toast.warning),
+        )),
+        AppToast::Error(message) => Some((
+            "ERROR",
+            message.as_str(),
+            configure::themed_color(|colors| colors.text.error),
+        )),
+    }
+}
+
+fn truncate_to_width(message: &str, max_width: usize) -> String {
+    let char_count = message.chars().count();
+    if char_count <= max_width {
+        return message.to_string();
+    }
+    if max_width <= 3 {
+        return ".".repeat(max_width);
+    }
+    let mut truncated = message.chars().take(max_width - 3).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn render_error(frame: &mut Frame<'_>, error: &str) {
