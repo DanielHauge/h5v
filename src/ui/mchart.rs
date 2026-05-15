@@ -278,6 +278,78 @@ fn classify_function_value_kind(
     }
 }
 
+fn interp_call_args(
+    ast: &ExpressionAst,
+) -> Option<(&expression::ExpressionItemRef, &ExpressionAst)> {
+    let ExpressionAst::FunctionCall { name, args } = ast else {
+        return None;
+    };
+    if name != "interp" || args.len() != 2 {
+        return None;
+    }
+    let ExpressionAst::ItemRef(item_ref) = &args[0] else {
+        return None;
+    };
+    Some((item_ref, &args[1]))
+}
+
+fn slice_call_args(
+    ast: &ExpressionAst,
+) -> Option<(
+    &expression::ExpressionItemRef,
+    &ExpressionAst,
+    &ExpressionAst,
+)> {
+    let ExpressionAst::FunctionCall { name, args } = ast else {
+        return None;
+    };
+    if name != "slice" || args.len() != 3 {
+        return None;
+    }
+    let ExpressionAst::ItemRef(item_ref) = &args[0] else {
+        return None;
+    };
+    Some((item_ref, &args[1], &args[2]))
+}
+
+fn ensure_top_level_transform_usage_is_supported(
+    expr: &ExpressionAst,
+    allow_top_level: bool,
+) -> Result<(), String> {
+    match expr {
+        ExpressionAst::Number(_) | ExpressionAst::ItemRef(_) | ExpressionAst::LoadRef(_) => Ok(()),
+        ExpressionAst::UnaryMinus(inner) => {
+            ensure_top_level_transform_usage_is_supported(inner, false)
+        }
+        ExpressionAst::Binary { lhs, rhs, .. } => {
+            ensure_top_level_transform_usage_is_supported(lhs, false)?;
+            ensure_top_level_transform_usage_is_supported(rhs, false)
+        }
+        ExpressionAst::FunctionCall { name, args } => {
+            if matches!(name.as_str(), "interp" | "slice") {
+                if !allow_top_level {
+                    return Err(format!("{name}() must be the top-level expression"));
+                }
+                let expected_arg_count = if name == "interp" { 2 } else { 3 };
+                if args.len() != expected_arg_count {
+                    return Err(format!(
+                        "{name}() expects exactly {expected_arg_count} arguments"
+                    ));
+                }
+                if !matches!(args.first(), Some(ExpressionAst::ItemRef(_))) {
+                    return Err(format!(
+                        "{name}() requires a direct chart item reference as the first argument"
+                    ));
+                }
+            }
+            for arg in args {
+                ensure_top_level_transform_usage_is_supported(arg, false)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CapturedMultiChartItem {
     pub source: ChartSource,
@@ -1225,6 +1297,179 @@ impl MultiChartState {
         )
     }
 
+    fn series_transform_input(
+        &self,
+        item_ref: &expression::ExpressionItemRef,
+        resolution: ExpressionSeriesResolution,
+    ) -> Result<(Vec<Point>, DerivedExpressionKind), String> {
+        let item = match &item_ref.target {
+            expression::ExpressionItemTarget::Id(id) => self
+                .item_by_id(*id)
+                .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+            expression::ExpressionItemTarget::Name(name) => self
+                .item_by_name(name)
+                .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+        };
+        if !item.has_loaded_series() {
+            return Err(format!(
+                "Chart item reference {} is still loading",
+                item_ref.render()
+            ));
+        }
+        let kind = match item.source {
+            ChartSource::DerivedExpression {
+                kind: DerivedExpressionKind::XySeries,
+                ..
+            } => DerivedExpressionKind::XySeries,
+            _ => DerivedExpressionKind::YSeries,
+        };
+        let points = match resolution {
+            ExpressionSeriesResolution::Overview => item.overview_series().points.clone(),
+            ExpressionSeriesResolution::Active => item.active_series().points.clone(),
+        };
+        let points = match &item_ref.slice {
+            Some(slice) => {
+                if slice.end > points.len() {
+                    return Err(format!(
+                        "Chart item reference {} is out of bounds for len {}",
+                        item_ref.render(),
+                        points.len()
+                    ));
+                }
+                points[slice.start..slice.end].to_vec()
+            }
+            None => points,
+        };
+        if points.len() < 2 {
+            return Err("Top-level series transforms require at least two samples".to_string());
+        }
+        for window in points.windows(2) {
+            if window[1].0 <= window[0].0 {
+                return Err(
+                    "Top-level series transforms require strictly increasing x-values".to_string(),
+                );
+            }
+        }
+        Ok((points, kind))
+    }
+
+    fn evaluate_interp_expression_with_resolution(
+        &self,
+        expr: &ExpressionAst,
+        refs: &ExpressionRefs,
+        resolution: ExpressionSeriesResolution,
+        item_series_values: &HashMap<expression::ExpressionItemRef, Vec<Point>>,
+        item_scalar_values: &HashMap<expression::ExpressionItemRef, f64>,
+        external_series: &HashMap<expression::ExpressionLoadRef, Vec<Point>>,
+        scalar_values: &HashMap<expression::ExpressionLoadRef, f64>,
+    ) -> Result<EvaluatedExpression, String> {
+        let Some((item_ref, sample_rate_expr)) = interp_call_args(expr) else {
+            return Err("interp() must be the top-level expression".to_string());
+        };
+        let (input_points, kind) = self.series_transform_input(item_ref, resolution)?;
+        if kind != DerivedExpressionKind::XySeries {
+            return Err("interp() requires an x/y derived series such as ($1, $2)".to_string());
+        }
+        let sample_rate = eval_scalar_expression(
+            sample_rate_expr,
+            item_series_values,
+            item_scalar_values,
+            external_series,
+            scalar_values,
+            input_points.len(),
+        )?;
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return Err("interp() sample rate must be a positive finite scalar".to_string());
+        }
+        let first_x = input_points.first().map(|(x, _)| *x).unwrap_or_default();
+        let last_x = input_points.last().map(|(x, _)| *x).unwrap_or_default();
+        let mut next_x = ((first_x / sample_rate).floor() + 1.0) * sample_rate;
+        let epsilon = sample_rate.abs() * 1e-9;
+        let mut points = Vec::new();
+        let mut segment_idx = 0usize;
+        while next_x <= last_x + epsilon {
+            while segment_idx + 1 < input_points.len() && input_points[segment_idx + 1].0 < next_x {
+                segment_idx += 1;
+            }
+            if segment_idx + 1 >= input_points.len() {
+                break;
+            }
+            let (x0, y0) = input_points[segment_idx];
+            let (x1, y1) = input_points[segment_idx + 1];
+            if next_x < x0 - epsilon || next_x > x1 + epsilon {
+                next_x += sample_rate;
+                continue;
+            }
+            let t = if (x1 - x0).abs() <= f64::EPSILON {
+                0.0
+            } else {
+                (next_x - x0) / (x1 - x0)
+            };
+            points.push((next_x, y0 + (y1 - y0) * t));
+            next_x += sample_rate;
+        }
+        if points.is_empty() {
+            return Err("interp() sample rate produced no output samples".to_string());
+        }
+        Ok(EvaluatedExpression {
+            points,
+            scalar_value: None,
+            kind: DerivedExpressionKind::XySeries,
+            input_ids: self.collect_expression_input_ids(refs),
+        })
+    }
+
+    fn evaluate_slice_expression_with_resolution(
+        &self,
+        expr: &ExpressionAst,
+        refs: &ExpressionRefs,
+        resolution: ExpressionSeriesResolution,
+        item_series_values: &HashMap<expression::ExpressionItemRef, Vec<Point>>,
+        item_scalar_values: &HashMap<expression::ExpressionItemRef, f64>,
+        external_series: &HashMap<expression::ExpressionLoadRef, Vec<Point>>,
+        scalar_values: &HashMap<expression::ExpressionLoadRef, f64>,
+    ) -> Result<EvaluatedExpression, String> {
+        let Some((item_ref, start_expr, end_expr)) = slice_call_args(expr) else {
+            return Err("slice() must be the top-level expression".to_string());
+        };
+        let (input_points, kind) = self.series_transform_input(item_ref, resolution)?;
+        let start_x = eval_scalar_expression(
+            start_expr,
+            item_series_values,
+            item_scalar_values,
+            external_series,
+            scalar_values,
+            input_points.len(),
+        )?;
+        let end_x = eval_scalar_expression(
+            end_expr,
+            item_series_values,
+            item_scalar_values,
+            external_series,
+            scalar_values,
+            input_points.len(),
+        )?;
+        if !start_x.is_finite() || !end_x.is_finite() {
+            return Err("slice() bounds must be finite scalars".to_string());
+        }
+        if start_x > end_x {
+            return Err("slice() requires start <= end".to_string());
+        }
+        let points = input_points
+            .into_iter()
+            .filter(|(x, _)| *x >= start_x && *x <= end_x)
+            .collect::<Vec<_>>();
+        if points.is_empty() {
+            return Err("slice() x-range produced no samples".to_string());
+        }
+        Ok(EvaluatedExpression {
+            points,
+            scalar_value: None,
+            kind,
+            input_ids: self.collect_expression_input_ids(refs),
+        })
+    }
+
     fn validate_expression_with_file(
         &self,
         expression: &str,
@@ -1232,6 +1477,31 @@ impl MultiChartState {
     ) -> Result<ValidatedExpression, String> {
         let tokens = tokenize_expression(expression)?;
         let parsed = parse_derived_expression(&tokens)?;
+        match &parsed {
+            ParsedExpression::YSeries(ast) => {
+                ensure_top_level_transform_usage_is_supported(ast, true)?
+            }
+            ParsedExpression::XySeries(x_ast, y_ast) => {
+                ensure_top_level_transform_usage_is_supported(x_ast, false)?;
+                ensure_top_level_transform_usage_is_supported(y_ast, false)?;
+            }
+        }
+        if matches!(
+            &parsed,
+            ParsedExpression::YSeries(ast)
+                if interp_call_args(ast).is_some() || slice_call_args(ast).is_some()
+        ) {
+            let evaluated = self.evaluate_expression_with_resolution(
+                expression,
+                file,
+                ExpressionSeriesResolution::Overview,
+                true,
+            )?;
+            return Ok(ValidatedExpression {
+                kind: evaluated.kind,
+                sample_count: evaluated.points.len(),
+            });
+        }
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
         refs.item_refs.sort_by_key(|item_ref| item_ref.render());
@@ -1351,6 +1621,15 @@ impl MultiChartState {
     ) -> Result<EvaluatedExpression, String> {
         let tokens = tokenize_expression(expression)?;
         let parsed = parse_derived_expression(&tokens)?;
+        match &parsed {
+            ParsedExpression::YSeries(ast) => {
+                ensure_top_level_transform_usage_is_supported(ast, true)?
+            }
+            ParsedExpression::XySeries(x_ast, y_ast) => {
+                ensure_top_level_transform_usage_is_supported(x_ast, false)?;
+                ensure_top_level_transform_usage_is_supported(y_ast, false)?;
+            }
+        }
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
         refs.item_refs.sort_by_key(|item_ref| item_ref.render());
@@ -1402,6 +1681,30 @@ impl MultiChartState {
                         scalar_values.insert(load_ref.clone(), value);
                     }
                 }
+            }
+        }
+        if let ParsedExpression::YSeries(ast) = &parsed {
+            if interp_call_args(ast).is_some() {
+                return self.evaluate_interp_expression_with_resolution(
+                    ast,
+                    &refs,
+                    resolution,
+                    &item_series_values,
+                    &item_scalar_values,
+                    &external_series,
+                    &scalar_values,
+                );
+            }
+            if slice_call_args(ast).is_some() {
+                return self.evaluate_slice_expression_with_resolution(
+                    ast,
+                    &refs,
+                    resolution,
+                    &item_series_values,
+                    &item_scalar_values,
+                    &external_series,
+                    &scalar_values,
+                );
             }
         }
         let mut series_inputs = item_series_values
