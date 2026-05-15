@@ -164,7 +164,7 @@ pub struct MultiChartSettings {
 impl Default for MultiChartSettings {
     fn default() -> Self {
         Self {
-            overview_max_samples: crate::data::MAX_PLOT_SAMPLES,
+            overview_max_samples: crate::data::DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
             detail_enabled: true,
             detail_samples_per_column: 4,
             detail_min_samples: 512,

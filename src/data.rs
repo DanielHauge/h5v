@@ -3,7 +3,7 @@ use core::f64;
 use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
-pub(crate) const MAX_PLOT_SAMPLES: usize = 4096;
+pub(crate) const DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES: usize = 4096;
 
 pub trait Previewable {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error>;
@@ -171,7 +171,7 @@ impl MatrixValues for Dataset {
 
 impl Previewable for Dataset {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error> {
-        plot_dataset_with_cap(self, selection, MAX_PLOT_SAMPLES)
+        plot_dataset_with_cap(self, selection, usize::MAX)
     }
 }
 
@@ -220,11 +220,6 @@ pub(crate) fn plot_dataset_with_cap(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn plot_sampling_step(length: usize) -> usize {
-    plot_sampling_step_with_cap(length, MAX_PLOT_SAMPLES)
-}
-
 pub(crate) fn plot_sampling_step_with_cap(length: usize, max_samples: usize) -> usize {
     length.div_ceil(max_samples.max(1)).max(1)
 }
@@ -234,8 +229,8 @@ pub(crate) fn plot_sampling_step_with_cap(length: usize, max_samples: usize) -> 
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        plot_sampling_step, validate_preview_selection_shape, DatasetTableData, PreviewSelection,
-        SliceSelection, StringLengths,
+        plot_sampling_step_with_cap, validate_preview_selection_shape, DatasetTableData,
+        PreviewSelection, SliceSelection, StringLengths, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
     };
     use ndarray::Array2;
 
@@ -262,6 +257,11 @@ mod tests {
     }
 
     #[test]
+    fn uncapped_plot_sampling_keeps_every_point() {
+        assert_eq!(plot_sampling_step_with_cap(10_000, usize::MAX), 1);
+    }
+
+    #[test]
     fn string_lengths_handles_empty_second_dimension() {
         let data = DatasetTableData {
             data: Array2::<String>::default((2, 0)),
@@ -270,10 +270,22 @@ mod tests {
     }
 
     #[test]
-    fn plot_sampling_step_caps_large_previews() {
-        assert_eq!(plot_sampling_step(16), 1);
-        assert_eq!(plot_sampling_step(4096), 1);
-        assert_eq!(plot_sampling_step(4097), 2);
-        assert_eq!(plot_sampling_step(10_000), 3);
+    fn plot_sampling_step_caps_multichart_overview() {
+        assert_eq!(
+            plot_sampling_step_with_cap(16, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES),
+            1
+        );
+        assert_eq!(
+            plot_sampling_step_with_cap(4096, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES),
+            1
+        );
+        assert_eq!(
+            plot_sampling_step_with_cap(4097, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES),
+            2
+        );
+        assert_eq!(
+            plot_sampling_step_with_cap(10_000, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES),
+            3
+        );
     }
 }

@@ -181,6 +181,12 @@ pub static SYSTEM_PROPERTIES: [&str; 8] = [
 ];
 
 impl DatasetMeta {
+    pub fn current_compound_type(&self) -> Option<&CompoundType> {
+        self.compound_projection
+            .as_ref()
+            .and_then(CompoundFieldProjection::current_compound_type)
+    }
+
     pub fn is_opaque(&self) -> bool {
         self.unsupported_reason.is_some()
     }
@@ -192,14 +198,20 @@ impl DatasetMeta {
     }
 
     pub fn is_compound_container(&self) -> bool {
-        self.compound_projection
-            .as_ref()
-            .and_then(CompoundFieldProjection::current_compound_type)
-            .is_some()
+        self.current_compound_type().is_some()
     }
 
     pub fn is_compound_leaf(&self) -> bool {
         self.compound_projection.is_some() && !self.is_compound_container()
+    }
+
+    pub fn supports_compound_root_matrix(&self) -> bool {
+        self.is_compound_container() && self.shape.iter().any(|len| *len > 1)
+    }
+
+    pub fn compound_root_matrix_column_count(&self) -> Option<usize> {
+        self.current_compound_type()
+            .map(|compound| compound.fields.len())
     }
 
     pub fn render(&self, longest_name: u16) -> Vec<RenderedAttributeRow> {

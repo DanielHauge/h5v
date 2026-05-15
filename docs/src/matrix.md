@@ -33,7 +33,7 @@ String matrices render inline with widths adjusted to the visible content.
 
 ### Compound fields
 
-Compound container roots are documented through the schema preview. Individual projected leaf fields, however, can still render in matrix mode once you drill down to a matrixable field.
+Compound container roots can render in matrix mode as a read-only table with one row along the selected record dimension and one column per direct field. Horizontal scrolling moves across fields, while any additional dataset dimensions remain fixed to the currently selected indices. Individual projected leaf fields can also render in matrix mode once you drill down to a matrixable field.
 
 ## Practical workflow
 

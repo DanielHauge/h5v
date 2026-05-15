@@ -10,7 +10,7 @@ use std::{
 use crate::{
     configure,
     data::{plot_dataset_with_cap, DatasetPlotingData, PreviewSelection, SliceSelection},
-    h5f::{plot_projected, plot_projected_with_cap, DatasetMeta},
+    h5f::{plot_projected_with_cap, DatasetMeta},
     ui::app::AppEvent,
 };
 
@@ -176,14 +176,19 @@ pub fn handle_mchart_load(tx_events: Sender<AppEvent>) -> Sender<MultiChartLoadR
                     meta,
                     selection,
                 },
-            ) => plot_projected(&dataset, meta.as_ref(), &selection)
-                .map(|preview| MultiChartLoadResult::Success {
-                    item_id: request.item_id,
-                    kind: request.kind,
-                    points: preview.data,
-                    source_len: preview.length,
-                })
-                .map_err(|error| format!("Failed loading sampled series: {error}")),
+            ) => plot_projected_with_cap(
+                &dataset,
+                meta.as_ref(),
+                &selection,
+                configure::current_multichart_settings().overview_max_samples,
+            )
+            .map(|preview| MultiChartLoadResult::Success {
+                item_id: request.item_id,
+                kind: request.kind,
+                points: preview.data,
+                source_len: preview.length,
+            })
+            .map_err(|error| format!("Failed loading sampled series: {error}")),
             (
                 MultiChartLoadKind::Detail { window, .. },
                 MultiChartLoadSource::Dataset { dataset, selection },

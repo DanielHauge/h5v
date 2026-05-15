@@ -641,11 +641,43 @@ impl AppState<'_> {
     }
 
     pub fn change_row(&mut self, delta: isize) -> Result<EventResult> {
-        match self.active_content_mode() {
+        let active_mode = self.active_content_mode();
+        match active_mode {
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
+                    if matches!(active_mode, ContentShowMode::Matrix)
+                        && dsattr.is_compound_container()
+                        && dsattr.supports_compound_root_matrix()
+                    {
+                        let selectable_dims = dsattr
+                            .shape
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, len)| **len > 1)
+                            .map(|(dim, _)| dim)
+                            .collect::<Vec<_>>();
+                        if selectable_dims.is_empty() {
+                            return Ok(EventResult::Redraw);
+                        }
+                        let current_index = selectable_dims
+                            .iter()
+                            .position(|dim| *dim == current_node.selected_row)
+                            .unwrap_or(0);
+                        let next_index = (current_index as isize + delta.signum())
+                            .rem_euclid(selectable_dims.len() as isize)
+                            as usize;
+                        current_node.selected_row = selectable_dims[next_index];
+                        if current_node.selected_dim == current_node.selected_row {
+                            current_node.selected_dim = selectable_dims
+                                .iter()
+                                .copied()
+                                .find(|dim| *dim != current_node.selected_row)
+                                .unwrap_or(0);
+                        }
+                        return Ok(EventResult::Redraw);
+                    }
                     let shape = dsattr.shape.clone();
                     if shape.len() == 2 {
                         let temp = current_node.selected_row;
@@ -779,8 +811,17 @@ impl AppState<'_> {
                 Ok(EventResult::Redraw)
             }
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
+                let is_compound_root_matrix = matches!(
+                    &node.node,
+                    Node::Dataset(_, dsattr)
+                        if matches!(active_mode, ContentShowMode::Matrix)
+                            && dsattr.is_compound_container()
+                            && dsattr.supports_compound_root_matrix()
+                );
                 if new_selected_dim != node.selected_col && new_selected_dim != node.selected_row {
-                    node.selected_dim = new_selected_dim;
+                    if !is_compound_root_matrix || new_selected_dim != node.selected_row {
+                        node.selected_dim = new_selected_dim;
+                    }
                 } else {
                     let next_next = new_selected_dim as isize + delta;
                     let next_next = if next_next < 0 {
@@ -790,7 +831,11 @@ impl AppState<'_> {
                     } else {
                         next_next as usize
                     };
-                    if next_next != node.selected_col && next_next != node.selected_row {
+                    if (is_compound_root_matrix && next_next != node.selected_row)
+                        || (!is_compound_root_matrix
+                            && next_next != node.selected_col
+                            && next_next != node.selected_row)
+                    {
                         node.selected_dim = next_next.clamp(0, current_shape_len as usize);
                     } else {
                         let next_next_next = next_next as isize + delta;
@@ -801,7 +846,12 @@ impl AppState<'_> {
                         } else {
                             next_next_next as usize
                         };
-                        node.selected_dim = next_next_next.clamp(0, current_shape_len as usize);
+                        node.selected_dim =
+                            if is_compound_root_matrix && next_next_next == node.selected_row {
+                                node.selected_dim
+                            } else {
+                                next_next_next.clamp(0, current_shape_len as usize)
+                            };
                     }
                 }
                 Ok(EventResult::Redraw)
@@ -828,11 +878,18 @@ impl AppState<'_> {
     }
 
     pub fn change_col(&mut self, delta: isize) -> Result<EventResult> {
-        match self.active_content_mode() {
+        let active_mode = self.active_content_mode();
+        match active_mode {
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
                 if let Node::Dataset(_, dsattr) = &current_node.node {
+                    if matches!(active_mode, ContentShowMode::Matrix)
+                        && dsattr.is_compound_container()
+                        && dsattr.supports_compound_root_matrix()
+                    {
+                        return Ok(EventResult::Redraw);
+                    }
                     let shape = dsattr.shape.clone();
                     if shape.len() == 2 {
                         // Just swap row and col.
@@ -1212,7 +1269,15 @@ impl AppState<'_> {
                 let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
                 let current_node = &node.node;
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let col_selected_shape = dsattr.shape[node.selected_col];
+                    let col_selected_shape = if dsattr.is_compound_container()
+                        && dsattr.supports_compound_root_matrix()
+                    {
+                        dsattr
+                            .compound_root_matrix_column_count()
+                            .unwrap_or_default()
+                    } else {
+                        dsattr.shape[node.selected_col]
+                    };
                     self.matrix_view_state.col_offset =
                         (self.matrix_view_state.col_offset + inc as usize).min(
                             col_selected_shape
@@ -1273,7 +1338,15 @@ impl AppState<'_> {
                     return Ok(EventResult::Redraw);
                 }
                 if let Node::Dataset(_, dsattr) = current_node {
-                    let col_selected_shape = dsattr.shape[node.selected_col];
+                    let col_selected_shape = if dsattr.is_compound_container()
+                        && dsattr.supports_compound_root_matrix()
+                    {
+                        dsattr
+                            .compound_root_matrix_column_count()
+                            .unwrap_or_default()
+                    } else {
+                        dsattr.shape[node.selected_col]
+                    };
                     self.matrix_view_state.col_offset = (self
                         .matrix_view_state
                         .col_offset

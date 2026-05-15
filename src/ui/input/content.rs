@@ -20,6 +20,7 @@ use crate::{
     },
     ui::{
         edit::perform_edit,
+        matrix::compound_root_matrix_cell_text,
         preview::chart::render_image_chart,
         preview::preview_text_for_compound_schema,
         render::MatrixRenderType,
@@ -125,6 +126,68 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
             ))
         }
     };
+
+    if meta.is_compound_container() && meta.supports_compound_root_matrix() {
+        let field_count = meta.compound_root_matrix_column_count().unwrap_or_default();
+        let row_dim = if meta
+            .shape
+            .get(node.selected_row)
+            .copied()
+            .unwrap_or_default()
+            > 1
+        {
+            node.selected_row
+        } else {
+            meta.shape
+                .iter()
+                .enumerate()
+                .find(|(_, len)| **len > 1)
+                .map(|(dim, _)| dim)
+                .unwrap_or(0)
+        };
+        let row_count = meta.shape.get(row_dim).copied().unwrap_or_default();
+        if row_count == 0 || field_count == 0 {
+            return Err(EventResult::Toast(
+                AppToast::Warning("Current matrix content cannot be copied".to_string()),
+                false,
+            ));
+        }
+        let visible_rows = state
+            .matrix_view_state
+            .rows_currently_available
+            .max(1)
+            .min(row_count);
+        let visible_cols = state
+            .matrix_view_state
+            .cols_currently_available
+            .max(1)
+            .min(field_count);
+        let row_index = state
+            .matrix_view_state
+            .row_offset
+            .min(row_count.saturating_sub(visible_rows))
+            + state
+                .matrix_view_state
+                .cursor_row
+                .min(visible_rows.saturating_sub(1));
+        let field_index = state
+            .matrix_view_state
+            .col_offset
+            .min(field_count.saturating_sub(visible_cols))
+            + state
+                .matrix_view_state
+                .cursor_col
+                .min(visible_cols.saturating_sub(1));
+        return compound_root_matrix_cell_text(
+            &dataset,
+            &meta,
+            row_dim,
+            row_index,
+            field_index,
+            &node.selected_indexes,
+        )
+        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false));
+    }
 
     if meta.matrixable.is_none() {
         return Err(EventResult::Toast(

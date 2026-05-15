@@ -2,14 +2,14 @@ use std::fmt::Display;
 
 use hdf5_metno::{
     types::{EnumMember, EnumType, IntSize},
-    H5Type, Selection,
+    H5Type, Hyperslab, Selection, SliceOrIndex,
 };
 use ndarray::{Array1, Array2};
 use ratatui::{
     layout::{Constraint, Layout, Offset, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -19,10 +19,10 @@ use crate::{
     error::AppError,
     h5f::{
         read_opaque_values_1d, read_opaque_values_2d, read_projected_values_1d,
-        read_projected_values_2d, read_varlen_u8_matrix_table, read_varlen_u8_matrix_values,
-        DatasetMeta, EnumRenderOverrides, H5FNode,
+        read_projected_values_2d, read_selected_values_bytes, read_varlen_u8_matrix_table,
+        read_varlen_u8_matrix_values, DatasetMeta, EnumRenderOverrides, H5FNode, ProjectionDecode,
     },
-    ui::state::Focus,
+    ui::{render::sprint_typedescriptor, state::Focus},
 };
 
 use super::{
@@ -312,6 +312,454 @@ pub fn render_varlen_u8_matrix(
     )
 }
 
+pub fn render_compound_root_matrix(
+    f: &mut Frame,
+    area: &Rect,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+) -> Result<(), AppError> {
+    let Some(compound) = attr.current_compound_type() else {
+        render_not_yet_implemented(f, area, "Compound root matrix metadata is unavailable");
+        return Ok(());
+    };
+    let Some((row_dim, row_count)) = compound_root_matrix_axis(node, attr) else {
+        render_not_yet_implemented(
+            f,
+            area,
+            "Compound root matrix requires at least one non-singleton record axis",
+        );
+        return Ok(());
+    };
+
+    node.sync_selection_rank(attr.shape.len());
+    node.selected_row = row_dim;
+    let area_inner = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 2,
+    });
+    let field_count = compound.fields.len();
+    let matrix_area = if attr.shape.len() > 1 {
+        let areas_split =
+            Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(area_inner);
+        let provisional_selection = visible_matrix_capacity(areas_split[1], row_count, field_count);
+        let field_window =
+            compound_root_field_window(state, field_count, provisional_selection.cols);
+        render_compound_root_matrix_selector(
+            f,
+            &areas_split[0],
+            node,
+            attr,
+            row_dim,
+            field_window,
+        )?;
+        areas_split[1].inner(ratatui::layout::Margin {
+            horizontal: 0,
+            vertical: 1,
+        })
+    } else {
+        area_inner
+    };
+    let matrix_selection = visible_matrix_capacity(matrix_area, row_count, field_count);
+    let max_cols = matrix_selection.cols;
+    let max_rows = matrix_selection.rows;
+    state.matrix_view_state.rows_currently_available = max_rows;
+    state.matrix_view_state.cols_currently_available = max_cols;
+
+    if max_rows == 0 || max_cols == 0 || field_count == 0 {
+        return Ok(());
+    }
+
+    let row_start = state
+        .matrix_view_state
+        .row_offset
+        .min(row_count.saturating_sub(max_rows));
+    let col_start = compound_root_field_window(state, field_count, max_cols).start;
+    let selection = compound_root_matrix_selection(node, attr, row_dim, row_start, max_rows);
+    let (bytes, _) = read_selected_values_bytes(ds, selection)?;
+    let record_size = compound.size;
+    if bytes.len() != max_rows * record_size {
+        return Err(AppError::DrawingError(format!(
+            "Compound root matrix byte size mismatch: expected {} bytes, got {}",
+            max_rows * record_size,
+            bytes.len()
+        )));
+    }
+    let records = bytes.chunks_exact(record_size).collect::<Vec<_>>();
+
+    let mut rows_area_constraints = Vec::with_capacity(max_rows + 1);
+    (0..max_rows).for_each(|_| rows_area_constraints.push(Constraint::Length(1)));
+    let rows_areas = Layout::vertical(rows_area_constraints).split(matrix_area);
+
+    let mut col_constraint = Vec::with_capacity(max_cols + 1);
+    col_constraint.push(Constraint::Length(15));
+    (0..max_cols).for_each(|_| col_constraint.push(Constraint::Fill(1)));
+    let col_header_areas = Layout::horizontal(col_constraint.clone()).split(rows_areas[0]);
+
+    for col in 0..max_cols {
+        let field = &compound.fields[col_start + col];
+        let col_area = col_header_areas[col + 1];
+        let mut header = Line::from(Span::styled(
+            field.name.clone(),
+            Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+        ))
+        .centered();
+        if configure::prefers_strong_text() {
+            header = header.bold();
+        }
+        f.render_widget(header, col_area.offset(Offset { x: 0, y: -1 }));
+    }
+
+    for i in 0..max_rows {
+        let row_area = rows_areas[i];
+        let col_areas = Layout::horizontal(col_constraint.clone()).split(row_area);
+        let idx_area = col_areas[0];
+        state.ui_layout.matrix_rows.push(MatrixRowHitbox {
+            area: idx_area,
+            row: i,
+        });
+        let row_index = row_start + i;
+        let mut idx_line = Line::from(format!("{row_index}"))
+            .style(Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)))
+            .left_aligned();
+        if configure::prefers_strong_text() {
+            idx_line = idx_line.bold();
+        }
+        f.render_widget(idx_line, idx_area);
+
+        let record = records[i];
+        for j in 0..max_cols {
+            let val_area = col_areas[j + 1];
+            state.ui_layout.matrix_cells.push(MatrixCellHitbox {
+                area: val_area,
+                row: i,
+                col: j,
+            });
+            let field = &compound.fields[col_start + j];
+            let val_bg_color = match (
+                (i + state.matrix_view_state.row_offset).is_multiple_of(2),
+                (j + state.matrix_view_state.col_offset).is_multiple_of(2),
+            ) {
+                (true, true) => configure::themed_color(|colors| colors.surface.bg_val3),
+                (true, false) => configure::themed_color(|colors| colors.surface.bg_val4),
+                (false, true) => configure::themed_color(|colors| colors.surface.bg_val1),
+                (false, false) => configure::themed_color(|colors| colors.surface.bg_val2),
+            };
+            let val_bg_color = if i == state.matrix_view_state.cursor_row
+                && j == state.matrix_view_state.cursor_col
+            {
+                selected_matrix_bg_color(&state.focus, state.copying, val_bg_color, true)
+            } else {
+                val_bg_color
+            };
+            let value = compound_root_matrix_field_text_from_record(record, field)?;
+            render_centered_matrix_cell(
+                f,
+                val_area,
+                DefaultMatrixResultRenderIntercept.render_as_line(&value),
+                val_bg_color,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn compound_root_matrix_cell_text(
+    dataset: &hdf5_metno::Dataset,
+    meta: &DatasetMeta,
+    row_dim: usize,
+    row_index: usize,
+    field_index: usize,
+    selected_indexes: &[usize],
+) -> Result<String, AppError> {
+    let Some((row_dim, row_count)) = compound_root_matrix_axis_for_row(meta, row_dim) else {
+        return Err(AppError::DrawingError(
+            "Compound root matrix copy requires at least one non-singleton record axis".to_string(),
+        ));
+    };
+    let compound = meta.current_compound_type().ok_or_else(|| {
+        AppError::DrawingError("Compound root matrix metadata is unavailable".to_string())
+    })?;
+    let field = compound.fields.get(field_index).ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Compound root field column {field_index} is out of bounds for {} fields",
+            compound.fields.len()
+        ))
+    })?;
+    if row_index >= row_count {
+        return Err(AppError::DrawingError(format!(
+            "Compound root row {row_index} is out of bounds for {row_count} rows"
+        )));
+    }
+
+    let mut slice = Vec::with_capacity(meta.shape.len());
+    for dim in 0..meta.shape.len() {
+        if dim == row_dim {
+            slice.push(SliceOrIndex::Index(row_index));
+        } else {
+            slice.push(SliceOrIndex::Index(
+                selected_indexes.get(dim).copied().unwrap_or_default(),
+            ));
+        }
+    }
+    let (bytes, _) =
+        read_selected_values_bytes(dataset, Selection::Hyperslab(Hyperslab::from(slice)))?;
+    if bytes.len() != compound.size {
+        return Err(AppError::DrawingError(format!(
+            "Compound root cell read returned {} bytes, expected {}",
+            bytes.len(),
+            compound.size
+        )));
+    }
+    compound_root_matrix_field_text_from_record(&bytes, field)
+}
+
+#[derive(Clone, Copy)]
+struct CompoundFieldWindow {
+    start: usize,
+    end: usize,
+}
+
+fn compound_root_matrix_axis(node: &mut H5FNode, attr: &DatasetMeta) -> Option<(usize, usize)> {
+    let selectable_dims = compound_root_selectable_dims(attr);
+    let row_dim = if selectable_dims.contains(&node.selected_row) {
+        node.selected_row
+    } else {
+        *selectable_dims.first()?
+    };
+    node.selected_row = row_dim;
+    if node.selected_dim == row_dim {
+        node.selected_dim = selectable_dims
+            .iter()
+            .copied()
+            .find(|dim| *dim != row_dim)
+            .unwrap_or(0);
+    }
+    compound_root_matrix_axis_for_row(attr, row_dim)
+}
+
+fn compound_root_matrix_axis_for_row(attr: &DatasetMeta, row_dim: usize) -> Option<(usize, usize)> {
+    if !attr.supports_compound_root_matrix() {
+        return None;
+    }
+    attr.shape
+        .get(row_dim)
+        .copied()
+        .filter(|len| *len > 1)
+        .map(|len| (row_dim, len))
+}
+
+fn compound_root_selectable_dims(attr: &DatasetMeta) -> Vec<usize> {
+    attr.shape
+        .iter()
+        .enumerate()
+        .filter(|(_, len)| **len > 1)
+        .map(|(dim, _)| dim)
+        .collect()
+}
+
+fn compound_root_field_window(
+    state: &AppState,
+    field_count: usize,
+    visible_cols: usize,
+) -> CompoundFieldWindow {
+    let start = state
+        .matrix_view_state
+        .col_offset
+        .min(field_count.saturating_sub(visible_cols));
+    let end = (start + visible_cols).min(field_count);
+    CompoundFieldWindow { start, end }
+}
+
+fn render_compound_root_matrix_selector(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    attr: &DatasetMeta,
+    row_dim: usize,
+    field_window: CompoundFieldWindow,
+) -> Result<(), AppError> {
+    let block = Block::default()
+        .title("Compound matrix")
+        .title_style(
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.surface.panel_title))
+                .bold(),
+        )
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(configure::themed_color(|colors| {
+            colors.surface.panel_border
+        })));
+    f.render_widget(block, *area);
+    let inner = area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+
+    let mut lines = Vec::with_capacity(2);
+    let shape_summary = attr
+        .shape
+        .iter()
+        .enumerate()
+        .map(|(dim, len)| {
+            if dim == row_dim {
+                format!("[{len}]")
+            } else {
+                len.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    lines.push(Line::from(vec![
+        Span::styled(
+            "shape ",
+            Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+        ),
+        Span::styled(
+            shape_summary,
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "row dim ",
+            Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+        ),
+        Span::styled(
+            row_dim.to_string(),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.accent.selected_dim))
+                .bold(),
+        ),
+    ]));
+
+    let fixed_dims = attr
+        .shape
+        .iter()
+        .enumerate()
+        .filter(|(dim, _)| *dim != row_dim)
+        .map(|(dim, len)| {
+            let value = node.selected_indexes.get(dim).copied().unwrap_or_default();
+            format!("d{dim}={}/{}", value, len.saturating_sub(1))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let field_count = attr.compound_root_matrix_column_count().unwrap_or_default();
+    let field_range = if field_window.end > field_window.start {
+        format!(
+            "{}..{}/{}",
+            field_window.start,
+            field_window.end.saturating_sub(1),
+            field_count
+        )
+    } else {
+        format!("0/{}", field_count)
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            "fields ",
+            Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+        ),
+        Span::styled(
+            field_range,
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            "fixed ",
+            Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
+        ),
+        Span::styled(
+            if fixed_dims.is_empty() {
+                "<none>".to_string()
+            } else {
+                fixed_dims
+            },
+            Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
+        ),
+    ]));
+    f.render_widget(Paragraph::new(lines), inner);
+    Ok(())
+}
+
+fn compound_root_matrix_selection(
+    node: &mut H5FNode,
+    attr: &DatasetMeta,
+    row_dim: usize,
+    row_start: usize,
+    rows: usize,
+) -> Selection {
+    let end = (row_start + rows).min(attr.shape[row_dim]);
+    let mut slice = Vec::with_capacity(attr.shape.len());
+    for dim in 0..attr.shape.len() {
+        if dim == row_dim {
+            slice.push(SliceOrIndex::SliceTo {
+                start: row_start,
+                step: 1,
+                end,
+                block: 1,
+            });
+        } else {
+            slice.push(SliceOrIndex::Index(
+                node.selected_indexes.get(dim).copied().unwrap_or_default(),
+            ));
+        }
+    }
+    Selection::Hyperslab(Hyperslab::from(slice))
+}
+
+fn compound_root_matrix_field_text_from_record(
+    record: &[u8],
+    field: &hdf5_metno::types::CompoundField,
+) -> Result<String, AppError> {
+    let end = field.offset + field.ty.size();
+    let field_bytes = record.get(field.offset..end).ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Compound field '{}' exceeded record bounds",
+            field.name
+        ))
+    })?;
+    format_compound_matrix_value(&field.ty, field_bytes)
+}
+
+fn format_compound_matrix_value(
+    type_desc: &hdf5_metno::types::TypeDescriptor,
+    bytes: &[u8],
+) -> Result<String, AppError> {
+    match type_desc {
+        hdf5_metno::types::TypeDescriptor::Compound(compound) => {
+            let mut fields = Vec::with_capacity(compound.fields.len());
+            for field in &compound.fields {
+                let value = compound_root_matrix_field_text_from_record(bytes, field)?;
+                fields.push(format!("{}: {value}", field.name));
+            }
+            Ok(format!("{{{}}}", fields.join(", ")))
+        }
+        hdf5_metno::types::TypeDescriptor::FixedArray(inner, size) => {
+            let inner_size = inner.size();
+            if bytes.len() != inner_size * size {
+                return Err(AppError::DrawingError(format!(
+                    "Fixed array value size mismatch: expected {}, got {}",
+                    inner_size * size,
+                    bytes.len()
+                )));
+            }
+            let mut values = Vec::with_capacity(*size);
+            for chunk in bytes.chunks_exact(inner_size).take(*size) {
+                values.push(format_compound_matrix_value(inner.as_ref(), chunk)?);
+            }
+            Ok(format!("[{}]", values.join(", ")))
+        }
+        hdf5_metno::types::TypeDescriptor::VarLenArray(_)
+        | hdf5_metno::types::TypeDescriptor::Reference(_) => Ok(sprint_typedescriptor(type_desc)),
+        _ => {
+            let mut owned = bytes.to_vec();
+            <String as ProjectionDecode>::decode_scalar_buffer(type_desc, &mut owned)
+        }
+    }
+}
+
 fn visible_matrix_capacity(matrix_area: Rect, row_len: usize, col_len: usize) -> MatrixSelection {
     MatrixSelection {
         cols: usize::from(matrix_area.width / 24).min(col_len),
@@ -552,7 +1000,9 @@ fn render_matrix_with_reader<T: Display>(
 mod tests {
     use super::*;
     use crate::ui::state::{Focus, LastFocused};
-    use hdf5_metno::types::{EnumMember, EnumType, IntSize};
+    use hdf5_metno::types::{
+        CompoundField, CompoundType, EnumMember, EnumType, IntSize, TypeDescriptor,
+    };
     use ratatui::style::Color;
 
     fn sample_enum() -> EnumType {
@@ -682,5 +1132,26 @@ mod tests {
             selected_matrix_bg_color(&Focus::Attributes, true, fallback_bg, true),
             fallback_bg
         );
+    }
+
+    #[test]
+    fn compound_matrix_value_formats_nested_fields() {
+        let type_desc = TypeDescriptor::Compound(CompoundType {
+            fields: vec![
+                CompoundField::new("count", TypeDescriptor::Unsigned(IntSize::U2), 0, 0),
+                CompoundField::new(
+                    "window",
+                    TypeDescriptor::FixedArray(Box::new(TypeDescriptor::Integer(IntSize::U2)), 2),
+                    2,
+                    1,
+                ),
+            ],
+            size: 6,
+        });
+        let bytes = vec![7, 0, 1, 0, 2, 0];
+
+        let rendered =
+            format_compound_matrix_value(&type_desc, &bytes).expect("failed rendering compound");
+        assert_eq!(rendered, "{count: 7, window: [1, 2]}");
     }
 }

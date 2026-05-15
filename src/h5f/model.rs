@@ -216,6 +216,9 @@ impl H5FNode {
             }
             Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
                 result.push(ContentShowMode::Preview);
+                if dataset_meta.supports_compound_root_matrix() {
+                    result.push(ContentShowMode::Matrix);
+                }
             }
             Node::Dataset(_, dataset_meta)
                 if dataset_meta.is_compound_leaf()
@@ -326,7 +329,7 @@ mod tests {
         h5f::{CompoundFieldProjection, DatasetMeta, Encoding},
         ui::{render::MatrixRenderType, state::ContentShowMode},
     };
-    use hdf5_metno::types::TypeDescriptor;
+    use hdf5_metno::types::{CompoundType, TypeDescriptor};
     use ndarray::arr2;
 
     #[test]
@@ -414,6 +417,104 @@ mod tests {
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+    }
+
+    #[test]
+    fn one_dimensional_compound_roots_support_preview_and_matrix() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "records".to_string(),
+                shape: vec![2],
+                data_type: "{id, label}".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::Compound(CompoundType {
+                    fields: vec![],
+                    size: 16,
+                }),
+                data_bytesize: 16,
+                storage_required: 32,
+                total_bytes: 32,
+                total_elems: 2,
+                chunk_shape: None,
+                hl: None,
+                matrixable: None,
+                encoding: Encoding::Unknown,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: Some(crate::h5f::root_compound_projection(
+                    "/values",
+                    CompoundType {
+                        fields: vec![],
+                        size: 16,
+                    },
+                )),
+            },
+        ));
+
+        assert_eq!(
+            node.content_show_modes(),
+            vec![ContentShowMode::Preview, ContentShowMode::Matrix]
+        );
+    }
+
+    #[test]
+    fn multi_axis_compound_roots_support_preview_and_matrix() {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[1_i16, 2_i16])
+            .create("values")
+            .expect("failed to create dataset");
+        let node = H5FNode::new(Node::Dataset(
+            dataset,
+            DatasetMeta {
+                link_name: None,
+                display_name: "records".to_string(),
+                shape: vec![2, 2],
+                data_type: "{id, label}".to_string(),
+                unsupported_reason: None,
+                type_descriptor: TypeDescriptor::Compound(CompoundType {
+                    fields: vec![],
+                    size: 16,
+                }),
+                data_bytesize: 16,
+                storage_required: 64,
+                total_bytes: 64,
+                total_elems: 4,
+                chunk_shape: None,
+                hl: None,
+                matrixable: None,
+                encoding: Encoding::Unknown,
+                image: None,
+                enum_render_overrides: None,
+                is_link: false,
+                filename: file.filename(),
+                compound_projection: Some(crate::h5f::root_compound_projection(
+                    "/values",
+                    CompoundType {
+                        fields: vec![],
+                        size: 16,
+                    },
+                )),
+            },
+        ));
+
+        assert_eq!(
+            node.content_show_modes(),
+            vec![ContentShowMode::Preview, ContentShowMode::Matrix]
+        );
     }
 
     #[test]

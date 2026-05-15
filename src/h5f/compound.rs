@@ -530,7 +530,7 @@ pub fn plot_projected(
     meta: &DatasetMeta,
     selection: &PreviewSelection,
 ) -> Result<DatasetPlotingData, AppError> {
-    plot_projected_with_cap(dataset, meta, selection, crate::data::MAX_PLOT_SAMPLES)
+    plot_projected_with_cap(dataset, meta, selection, usize::MAX)
 }
 
 pub fn plot_projected_with_cap(

@@ -13,10 +13,10 @@ h5v can browse groups, datasets, links, broken links, and synthetic nodes create
 | Enum | Yes | Yes | Uses colored symbols and labels, with optional dataset-defined overrides |
 | Fixed strings | Text | Yes | Fixed strings are read with a 32768-byte limit |
 | Variable strings | Text | Yes | Good for inline string inspection |
-| Compound | Schema or projected preview | Projected fields only | Root compound matrix rendering is not implemented |
+| Compound | Schema or projected preview | Projected fields and compound roots | Root compound matrix mode uses one selected dataset dimension for rows and direct fields for columns |
 | Fixed arrays | Limited | No | Standalone fixed arrays are not matrixable through the main renderer |
 | Variable arrays | Limited | No | Not matrixable through the main matrix renderer |
-| References | Limited | No | No dedicated matrix renderer |
+| References | Limited | No | Attribute navigation follows object and dataset-region references; no dedicated matrix renderer |
 
 Matrix mode is only available when a dataset is matrixable and its shape has at least one dimension larger than `1`. Single-value datasets stay in scalar preview mode.
 

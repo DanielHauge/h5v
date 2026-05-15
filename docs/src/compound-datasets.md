@@ -15,6 +15,15 @@ When the focused node is the root of a compound dataset, the preview pane shows 
 - byte offsets
 - nested compounds and compound arrays
 
+For compound datasets with at least one non-singleton record axis, Matrix mode is also available as a first-pass table view:
+
+- one row per compound record along the selected record dimension
+- one column per direct field
+- horizontal scrolling moves through fields when there are more fields than the viewport can show
+- additional dataset dimensions stay fixed to the currently selected indices
+- nested compounds and array-valued fields rendered inline as summarized cell text
+- read-only for now; editing still happens through projected leaves
+
 ## Recursion handling
 
 Schema rendering has a hard recursion limit of `32` nested levels and explicitly omits recursive loops once they are detected. That keeps pathological or self-referential layouts from hanging the preview.

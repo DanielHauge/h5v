@@ -36,7 +36,7 @@ use crate::{
     },
 };
 
-pub const MAX_SEGMENT_SIZE: usize = 250000;
+pub const MAX_SEGMENT_SIZE: usize = 2_500_000;
 
 fn render_chart_loading_indicator(f: &mut Frame, area: Rect) {
     let indicator = Block::default()
@@ -888,7 +888,7 @@ mod tests {
     use crate::data::DatasetPlotingData;
 
     #[test]
-    fn preview_x_axis_max_uses_last_sample_index_for_multiple_points() {
+    fn preview_x_axis_max_uses_last_point_index_for_multiple_points() {
         let preview = DatasetPlotingData {
             data: vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
             length: 3,
@@ -910,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_x_axis_max_uses_original_length_for_sparse_samples() {
+    fn preview_x_axis_max_uses_original_length_for_nonconsecutive_points() {
         let preview = DatasetPlotingData {
             data: vec![(0.0, 1.0), (4.0, 2.0), (8.0, 3.0)],
             length: 10,

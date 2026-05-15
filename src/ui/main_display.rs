@@ -24,8 +24,8 @@ use crate::{
 use super::{
     attributes::{prepare_metadata_layout, render_info_attributes},
     matrix::{
-        render_matrix, render_not_yet_implemented, render_opaque_matrix, render_projected_matrix,
-        render_varlen_u8_matrix,
+        render_compound_root_matrix, render_matrix, render_not_yet_implemented,
+        render_opaque_matrix, render_projected_matrix, render_varlen_u8_matrix,
     },
     preview::render_preview,
     state::{AppState, ContentShowMode},
@@ -217,6 +217,10 @@ pub fn render_main_display(
             };
             if attr.is_empty() {
                 render_empty_dataset(f, &content_area);
+                return Ok(());
+            }
+            if attr.is_compound_container() {
+                render_compound_root_matrix(f, &content_area, &ds, &attr, &mut node, state)?;
                 return Ok(());
             }
             if attr.is_opaque() {
