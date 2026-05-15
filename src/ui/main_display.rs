@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
@@ -32,13 +32,21 @@ use super::{
     std_comp_render::render_empty_dataset,
 };
 
-fn split_main_display(area: Rect, attributes_count: usize) -> (Rect, Rect) {
+fn split_main_display(area: Rect, focus: &ui::state::Focus) -> (Rect, Rect) {
+    let layout = configure::current_auto_layout_settings();
+    let (attributes_constraint, content_constraint) = match super::app::main_content_focus(focus) {
+        ui::state::LastFocused::Attributes => (
+            layout.attributes.focused.as_constraint(),
+            layout.content.unfocused.as_constraint(),
+        ),
+        ui::state::LastFocused::Content => (
+            layout.attributes.unfocused.as_constraint(),
+            layout.content.focused.as_constraint(),
+        ),
+    };
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            Constraint::Length(attributes_count.saturating_add(2).min(10) as u16),
-            Constraint::Min(0),
-        ])
+        .constraints([attributes_constraint, content_constraint])
         .split(area);
     (chunks[0], chunks[1])
 }
@@ -57,10 +65,7 @@ pub fn render_main_display(
     };
 
     let content_area = if state.show_tree_view {
-        let (attr_area, content_area) = split_main_display(
-            *area,
-            prepared_attributes.as_ref().map_or(0, |x| x.row_count()),
-        );
+        let (attr_area, content_area) = split_main_display(*area, &state.focus);
         render_info_attributes(
             f,
             &attr_area,

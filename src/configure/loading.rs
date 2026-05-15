@@ -84,6 +84,13 @@ fn default_config_contents() -> String {
         "--     { label = \"2.5..5.5\", min = 2.5, max = 5.5 },".to_string(),
         "--   },".to_string(),
         "-- }".to_string(),
+        "-- Main panels resize automatically based on focus.".to_string(),
+        "-- Layout values accept exact cell counts (12), percentages (\"28%\"), or fill (\"*\").".to_string(),
+        "-- h5v.layout = {".to_string(),
+        "--   tree = { focused = \"28%\", unfocused = \"20%\" },".to_string(),
+        "--   attributes = { focused = 12, unfocused = 5 },".to_string(),
+        "--   content = { focused = \"*\", unfocused = \"*\" },".to_string(),
+        "-- }".to_string(),
         "-- Multichart large-series tuning controls overview sampling and viewport refinement."
             .to_string(),
         "-- h5v.multichart = {".to_string(),
@@ -241,6 +248,14 @@ fn lua_ls_stub_contents() -> String {
         "---@field default_invert_y boolean".to_string(),
         "---@field default_invert_c boolean".to_string(),
         "---@field range_modes H5vHeatmapRangePreset[]".to_string(),
+        "---@alias H5vLayoutSize integer|string".to_string(),
+        "---@class H5vLayoutPanelConfig".to_string(),
+        "---@field focused H5vLayoutSize".to_string(),
+        "---@field unfocused H5vLayoutSize".to_string(),
+        "---@class H5vLayoutConfig".to_string(),
+        "---@field tree H5vLayoutPanelConfig".to_string(),
+        "---@field attributes H5vLayoutPanelConfig".to_string(),
+        "---@field content H5vLayoutPanelConfig".to_string(),
         "---@class H5vMultiChartConfig".to_string(),
         "---@field overview_max_samples integer".to_string(),
         "---@field detail_enabled boolean".to_string(),
@@ -321,6 +336,7 @@ fn lua_ls_stub_contents() -> String {
     lines.push("---@field theme H5vThemeName".to_string());
     lines.push("---@field symbol_theme H5vSymbolThemeName".to_string());
     lines.push("---@field heatmap H5vHeatmapConfig".to_string());
+    lines.push("---@field layout H5vLayoutConfig".to_string());
     lines.push("---@field multichart H5vMultiChartConfig".to_string());
     lines.push("---@field keymaps H5vKeymaps".to_string());
     lines.push("---@field modes H5vModes".to_string());
@@ -551,7 +567,6 @@ mod tests {
         let config = default_config_contents();
 
         assert_eq!(config.matches("--   text = {").count(), 1);
-        assert_eq!(config.matches("--   content = {").count(), 1);
         assert_eq!(config.matches("--   command = {").count(), 1);
         assert_eq!(config.matches("--   help = {").count(), 1);
         assert_eq!(config.matches("--   metadata = {").count(), 1);
@@ -559,7 +574,7 @@ mod tests {
         assert_eq!(config.matches("--   mchart = {").count(), 1);
         assert_eq!(config.matches("--   surface = {").count(), 1);
         assert_eq!(config.matches("--   accent = {").count(), 1);
-        assert_eq!(config.matches("--   tree = {").count(), 2);
+        assert_eq!(config.matches("--   tree = {").count(), 3);
         assert_eq!(config.matches("--   chart = {").count(), 2);
         assert_eq!(config.matches("--   status = {").count(), 1);
         assert_eq!(config.matches("--   toast = {").count(), 1);
@@ -572,6 +587,7 @@ mod tests {
     fn scaffold_points_to_external_lua_ls_support() {
         let config = default_config_contents();
         assert!(config.contains(".h5v-luals"));
+        assert!(config.contains("-- h5v.layout = {"));
         assert!(!config.contains("---@class H5vConfig"));
     }
 

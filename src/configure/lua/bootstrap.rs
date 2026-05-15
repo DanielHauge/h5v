@@ -13,6 +13,7 @@ use crate::{
 use super::{
     heatmap::build_heatmap_table,
     keymaps::{build_action_constants_table, build_keymaps_table, build_mode_constants_table},
+    layout::build_layout_table,
     mchart::build_multichart_table,
     themes::{build_empty_nested_table, build_symbol_theme_table, build_theme_table},
 };
@@ -74,6 +75,7 @@ pub(super) fn build_h5v_table(
     h5v.set("themes", build_theme_table(lua)?)?;
     h5v.set("symbol_themes", build_symbol_theme_table(lua)?)?;
     h5v.set("heatmap", build_heatmap_table(lua)?)?;
+    h5v.set("layout", build_layout_table(lua)?)?;
     h5v.set("multichart", build_multichart_table(lua)?)?;
     h5v.set("modes", build_mode_constants_table(lua)?)?;
     h5v.set("actions", build_action_constants_table(lua)?)?;

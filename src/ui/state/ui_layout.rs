@@ -1,6 +1,8 @@
 use ratatui::layout::Rect;
 
-use super::ContentShowMode;
+use super::{
+    ContentShowMode, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TreeHitbox {
@@ -49,8 +51,31 @@ pub struct HeatmapSettingHitbox {
     pub setting: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HelpTabHitbox {
+    pub area: Rect,
+    pub tab: HelpTab,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum HelpSidebarTarget {
+    Keymap(HelpKeymapSection),
+    Command(HelpCommandSection),
+    Customization(HelpCustomizationSection),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HelpSidebarHitbox {
+    pub area: Rect,
+    pub target: HelpSidebarTarget,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
+    pub help_toggle: Option<Rect>,
+    pub help_top_bar: Option<Rect>,
+    pub help_tabs: Vec<HelpTabHitbox>,
+    pub help_sidebar_items: Vec<HelpSidebarHitbox>,
     pub tree: Option<TreeHitbox>,
     pub attributes: Option<AttributesHitbox>,
     pub content: Option<Rect>,

@@ -10,7 +10,7 @@ use keymap::{
     global_action, normal_action, window_action, BoundAction, Direction, GlobalAction,
     NormalAction, WindowAction,
 };
-use mouse::handle_normal_mouse_event;
+use mouse::{handle_global_mouse_event, handle_help_mouse_event, handle_normal_mouse_event};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tree::handle_normal_tree_event;
 
@@ -192,6 +192,12 @@ fn handle_global_action(
 pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<EventResult, AppError> {
     if let Event::Resize(_, __) = event {
         return Ok(EventResult::Redraw);
+    }
+
+    if let Event::Mouse(mouse_event) = event {
+        if let Some(result) = handle_global_mouse_event(state, mouse_event)? {
+            return Ok(result);
+        }
     }
 
     match state.mode {
@@ -384,60 +390,64 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
             search::handle_search_event(state, event)
         }
         Mode::Help => {
-            if let Event::Key(key_event) = event {
-                if !is_handled_key_press(&key_event) {
-                    return Ok(EventResult::Continue);
+            match event {
+                Event::Key(key_event) => {
+                    if !is_handled_key_press(&key_event) {
+                        return Ok(EventResult::Continue);
+                    }
+                    match key_event.code {
+                        KeyCode::Esc => {
+                            state.mode = state.help_return_mode.clone();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                            if state.help_next_tab() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                            if state.help_prev_tab() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.help_next_section() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if state.help_prev_section() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Home | KeyCode::Char('g') => {
+                            if state.help_first_section() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::End | KeyCode::Char('G') => {
+                            if state.help_last_section() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        _ => {}
+                    }
+                    let keymaps = configure::current_keymaps();
+                    if let Some(action) = global_action(&key_event, &keymaps) {
+                        return match action {
+                            BoundAction::Action(action) => handle_global_action(state, action),
+                            BoundAction::Command(command) => execute_bound_command(state, &command),
+                            BoundAction::Script(script) => {
+                                execute_bound_script(state, &script, "keybinding script")
+                            }
+                            BoundAction::LuaCallback(callback_id) => {
+                                execute_bound_lua_callback(state, &callback_id)
+                            }
+                        };
+                    }
                 }
-                match key_event.code {
-                    KeyCode::Esc => {
-                        state.mode = state.help_return_mode.clone();
-                        return Ok(EventResult::Redraw);
-                    }
-                    KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                        if state.help_next_tab() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                        if state.help_prev_tab() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if state.help_next_section() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if state.help_prev_section() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    KeyCode::Home | KeyCode::Char('g') => {
-                        if state.help_first_section() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    KeyCode::End | KeyCode::Char('G') => {
-                        if state.help_last_section() {
-                            return Ok(EventResult::Redraw);
-                        }
-                    }
-                    _ => {}
-                }
-                let keymaps = configure::current_keymaps();
-                if let Some(action) = global_action(&key_event, &keymaps) {
-                    return match action {
-                        BoundAction::Action(action) => handle_global_action(state, action),
-                        BoundAction::Command(command) => execute_bound_command(state, &command),
-                        BoundAction::Script(script) => {
-                            execute_bound_script(state, &script, "keybinding script")
-                        }
-                        BoundAction::LuaCallback(callback_id) => {
-                            execute_bound_lua_callback(state, &callback_id)
-                        }
-                    };
-                }
+                Event::Mouse(mouse_event) => return handle_help_mouse_event(state, mouse_event),
+                _ => {}
             }
             Ok(EventResult::Continue)
         }

@@ -5,10 +5,36 @@ use ratatui::{
 
 use crate::{
     error::AppError,
-    ui::state::{AttributeViewSelection, ContentShowMode, Focus},
+    ui::state::{AttributeViewSelection, ContentShowMode, Focus, Mode},
 };
 
 use super::{super::state::AppState, EventResult};
+
+pub(super) fn handle_global_mouse_event(
+    state: &mut AppState<'_>,
+    mouse_event: MouseEvent,
+) -> Result<Option<EventResult>, AppError> {
+    match mouse_event.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if state
+                .ui_layout
+                .help_toggle
+                .is_some_and(|rect| point_in_rect(rect, mouse_event.column, mouse_event.row))
+            {
+                if matches!(state.mode, Mode::Help) {
+                    state.mode = state.help_return_mode.clone();
+                } else {
+                    state.help_return_mode = state.mode.clone();
+                    state.mode = Mode::Help;
+                }
+                state.pending_chord = None;
+                return Ok(Some(EventResult::Redraw));
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
 
 pub(super) fn handle_normal_mouse_event(
     state: &mut AppState<'_>,
@@ -37,6 +63,64 @@ pub(super) fn handle_normal_mouse_event(
         }
         _ => Ok(EventResult::Continue),
     }
+}
+
+pub(super) fn handle_help_mouse_event(
+    state: &mut AppState<'_>,
+    mouse_event: MouseEvent,
+) -> Result<EventResult, AppError> {
+    state.pending_chord = None;
+    if !matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(EventResult::Continue);
+    }
+
+    let column = mouse_event.column;
+    let row = mouse_event.row;
+    if state
+        .ui_layout
+        .help_top_bar
+        .is_some_and(|rect| point_in_rect(rect, column, row))
+    {
+        state.mode = state.help_return_mode.clone();
+        return Ok(EventResult::Redraw);
+    }
+
+    if let Some(tab_hitbox) = state
+        .ui_layout
+        .help_tabs
+        .iter()
+        .find(|tab| point_in_rect(tab.area, column, row))
+        .copied()
+    {
+        state.help.selected_tab = tab_hitbox.tab;
+        return Ok(EventResult::Redraw);
+    }
+
+    if let Some(item_hitbox) = state
+        .ui_layout
+        .help_sidebar_items
+        .iter()
+        .find(|item| point_in_rect(item.area, column, row))
+        .copied()
+    {
+        match item_hitbox.target {
+            super::super::state::HelpSidebarTarget::Keymap(section) => {
+                state.help.selected_tab = super::super::state::HelpTab::Keymap;
+                state.help.keymap_section = section;
+            }
+            super::super::state::HelpSidebarTarget::Command(section) => {
+                state.help.selected_tab = super::super::state::HelpTab::Commands;
+                state.help.command_section = section;
+            }
+            super::super::state::HelpSidebarTarget::Customization(section) => {
+                state.help.selected_tab = super::super::state::HelpTab::Configuration;
+                state.help.customization_section = section;
+            }
+        }
+        return Ok(EventResult::Redraw);
+    }
+
+    Ok(EventResult::Continue)
 }
 
 fn handle_left_click(

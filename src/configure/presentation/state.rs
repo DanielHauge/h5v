@@ -39,6 +39,7 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
         colors: ThemeColors::for_theme(ThemeName::Dark),
         symbols: UiSymbols::for_theme(symbol_theme),
         content_mode_order: default_content_mode_order(),
+        auto_layout: super::types::AutoLayoutSettings::default(),
         heatmap_range_modes: Vec::new(),
         heatmap_default_settings: HeatmapSettings::default(),
         multichart_settings: super::types::MultiChartSettings::default(),
@@ -56,6 +57,7 @@ pub fn reset_config(theme: ThemeName) {
         state.colors = ThemeColors::for_theme(theme);
         state.symbols = UiSymbols::for_theme(symbol_theme);
         state.content_mode_order = default_content_mode_order();
+        state.auto_layout = super::types::AutoLayoutSettings::default();
         state.heatmap_range_modes = Vec::new();
         state.heatmap_default_settings = HeatmapSettings::default();
         state.multichart_settings = super::types::MultiChartSettings::default();
@@ -79,6 +81,7 @@ pub fn snapshot_config() -> ConfigSnapshot {
         colors: state.colors.clone(),
         symbols: state.symbols.clone(),
         content_mode_order: state.content_mode_order.clone(),
+        auto_layout: state.auto_layout.clone(),
         heatmap_range_modes: state.heatmap_range_modes.clone(),
         heatmap_default_settings: state.heatmap_default_settings.clone(),
         multichart_settings: state.multichart_settings.clone(),
@@ -95,6 +98,7 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
         state.colors = snapshot.colors;
         state.symbols = snapshot.symbols;
         state.content_mode_order = snapshot.content_mode_order;
+        state.auto_layout = snapshot.auto_layout;
         state.heatmap_range_modes = snapshot.heatmap_range_modes;
         state.heatmap_default_settings = snapshot.heatmap_default_settings;
         state.multichart_settings = snapshot.multichart_settings;
@@ -165,6 +169,17 @@ pub fn ordered_content_modes(available: &[ContentShowMode]) -> Vec<ContentShowMo
 
 pub fn current_content_mode_order() -> Vec<ContentShowMode> {
     with_config_read(|state| state.content_mode_order.clone())
+}
+
+pub fn set_auto_layout_settings(settings: &super::types::AutoLayoutSettings) {
+    with_config_write(|state| {
+        state.config_generation = state.config_generation.wrapping_add(1);
+        state.auto_layout = settings.clone();
+    });
+}
+
+pub fn current_auto_layout_settings() -> super::types::AutoLayoutSettings {
+    with_config_read(|state| state.auto_layout.clone())
 }
 
 pub fn set_heatmap_ranges(range_modes: &[HeatmapRangeMode], default_range: &HeatmapRangeMode) {

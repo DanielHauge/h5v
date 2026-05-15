@@ -11,7 +11,8 @@ use ratatui::{
 use crate::{
     configure,
     ui::state::{
-        AppState, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab,
+        AppState, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
+        HelpSidebarHitbox, HelpSidebarTarget, HelpTab, HelpTabHitbox,
     },
 };
 
@@ -41,9 +42,17 @@ struct CachedHelpPanel {
 static HELP_PANEL_CACHE: LazyLock<RwLock<Vec<CachedHelpPanel>>> =
     LazyLock::new(|| RwLock::new(Vec::with_capacity(HELP_PANEL_CACHE_SIZE)));
 
-pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
     warm_help_panel_cache();
     let popup = centered_rect(area, 176, 44);
+    state.ui_layout.help_top_bar = Some(Rect {
+        x: popup.x.saturating_add(1),
+        y: popup.y,
+        width: popup.width.saturating_sub(2),
+        height: 1,
+    });
+    state.ui_layout.help_tabs.clear();
+    state.ui_layout.help_sidebar_items.clear();
 
     frame.render_widget(
         Block::default()
@@ -86,7 +95,7 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
         vertical: 1,
     });
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(inner);
-    render_tab_bar(frame, sections[0], state.help.selected_tab);
+    render_tab_bar(frame, sections[0], state);
 
     match state.help.selected_tab {
         HelpTab::Keymap => render_keymap_help(frame, sections[1], state),
@@ -124,7 +133,7 @@ pub fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
     horizontal[1]
 }
 
-fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, selected: HelpTab) {
+fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
     let labels = [
         (HelpTab::Keymap, "Keymap"),
         (HelpTab::Commands, "Commands"),
@@ -133,11 +142,18 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, selected: HelpTab) {
         (HelpTab::Configuration, "Customization"),
     ];
     let mut spans = Vec::new();
+    let mut tab_layout = Vec::new();
     for (idx, (tab, label)) in labels.iter().enumerate() {
         if idx > 0 {
             spans.push(Span::styled("  ", help_muted_style()));
         }
-        let style = if *tab == selected {
+        let padded = format!(" {label} ");
+        tab_layout.push((
+            *tab,
+            padded.clone(),
+            Line::from(padded.as_str()).width() as u16,
+        ));
+        let style = if *tab == state.help.selected_tab {
             Style::default()
                 .fg(configure::themed_color(|colors| colors.accent.selection_fg))
                 .bg(configure::themed_color(|colors| colors.accent.selection_bg))
@@ -148,23 +164,46 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, selected: HelpTab) {
                 .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
                 .bold()
         };
-        spans.push(Span::styled(format!(" {label} "), style));
+        spans.push(Span::styled(padded, style));
+    }
+    let line = Line::from(spans);
+    let line_width = line.width() as u16;
+    let start_x = area
+        .x
+        .saturating_add(area.width.saturating_sub(line_width) / 2);
+    let separator_width = Line::from("  ").width() as u16;
+    let mut current_x = start_x;
+    for (idx, (tab, _, width)) in tab_layout.iter().enumerate() {
+        state.ui_layout.help_tabs.push(HelpTabHitbox {
+            area: Rect {
+                x: current_x,
+                y: area.y,
+                width: *width,
+                height: 1,
+            },
+            tab: *tab,
+        });
+        current_x = current_x.saturating_add(*width);
+        if idx + 1 != tab_layout.len() {
+            current_x = current_x.saturating_add(separator_width);
+        }
     }
 
     frame.render_widget(
-        Paragraph::new(Line::from(spans))
+        Paragraph::new(line)
             .alignment(Alignment::Center)
             .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg))),
         area,
     );
 }
 
-fn render_keymap_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+fn render_keymap_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
     let layout = Layout::horizontal([Constraint::Length(24), Constraint::Min(0)])
         .spacing(1)
         .split(area);
     render_sidebar(
         frame,
+        state,
         layout[0],
         "Modes",
         &[
@@ -178,6 +217,7 @@ fn render_keymap_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
             (HelpKeymapSection::MultiChart, "Multichart"),
         ],
         state.help.keymap_section,
+        HelpSidebarTarget::Keymap,
     );
 
     render_cached_panel(
@@ -187,12 +227,13 @@ fn render_keymap_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
     );
 }
 
-fn render_command_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+fn render_command_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
     let layout = Layout::horizontal([Constraint::Length(24), Constraint::Min(0)])
         .spacing(1)
         .split(area);
     render_sidebar(
         frame,
+        state,
         layout[0],
         "Categories",
         &[
@@ -205,6 +246,7 @@ fn render_command_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) 
             (HelpCommandSection::Input, "Input"),
         ],
         state.help.command_section,
+        HelpSidebarTarget::Command,
     );
 
     render_cached_panel(
@@ -214,12 +256,13 @@ fn render_command_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) 
     );
 }
 
-fn render_customization_help(frame: &mut Frame<'_>, area: Rect, state: &AppState<'_>) {
+fn render_customization_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
     let layout = Layout::horizontal([Constraint::Length(24), Constraint::Min(0)])
         .spacing(1)
         .split(area);
     render_sidebar(
         frame,
+        state,
         layout[0],
         "Sections",
         &[
@@ -231,6 +274,7 @@ fn render_customization_help(frame: &mut Frame<'_>, area: Rect, state: &AppState
             (HelpCustomizationSection::Scripting, "Scripting"),
         ],
         state.help.customization_section,
+        HelpSidebarTarget::Customization,
     );
 
     render_cached_panel(
@@ -247,14 +291,32 @@ fn render_cached_panel(frame: &mut Frame<'_>, area: Rect, key: HelpPanelCacheKey
 
 fn render_sidebar<T: Copy + PartialEq>(
     frame: &mut Frame<'_>,
+    state: &mut AppState<'_>,
     area: Rect,
     title: &str,
     items: &[(T, &str)],
     selected: T,
+    make_target: impl Fn(T) -> HelpSidebarTarget,
 ) {
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
     let lines = items
         .iter()
-        .map(|(item, label)| {
+        .enumerate()
+        .map(|(index, (item, label))| {
+            if index < inner.height as usize {
+                state.ui_layout.help_sidebar_items.push(HelpSidebarHitbox {
+                    area: Rect {
+                        x: inner.x,
+                        y: inner.y.saturating_add(index as u16),
+                        width: inner.width,
+                        height: 1,
+                    },
+                    target: make_target(*item),
+                });
+            }
             if *item == selected {
                 Line::from(Span::styled(
                     format!("> {label}"),

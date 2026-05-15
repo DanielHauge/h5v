@@ -8,6 +8,7 @@
 | `h5v.symbol_theme` | string | Built-in symbol theme name |
 | `h5v.compatibility` | boolean | Compatibility mode override from config |
 | `h5v.content_mode_order` | string array | Ordered content-mode preference |
+| `h5v.layout` | table | Focus-aware auto sizing for tree, attributes, and content panels |
 | `h5v.heatmap` | table | Preferred heatmap defaults and custom range presets |
 | `h5v.multichart` | table | Multichart overview sampling and viewport-refinement tuning |
 | `h5v.keymaps` | table | Scoped keymap overrides and command bindings |
@@ -158,6 +159,38 @@ h5v.heatmap.default_invert_c = true
 h5v.heatmap.range_modes = {
   { label = "5-80%", min = "5%", max = "80%" },
 }
+```
+
+## Layout config
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `h5v.layout.tree.focused` | integer or string | Tree width/height while tree has focus |
+| `h5v.layout.tree.unfocused` | integer or string | Tree width/height while another panel has focus |
+| `h5v.layout.attributes.focused` | integer or string | Attributes height while attributes are the active main panel |
+| `h5v.layout.attributes.unfocused` | integer or string | Attributes height while content is the active main panel |
+| `h5v.layout.content.focused` | integer or string | Content height while content is the active main panel |
+| `h5v.layout.content.unfocused` | integer or string | Content height while attributes are the active main panel |
+
+Accepted values:
+
+- integer like `12` for exact terminal rows/columns
+- percentage string like `"28%"`
+- `"*"` to fill remaining space
+
+If both sides of an attributes/content focus pair use percentages, they must add up to `100%`.
+
+Use the same focused and unfocused value for a panel if you want it to stay fixed across focus changes.
+
+Example:
+
+```lua
+h5v.layout.tree.focused = "28%"
+h5v.layout.tree.unfocused = "20%"
+h5v.layout.attributes.focused = 12
+h5v.layout.attributes.unfocused = 5
+h5v.layout.content.focused = "*"
+h5v.layout.content.unfocused = "*"
 ```
 
 ## Multichart config

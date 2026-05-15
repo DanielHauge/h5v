@@ -31,6 +31,7 @@ Most configs only need these fields:
 - `h5v.symbol_theme`
 - `h5v.content_mode_order`
 - `h5v.compatibility`
+- `h5v.layout.*`
 - `h5v.heatmap.*`
 - `h5v.keymaps`
 - `h5v.colors`
@@ -100,6 +101,25 @@ Heatmap settings live under `h5v.heatmap`:
 - `default_invert_c`
 - `range_modes`
 
+## Panel layout
+
+Main panel sizing lives under `h5v.layout`:
+
+- `tree.focused`
+- `tree.unfocused`
+- `attributes.focused`
+- `attributes.unfocused`
+- `content.focused`
+- `content.unfocused`
+
+Layout values accept:
+
+- integers like `12` for exact terminal rows/columns
+- strings like `"28%"` for percentages
+- `"*"` to fill the remaining space
+
+If both sides of an attributes/content focus pair use percentages, they must add up to `100%`.
+
 ## Example
 
 ```lua
@@ -107,6 +127,13 @@ h5v.theme = "light"
 h5v.content_mode_order = { "matrix", "preview" }
 h5v.symbol_theme = "compatibility"
 h5v.compatibility = true
+
+h5v.layout.tree.focused = "28%"
+h5v.layout.tree.unfocused = "20%"
+h5v.layout.attributes.focused = 12
+h5v.layout.attributes.unfocused = 5
+h5v.layout.content.focused = "*"
+h5v.layout.content.unfocused = "*"
 
 h5v.heatmap.default_colormap = "inferno"
 h5v.heatmap.default_normalization = "log"

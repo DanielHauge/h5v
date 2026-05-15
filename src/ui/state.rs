@@ -61,8 +61,9 @@ pub use preview::{
     ImgState, IsFromDs, RawImageLoadRequest, SegmentState, SegmentType, VarLenImageLoadRequest,
 };
 pub use ui_layout::{
-    AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, MatrixCellHitbox, MatrixRowHitbox,
-    MetadataCellHitbox, TreeHitbox, UiLayoutState,
+    AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpSidebarHitbox, HelpSidebarTarget,
+    HelpTabHitbox, MatrixCellHitbox, MatrixRowHitbox, MetadataCellHitbox, TreeHitbox,
+    UiLayoutState,
 };
 
 pub struct AppState<'a> {

@@ -11,12 +11,14 @@ use super::errors::ConfigureErrors;
 mod bootstrap;
 mod heatmap;
 mod keymaps;
+mod layout;
 mod mchart;
 mod themes;
 use bootstrap::{default_symbol_theme_for_compatibility, execute_config_chunk, prepare_lua_config};
 use heatmap::parse_heatmap_config;
 pub use keymaps::with_keymap_lua_callback;
 use keymaps::{parse_keymaps_config, store_keymap_lua_runtime};
+use layout::parse_layout_config;
 use mchart::parse_multichart_config;
 
 fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureErrors> {
@@ -111,6 +113,7 @@ fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
     let compatibility_override = parse_compatibility_override(h5v)?;
     let content_mode_order = parse_content_mode_order(h5v)?;
     let heatmap_config = parse_heatmap_config(h5v)?;
+    let layout_config = parse_layout_config(h5v)?;
     let multichart_config = parse_multichart_config(h5v)?;
     let keymap_config = parse_keymaps_config(h5v)?;
     let selected_theme = match h5v.get::<Value>("theme")? {
@@ -135,6 +138,9 @@ fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
     configure::reset_config(selected_theme);
     if let Some(order) = content_mode_order {
         configure::set_content_mode_order(&order);
+    }
+    if let Some(layout_settings) = layout_config {
+        configure::set_auto_layout_settings(&layout_settings);
     }
     if let Some((range_modes, default_settings)) = heatmap_config {
         configure::set_heatmap_ranges(&range_modes, &default_settings.range);
@@ -279,12 +285,14 @@ mod tests {
         apply_lua_config,
         bootstrap::{build_h5v_table, execute_config_chunk},
         heatmap::parse_heatmap_config,
+        layout::parse_layout_config,
         parse_compatibility_override, parse_content_mode_order,
         themes::{build_symbol_theme_table, build_theme_table},
     };
     use crate::configure::{
-        self, configured_symbol, current_content_mode_order, current_heatmap_default_settings,
-        current_heatmap_range_modes, current_keymaps, themed_color, SymbolThemeName, ThemeName,
+        self, configured_symbol, current_auto_layout_settings, current_content_mode_order,
+        current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
+        themed_color, AutoLayoutSettings, LayoutSize, PanelLayoutSizes, SymbolThemeName, ThemeName,
     };
     use crate::ui::input::keymap::{
         global_action, heatmap_action, BoundAction, ContentAction, GlobalAction,
@@ -407,6 +415,97 @@ mod tests {
             Some(BoundAction::LuaCallback(_))
         ));
 
+        configure::reset_config(ThemeName::Dark);
+    }
+
+    #[test]
+    fn parses_layout_configuration() {
+        let lua = Lua::new();
+        let h5v = lua.create_table().expect("create h5v table");
+        let layout = lua.create_table().expect("create layout table");
+        let tree = lua.create_table().expect("create tree table");
+        tree.set("focused", "32%").expect("set tree focused");
+        tree.set("unfocused", "18%").expect("set tree unfocused");
+        layout.set("tree", tree).expect("set tree config");
+        let attributes = lua.create_table().expect("create attributes table");
+        attributes
+            .set("focused", 14)
+            .expect("set attributes focused");
+        attributes
+            .set("unfocused", 6)
+            .expect("set attributes unfocused");
+        layout
+            .set("attributes", attributes)
+            .expect("set attributes config");
+        let content = lua.create_table().expect("create content table");
+        content.set("focused", "*").expect("set content focused");
+        content
+            .set("unfocused", "*")
+            .expect("set content unfocused");
+        layout.set("content", content).expect("set content config");
+        h5v.set("layout", layout).expect("set layout");
+
+        let parsed = parse_layout_config(&h5v)
+            .expect("parse layout config")
+            .expect("layout config present");
+        assert_eq!(
+            parsed,
+            AutoLayoutSettings {
+                tree: PanelLayoutSizes::new(LayoutSize::percent(32), LayoutSize::percent(18)),
+                attributes: PanelLayoutSizes::new(LayoutSize::cells(14), LayoutSize::cells(6)),
+                content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
+            }
+        );
+    }
+
+    #[test]
+    fn applies_layout_configuration() {
+        let lua = Lua::new();
+        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.layout.tree.focused = "32%"
+            h5v.layout.tree.unfocused = "18%"
+            h5v.layout.attributes.focused = 14
+            h5v.layout.attributes.unfocused = 6
+            h5v.layout.content.focused = "*"
+            h5v.layout.content.unfocused = "*"
+        "#,
+        )
+        .exec()
+        .expect("assign layout config");
+
+        apply_lua_config(&h5v).expect("apply config");
+        assert_eq!(
+            current_auto_layout_settings(),
+            AutoLayoutSettings {
+                tree: PanelLayoutSizes::new(LayoutSize::percent(32), LayoutSize::percent(18)),
+                attributes: PanelLayoutSizes::new(LayoutSize::cells(14), LayoutSize::cells(6)),
+                content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
+            }
+        );
+        configure::reset_config(ThemeName::Dark);
+    }
+
+    #[test]
+    fn layout_configuration_rejects_invalid_pairing() {
+        let lua = Lua::new();
+        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.layout.attributes.focused = "61%"
+            h5v.layout.content.unfocused = "30%"
+        "#,
+        )
+        .exec()
+        .expect("assign invalid layout config");
+
+        let error = apply_lua_config(&h5v).expect_err("invalid layout should error");
+        assert!(error.to_string().contains(
+            "h5v.layout.attributes.focused (61%) + h5v.layout.content.unfocused (30%) must equal 100% when both sides use percentages"
+        ));
         configure::reset_config(ThemeName::Dark);
     }
 

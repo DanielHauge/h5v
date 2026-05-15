@@ -38,7 +38,7 @@ use super::{
     main_display::render_main_display,
     mchart::MultiChartLoadResult,
     preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
-    state::{self, AppState, Mode},
+    state::{self, AppState, Focus, LastFocused, Mode},
     tree_view::render_tree,
 };
 
@@ -58,25 +58,48 @@ pub(super) fn primary_text_style() -> Style {
     style
 }
 
-fn make_panels_rect(area: Rect, mode: Mode) -> Rc<[Rect]> {
+fn make_panels_rect(area: Rect, mode: &Mode, focus: &Focus) -> Rc<[Rect]> {
     if let Mode::Search = mode {
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
             .split(area)
     } else {
+        let layout = configure::current_auto_layout_settings();
+        let tree_focus = match focus {
+            Focus::Tree(_) => PanelFocus::Focused,
+            Focus::Attributes | Focus::Content => PanelFocus::Unfocused,
+        };
+        let tree_constraint = match tree_focus {
+            PanelFocus::Focused => layout.tree.focused.as_constraint(),
+            PanelFocus::Unfocused => layout.tree.unfocused.as_constraint(),
+        };
         if area.width < 100 {
             let chunks = Layout::default()
                 .direction(ratatui::layout::Direction::Vertical)
-                .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+                .constraints([tree_constraint, Constraint::Fill(1)])
                 .split(area);
             return chunks;
         }
 
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .constraints([tree_constraint, Constraint::Fill(1)])
             .split(area)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PanelFocus {
+    Focused,
+    Unfocused,
+}
+
+pub(super) fn main_content_focus(focus: &Focus) -> LastFocused {
+    match focus {
+        Focus::Tree(last_focused) => last_focused.clone(),
+        Focus::Attributes => LastFocused::Attributes,
+        Focus::Content => LastFocused::Content,
     }
 }
 
@@ -150,12 +173,12 @@ fn main_recover_loop(
     let draw_closure = |frame: &mut Frame, state: &mut AppState| {
         let command_over_multichart = matches!(state.mode, Mode::Command)
             && matches!(state.command_return_mode, Mode::MultiChart);
+        state.ui_layout = state::UiLayoutState::default();
         let content_area = render_header(frame, frame.area(), state, new_version);
         let (content_area, command_area) = match state.mode {
             Mode::Command => split_command_bar(content_area),
             _ => (content_area, Rect::new(0, 0, 0, 0)),
         };
-        state.ui_layout = state::UiLayoutState::default();
 
         if let Mode::Help = state.mode {
             render_help(frame, content_area, state);
@@ -177,7 +200,7 @@ fn main_recover_loop(
 
         let main_display_area = match show_tree_view {
             true => {
-                let areas = make_panels_rect(content_area, state.mode.clone());
+                let areas = make_panels_rect(content_area, &state.mode, &state.focus);
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
                 render_tree(frame, tree_area, state);
                 main_display_area
@@ -670,7 +693,7 @@ pub enum HeatmapLoadedResult {
 fn render_header(
     frame: &mut Frame<'_>,
     area: Rect,
-    state: &AppState<'_>,
+    state: &mut AppState<'_>,
     new_version: Option<&str>,
 ) -> Rect {
     if area.height <= HEADER_HEIGHT {
@@ -782,6 +805,15 @@ fn render_header(
         "(type ? for help)",
         Style::default().fg(configure::themed_color(|colors| colors.content.help_hint)),
     )]);
+    let right_width = right.width() as u16;
+    state.ui_layout.help_toggle = Some(Rect {
+        x: columns[2]
+            .x
+            .saturating_add(columns[2].width.saturating_sub(right_width)),
+        y: columns[2].y,
+        width: right_width,
+        height: columns[2].height,
+    });
     frame.render_widget(
         Paragraph::new(right).alignment(Alignment::Right),
         columns[2],

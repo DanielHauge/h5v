@@ -1,9 +1,11 @@
 use ratatui::style::Color;
 
 use crate::configure::{
-    available_color_names, color_to_lua_string, current_config_generation, current_theme_name,
-    ordered_content_modes, parse_color, reset_config, set_color_override, set_content_mode_order,
-    theme_named_colors, themed_color, SymbolThemeName, ThemeName,
+    available_color_names, color_to_lua_string, current_auto_layout_settings,
+    current_config_generation, current_theme_name, ordered_content_modes, parse_color,
+    reset_config, set_auto_layout_settings, set_color_override, set_content_mode_order,
+    theme_named_colors, themed_color, AutoLayoutSettings, LayoutSize, PanelLayoutSizes,
+    SymbolThemeName, ThemeName,
 };
 use crate::ui::state::ContentShowMode;
 
@@ -86,4 +88,17 @@ fn config_generation_tracks_successful_mutations() {
     let failed = set_color_override("bogus.color", Color::Blue);
     assert!(failed.is_err());
     assert_eq!(current_config_generation(), after_reorder);
+}
+
+#[test]
+fn auto_layout_settings_round_trip() {
+    reset_config(ThemeName::Dark);
+    let custom = AutoLayoutSettings {
+        tree: PanelLayoutSizes::new(LayoutSize::percent(32), LayoutSize::percent(18)),
+        attributes: PanelLayoutSizes::new(LayoutSize::cells(14), LayoutSize::cells(6)),
+        content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
+    };
+    set_auto_layout_settings(&custom);
+    assert_eq!(current_auto_layout_settings(), custom);
+    reset_config(ThemeName::Dark);
 }

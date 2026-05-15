@@ -1,5 +1,5 @@
 use macros::{ColorGroup, SymbolGroup, ThemeColorCatalog, ThemeSymbolCatalog};
-use ratatui::prelude::Color;
+use ratatui::{layout::Constraint, prelude::Color};
 
 use crate::ui::{
     input::keymap::{EffectiveKeymaps, KeymapConfig},
@@ -175,6 +175,64 @@ impl Default for MultiChartSettings {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LayoutSize {
+    Cells(u16),
+    Percent(u16),
+    Fill,
+}
+
+impl LayoutSize {
+    pub const fn cells(value: u16) -> Self {
+        Self::Cells(value)
+    }
+
+    pub const fn percent(value: u16) -> Self {
+        Self::Percent(value)
+    }
+
+    pub const fn fill() -> Self {
+        Self::Fill
+    }
+
+    pub const fn as_constraint(&self) -> Constraint {
+        match self {
+            Self::Cells(value) => Constraint::Length(*value),
+            Self::Percent(value) => Constraint::Percentage(*value),
+            Self::Fill => Constraint::Fill(1),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelLayoutSizes {
+    pub focused: LayoutSize,
+    pub unfocused: LayoutSize,
+}
+
+impl PanelLayoutSizes {
+    pub const fn new(focused: LayoutSize, unfocused: LayoutSize) -> Self {
+        Self { focused, unfocused }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AutoLayoutSettings {
+    pub tree: PanelLayoutSizes,
+    pub attributes: PanelLayoutSizes,
+    pub content: PanelLayoutSizes,
+}
+
+impl Default for AutoLayoutSettings {
+    fn default() -> Self {
+        Self {
+            tree: PanelLayoutSizes::new(LayoutSize::percent(28), LayoutSize::percent(20)),
+            attributes: PanelLayoutSizes::new(LayoutSize::cells(12), LayoutSize::cells(5)),
+            content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, ThemeColorCatalog)]
 pub(crate) struct ThemeColors {
     pub(crate) text: TextColors,
@@ -199,6 +257,7 @@ pub struct ConfigSnapshot {
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
     pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) auto_layout: AutoLayoutSettings,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
     pub(crate) multichart_settings: MultiChartSettings,
@@ -214,6 +273,7 @@ pub(crate) struct ConfigState {
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
     pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) auto_layout: AutoLayoutSettings,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
     pub(crate) multichart_settings: MultiChartSettings,

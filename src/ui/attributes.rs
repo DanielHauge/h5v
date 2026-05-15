@@ -28,12 +28,6 @@ pub struct PreparedMetadataLayout {
     initial_display_rows: Vec<MetadataDisplayRow>,
 }
 
-impl PreparedMetadataLayout {
-    pub fn row_count(&self) -> usize {
-        self.initial_display_rows.len()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MetadataCellPosition {
     display_row: usize,
