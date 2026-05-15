@@ -214,6 +214,54 @@ fn classify_function_value_kind(
             }
             Ok(arg_kinds[0])
         }
+        "rolling_mean" | "rolling_median" | "rolling_stddev" | "rolling_min" | "rolling_max" => {
+            if arg_kinds.len() != 2 {
+                return Err(format!("{name}() expects exactly 2 arguments"));
+            }
+            if arg_kinds[0] != ExpressionValueKind::Series {
+                return Err(format!("{name}() requires a series as the first argument"));
+            }
+            if arg_kinds[1] != ExpressionValueKind::Scalar {
+                return Err(format!("{name}() requires a scalar window argument"));
+            }
+            Ok(ExpressionValueKind::Series)
+        }
+        "rolling_quantile" => {
+            if arg_kinds.len() != 3 {
+                return Err("rolling_quantile() expects exactly 3 arguments".to_string());
+            }
+            if arg_kinds[0] != ExpressionValueKind::Series {
+                return Err(
+                    "rolling_quantile() requires a series as the first argument".to_string()
+                );
+            }
+            if arg_kinds[1] != ExpressionValueKind::Scalar
+                || arg_kinds[2] != ExpressionValueKind::Scalar
+            {
+                return Err(
+                    "rolling_quantile() requires scalar window and quantile arguments".to_string(),
+                );
+            }
+            Ok(ExpressionValueKind::Series)
+        }
+        "threshold" => {
+            if arg_kinds.len() != 2 {
+                return Err("threshold() expects exactly 2 arguments".to_string());
+            }
+            if arg_kinds[1] != ExpressionValueKind::Scalar {
+                return Err("threshold() requires a scalar threshold argument".to_string());
+            }
+            Ok(arg_kinds[0])
+        }
+        "diff" => {
+            if arg_kinds.len() != 1 {
+                return Err("diff() expects exactly 1 argument".to_string());
+            }
+            if arg_kinds[0] != ExpressionValueKind::Series {
+                return Err("diff() requires a series argument".to_string());
+            }
+            Ok(ExpressionValueKind::Series)
+        }
         "max2" | "min2" => {
             if arg_kinds.len() != 2 {
                 return Err(format!("{name}() expects exactly 2 arguments"));

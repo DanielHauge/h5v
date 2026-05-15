@@ -440,6 +440,58 @@ pub(super) fn eval_expression_at(
                     )?,
                 )
             }
+            "rolling_mean" | "rolling_median" | "rolling_stddev" | "rolling_min"
+            | "rolling_max" => eval_rolling_series_function(
+                name,
+                args,
+                idx,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            ),
+            "rolling_quantile" => eval_rolling_quantile_function(
+                args,
+                idx,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            ),
+            "threshold" => {
+                if args.len() != 2 {
+                    return Err("threshold() expects exactly 2 arguments".to_string());
+                }
+                let value = eval_expression_at(
+                    &args[0],
+                    idx,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                let threshold = eval_scalar_expression(
+                    &args[1],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                Ok(if value >= threshold { 1.0 } else { 0.0 })
+            }
+            "diff" => eval_diff_series_function(
+                args,
+                idx,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            ),
             "avg" | "mean" | "min" | "max" | "stddev" | "len" | "max2" | "min2" => {
                 eval_scalar_expression(
                     expr,
@@ -550,6 +602,28 @@ pub(super) fn eval_scalar_expression(
                         series_sample_count,
                     )?,
                 )
+            }
+            "threshold" => {
+                if args.len() != 2 {
+                    return Err("threshold() expects exactly 2 arguments".to_string());
+                }
+                let value = eval_scalar_expression(
+                    &args[0],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                let threshold = eval_scalar_expression(
+                    &args[1],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                Ok(if value >= threshold { 1.0 } else { 0.0 })
             }
             "avg" | "mean" => reduce_series_function(
                 name,
@@ -679,6 +753,216 @@ where
         )?);
     }
     reducer(&values)
+}
+
+fn eval_rolling_series_function(
+    name: &str,
+    args: &[ExpressionAst],
+    idx: usize,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<f64, String> {
+    if args.len() != 2 {
+        return Err(format!("{name}() expects exactly 2 arguments"));
+    }
+    let window = eval_window_size(
+        name,
+        &args[1],
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    let values = eval_trailing_series_window(
+        &args[0],
+        idx,
+        window,
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    let mut values = values;
+    match name {
+        "rolling_mean" => Ok(values.iter().sum::<f64>() / values.len() as f64),
+        "rolling_median" => rolling_quantile_from_sorted(&mut values, 0.5),
+        "rolling_stddev" => {
+            let mean = values.iter().sum::<f64>() / values.len() as f64;
+            let variance = if values.len() <= 1 {
+                0.0
+            } else {
+                values
+                    .iter()
+                    .map(|value| {
+                        let delta = *value - mean;
+                        delta * delta
+                    })
+                    .sum::<f64>()
+                    / values.len() as f64
+            };
+            Ok(variance.sqrt())
+        }
+        "rolling_min" => Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
+        "rolling_max" => Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
+        _ => Err(format!("Unsupported function '{name}'")),
+    }
+}
+
+fn eval_rolling_quantile_function(
+    args: &[ExpressionAst],
+    idx: usize,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<f64, String> {
+    if args.len() != 3 {
+        return Err("rolling_quantile() expects exactly 3 arguments".to_string());
+    }
+    let window = eval_window_size(
+        "rolling_quantile",
+        &args[1],
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    let quantile = eval_scalar_expression(
+        &args[2],
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    if !(0.0..=1.0).contains(&quantile) {
+        return Err("rolling_quantile() quantile must be between 0 and 1".to_string());
+    }
+    let values = eval_trailing_series_window(
+        &args[0],
+        idx,
+        window,
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    let mut values = values;
+    rolling_quantile_from_sorted(&mut values, quantile)
+}
+
+fn eval_diff_series_function(
+    args: &[ExpressionAst],
+    idx: usize,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<f64, String> {
+    if args.len() != 1 {
+        return Err("diff() expects exactly 1 argument".to_string());
+    }
+    if idx == 0 {
+        return Ok(0.0);
+    }
+    let current = eval_expression_at(
+        &args[0],
+        idx,
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    let previous = eval_expression_at(
+        &args[0],
+        idx - 1,
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    Ok(current - previous)
+}
+
+fn eval_window_size(
+    function_name: &str,
+    window_expr: &ExpressionAst,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<usize, String> {
+    let window = eval_scalar_expression(
+        window_expr,
+        item_series_values,
+        item_scalar_values,
+        series_values,
+        scalar_values,
+        series_sample_count,
+    )?;
+    if window < 1.0 || window.fract() != 0.0 {
+        return Err(format!(
+            "{function_name}() window must be a positive integer"
+        ));
+    }
+    Ok(window as usize)
+}
+
+fn eval_trailing_series_window(
+    series_expr: &ExpressionAst,
+    idx: usize,
+    window: usize,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<Vec<f64>, String> {
+    let start = idx.saturating_add(1).saturating_sub(window);
+    let mut values = Vec::with_capacity(idx - start + 1);
+    for sample_idx in start..=idx {
+        values.push(eval_expression_at(
+            series_expr,
+            sample_idx,
+            item_series_values,
+            item_scalar_values,
+            series_values,
+            scalar_values,
+            series_sample_count,
+        )?);
+    }
+    Ok(values)
+}
+
+fn rolling_quantile_from_sorted(values: &mut Vec<f64>, quantile: f64) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("rolling quantile requires at least one sample".to_string());
+    }
+    values.sort_by(f64::total_cmp);
+    if values.len() == 1 {
+        return Ok(values[0]);
+    }
+    let position = quantile * (values.len() - 1) as f64;
+    let lower = position.floor() as usize;
+    let upper = position.ceil() as usize;
+    if lower == upper {
+        Ok(values[lower])
+    } else {
+        let weight = position - lower as f64;
+        Ok(values[lower] * (1.0 - weight) + values[upper] * weight)
+    }
 }
 
 fn apply_unary_math_function(name: &str, value: f64) -> Result<f64, String> {

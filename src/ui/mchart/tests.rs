@@ -1315,6 +1315,78 @@ fn scalar_functions_support_series_and_scalar_references() {
 }
 
 #[test]
+fn derived_series_functions_support_rolling_threshold_and_diff() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)],
+    );
+    state
+        .create_expression_derived("rolling_mean($1, 2)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("rolling_median($1, 2)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("rolling_stddev($1, 2)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("rolling_min($1, 2)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("rolling_max($1, 2)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("rolling_quantile($1, 2, 0.25)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("threshold($1, 4)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("diff($1)".to_string())
+        .unwrap();
+
+    assert_eq!(
+        state.chart_items()[1].series.points,
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 4.0)]
+    );
+    assert_eq!(
+        state.chart_items()[2].series.points,
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 4.0)]
+    );
+    assert_eq!(
+        state.chart_items()[3].series.points,
+        vec![(0.0, 0.0), (1.0, 1.0), (2.0, 1.0)]
+    );
+    assert_eq!(
+        state.chart_items()[4].series.points,
+        vec![(0.0, 1.0), (1.0, 1.0), (2.0, 3.0)]
+    );
+    assert_eq!(
+        state.chart_items()[5].series.points,
+        vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)]
+    );
+    assert_eq!(
+        state.chart_items()[6].series.points,
+        vec![(0.0, 1.0), (1.0, 1.5), (2.0, 3.5)]
+    );
+    assert_eq!(
+        state.chart_items()[7].series.points,
+        vec![(0.0, 0.0), (1.0, 0.0), (2.0, 1.0)]
+    );
+    assert_eq!(
+        state.chart_items()[8].series.points,
+        vec![(0.0, 0.0), (1.0, 2.0), (2.0, 2.0)]
+    );
+}
+
+#[test]
 fn scalar_only_functions_reject_series_arguments() {
     let mut state = make_state();
     let selection = PreviewSelection {
