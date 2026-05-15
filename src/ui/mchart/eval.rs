@@ -11,7 +11,8 @@ use crate::data::{
 use super::{
     expression::{
         ExprBinaryOp, ExpressionAst, ExpressionDatasetSelector, ExpressionItemRef,
-        ExpressionLoadRef, ExpressionObjectTarget, ExpressionScalarRef, ExpressionSeriesRef,
+        ExpressionItemTarget, ExpressionLoadRef, ExpressionObjectTarget, ExpressionScalarRef,
+        ExpressionSeriesRef,
     },
     sanitize_chart_points, ChartItemId, DerivedExpressionKind, MultiChartState, Point,
 };
@@ -175,9 +176,14 @@ pub(super) fn resolve_expression_item_value(
     item_ref: &ExpressionItemRef,
     resolution: ExpressionSeriesResolution,
 ) -> Result<Vec<Point>, String> {
-    let item = state
-        .item_by_id(item_ref.id)
-        .ok_or_else(|| format!("Unknown chart item reference ${}", item_ref.id.0))?;
+    let item = match &item_ref.target {
+        ExpressionItemTarget::Id(id) => state
+            .item_by_id(*id)
+            .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+        ExpressionItemTarget::Name(name) => state
+            .item_by_name(name)
+            .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+    };
     if !item.has_loaded_series() {
         return Err(format!(
             "Chart item reference {} is still loading",
@@ -218,10 +224,18 @@ pub(super) fn validate_expression_load_ref(
     allow_external_series: bool,
 ) -> Result<ValidatedExpressionLoad, String> {
     match (&load_ref.target, &load_ref.attr_name) {
-        (ExpressionObjectTarget::ItemRef(id), None) => {
+        (ExpressionObjectTarget::ItemRef(target), None) => {
+            let item = match target {
+                ExpressionItemTarget::Id(id) => state
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                ExpressionItemTarget::Name(name) => state
+                    .item_by_name(name)
+                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+            };
             let points = resolve_expression_item_points_by_selector(
                 state,
-                *id,
+                item.id,
                 load_ref.selectors.as_deref(),
                 resolution,
                 &load_ref.render(),
@@ -267,13 +281,23 @@ pub(super) fn resolve_expression_load_value(
     allow_external_series: bool,
 ) -> Result<ResolvedExpressionLoad, String> {
     match (&load_ref.target, &load_ref.attr_name) {
-        (ExpressionObjectTarget::ItemRef(id), None) => resolve_expression_item_points_by_selector(
-            state,
-            *id,
-            load_ref.selectors.as_deref(),
-            resolution,
-            &load_ref.render(),
-        ),
+        (ExpressionObjectTarget::ItemRef(target), None) => {
+            let item = match target {
+                ExpressionItemTarget::Id(id) => state
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                ExpressionItemTarget::Name(name) => state
+                    .item_by_name(name)
+                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+            };
+            resolve_expression_item_points_by_selector(
+                state,
+                item.id,
+                load_ref.selectors.as_deref(),
+                resolution,
+                &load_ref.render(),
+            )
+        }
         (target, Some(attr_name)) => {
             let object_path = resolve_expression_target_path(state, target, &load_ref.render())?;
             let attr = open_expression_attribute(file, &object_path, attr_name)?;
@@ -892,7 +916,7 @@ fn resolve_expression_target_path(
 ) -> Result<String, String> {
     match target {
         ExpressionObjectTarget::AbsolutePath(path) => normalize_absolute_object_path(path),
-        ExpressionObjectTarget::ItemRef(id) => state
+        ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Id(id)) => state
             .item_by_id(*id)
             .and_then(|item| item.source.dataset_source())
             .map(|dataset_source| dataset_source.dataset_path.clone())
@@ -900,6 +924,16 @@ fn resolve_expression_target_path(
                 format!(
                     "Reference {} requires chart item ${} to be dataset-backed",
                     reference, id.0
+                )
+            }),
+        ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Name(name)) => state
+            .item_by_name(name)
+            .and_then(|item| item.source.dataset_source())
+            .map(|dataset_source| dataset_source.dataset_path.clone())
+            .ok_or_else(|| {
+                format!(
+                    "Reference {} requires chart item ${name} to be dataset-backed",
+                    reference
                 )
             }),
     }

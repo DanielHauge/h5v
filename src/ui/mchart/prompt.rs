@@ -116,8 +116,12 @@ struct ExpressionPromptAnalysis {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExpressionPromptState {
+    pub(super) item_id: ChartItemId,
+    pub(super) name_buffer: String,
+    pub(super) name_cursor: usize,
     pub(super) buffer: String,
     pub(super) cursor: usize,
+    pub(super) focus: ExpressionPromptFocus,
     pub(super) mode: ExpressionPromptMode,
     pub(super) messages: Vec<ExpressionPromptMessage>,
     pub(super) suggestions: Vec<ExpressionPromptSuggestion>,
@@ -126,11 +130,28 @@ pub(super) struct ExpressionPromptState {
     lookup_cache: ExpressionPromptLookupCache,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExpressionPromptFocus {
+    Name,
+    Expression,
+}
+
 impl ExpressionPromptState {
-    pub(super) fn new(buffer: String, cursor: usize, mode: ExpressionPromptMode) -> Self {
+    pub(super) fn new(
+        item_id: ChartItemId,
+        name_buffer: String,
+        buffer: String,
+        cursor: usize,
+        mode: ExpressionPromptMode,
+    ) -> Self {
+        let name_cursor = name_buffer.len();
         Self {
+            item_id,
+            name_buffer,
+            name_cursor,
             buffer,
             cursor,
+            focus: ExpressionPromptFocus::Expression,
             mode,
             messages: Vec::new(),
             suggestions: Vec::new(),
@@ -146,6 +167,8 @@ impl MultiChartState {
         let buffer = String::new();
         let cursor = buffer.len();
         self.expression_prompt = Some(ExpressionPromptState::new(
+            ChartItemId(self.next_id),
+            String::new(),
             buffer,
             cursor,
             ExpressionPromptMode::New,
@@ -165,6 +188,8 @@ impl MultiChartState {
         })?;
         let cursor = buffer.len();
         self.expression_prompt = Some(ExpressionPromptState::new(
+            selected.id,
+            selected.name.clone().unwrap_or_default(),
             buffer,
             cursor,
             ExpressionPromptMode::EditExisting(selected.id),
@@ -180,73 +205,145 @@ impl MultiChartState {
 
     pub fn expression_insert_char(&mut self, ch: char) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.buffer.insert(prompt.cursor, ch);
-            prompt.cursor += 1;
-            prompt.selected_suggestion = None;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_buffer.insert(prompt.name_cursor, ch);
+                    prompt.name_cursor += 1;
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.buffer.insert(prompt.cursor, ch);
+                    prompt.cursor += 1;
+                    prompt.selected_suggestion = None;
+                }
+            }
         }
     }
 
     pub fn expression_backspace(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            if prompt.cursor > 0 {
-                prompt.cursor -= 1;
-                prompt.buffer.remove(prompt.cursor);
-                prompt.selected_suggestion = None;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    if prompt.name_cursor > 0 {
+                        prompt.name_cursor -= 1;
+                        prompt.name_buffer.remove(prompt.name_cursor);
+                    }
+                }
+                ExpressionPromptFocus::Expression => {
+                    if prompt.cursor > 0 {
+                        prompt.cursor -= 1;
+                        prompt.buffer.remove(prompt.cursor);
+                        prompt.selected_suggestion = None;
+                    }
+                }
             }
         }
     }
 
     pub fn expression_delete(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            if prompt.cursor < prompt.buffer.len() {
-                prompt.buffer.remove(prompt.cursor);
-                prompt.selected_suggestion = None;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    if prompt.name_cursor < prompt.name_buffer.len() {
+                        prompt.name_buffer.remove(prompt.name_cursor);
+                    }
+                }
+                ExpressionPromptFocus::Expression => {
+                    if prompt.cursor < prompt.buffer.len() {
+                        prompt.buffer.remove(prompt.cursor);
+                        prompt.selected_suggestion = None;
+                    }
+                }
             }
         }
     }
 
     pub fn expression_move_left(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            if prompt.cursor > 0 {
-                prompt.cursor -= 1;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_cursor = prompt.name_cursor.saturating_sub(1);
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = prompt.cursor.saturating_sub(1);
+                    prompt.selected_suggestion = None;
+                }
             }
-            prompt.selected_suggestion = None;
         }
     }
 
     pub fn expression_move_right(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            if prompt.cursor < prompt.buffer.len() {
-                prompt.cursor += 1;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    if prompt.name_cursor < prompt.name_buffer.len() {
+                        prompt.name_cursor += 1;
+                    }
+                }
+                ExpressionPromptFocus::Expression => {
+                    if prompt.cursor < prompt.buffer.len() {
+                        prompt.cursor += 1;
+                    }
+                    prompt.selected_suggestion = None;
+                }
             }
-            prompt.selected_suggestion = None;
         }
     }
 
     pub fn expression_move_to_start(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.cursor = 0;
-            prompt.selected_suggestion = None;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => prompt.name_cursor = 0,
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = 0;
+                    prompt.selected_suggestion = None;
+                }
+            }
         }
     }
 
     pub fn expression_move_to_end(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.cursor = prompt.buffer.len();
-            prompt.selected_suggestion = None;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => prompt.name_cursor = prompt.name_buffer.len(),
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = prompt.buffer.len();
+                    prompt.selected_suggestion = None;
+                }
+            }
         }
     }
 
     pub fn expression_clear(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.buffer.clear();
-            prompt.cursor = 0;
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_buffer.clear();
+                    prompt.name_cursor = 0;
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.buffer.clear();
+                    prompt.cursor = 0;
+                    prompt.selected_suggestion = None;
+                }
+            }
+        }
+    }
+
+    pub fn expression_toggle_focus(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.focus = match prompt.focus {
+                ExpressionPromptFocus::Name => ExpressionPromptFocus::Expression,
+                ExpressionPromptFocus::Expression => ExpressionPromptFocus::Name,
+            };
             prompt.selected_suggestion = None;
         }
     }
 
     pub fn expression_select_next_suggestion(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.focus != ExpressionPromptFocus::Expression {
+                return;
+            }
             if !prompt.suggestions.is_empty() {
                 let visible = prompt
                     .suggestions
@@ -262,6 +359,9 @@ impl MultiChartState {
 
     pub fn expression_select_prev_suggestion(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
+            if prompt.focus != ExpressionPromptFocus::Expression {
+                return;
+            }
             if !prompt.suggestions.is_empty() {
                 let visible = prompt
                     .suggestions
@@ -293,6 +393,9 @@ impl MultiChartState {
         let Some(prompt) = self.expression_prompt.as_mut() else {
             return false;
         };
+        if prompt.focus != ExpressionPromptFocus::Expression {
+            return false;
+        }
         let Some((start, end, suggestion)) = current_expression_completion(prompt)
             .map(|(start, end, _, suggestion)| (start, end, suggestion.clone()))
         else {
@@ -332,10 +435,17 @@ impl MultiChartState {
     }
 
     pub fn submit_expression_prompt(&mut self, file: Option<&File>) -> Result<(), String> {
-        let (expression, mode) = self
+        let (expression, name, mode, item_id) = self
             .expression_prompt
             .as_ref()
-            .map(|prompt| (prompt.buffer.trim().to_string(), prompt.mode.clone()))
+            .map(|prompt| {
+                (
+                    prompt.buffer.trim().to_string(),
+                    prompt.name_buffer.clone(),
+                    prompt.mode.clone(),
+                    prompt.item_id,
+                )
+            })
             .ok_or_else(|| "Expression prompt is not active".to_string())?;
         if expression.is_empty() {
             self.set_expression_messages(vec![ExpressionPromptMessage {
@@ -356,6 +466,7 @@ impl MultiChartState {
 
         match result {
             Ok(_) => {
+                self.set_selected_item_name(&name, Some(item_id))?;
                 self.close_expression_prompt();
                 Ok(())
             }
@@ -420,7 +531,9 @@ fn expression_prompt_messages_with_cache(
             },
             ExpressionPromptMessage {
                 kind: ExpressionPromptMessageKind::Hint,
-                text: "Tab applies the selected suggestion.".to_string(),
+                text:
+                    "Tab switches between name and expression; Enter applies a selected suggestion or submits."
+                        .to_string(),
             },
         ];
     }
@@ -839,10 +952,15 @@ fn expression_item_ref_suggestions(
     let mut suggestions = state
         .items
         .iter()
-        .filter_map(|item| {
-            let label = format!("${}", item.id.0);
-            let score = expression_suggestion_score(&label, fragment, None)?;
-            Some((score, item, label))
+        .flat_map(|item| {
+            let mut labels = vec![format!("${}", item.id.0)];
+            if let Some(name) = &item.name {
+                labels.push(format!("${name}"));
+            }
+            labels.into_iter().filter_map(|label| {
+                let score = expression_suggestion_score(&label, fragment, None)?;
+                Some((score, item.clone(), label))
+            })
         })
         .map(|(score, item, label)| {
             (

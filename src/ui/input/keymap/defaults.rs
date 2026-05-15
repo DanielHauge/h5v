@@ -359,6 +359,10 @@ pub(super) fn default_multichart_bindings() -> Vec<KeyBinding<MultiChartAction>>
             BoundAction::Action(MultiChartAction::OpenExpressionPrompt),
         ),
         binding(
+            "n",
+            BoundAction::Action(MultiChartAction::OpenExpressionPrompt),
+        ),
+        binding(
             "Space",
             BoundAction::Action(MultiChartAction::ToggleSelectedVisible),
         ),

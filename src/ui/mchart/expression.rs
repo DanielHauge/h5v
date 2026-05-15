@@ -56,7 +56,13 @@ pub(super) enum ExpressionDatasetSelector {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum ExpressionObjectTarget {
     AbsolutePath(String),
-    ItemRef(ChartItemId),
+    ItemRef(ExpressionItemTarget),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) enum ExpressionItemTarget {
+    Id(ChartItemId),
+    Name(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,7 +73,7 @@ pub(super) struct ExpressionItemSlice {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct ExpressionItemRef {
-    pub(super) id: ChartItemId,
+    pub(super) target: ExpressionItemTarget,
     pub(super) slice: Option<ExpressionItemSlice>,
 }
 
@@ -85,7 +91,10 @@ impl ExpressionObjectTarget {
     pub(super) fn render(&self) -> String {
         match self {
             ExpressionObjectTarget::AbsolutePath(path) => path.clone(),
-            ExpressionObjectTarget::ItemRef(id) => format!("${}", id.0),
+            ExpressionObjectTarget::ItemRef(target) => match target {
+                ExpressionItemTarget::Id(id) => format!("${}", id.0),
+                ExpressionItemTarget::Name(name) => format!("${name}"),
+            },
         }
     }
 }
@@ -93,8 +102,17 @@ impl ExpressionObjectTarget {
 impl ExpressionItemRef {
     pub(super) fn render(&self) -> String {
         match &self.slice {
-            Some(slice) => format!("${}[{}..{}]", self.id.0, slice.start, slice.end),
-            None => format!("${}", self.id.0),
+            Some(slice) => format!("{}[{}..{}]", self.target.render(), slice.start, slice.end),
+            None => self.target.render(),
+        }
+    }
+}
+
+impl ExpressionItemTarget {
+    pub(super) fn render(&self) -> String {
+        match self {
+            ExpressionItemTarget::Id(id) => format!("${}", id.0),
+            ExpressionItemTarget::Name(name) => format!("${name}"),
         }
     }
 }
@@ -321,31 +339,40 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
     Ok(tokens)
 }
 
-fn parse_expression_item_id(
+fn parse_expression_item_target(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ChartItemId, String> {
-    let mut digits = String::new();
+) -> Result<ExpressionItemTarget, String> {
+    let mut target = String::new();
     while let Some(next) = chars.peek() {
-        if next.is_ascii_digit() {
-            digits.push(*next);
+        if next.is_ascii_alphanumeric() || *next == '_' {
+            target.push(*next);
             chars.next();
         } else {
             break;
         }
     }
-    if digits.is_empty() {
-        return Err("Expected digits after '$' item reference".to_string());
+    if target.is_empty() {
+        return Err("Expected digits or identifier after '$' item reference".to_string());
     }
-    let id = digits
-        .parse::<u64>()
-        .map_err(|_| format!("Invalid chart item reference '${digits}'"))?;
-    Ok(ChartItemId(id))
+    if target.chars().all(|ch| ch.is_ascii_digit()) {
+        let id = target
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid chart item reference '${target}'"))?;
+        return Ok(ExpressionItemTarget::Id(ChartItemId(id)));
+    }
+    let first = target.chars().next().unwrap_or_default();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return Err(format!(
+            "Named chart item reference '${target}' must start with a letter or '_'"
+        ));
+    }
+    Ok(ExpressionItemTarget::Name(target))
 }
 
 pub(super) fn parse_expression_item_ref(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
 ) -> Result<ExpressionItemRef, String> {
-    let id = parse_expression_item_id(chars)?;
+    let target = parse_expression_item_target(chars)?;
     let slice = if chars.peek() == Some(&'[') {
         chars.next();
         let mut spec = String::new();
@@ -359,42 +386,45 @@ pub(super) fn parse_expression_item_ref(
         }
         if !closed {
             return Err(format!(
-                "Chart item reference '${}[{spec}' is missing a closing ']'",
-                id.0
+                "Chart item reference '{}[{spec}' is missing a closing ']'",
+                target.render()
             ));
         }
-        Some(parse_expression_item_slice(id, &spec)?)
+        Some(parse_expression_item_slice(&target, &spec)?)
     } else {
         None
     };
-    Ok(ExpressionItemRef { id, slice })
+    Ok(ExpressionItemRef { target, slice })
 }
 
-fn parse_expression_item_slice(id: ChartItemId, spec: &str) -> Result<ExpressionItemSlice, String> {
+fn parse_expression_item_slice(
+    target: &ExpressionItemTarget,
+    spec: &str,
+) -> Result<ExpressionItemSlice, String> {
     let Some((start, end)) = spec.split_once("..") else {
         return Err(format!(
-            "Chart item reference '${}[{spec}]' must use a slice like [0..5]",
-            id.0
+            "Chart item reference '{}[{spec}]' must use a slice like [0..5]",
+            target.render()
         ));
     };
     let start = start.trim().parse::<usize>().map_err(|_| {
         format!(
-            "Chart item reference '${}[{spec}]' has invalid slice start '{}'",
-            id.0,
+            "Chart item reference '{}[{spec}]' has invalid slice start '{}'",
+            target.render(),
             start.trim()
         )
     })?;
     let end = end.trim().parse::<usize>().map_err(|_| {
         format!(
-            "Chart item reference '${}[{spec}]' has invalid slice end '{}'",
-            id.0,
+            "Chart item reference '{}[{spec}]' has invalid slice end '{}'",
+            target.render(),
             end.trim()
         )
     })?;
     if end <= start {
         return Err(format!(
-            "Chart item reference '${}[{spec}]' must use an increasing slice",
-            id.0
+            "Chart item reference '{}[{spec}]' must use an increasing slice",
+            target.render()
         ));
     }
     Ok(ExpressionItemSlice { start, end })
@@ -435,17 +465,9 @@ fn parse_expression_object_target(
         Some('/') => Ok(ExpressionObjectTarget::AbsolutePath(
             parse_expression_absolute_path(chars)?,
         )),
-        Some('$') => {
-            chars.next();
-            Ok(ExpressionObjectTarget::ItemRef(parse_expression_item_id(
-                chars,
-            )?))
-        }
         _ => Err(match function_name {
-            "load" => {
-                "Data references must use load(/group/dataset), load(/group/dataset:ATTR), or load($1:ATTR)"
-                    .to_string()
-            }
+            "load" => "Data references must use load(/group/dataset) or load(/group/dataset:ATTR)"
+                .to_string(),
             _ => "Invalid expression reference".to_string(),
         }),
     }
@@ -759,12 +781,16 @@ pub(super) fn collect_expression_input_ids(refs: &ExpressionRefs) -> Vec<ChartIt
     let mut input_ids = refs
         .item_refs
         .iter()
-        .map(|item_ref| item_ref.id)
+        .filter_map(|item_ref| match item_ref.target {
+            ExpressionItemTarget::Id(id) => Some(id),
+            ExpressionItemTarget::Name(_) => None,
+        })
         .chain(
             refs.load_refs
                 .iter()
                 .filter_map(|load_ref| match &load_ref.target {
-                    ExpressionObjectTarget::ItemRef(id) => Some(*id),
+                    ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Id(id)) => Some(*id),
+                    ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Name(_)) => None,
                     ExpressionObjectTarget::AbsolutePath(_) => None,
                 }),
         )

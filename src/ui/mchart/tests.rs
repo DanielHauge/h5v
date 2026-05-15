@@ -1,8 +1,11 @@
 use super::eval::{dataset_ploting_data_from_points, normalize_absolute_object_path};
-use super::expression::{ExpressionDatasetSelector, ExpressionScalarRef, ExpressionSeriesRef};
+use super::expression::{
+    collect_expression_input_ids, ExpressionDatasetSelector, ExpressionScalarRef,
+    ExpressionSeriesRef,
+};
 use super::prompt::{
     consume_expression_reference_fragment, current_expression_fragment, expression_prompt_messages,
-    expression_suggestion_score,
+    expression_suggestion_score, ExpressionPromptFocus,
 };
 use super::*;
 use std::{
@@ -107,6 +110,7 @@ fn chart_item_statistics_compute_mean_median_and_stddev() {
         id: ChartItemId(1),
         color_slot: 0,
         label: "series".to_string(),
+        name: None,
         source: ChartSource::DerivedExpression {
             expression: "series".to_string(),
             input_ids: vec![],
@@ -326,18 +330,21 @@ fn expression_derived_rejects_mismatched_x_values() {
         vec![(10.0, 3.0), (20.0, 5.0)],
     );
 
-    let err = state
+    state
         .create_expression_derived("$1 + $2".to_string())
-        .unwrap_err();
-    assert!(err.contains("x-values must match"));
+        .expect("save invalid draft");
+    let item = state.chart_items().last().unwrap();
+    assert_eq!(item.list_label(), "$1 + $2");
+    assert!(!item.visible);
+    assert!(
+        matches!(item.load_state, MultiChartLoadState::Error(ref message) if message.contains("x-values must match"))
+    );
 }
 
 #[test]
 fn tokenizes_explicit_scalar_references() {
-    let tokens = tokenize_expression(
-        "$1 * load(/parent/scalar) + load(/parent/otherds:BIAS) + load($1:SCALE)",
-    )
-    .unwrap();
+    let tokens =
+        tokenize_expression("$1 * load(/parent/scalar) + load(/parent/otherds:BIAS)").unwrap();
     assert!(tokens.iter().any(|token| matches!(
         token,
         ExpressionToken::LoadRef(ExpressionScalarRef {
@@ -354,20 +361,11 @@ fn tokenizes_explicit_scalar_references() {
             selectors: None,
         }) if path == "/parent/otherds" && attr_name == "BIAS"
     )));
-    assert!(tokens.iter().any(|token| matches!(
-        token,
-        ExpressionToken::LoadRef(ExpressionScalarRef {
-            target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
-            attr_name: Some(attr_name),
-            selectors: None,
-        }) if attr_name == "SCALE"
-    )));
 }
 
 #[test]
 fn tokenizes_explicit_series_references() {
-    let tokens =
-        tokenize_expression("load(/series) + load(/matrix)[.., 1] + load($1:TRACE)").unwrap();
+    let tokens = tokenize_expression("load(/series) + load(/matrix)[.., 1]").unwrap();
     assert!(tokens.iter().any(|token| matches!(
         token,
         ExpressionToken::LoadRef(ExpressionSeriesRef {
@@ -388,14 +386,6 @@ fn tokenizes_explicit_series_references() {
                         ExpressionDatasetSelector::All,
                         ExpressionDatasetSelector::Index(1),
                     ]
-    )));
-    assert!(tokens.iter().any(|token| matches!(
-        token,
-        ExpressionToken::LoadRef(ExpressionSeriesRef {
-            target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
-            attr_name: Some(attr_name),
-            selectors: None,
-        }) if attr_name == "TRACE"
     )));
 }
 
@@ -557,6 +547,8 @@ fn expression_prompt_can_defer_cached_image_protocol_frames() {
         ImageBuffer::<Rgb<u8>, _>::from_pixel(1, 1, Rgb([0, 0, 0])),
     )));
     state.expression_prompt = Some(ExpressionPromptState::new(
+        ChartItemId(1),
+        String::new(),
         "load(/series)".to_string(),
         "load(/series)".len(),
         ExpressionPromptMode::New,
@@ -582,7 +574,13 @@ fn raw_dataset_reference_prompt_message_is_background_loading_hint() {
 #[test]
 fn suggestion_selection_wraps_within_visible_entries() {
     let mut state = make_state();
-    let mut prompt = ExpressionPromptState::new("load(/".to_string(), 6, ExpressionPromptMode::New);
+    let mut prompt = ExpressionPromptState::new(
+        ChartItemId(1),
+        String::new(),
+        "load(/".to_string(),
+        6,
+        ExpressionPromptMode::New,
+    );
     prompt.suggestions = (0..6)
         .map(|idx| ExpressionPromptSuggestion {
             symbol: String::new(),
@@ -634,7 +632,7 @@ fn suggestion_score_prefers_prefix_and_basename_matches() {
 fn open_selected_item_for_edit_prefills_existing_expression() {
     let mut state = make_state();
     let selection = PreviewSelection {
-        index: vec![0],
+        index: vec![0, 0],
         x: 0,
         slice: SliceSelection::All,
     };
@@ -651,6 +649,180 @@ fn open_selected_item_for_edit_prefills_existing_expression() {
         prompt.mode,
         ExpressionPromptMode::EditExisting(ChartItemId(2))
     );
+}
+
+#[test]
+fn open_selected_item_for_edit_prefills_existing_name() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create derived");
+    state
+        .set_selected_item_name("temperature", Some(ChartItemId(2)))
+        .expect("rename item");
+
+    state
+        .open_selected_item_for_edit()
+        .expect("open edit prompt");
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.name_buffer, "temperature");
+    assert_eq!(prompt.focus, ExpressionPromptFocus::Expression);
+}
+
+#[test]
+fn prompt_focus_toggles_between_name_and_expression() {
+    let mut state = make_state();
+    state.open_expression_prompt();
+    state.expression_toggle_focus();
+    state.expression_insert_char('t');
+    state.expression_insert_char('1');
+    state.expression_toggle_focus();
+    state.expression_insert_char('$');
+
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.name_buffer, "t1");
+    assert_eq!(prompt.buffer, "$");
+    assert_eq!(prompt.focus, ExpressionPromptFocus::Expression);
+}
+
+#[test]
+fn named_series_can_be_referenced_by_name() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state
+        .set_selected_item_name("temperature", Some(ChartItemId(1)))
+        .expect("rename item");
+
+    let derived_id = state
+        .create_expression_derived("$temperature + 1".to_string())
+        .expect("create derived");
+    let derived = state
+        .item_by_id(derived_id)
+        .expect("derived item should exist");
+
+    assert_eq!(derived.series.points, vec![(0.0, 2.0), (1.0, 3.0)]);
+}
+
+#[test]
+fn duplicate_series_names_are_rejected() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 2.0)],
+    );
+    state
+        .set_selected_item_name("temperature", Some(ChartItemId(1)))
+        .expect("rename first item");
+    state.add_chart_item(source("/group/b", selection), vec![(0.0, 3.0), (1.0, 4.0)]);
+
+    let err = state
+        .set_selected_item_name("temperature", Some(ChartItemId(2)))
+        .unwrap_err();
+    assert!(err.contains("already in use"));
+}
+
+#[test]
+fn recursive_name_assignment_is_rejected() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    let id = state
+        .create_expression_derived("$future + 1".to_string())
+        .expect("invalid expressions are persisted as drafts");
+
+    let err = state
+        .set_selected_item_name("future", Some(id))
+        .unwrap_err();
+    assert!(err.contains("references $future"));
+}
+
+#[test]
+fn invalid_expression_submit_is_saved_hidden_and_editable() {
+    let mut state = make_state();
+    state
+        .create_expression_derived("load(/broken".to_string())
+        .expect("save invalid expression");
+
+    let item = state.chart_items().last().expect("saved item");
+    assert_eq!(item.list_label(), "load(/broken");
+    assert!(!item.visible);
+    assert!(matches!(item.load_state, MultiChartLoadState::Error(_)));
+
+    state
+        .open_selected_item_for_edit()
+        .expect("open invalid item");
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.buffer, "load(/broken");
+}
+
+#[test]
+fn updating_expression_to_invalid_keeps_item_as_hidden_error_draft() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    let id = state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create valid expression");
+
+    state
+        .update_expression_item_with_file(id, "$1 +".to_string(), None)
+        .expect("save invalid draft");
+
+    let item = state.item_by_id(id).expect("updated item");
+    assert_eq!(item.list_label(), "$1 +");
+    assert!(!item.visible);
+    assert!(matches!(item.load_state, MultiChartLoadState::Error(_)));
+}
+
+#[test]
+fn fixing_invalid_expression_clears_error_state() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    let id = state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create valid expression");
+
+    state
+        .update_expression_item_with_file(id, "$1 +".to_string(), None)
+        .expect("save invalid draft");
+    state
+        .update_expression_item_with_file(id, "$1 + 2".to_string(), None)
+        .expect("repair expression");
+
+    let item = state.item_by_id(id).expect("updated item");
+    assert_eq!(item.list_label(), "$1 + 2");
+    assert!(item.visible);
+    assert_eq!(item.load_state, MultiChartLoadState::Ready);
+    assert_eq!(item.series.points, vec![(0.0, 3.0), (1.0, 4.0)]);
 }
 
 #[test]
@@ -789,8 +961,8 @@ fn updating_xy_series_recomputes_downstream_y_dependents() {
 }
 
 #[test]
-fn collect_expression_input_ids_includes_item_targeted_series_refs() {
-    let tokens = tokenize_expression("(load($1:TRACE), $2 + 1)").expect("tokenize");
+fn collect_expression_input_ids_includes_item_refs() {
+    let tokens = tokenize_expression("($1, $2 + 1)").expect("tokenize");
     let parsed = parse_derived_expression(&tokens).expect("parse");
     let mut refs = ExpressionRefs::default();
     collect_parsed_expression_refs(&parsed, &mut refs);
@@ -799,6 +971,12 @@ fn collect_expression_input_ids_includes_item_targeted_series_refs() {
         collect_expression_input_ids(&refs),
         vec![ChartItemId(1), ChartItemId(2)]
     );
+}
+
+#[test]
+fn rejects_item_refs_inside_load_calls() {
+    let err = tokenize_expression("load($1:TRACE)").unwrap_err();
+    assert!(err.contains("load(/group/dataset) or load(/group/dataset:ATTR)"));
 }
 
 #[test]
@@ -872,13 +1050,18 @@ fn expression_derived_dataset_path_refs_validate_series_lengths() {
     let (file, path) = make_dataset_ref_test_file();
     let mut state = make_state();
 
-    let err = state
+    state
         .create_expression_derived_with_file(
             "load(/series) + load(/matrix)[1,..]".to_string(),
             Some(&file),
         )
-        .unwrap_err();
-    assert!(err.contains("lengths must match"));
+        .expect("save invalid draft");
+    let item = state.chart_items().last().unwrap();
+    assert_eq!(item.list_label(), "load(/series) + load(/matrix)[1,..]");
+    assert!(!item.visible);
+    assert!(
+        matches!(item.load_state, MultiChartLoadState::Error(ref message) if message.contains("lengths must match"))
+    );
 
     drop(file);
     fs::remove_file(path).expect("failed removing temp hdf5 file");
@@ -938,10 +1121,15 @@ fn expression_derived_xy_tuple_requires_matching_lengths() {
     );
     state.add_chart_item(source("/group/b", selection), vec![(0.0, 3.0), (1.0, 5.0)]);
 
-    let err = state
+    state
         .create_expression_derived("($1, $2 + 1)".to_string())
-        .unwrap_err();
-    assert!(err.contains("lengths must match"));
+        .expect("save invalid draft");
+    let item = state.chart_items().last().unwrap();
+    assert_eq!(item.list_label(), "($1, $2 + 1)");
+    assert!(!item.visible);
+    assert!(
+        matches!(item.load_state, MultiChartLoadState::Error(ref message) if message.contains("lengths must match"))
+    );
 }
 
 #[test]
@@ -968,84 +1156,40 @@ fn expression_derived_supports_scalar_attributes_from_dataset_and_paths() {
 
     state
         .create_expression_derived_with_file(
-            "$1 * load($1:SCALE) + load(/parent/child:CHILD_OFFSET) + load(/parent/otherds:BIAS) + load(/parent/scalar)"
+            "$1 + load(/parent/child:CHILD_OFFSET) + load(/parent/otherds:BIAS) + load(/parent/scalar)"
                 .to_string(),
             Some(&file),
         )
         .unwrap();
 
     let derived = state.chart_items().last().unwrap();
-    assert_eq!(derived.series.points, vec![(0.0, 17.0), (1.0, 19.0)]);
+    assert_eq!(derived.series.points, vec![(0.0, 8.0), (1.0, 10.0)]);
 
     drop(file);
     fs::remove_file(path).expect("failed removing temp hdf5 file");
 }
 
 #[test]
-#[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
-fn expression_derived_rejects_non_numeric_scalar_attribute() {
-    let (file, path) = make_attribute_test_file();
+fn expression_derived_rejects_item_refs_inside_load_calls() {
     let mut state = make_state();
     let selection = PreviewSelection {
         index: vec![0],
         x: 0,
         slice: SliceSelection::All,
     };
-
-    state.add_chart_item(
-        ChartSource::DatasetSelection(DatasetChartSource {
-            dataset_path: "/parent/child/ds".to_string(),
-            display_path: "/parent/child/ds".to_string(),
-            selection,
-            shape: vec![2],
-            kind: DatasetChartKind::Dataset,
-        }),
-        vec![(0.0, 1.0), (1.0, 2.0)],
-    );
-
-    let err = state
-        .create_expression_derived_with_file("$1 + load($1:FLAG)".to_string(), Some(&file))
-        .unwrap_err();
-    assert!(err.contains("must be numeric"));
-
-    drop(file);
-    fs::remove_file(path).expect("failed removing temp hdf5 file");
-}
-
-#[test]
-#[ignore = "real HDF5 attribute reads are unstable in the default parallel test environment"]
-fn expression_derived_supports_series_attributes_on_dataset_items() {
-    let (file, path) = make_attribute_test_file();
-    let mut state = make_state();
-    let selection = PreviewSelection {
-        index: vec![0],
-        x: 0,
-        slice: SliceSelection::All,
-    };
-
-    state.add_chart_item(
-        ChartSource::DatasetSelection(DatasetChartSource {
-            dataset_path: "/parent/child/ds".to_string(),
-            display_path: "/parent/child/ds".to_string(),
-            selection,
-            shape: vec![2],
-            kind: DatasetChartKind::Dataset,
-        }),
-        vec![(0.0, 1.0), (1.0, 2.0)],
-    );
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
 
     state
-        .create_expression_derived_with_file(
-            "load($1:TRACE) + load(/parent/scalar)".to_string(),
-            Some(&file),
-        )
-        .unwrap();
+        .create_expression_derived("$1 + load($1:FLAG)".to_string())
+        .expect("invalid expressions are persisted as drafts");
 
-    let derived = state.chart_items().last().unwrap();
-    assert_eq!(derived.series.points, vec![(0.0, 11.0), (1.0, 15.0)]);
-
-    drop(file);
-    fs::remove_file(path).expect("failed removing temp hdf5 file");
+    let item = state.chart_items().last().expect("draft item");
+    assert!(!item.visible);
+    assert!(matches!(
+        item.load_state,
+        MultiChartLoadState::Error(ref message)
+            if message.contains("load(/group/dataset) or load(/group/dataset:ATTR)")
+    ));
 }
 
 #[test]

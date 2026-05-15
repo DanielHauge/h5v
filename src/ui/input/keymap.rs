@@ -468,6 +468,16 @@ mod tests {
     }
 
     #[test]
+    fn multichart_n_opens_expression_prompt() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::OpenExpressionPrompt))
+        );
+    }
+
+    #[test]
     fn multichart_e_edits_selected_expression() {
         let keymaps = EffectiveKeymaps::default();
         let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);

@@ -23,6 +23,16 @@ pub(crate) fn handle_mchart_event(
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => {
                 if state.multi_chart.is_expression_prompt_active() {
+                    if matches!(
+                        key_event.code,
+                        ratatui::crossterm::event::KeyCode::Tab
+                            | ratatui::crossterm::event::KeyCode::BackTab
+                    ) {
+                        state.multi_chart.expression_toggle_focus();
+                        let file = state.file.clone();
+                        state.multi_chart.refresh_expression_prompt(file.as_ref());
+                        return Ok(EventResult::Redraw);
+                    }
                     return match command_action(&key_event) {
                         Some(CommandAction::Submit) => {
                             if state.multi_chart.expression_has_selected_suggestion() {

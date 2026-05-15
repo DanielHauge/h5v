@@ -28,8 +28,8 @@ use eval::{
     ExpressionSeriesResolution, ResolvedExpressionLoad, ValidatedExpressionLoad,
 };
 use expression::{
-    collect_expression_input_ids, collect_parsed_expression_refs, parse_derived_expression,
-    tokenize_expression, ExpressionObjectTarget, ExpressionRefs, ExpressionToken, ParsedExpression,
+    collect_parsed_expression_refs, parse_derived_expression, tokenize_expression,
+    ExpressionObjectTarget, ExpressionRefs, ExpressionToken, ParsedExpression,
 };
 use model::sanitize_chart_points;
 #[allow(unused_imports)]
@@ -509,6 +509,113 @@ impl MultiChartState {
         self.items.iter().find(|item| item.id == id)
     }
 
+    fn item_by_name(&self, name: &str) -> Option<&ChartItem> {
+        self.items
+            .iter()
+            .find(|item| item.name.as_deref() == Some(name))
+    }
+
+    fn collect_expression_input_ids(&self, refs: &ExpressionRefs) -> Vec<ChartItemId> {
+        let mut input_ids = refs
+            .item_refs
+            .iter()
+            .filter_map(|item_ref| match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => Some(*id),
+                expression::ExpressionItemTarget::Name(name) => {
+                    self.item_by_name(name).map(|item| item.id)
+                }
+            })
+            .chain(
+                refs.load_refs
+                    .iter()
+                    .filter_map(|load_ref| match &load_ref.target {
+                        ExpressionObjectTarget::ItemRef(expression::ExpressionItemTarget::Id(
+                            id,
+                        )) => Some(*id),
+                        ExpressionObjectTarget::ItemRef(
+                            expression::ExpressionItemTarget::Name(name),
+                        ) => self.item_by_name(name).map(|item| item.id),
+                        ExpressionObjectTarget::AbsolutePath(_) => None,
+                    }),
+            )
+            .collect::<Vec<_>>();
+        input_ids.sort_by_key(|id| id.0);
+        input_ids.dedup();
+        input_ids
+    }
+
+    fn normalized_item_name(
+        &self,
+        name: &str,
+        current_id: Option<ChartItemId>,
+    ) -> Result<Option<String>, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let mut chars = trimmed.chars();
+        let first = chars.next().unwrap_or_default();
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return Err("Series names must start with a letter or '_'".to_string());
+        }
+        if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            return Err("Series names may only use letters, digits, and '_'".to_string());
+        }
+        if self.items.iter().any(|item| {
+            item.id != current_id.unwrap_or(ChartItemId(u64::MAX))
+                && item.name.as_deref() == Some(trimmed)
+        }) {
+            return Err(format!("Series name '${trimmed}' is already in use"));
+        }
+        if let Some(current_id) = current_id {
+            let Some(item) = self.item_by_id(current_id) else {
+                return Err(format!("Chart item ${} no longer exists", current_id.0));
+            };
+            if item
+                .editable_expression()
+                .is_some_and(|expression| Self::expression_references_name(&expression, trimmed))
+            {
+                return Err(format!(
+                    "Series ${} cannot be named '${trimmed}' because its expression references ${trimmed}",
+                    current_id.0
+                ));
+            }
+        }
+        Ok(Some(trimmed.to_string()))
+    }
+
+    fn expression_references_name(expression: &str, name: &str) -> bool {
+        let Ok(tokens) = tokenize_expression(expression) else {
+            return false;
+        };
+        let Ok(parsed) = parse_derived_expression(&tokens) else {
+            return false;
+        };
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        refs.item_refs.iter().any(|item_ref| {
+            matches!(
+                &item_ref.target,
+                expression::ExpressionItemTarget::Name(candidate) if candidate == name
+            )
+        })
+    }
+
+    fn set_selected_item_name(
+        &mut self,
+        name: &str,
+        current_id: Option<ChartItemId>,
+    ) -> Result<(), String> {
+        let normalized = self.normalized_item_name(name, current_id)?;
+        let Some(item) = self.items.get_mut(self.idx) else {
+            return Ok(());
+        };
+        item.name = normalized;
+        item.label = item.list_label();
+        self.modified = true;
+        Ok(())
+    }
+
     fn raw_dataset_reference(
         expression: &str,
     ) -> Result<Option<expression::ExpressionSeriesRef>, String> {
@@ -566,16 +673,20 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
-        if Self::raw_dataset_reference(&expression)?.is_some() {
+        if matches!(Self::raw_dataset_reference(&expression), Ok(Some(_))) {
             return self.add_dataset_reference_command(&expression, file);
         }
-        let (source, series) = self.build_expression_chart_item(&expression, file)?;
-        let points = series.points.clone();
-        let id = self
-            .add_chart_item(source, points)
-            .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
-        self.refresh_expression_detail_series(file)?;
-        Ok(id)
+        match self.build_expression_chart_item(&expression, file) {
+            Ok((source, series)) => {
+                let points = series.points.clone();
+                let id = self
+                    .add_chart_item(source, points)
+                    .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
+                self.refresh_expression_detail_series(file)?;
+                Ok(id)
+            }
+            Err(error) => self.apply_expression_error_state(None, expression, error),
+        }
     }
 
     fn build_expression_chart_item(
@@ -598,6 +709,78 @@ impl MultiChartState {
         let series = ChartSeries::from_points(points)
             .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
         Ok((source, series))
+    }
+
+    fn invalid_expression_source(
+        expression: String,
+        previous_source: Option<&ChartSource>,
+    ) -> ChartSource {
+        match previous_source {
+            Some(ChartSource::DerivedExpression {
+                input_ids,
+                len,
+                kind,
+                ..
+            }) => ChartSource::DerivedExpression {
+                expression,
+                input_ids: input_ids.clone(),
+                len: *len,
+                kind: *kind,
+            },
+            _ => ChartSource::DerivedExpression {
+                expression,
+                input_ids: Vec::new(),
+                len: 0,
+                kind: DerivedExpressionKind::YSeries,
+            },
+        }
+    }
+
+    fn apply_expression_error_state(
+        &mut self,
+        id: Option<ChartItemId>,
+        expression: String,
+        message: String,
+    ) -> Result<ChartItemId, String> {
+        match id {
+            Some(id) => {
+                let index = self
+                    .items
+                    .iter()
+                    .position(|item| item.id == id)
+                    .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+                let source =
+                    Self::invalid_expression_source(expression, Some(&self.items[index].source));
+                let item = &mut self.items[index];
+                item.label = source.label();
+                item.source = source;
+                item.series = ChartSeries::from_points(vec![(0.0, 0.0)])
+                    .ok_or_else(|| "Failed to create placeholder series".to_string())?;
+                item.clear_detail_state(true);
+                item.load_state = MultiChartLoadState::Error(message);
+                item.visible = false;
+                self.idx = index;
+                self.modified = true;
+                Ok(id)
+            }
+            None => {
+                let source = Self::invalid_expression_source(expression, None);
+                let id = self
+                    .add_chart_item_with_status(
+                        source,
+                        Some(vec![(0.0, 0.0)]),
+                        0,
+                        MultiChartLoadState::Error(message),
+                        false,
+                    )
+                    .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
+                if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+                    item.visible = false;
+                }
+                self.modified = true;
+                Ok(id)
+            }
+        }
     }
 
     fn direct_expression_dependents_of(&self, id: ChartItemId) -> Vec<ChartItemId> {
@@ -722,7 +905,12 @@ impl MultiChartState {
                 .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
             self.items[index].label = source.label();
             self.items[index].source = source;
+            self.items[index].source_len = series.len();
+            self.items[index].sampled = false;
             self.items[index].series = series;
+            self.items[index].visible = true;
+            self.items[index].clear_detail_state(true);
+            self.items[index].load_state = MultiChartLoadState::Ready;
         }
         Ok(())
     }
@@ -733,7 +921,7 @@ impl MultiChartState {
         expression: String,
         file: Option<&File>,
     ) -> Result<(), String> {
-        if Self::raw_dataset_reference(&expression)?.is_some() {
+        if matches!(Self::raw_dataset_reference(&expression), Ok(Some(_))) {
             let item_id = self.add_dataset_reference_command(&expression, file)?;
             if item_id != id {
                 let index = self
@@ -750,7 +938,13 @@ impl MultiChartState {
         let original_idx = self.idx;
         let original_modified = self.modified;
         let previous_dependents = self.transitive_expression_dependents_of(id);
-        let (source, series) = self.build_expression_chart_item(&expression, file)?;
+        let (source, series) = match self.build_expression_chart_item(&expression, file) {
+            Ok(item) => item,
+            Err(error) => {
+                self.apply_expression_error_state(Some(id), expression, error)?;
+                return Ok(());
+            }
+        };
         self.validate_expression_rewire(id, &previous_dependents, source.input_ids())?;
         let index = self
             .items
@@ -759,7 +953,12 @@ impl MultiChartState {
             .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
         self.items[index].label = source.label();
         self.items[index].source = source;
+        self.items[index].source_len = series.len();
+        self.items[index].sampled = false;
         self.items[index].series = series;
+        self.items[index].visible = true;
+        self.items[index].clear_detail_state(true);
+        self.items[index].load_state = MultiChartLoadState::Ready;
         self.idx = index;
         let result = self.recompute_expression_dependents(previous_dependents, file);
         match result {
@@ -799,23 +998,13 @@ impl MultiChartState {
         let parsed = parse_derived_expression(&tokens)?;
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
-        refs.item_refs.sort_by(|lhs, rhs| {
-            lhs.id
-                .0
-                .cmp(&rhs.id.0)
-                .then_with(|| match (&lhs.slice, &rhs.slice) {
-                    (None, None) => std::cmp::Ordering::Equal,
-                    (None, Some(_)) => std::cmp::Ordering::Less,
-                    (Some(_), None) => std::cmp::Ordering::Greater,
-                    (Some(lhs), Some(rhs)) => lhs.start.cmp(&rhs.start).then(lhs.end.cmp(&rhs.end)),
-                })
-        });
+        refs.item_refs.sort_by_key(|item_ref| item_ref.render());
         refs.item_refs.dedup();
         refs.load_refs.sort_by_key(|load_ref| load_ref.render());
         refs.load_refs.dedup();
         if refs.item_refs.is_empty() && refs.load_refs.is_empty() {
             return Err(
-                "Expression must reference at least one series such as $3, load(/group/ds)[..,0], or load($3:ATTR)"
+                "Expression must reference at least one series such as $3 or load(/group/ds)[..,0]"
                     .to_string(),
             );
         }
@@ -891,23 +1080,13 @@ impl MultiChartState {
         let parsed = parse_derived_expression(&tokens)?;
         let mut refs = ExpressionRefs::default();
         collect_parsed_expression_refs(&parsed, &mut refs);
-        refs.item_refs.sort_by(|lhs, rhs| {
-            lhs.id
-                .0
-                .cmp(&rhs.id.0)
-                .then_with(|| match (&lhs.slice, &rhs.slice) {
-                    (None, None) => std::cmp::Ordering::Equal,
-                    (None, Some(_)) => std::cmp::Ordering::Less,
-                    (Some(_), None) => std::cmp::Ordering::Greater,
-                    (Some(lhs), Some(rhs)) => lhs.start.cmp(&rhs.start).then(lhs.end.cmp(&rhs.end)),
-                })
-        });
+        refs.item_refs.sort_by_key(|item_ref| item_ref.render());
         refs.item_refs.dedup();
         refs.load_refs.sort_by_key(|load_ref| load_ref.render());
         refs.load_refs.dedup();
         if refs.item_refs.is_empty() && refs.load_refs.is_empty() {
             return Err(
-                "Expression must reference at least one series such as $3, load(/group/ds)[..,0], or load($3:ATTR)"
+                "Expression must reference at least one series such as $3 or load(/group/ds)[..,0]"
                     .to_string(),
             );
         }
@@ -1013,7 +1192,7 @@ impl MultiChartState {
             }
         };
 
-        let input_ids = collect_expression_input_ids(&refs);
+        let input_ids = self.collect_expression_input_ids(&refs);
 
         Ok(EvaluatedExpression {
             points,
@@ -1029,9 +1208,14 @@ impl MultiChartState {
         collect_parsed_expression_refs(&parsed, &mut refs);
         let mut expected = None::<ChartLodWindow>;
         for item_ref in &refs.item_refs {
-            let item = self
-                .item_by_id(item_ref.id)
-                .ok_or_else(|| format!("Unknown chart item reference ${}", item_ref.id.0))?;
+            let item = match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => self
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                expression::ExpressionItemTarget::Name(name) => self
+                    .item_by_name(name)
+                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+            };
             let Some(window) = item.detail_window else {
                 return Ok(None);
             };
@@ -1041,10 +1225,15 @@ impl MultiChartState {
             expected = Some(window);
         }
         for load_ref in &refs.load_refs {
-            if let ExpressionObjectTarget::ItemRef(id) = &load_ref.target {
-                let item = self
-                    .item_by_id(*id)
-                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
+            if let ExpressionObjectTarget::ItemRef(target) = &load_ref.target {
+                let item = match target {
+                    expression::ExpressionItemTarget::Id(id) => self
+                        .item_by_id(*id)
+                        .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                    expression::ExpressionItemTarget::Name(name) => self
+                        .item_by_name(name)
+                        .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+                };
                 let Some(window) = item.detail_window else {
                     return Ok(None);
                 };
@@ -1156,6 +1345,7 @@ impl MultiChartState {
             item.sampled = sampled || item.source_len > loaded_len.max(1);
             item.load_state = load_state;
             item.visible = true;
+            item.name = None;
             self.idx = idx;
             self.modified = true;
             return Some(item.id);
@@ -1169,6 +1359,7 @@ impl MultiChartState {
             id,
             color_slot,
             label: source.label(),
+            name: None,
             source,
             series,
             detail_series: None,

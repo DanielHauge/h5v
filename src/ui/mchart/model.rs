@@ -268,6 +268,7 @@ pub struct ChartItem {
     pub id: ChartItemId,
     pub color_slot: usize,
     pub label: String,
+    pub name: Option<String>,
     pub source: ChartSource,
     pub series: ChartSeries,
     pub detail_series: Option<ChartSeries>,
@@ -318,9 +319,12 @@ impl ChartItem {
     }
 
     pub fn list_label(&self) -> String {
-        match &self.source {
-            ChartSource::DatasetSelection(source) => source.expression_reference(),
-            ChartSource::DerivedExpression { expression, .. } => expression.clone(),
+        match &self.name {
+            Some(name) => format!("${name}"),
+            None => match &self.source {
+                ChartSource::DatasetSelection(source) => source.expression_reference(),
+                ChartSource::DerivedExpression { expression, .. } => expression.clone(),
+            },
         }
     }
 

@@ -369,7 +369,7 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
             "Workflow",
             &[
                 "Add raw series first so you have stable $1, $2, and $3 references.",
-                "Press Enter for a new expression, e to edit the selected one, Tab to complete, and Esc to close.",
+                "Press Enter or n for a new expression, e to edit the selected one, Tab to switch between name and expression, and Esc to close.",
             ],
         ),
         (
@@ -377,7 +377,7 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
             &[
                 "$id refers to a chart item series, for example $1 or $2[0..256].",
                 "load(path) reads data and infers whether it stays a series or becomes a scalar.",
-                "Use selectors after the call, for example load(/signals/sine_wave), load(/matrix)[..,0], load(/group/ds:BIAS), or load($1:SCALE).",
+                "Use selectors after the call, for example load(/signals/sine_wave), load(/matrix)[..,0], or load(/group/ds:BIAS).",
                 "(x_expr, y_expr) creates an explicit x/y plot.",
             ],
         ),
@@ -385,7 +385,7 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
             "Examples",
             &[
                 "$1 - $2",
-                "$1 * load($1:SCALE)",
+                "$temperature * load(/measurements/sensors/group1/temperature:scale)",
                 "load(/signals/sine_wave) + load(/group_preview/offset)",
                 "($1 * load(/group_preview:scale), load(/group_preview/time))",
                 "(load(/signals/sine_wave), load(/signals/cosine_wave))",

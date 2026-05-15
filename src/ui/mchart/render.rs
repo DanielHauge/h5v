@@ -16,9 +16,10 @@ use ratatui_image::{picker::ProtocolType, StatefulImage};
 use crate::{configure, error::log_error};
 
 use super::{
-    ChartSource, ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
-    ExpressionPromptSuggestion, ExpressionPromptSuggestionKind, MultiChartRenderRequest,
-    MultiChartRenderResult, MultiChartState, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    prompt::ExpressionPromptFocus, ChartSource, ExpressionPromptInputKind,
+    ExpressionPromptMessageKind, ExpressionPromptMode, ExpressionPromptSuggestion,
+    ExpressionPromptSuggestionKind, MultiChartRenderRequest, MultiChartRenderResult,
+    MultiChartState, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 fn mchart_body_style() -> Style {
@@ -63,6 +64,22 @@ fn render_suggestion_label(
         spans.push(Span::styled(suggestion.label.clone(), base_style));
     }
     spans
+}
+
+fn truncate_to_width(message: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let char_count = message.chars().count();
+    if char_count <= max_width {
+        return message.to_string();
+    }
+    if max_width <= 3 {
+        return ".".repeat(max_width);
+    }
+    let mut truncated = message.chars().take(max_width - 3).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 pub(super) fn render_prepared_chart_request(
@@ -228,7 +245,11 @@ impl MultiChartState {
             }
 
             series.push(super::PreparedChartSeries {
-                label: item.label.clone(),
+                label: item
+                    .name
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| item.label.clone()),
                 color_slot: item.color_slot,
                 points,
                 is_selected: selected_item_id == Some(item.id),
@@ -520,65 +541,121 @@ impl MultiChartState {
         f.render_widget(block, area);
 
         let available_rows = inner.height as usize;
-        if available_rows == 0 {
+        let visible_items = available_rows / 2;
+        if visible_items == 0 {
             return;
         }
 
-        let half = available_rows / 2;
+        let half = visible_items / 2;
         let start = self.idx.saturating_sub(half);
-        let end = usize::min(start + available_rows, self.items.len());
-        let start = end.saturating_sub(available_rows);
+        let end = usize::min(start + visible_items, self.items.len());
+        let start = end.saturating_sub(visible_items);
 
         let lines = self.items[start..end]
             .iter()
             .enumerate()
-            .map(|(offset, item)| {
+            .flat_map(|(offset, item)| {
                 let absolute_idx = start + offset;
                 let is_selected = absolute_idx == self.idx;
-                let marker_color = configure::themed_color(|colors| {
-                    colors.chart.series[item.color_slot % colors.chart.series.len()]
-                });
-                let marker = if item.visible {
+                let has_error = matches!(item.load_state, super::MultiChartLoadState::Error(_));
+                let marker_color = if has_error {
+                    configure::themed_color(|colors| colors.text.error)
+                } else {
+                    configure::themed_color(|colors| {
+                        colors.chart.series[item.color_slot % colors.chart.series.len()]
+                    })
+                };
+                let marker = if has_error {
+                    "⚠"
+                } else if item.visible {
                     configure::configured_symbol(|symbols| symbols.chart.visibility_visible)
                 } else {
                     configure::configured_symbol(|symbols| symbols.chart.visibility_hidden)
                 };
-                let row_style = match (is_selected, item.visible) {
-                    (true, true) => Style::default()
+                let row_style = match (has_error, is_selected, item.visible) {
+                    (true, true, _) => Style::default()
+                        .fg(configure::themed_color(|colors| colors.text.error))
+                        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
+                        .dim(),
+                    (true, false, _) => Style::default()
+                        .fg(configure::themed_color(|colors| colors.text.error))
+                        .dim(),
+                    (false, true, true) => Style::default()
                         .fg(configure::themed_color(|colors| colors.text.primary))
                         .bg(configure::themed_color(|colors| colors.surface.focus_bg))
                         .bold(),
-                    (true, false) => Style::default()
+                    (false, true, false) => Style::default()
                         .fg(configure::themed_color(|colors| colors.text.primary))
                         .bg(configure::themed_color(|colors| colors.surface.focus_bg))
                         .bold()
                         .dim(),
-                    (false, true) => Style::default()
+                    (false, false, true) => Style::default()
                         .fg(configure::themed_color(|colors| colors.mchart.item_visible)),
-                    (false, false) => Style::default()
+                    (false, false, false) => Style::default()
                         .fg(configure::themed_color(|colors| colors.mchart.item_hidden))
                         .dim(),
                 };
-                Line::from(vec![
+                let id_text = format!("${}", item.id.0);
+                let prefix_width = 5 + id_text.chars().count();
+                let label_width = inner.width as usize - prefix_width.min(inner.width as usize);
+                let label = truncate_to_width(&item.list_label(), label_width);
+                let selected_bg =
+                    is_selected.then(|| configure::themed_color(|colors| colors.surface.focus_bg));
+                let label_style = if item.name.is_some() {
+                    let mut style = Style::default()
+                        .fg(configure::themed_color(|colors| colors.tree.dataset_file))
+                        .underlined();
+                    if let Some(bg) = selected_bg {
+                        style = style.bg(bg);
+                    }
+                    if !item.visible || has_error {
+                        style = style.dim();
+                    }
+                    style
+                } else {
+                    row_style
+                };
+                let mut id_style = Style::default()
+                    .fg(configure::themed_color(|colors| colors.toast.warning))
+                    .bold();
+                if let Some(bg) = selected_bg {
+                    id_style = id_style.bg(bg);
+                }
+                if !item.visible || has_error {
+                    id_style = id_style.dim();
+                }
+                let first_line = Line::from(vec![
                     Span::styled(" ", row_style),
                     Span::styled(marker, row_style.fg(marker_color).bold()),
                     Span::styled(" ", row_style),
-                    Span::styled(format!("${} ", item.id.0), row_style),
-                    Span::styled(item.list_label(), row_style),
-                    Span::styled(" ", row_style),
+                    Span::styled(format!("{id_text} "), id_style),
+                    Span::styled(label, label_style),
+                ]);
+                let state_label = if has_error {
+                    "expression error".to_string()
+                } else {
+                    item.data_state_label()
+                };
+                let second_line = Line::from(vec![
+                    Span::styled("   ", row_style),
                     Span::styled(
-                        format!("[{}]", item.data_state_label()),
-                        row_style
-                            .fg(configure::themed_color(|colors| colors.mchart.detail_label))
-                            .dim(),
+                        format!("[{}]", state_label),
+                        if has_error {
+                            row_style
+                                .fg(configure::themed_color(|colors| colors.text.error))
+                                .dim()
+                        } else {
+                            row_style
+                                .fg(configure::themed_color(|colors| colors.mchart.detail_label))
+                                .dim()
+                        },
                     ),
-                ])
+                ]);
+                [first_line, second_line]
             })
             .collect::<Vec<_>>();
         f.render_widget(
-            Paragraph::new(Text::from(lines))
-                .style(mchart_body_style())
-                .wrap(Wrap { trim: true }),
+            Paragraph::new(Text::from(lines)).style(mchart_body_style()),
             inner,
         );
     }
@@ -1027,63 +1104,131 @@ impl MultiChartState {
             .split(inner);
 
         let input_text = match prompt {
-            Some(prompt) if prompt.buffer.is_empty() => Line::from(vec![
-                Span::styled(
-                    "= ",
-                    Style::default()
-                        .fg(configure::themed_color(|colors| {
-                            colors.mchart.prompt_prefix
-                        }))
-                        .bold(),
-                ),
-                Span::styled(
-                    "$1 + load(/path)[..,0]",
+            Some(prompt) => {
+                let name_style = if prompt.name_buffer.is_empty() {
                     Style::default()
                         .fg(configure::themed_color(|colors| colors.text.type_desc))
-                        .italic(),
-                ),
-            ]),
-            Some(prompt) => {
-                let mut spans = vec![Span::styled(
-                    "= ",
+                        .dim()
+                } else {
                     Style::default()
-                        .fg(configure::themed_color(|colors| {
-                            colors.mchart.prompt_prefix
-                        }))
-                        .bold(),
-                )];
-                spans.extend(prompt.input_segments.iter().map(|segment| {
-                    let style = match segment.kind {
-                        ExpressionPromptInputKind::Plain => mchart_body_style(),
-                        ExpressionPromptInputKind::ValidReference => Style::default()
+                        .fg(configure::themed_color(|colors| colors.tree.dataset_file))
+                        .underlined()
+                };
+                let mut spans = vec![
+                    Span::styled(
+                        format!("${} ", prompt.item_id.0),
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.toast.warning))
+                            .bold(),
+                    ),
+                    Span::styled(
+                        if prompt.name_buffer.is_empty() {
+                            "(?)".to_string()
+                        } else {
+                            format!("${}", prompt.name_buffer)
+                        },
+                        if prompt.focus == ExpressionPromptFocus::Name {
+                            name_style.bold()
+                        } else {
+                            name_style
+                        },
+                    ),
+                    Span::styled(
+                        " = ",
+                        Style::default()
                             .fg(configure::themed_color(|colors| {
                                 colors.mchart.prompt_prefix
                             }))
                             .bold(),
-                        ExpressionPromptInputKind::InvalidReference => Style::default()
-                            .fg(configure::themed_color(|colors| colors.text.error))
-                            .bold(),
-                    };
-                    Span::styled(segment.text.clone(), style)
-                }));
+                    ),
+                ];
+                if prompt.buffer.is_empty() {
+                    spans.push(Span::styled(
+                        "$1 + load(/path)[..,0]",
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.text.type_desc))
+                            .italic(),
+                    ));
+                } else {
+                    spans.extend(prompt.input_segments.iter().map(|segment| {
+                        let style = match segment.kind {
+                            ExpressionPromptInputKind::Plain => mchart_body_style(),
+                            ExpressionPromptInputKind::ValidReference => Style::default()
+                                .fg(configure::themed_color(|colors| {
+                                    colors.mchart.prompt_prefix
+                                }))
+                                .bold(),
+                            ExpressionPromptInputKind::InvalidReference => Style::default()
+                                .fg(configure::themed_color(|colors| colors.text.error))
+                                .bold(),
+                        };
+                        Span::styled(segment.text.clone(), style)
+                    }));
+                }
                 Line::from(spans)
             }
-            None => Line::from(vec![
-                Span::styled(
-                    "= ",
-                    Style::default()
-                        .fg(configure::themed_color(|colors| {
-                            colors.mchart.prompt_prefix
-                        }))
-                        .bold(),
-                ),
-                Span::styled(
-                    "expression editor inactive",
-                    Style::default()
-                        .fg(configure::themed_color(|colors| colors.text.type_desc))
-                        .italic(),
-                ),
-            ]),
+            None => {
+                if let Some(item) = self.selected_item() {
+                    let name_style = if item.name.is_some() {
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.tree.dataset_file))
+                            .underlined()
+                    } else {
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.text.type_desc))
+                            .dim()
+                    };
+                    Line::from(vec![
+                        Span::styled(
+                            format!("${} ", item.id.0),
+                            Style::default()
+                                .fg(configure::themed_color(|colors| colors.toast.warning))
+                                .bold(),
+                        ),
+                        Span::styled(
+                            item.name
+                                .as_ref()
+                                .map(|name| format!("${name}"))
+                                .unwrap_or_else(|| "(?)".to_string()),
+                            name_style,
+                        ),
+                        Span::styled(
+                            " = ",
+                            Style::default()
+                                .fg(configure::themed_color(|colors| {
+                                    colors.mchart.prompt_prefix
+                                }))
+                                .bold()
+                                .dim(),
+                        ),
+                        Span::styled(
+                            item.editable_expression()
+                                .unwrap_or_else(|| "expression editor inactive".to_string()),
+                            Style::default()
+                                .fg(configure::themed_color(|colors| colors.text.type_desc))
+                                .italic()
+                                .dim(),
+                        ),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(
+                            "$? (?) = ",
+                            Style::default()
+                                .fg(configure::themed_color(|colors| {
+                                    colors.mchart.prompt_prefix
+                                }))
+                                .bold(),
+                        ),
+                        Span::styled(
+                            "expression editor inactive",
+                            Style::default()
+                                .fg(configure::themed_color(|colors| colors.text.type_desc))
+                                .italic(),
+                        ),
+                    ])
+                }
+            }
         };
         let input_block = Block::default()
             .borders(Borders::ALL)
@@ -1192,8 +1337,28 @@ impl MultiChartState {
         );
 
         if let Some(prompt) = prompt {
+            let name_display = if prompt.name_buffer.is_empty() {
+                "(?)".to_string()
+            } else {
+                format!("${}", prompt.name_buffer)
+            };
+            let prefix_width = 1
+                + prompt.item_id.0.to_string().chars().count()
+                + 1
+                + name_display.chars().count()
+                + 3;
             let cursor = ratatui::layout::Position::new(
-                chunks[0].x.saturating_add(3 + prompt.cursor as u16),
+                if prompt.focus == ExpressionPromptFocus::Name {
+                    let id_width = prompt.item_id.0.to_string().chars().count();
+                    let name_offset = 1;
+                    chunks[0].x.saturating_add(
+                        (1 + 2 + id_width + name_offset + prompt.name_cursor) as u16,
+                    )
+                } else {
+                    chunks[0]
+                        .x
+                        .saturating_add((1 + prefix_width + prompt.cursor) as u16)
+                },
                 chunks[0].y.saturating_add(1),
             );
             f.set_cursor_position(cursor);
