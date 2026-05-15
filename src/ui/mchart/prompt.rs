@@ -631,6 +631,7 @@ fn expression_prompt_messages_with_cache(
             let result_kind = match validated.kind {
                 DerivedExpressionKind::YSeries => "y-series",
                 DerivedExpressionKind::XySeries => "x/y series",
+                DerivedExpressionKind::Scalar => "scalar",
             };
             vec![ExpressionPromptMessage {
                 kind: ExpressionPromptMessageKind::Valid,

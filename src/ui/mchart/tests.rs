@@ -119,6 +119,7 @@ fn chart_item_statistics_compute_mean_median_and_stddev() {
         },
         series: ChartSeries::from_points(vec![(1.0, 1.0), (2.0, 3.0), (3.0, 5.0), (4.0, 7.0)])
             .expect("series"),
+        scalar_value: None,
         detail_series: None,
         detail_window: None,
         pending_detail_window: None,
@@ -1214,6 +1215,128 @@ fn expression_derived_xy_tuple_requires_matching_lengths() {
     assert!(
         matches!(item.load_state, MultiChartLoadState::Error(ref message) if message.contains("lengths must match"))
     );
+}
+
+#[test]
+fn scalar_expression_items_store_values_without_plot_series() {
+    let (file, path) = make_dataset_ref_test_file();
+    let mut state = make_state();
+
+    state
+        .create_expression_derived_with_file("load(/scalar)".to_string(), Some(&file))
+        .unwrap();
+
+    let item = state.chart_items().last().unwrap();
+    assert_eq!(item.scalar_value, Some(1.5));
+    assert!(!item.has_loaded_series());
+    assert_eq!(item.data_state_label(), "value 1.5");
+    match &item.source {
+        ChartSource::DerivedExpression { kind, .. } => {
+            assert_eq!(*kind, DerivedExpressionKind::Scalar);
+        }
+        other => panic!("expected scalar derived source, got {other:?}"),
+    }
+
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn scalar_functions_support_series_and_scalar_references() {
+    let (file, path) = make_dataset_ref_test_file();
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)],
+    );
+    state
+        .create_expression_derived_with_file("load(/scalar)".to_string(), Some(&file))
+        .unwrap();
+    state
+        .create_expression_derived_with_file("exp($1, $2)".to_string(), Some(&file))
+        .unwrap();
+    state
+        .create_expression_derived("avg($1)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("mean($1)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("stddev($1)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("len($1)".to_string())
+        .unwrap();
+    state
+        .create_expression_derived("sqrt(abs($1 - 4))".to_string())
+        .unwrap();
+    state
+        .create_expression_derived_with_file("round(load(/scalar))".to_string(), Some(&file))
+        .unwrap();
+
+    let exp_item = &state.chart_items()[2];
+    let avg_item = &state.chart_items()[3];
+    let mean_item = &state.chart_items()[4];
+    let stddev_item = &state.chart_items()[5];
+    let len_item = &state.chart_items()[6];
+    let unary_series_item = &state.chart_items()[7];
+    let unary_scalar_item = &state.chart_items()[8];
+    assert_eq!(
+        exp_item.series.points,
+        vec![
+            (0.0, 1.0_f64.powf(1.5)),
+            (1.0, 3.0_f64.powf(1.5)),
+            (2.0, 5.0_f64.powf(1.5))
+        ]
+    );
+    assert_eq!(avg_item.scalar_value, Some(3.0));
+    assert_eq!(avg_item.data_state_label(), "value 3");
+    assert_eq!(mean_item.scalar_value, Some(3.0));
+    assert_eq!(stddev_item.scalar_value, Some((8.0_f64 / 3.0).sqrt()));
+    assert_eq!(len_item.scalar_value, Some(3.0));
+    assert_eq!(
+        unary_series_item.series.points,
+        vec![
+            (0.0, 3.0_f64.sqrt()),
+            (1.0, 1.0_f64.sqrt()),
+            (2.0, 1.0_f64.sqrt())
+        ]
+    );
+    assert_eq!(unary_scalar_item.scalar_value, Some(2.0));
+
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn scalar_only_functions_reject_series_arguments() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)],
+    );
+    state
+        .create_expression_derived("max2($1, 2)".to_string())
+        .expect("save invalid scalar draft");
+
+    let item = state.chart_items().last().unwrap();
+    assert!(!item.visible);
+    assert!(matches!(
+        item.load_state,
+        MultiChartLoadState::Error(ref message) if message.contains("max2() requires scalar arguments")
+    ));
 }
 
 #[test]

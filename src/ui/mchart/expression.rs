@@ -15,6 +15,10 @@ pub(super) enum ExpressionAst {
     Number(f64),
     ItemRef(ExpressionItemRef),
     LoadRef(ExpressionLoadRef),
+    FunctionCall {
+        name: String,
+        args: Vec<ExpressionAst>,
+    },
     UnaryMinus(Box<ExpressionAst>),
     Binary {
         op: ExprBinaryOp,
@@ -27,6 +31,7 @@ pub(super) enum ExpressionAst {
 pub(super) enum ExpressionToken {
     ItemRef(ExpressionItemRef),
     LoadRef(ExpressionLoadRef),
+    Identifier(String),
     Number(f64),
     Plus,
     Minus,
@@ -288,11 +293,7 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
                     "load" => tokens.push(ExpressionToken::LoadRef(parse_expression_load_ref(
                         &mut chars,
                     )?)),
-                    _ => {
-                        return Err(format!(
-                            "Unsupported function '{ident}' in expression. Use load(...), $id item references, numbers, + - * /, commas, and parentheses"
-                        ))
-                    }
+                    _ => tokens.push(ExpressionToken::Identifier(ident)),
                 }
             }
             '+' => {
@@ -325,7 +326,7 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
             }
             other => {
                 return Err(format!(
-                    "Unsupported character '{}' in expression. Use $id item references, load(...) references, numbers, + - * /, commas, and parentheses",
+                    "Unsupported character '{}' in expression. Use $id item references, load(...), supported math functions, numbers, + - * /, commas, and parentheses",
                     other
                 ));
             }
@@ -655,6 +656,46 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(ExpressionAst::LoadRef(load_ref.clone()))
             }
+            ExpressionToken::Identifier(name) => {
+                let function_name = name.clone();
+                *pos += 1;
+                if *pos >= tokens.len() || !matches!(tokens[*pos], ExpressionToken::LParen) {
+                    return Err(format!(
+                        "Function '{function_name}' must be followed by '('"
+                    ));
+                }
+                *pos += 1;
+                let mut args = Vec::new();
+                if *pos < tokens.len() && !matches!(tokens[*pos], ExpressionToken::RParen) {
+                    loop {
+                        args.push(parse_expr(tokens, pos)?);
+                        if *pos >= tokens.len() {
+                            return Err(format!(
+                                "Missing closing ')' after function '{function_name}'"
+                            ));
+                        }
+                        match tokens[*pos] {
+                            ExpressionToken::Comma => *pos += 1,
+                            ExpressionToken::RParen => break,
+                            _ => {
+                                return Err(format!(
+                                    "Expected ',' or ')' in function '{function_name}'"
+                                ))
+                            }
+                        }
+                    }
+                }
+                if *pos >= tokens.len() || !matches!(tokens[*pos], ExpressionToken::RParen) {
+                    return Err(format!(
+                        "Missing closing ')' after function '{function_name}'"
+                    ));
+                }
+                *pos += 1;
+                Ok(ExpressionAst::FunctionCall {
+                    name: function_name,
+                    args,
+                })
+            }
             ExpressionToken::Minus => {
                 *pos += 1;
                 Ok(ExpressionAst::UnaryMinus(Box::new(parse_factor(
@@ -743,6 +784,11 @@ fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
         ExpressionAst::Number(_) => {}
         ExpressionAst::ItemRef(item_ref) => out.item_refs.push(item_ref.clone()),
         ExpressionAst::LoadRef(load_ref) => out.load_refs.push(load_ref.clone()),
+        ExpressionAst::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_expression_refs(arg, out);
+            }
+        }
         ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
         ExpressionAst::Binary { lhs, rhs, .. } => {
             collect_expression_refs(lhs, out);

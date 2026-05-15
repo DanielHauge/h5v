@@ -24,6 +24,7 @@ pub(super) struct ExpressionSeriesInput {
 
 pub(super) struct EvaluatedExpression {
     pub(super) points: Vec<Point>,
+    pub(super) scalar_value: Option<f64>,
     pub(super) kind: DerivedExpressionKind,
     pub(super) input_ids: Vec<ChartItemId>,
 }
@@ -36,6 +37,12 @@ pub(super) enum ExpressionSeriesResolution {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum ResolvedExpressionLoad {
+    Scalar(f64),
+    Series(Vec<Point>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum ResolvedExpressionItemValue {
     Scalar(f64),
     Series(Vec<Point>),
 }
@@ -174,7 +181,7 @@ pub(super) fn resolve_expression_item_value(
     state: &MultiChartState,
     item_ref: &ExpressionItemRef,
     resolution: ExpressionSeriesResolution,
-) -> Result<Vec<Point>, String> {
+) -> Result<ResolvedExpressionItemValue, String> {
     let item = match &item_ref.target {
         ExpressionItemTarget::Id(id) => state
             .item_by_id(*id)
@@ -183,6 +190,16 @@ pub(super) fn resolve_expression_item_value(
             .item_by_name(name)
             .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
     };
+    if let Some(value) = item.scalar_value {
+        if item_ref.slice.is_some() {
+            return Err(format!(
+                "Scalar chart item {} cannot use a series slice",
+                item_ref.render()
+            ));
+        }
+        return require_finite_scalar_value(value, &item_ref.render())
+            .map(ResolvedExpressionItemValue::Scalar);
+    }
     if !item.has_loaded_series() {
         return Err(format!(
             "Chart item reference {} is still loading",
@@ -212,7 +229,7 @@ pub(super) fn resolve_expression_item_value(
             item_ref.render()
         ));
     }
-    Ok(points)
+    Ok(ResolvedExpressionItemValue::Series(points))
 }
 
 pub(super) fn validate_expression_load_ref(
@@ -307,15 +324,22 @@ pub(super) fn dataset_ploting_data_from_points(
 pub(super) fn eval_expression_at(
     expr: &ExpressionAst,
     idx: usize,
-    item_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
     series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
     scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
 ) -> Result<f64, String> {
     match expr {
         ExpressionAst::Number(value) => Ok(*value),
-        ExpressionAst::ItemRef(item_ref) => item_values
+        ExpressionAst::ItemRef(item_ref) => item_scalar_values
             .get(item_ref)
-            .and_then(|points: &Vec<Point>| points.get(idx).map(|(_, y)| *y))
+            .copied()
+            .or_else(|| {
+                item_series_values
+                    .get(item_ref)
+                    .and_then(|points: &Vec<Point>| points.get(idx).map(|(_, y)| *y))
+            })
             .ok_or_else(|| {
                 format!(
                     "Chart item {} is unavailable at sample index {}",
@@ -335,13 +359,31 @@ pub(super) fn eval_expression_at(
         ExpressionAst::UnaryMinus(inner) => Ok(-eval_expression_at(
             inner,
             idx,
-            item_values,
+            item_series_values,
+            item_scalar_values,
             series_values,
             scalar_values,
+            series_sample_count,
         )?),
         ExpressionAst::Binary { op, lhs, rhs } => {
-            let lhs = eval_expression_at(lhs, idx, item_values, series_values, scalar_values)?;
-            let rhs = eval_expression_at(rhs, idx, item_values, series_values, scalar_values)?;
+            let lhs = eval_expression_at(
+                lhs,
+                idx,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )?;
+            let rhs = eval_expression_at(
+                rhs,
+                idx,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )?;
             match op {
                 ExprBinaryOp::Add => Ok(lhs + rhs),
                 ExprBinaryOp::Sub => Ok(lhs - rhs),
@@ -355,6 +397,308 @@ pub(super) fn eval_expression_at(
                 }
             }
         }
+        ExpressionAst::FunctionCall { name, args } => match name.as_str() {
+            "exp" => {
+                if args.len() != 2 {
+                    return Err("exp() expects exactly 2 arguments".to_string());
+                }
+                let lhs = eval_expression_at(
+                    &args[0],
+                    idx,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                let rhs = eval_expression_at(
+                    &args[1],
+                    idx,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                Ok(lhs.powf(rhs))
+            }
+            "abs" | "sqrt" | "ln" | "log10" | "sin" | "cos" | "tan" | "floor" | "ceil"
+            | "round" => {
+                if args.len() != 1 {
+                    return Err(format!("{name}() expects exactly 1 argument"));
+                }
+                apply_unary_math_function(
+                    name,
+                    eval_expression_at(
+                        &args[0],
+                        idx,
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?,
+                )
+            }
+            "avg" | "mean" | "min" | "max" | "stddev" | "len" | "max2" | "min2" => {
+                eval_scalar_expression(
+                    expr,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )
+            }
+            _ => Err(format!("Unsupported function '{name}'")),
+        },
+    }
+}
+
+pub(super) fn eval_scalar_expression(
+    expr: &ExpressionAst,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<f64, String> {
+    match expr {
+        ExpressionAst::Number(value) => Ok(*value),
+        ExpressionAst::ItemRef(item_ref) => item_scalar_values
+            .get(item_ref)
+            .copied()
+            .ok_or_else(|| format!("{} resolves to a series, not a scalar", item_ref.render())),
+        ExpressionAst::LoadRef(load_ref) => scalar_values
+            .get(load_ref)
+            .copied()
+            .ok_or_else(|| format!("{} resolves to a series, not a scalar", load_ref.render())),
+        ExpressionAst::UnaryMinus(inner) => Ok(-eval_scalar_expression(
+            inner,
+            item_series_values,
+            item_scalar_values,
+            series_values,
+            scalar_values,
+            series_sample_count,
+        )?),
+        ExpressionAst::Binary { op, lhs, rhs } => {
+            let lhs = eval_scalar_expression(
+                lhs,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )?;
+            let rhs = eval_scalar_expression(
+                rhs,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )?;
+            match op {
+                ExprBinaryOp::Add => Ok(lhs + rhs),
+                ExprBinaryOp::Sub => Ok(lhs - rhs),
+                ExprBinaryOp::Mul => Ok(lhs * rhs),
+                ExprBinaryOp::Div => {
+                    if rhs == 0.0 {
+                        Err("Expression division by zero".to_string())
+                    } else {
+                        Ok(lhs / rhs)
+                    }
+                }
+            }
+        }
+        ExpressionAst::FunctionCall { name, args } => match name.as_str() {
+            "exp" => {
+                if args.len() != 2 {
+                    return Err("exp() expects exactly 2 arguments".to_string());
+                }
+                let lhs = eval_scalar_expression(
+                    &args[0],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                let rhs = eval_scalar_expression(
+                    &args[1],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                Ok(lhs.powf(rhs))
+            }
+            "abs" | "sqrt" | "ln" | "log10" | "sin" | "cos" | "tan" | "floor" | "ceil"
+            | "round" => {
+                if args.len() != 1 {
+                    return Err(format!("{name}() expects exactly 1 argument"));
+                }
+                apply_unary_math_function(
+                    name,
+                    eval_scalar_expression(
+                        &args[0],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?,
+                )
+            }
+            "avg" | "mean" => reduce_series_function(
+                name,
+                args,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+                |values| Ok(values.iter().sum::<f64>() / values.len() as f64),
+            ),
+            "min" => reduce_series_function(
+                "min",
+                args,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+                |values| Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
+            ),
+            "max" => reduce_series_function(
+                "max",
+                args,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+                |values| Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
+            ),
+            "stddev" => reduce_series_function(
+                "stddev",
+                args,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+                |values| {
+                    let mean = values.iter().sum::<f64>() / values.len() as f64;
+                    let variance = if values.len() <= 1 {
+                        0.0
+                    } else {
+                        values
+                            .iter()
+                            .map(|value| {
+                                let delta = *value - mean;
+                                delta * delta
+                            })
+                            .sum::<f64>()
+                            / values.len() as f64
+                    };
+                    Ok(variance.sqrt())
+                },
+            ),
+            "len" => reduce_series_function(
+                "len",
+                args,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+                |values| Ok(values.len() as f64),
+            ),
+            "max2" | "min2" => {
+                if args.len() != 2 {
+                    return Err(format!("{name}() expects exactly 2 arguments"));
+                }
+                let lhs = eval_scalar_expression(
+                    &args[0],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                let rhs = eval_scalar_expression(
+                    &args[1],
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )?;
+                Ok(if name == "max2" {
+                    lhs.max(rhs)
+                } else {
+                    lhs.min(rhs)
+                })
+            }
+            _ => Err(format!("Unsupported function '{name}'")),
+        },
+    }
+}
+
+fn reduce_series_function<F>(
+    name: &str,
+    args: &[ExpressionAst],
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+    reducer: F,
+) -> Result<f64, String>
+where
+    F: FnOnce(&[f64]) -> Result<f64, String>,
+{
+    if args.len() != 1 {
+        return Err(format!("{name}() expects exactly 1 argument"));
+    }
+    if series_sample_count == 0 {
+        return Err(format!("{name}() requires at least one series input"));
+    }
+    let mut values = Vec::with_capacity(series_sample_count);
+    for idx in 0..series_sample_count {
+        values.push(eval_expression_at(
+            &args[0],
+            idx,
+            item_series_values,
+            item_scalar_values,
+            series_values,
+            scalar_values,
+            series_sample_count,
+        )?);
+    }
+    reducer(&values)
+}
+
+fn apply_unary_math_function(name: &str, value: f64) -> Result<f64, String> {
+    let output = match name {
+        "abs" => value.abs(),
+        "sqrt" => value.sqrt(),
+        "ln" => value.ln(),
+        "log10" => value.log10(),
+        "sin" => value.sin(),
+        "cos" => value.cos(),
+        "tan" => value.tan(),
+        "floor" => value.floor(),
+        "ceil" => value.ceil(),
+        "round" => value.round(),
+        _ => return Err(format!("Unsupported function '{name}'")),
+    };
+    if output.is_finite() {
+        Ok(output)
+    } else {
+        Err(format!("{name}() produced a non-finite value"))
     }
 }
 

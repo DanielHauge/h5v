@@ -30,6 +30,7 @@ pub struct ChartItemId(pub u64);
 pub enum DerivedExpressionKind {
     YSeries,
     XySeries,
+    Scalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +195,7 @@ impl ChartSource {
             ChartSource::DerivedExpression { kind, .. } => match kind {
                 DerivedExpressionKind::YSeries => "expression",
                 DerivedExpressionKind::XySeries => "expression x/y",
+                DerivedExpressionKind::Scalar => "scalar expression",
             },
         }
     }
@@ -271,6 +273,7 @@ pub struct ChartItem {
     pub name: Option<String>,
     pub source: ChartSource,
     pub series: ChartSeries,
+    pub scalar_value: Option<f64>,
     pub detail_series: Option<ChartSeries>,
     pub detail_window: Option<ChartLodWindow>,
     pub pending_detail_window: Option<ChartLodWindow>,
@@ -310,6 +313,10 @@ pub struct ChartItemStats {
 }
 
 impl ChartItem {
+    pub fn is_scalar(&self) -> bool {
+        self.scalar_value.is_some()
+    }
+
     pub fn matches_path(&self, path: &str) -> bool {
         self.source.matches_path(path)
     }
@@ -334,7 +341,9 @@ impl ChartItem {
             MultiChartLoadState::Sampling => "sampling".to_string(),
             MultiChartLoadState::Refining => "refining".to_string(),
             MultiChartLoadState::Ready => {
-                if self.detail_window.is_some() {
+                if let Some(value) = self.scalar_value {
+                    format!("value {}", value)
+                } else if self.detail_window.is_some() {
                     format!("detail {}/{}", self.active_series().len(), self.source_len)
                 } else if self.sampled {
                     format!("sampled {}/{}", self.series.len(), self.source_len)
@@ -347,10 +356,11 @@ impl ChartItem {
     }
 
     pub fn has_loaded_series(&self) -> bool {
-        matches!(
-            self.load_state,
-            MultiChartLoadState::Ready | MultiChartLoadState::Refining
-        )
+        !self.is_scalar()
+            && matches!(
+                self.load_state,
+                MultiChartLoadState::Ready | MultiChartLoadState::Refining
+            )
     }
 
     pub fn active_series(&self) -> &ChartSeries {
