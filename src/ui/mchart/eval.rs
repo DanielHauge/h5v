@@ -11,8 +11,7 @@ use crate::data::{
 use super::{
     expression::{
         ExprBinaryOp, ExpressionAst, ExpressionDatasetSelector, ExpressionItemRef,
-        ExpressionItemTarget, ExpressionLoadRef, ExpressionObjectTarget, ExpressionScalarRef,
-        ExpressionSeriesRef,
+        ExpressionItemTarget, ExpressionLoadRef, ExpressionObjectTarget,
     },
     sanitize_chart_points, ChartItemId, DerivedExpressionKind, MultiChartState, Point,
 };
@@ -217,38 +216,15 @@ pub(super) fn resolve_expression_item_value(
 }
 
 pub(super) fn validate_expression_load_ref(
-    state: &MultiChartState,
+    _state: &MultiChartState,
     file: &File,
     load_ref: &ExpressionLoadRef,
-    resolution: ExpressionSeriesResolution,
+    _resolution: ExpressionSeriesResolution,
     allow_external_series: bool,
 ) -> Result<ValidatedExpressionLoad, String> {
     match (&load_ref.target, &load_ref.attr_name) {
-        (ExpressionObjectTarget::ItemRef(target), None) => {
-            let item = match target {
-                ExpressionItemTarget::Id(id) => state
-                    .item_by_id(*id)
-                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
-                ExpressionItemTarget::Name(name) => state
-                    .item_by_name(name)
-                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
-            };
-            let points = resolve_expression_item_points_by_selector(
-                state,
-                item.id,
-                load_ref.selectors.as_deref(),
-                resolution,
-                &load_ref.render(),
-            )?;
-            Ok(match points {
-                ResolvedExpressionLoad::Scalar(_) => ValidatedExpressionLoad::Scalar,
-                ResolvedExpressionLoad::Series(points) => {
-                    ValidatedExpressionLoad::Series { len: points.len() }
-                }
-            })
-        }
         (target, Some(attr_name)) => {
-            let object_path = resolve_expression_target_path(state, target, &load_ref.render())?;
+            let object_path = resolve_expression_target_path(target)?;
             let attr = open_expression_attribute(file, &object_path, attr_name)?;
             validate_expression_attribute_load(&attr, load_ref)
         }
@@ -274,32 +250,15 @@ pub(super) fn validate_expression_load_ref(
 }
 
 pub(super) fn resolve_expression_load_value(
-    state: &MultiChartState,
+    _state: &MultiChartState,
     file: &File,
     load_ref: &ExpressionLoadRef,
-    resolution: ExpressionSeriesResolution,
+    _resolution: ExpressionSeriesResolution,
     allow_external_series: bool,
 ) -> Result<ResolvedExpressionLoad, String> {
     match (&load_ref.target, &load_ref.attr_name) {
-        (ExpressionObjectTarget::ItemRef(target), None) => {
-            let item = match target {
-                ExpressionItemTarget::Id(id) => state
-                    .item_by_id(*id)
-                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
-                ExpressionItemTarget::Name(name) => state
-                    .item_by_name(name)
-                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
-            };
-            resolve_expression_item_points_by_selector(
-                state,
-                item.id,
-                load_ref.selectors.as_deref(),
-                resolution,
-                &load_ref.render(),
-            )
-        }
         (target, Some(attr_name)) => {
-            let object_path = resolve_expression_target_path(state, target, &load_ref.render())?;
+            let object_path = resolve_expression_target_path(target)?;
             let attr = open_expression_attribute(file, &object_path, attr_name)?;
             resolve_expression_attribute_load(&attr, load_ref)
         }
@@ -399,25 +358,6 @@ pub(super) fn eval_expression_at(
     }
 }
 
-pub(super) fn resolve_expression_scalar_values(
-    state: &MultiChartState,
-    file: Option<&File>,
-    refs: &[ExpressionScalarRef],
-) -> Result<std::collections::HashMap<ExpressionScalarRef, f64>, String> {
-    if refs.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-    let file = file.ok_or_else(|| {
-        "Scalar references require an open file handle, but no file is loaded".to_string()
-    })?;
-    let mut values = std::collections::HashMap::with_capacity(refs.len());
-    for scalar_ref in refs {
-        let value = resolve_expression_scalar_value(state, file, scalar_ref)?;
-        values.insert(scalar_ref.clone(), value);
-    }
-    Ok(values)
-}
-
 fn require_finite_scalar_value(value: f64, reference: &str) -> Result<f64, String> {
     if value.is_finite() {
         Ok(value)
@@ -425,91 +365,6 @@ fn require_finite_scalar_value(value: f64, reference: &str) -> Result<f64, Strin
         Err(format!(
             "Scalar reference {reference} resolved to a non-finite value"
         ))
-    }
-}
-
-pub(super) fn resolve_expression_series_values(
-    state: &MultiChartState,
-    file: Option<&File>,
-    refs: &[ExpressionSeriesRef],
-    resolution: ExpressionSeriesResolution,
-    allow_external_series: bool,
-) -> Result<std::collections::HashMap<ExpressionSeriesRef, Vec<Point>>, String> {
-    if refs.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-    let file = file.ok_or_else(|| {
-        "Series references require an open file handle, but no file is loaded".to_string()
-    })?;
-    let mut series = std::collections::HashMap::with_capacity(refs.len());
-    for series_ref in refs {
-        let points = resolve_expression_series_value(
-            state,
-            file,
-            series_ref,
-            resolution,
-            allow_external_series,
-        )?;
-        series.insert(series_ref.clone(), points);
-    }
-    Ok(series)
-}
-
-pub(super) fn resolve_expression_series_value(
-    state: &MultiChartState,
-    file: &File,
-    series_ref: &ExpressionSeriesRef,
-    resolution: ExpressionSeriesResolution,
-    allow_external_series: bool,
-) -> Result<Vec<Point>, String> {
-    match resolve_expression_load_value(state, file, series_ref, resolution, allow_external_series)?
-    {
-        ResolvedExpressionLoad::Series(points) => Ok(points),
-        ResolvedExpressionLoad::Scalar(_) => Err(format!(
-            "Reference {} resolved to a scalar, but a series is required",
-            series_ref.render()
-        )),
-    }
-}
-
-pub(super) fn validate_expression_series_ref(
-    state: &MultiChartState,
-    file: &File,
-    series_ref: &ExpressionSeriesRef,
-    allow_external_series: bool,
-) -> Result<usize, String> {
-    match validate_expression_load_ref(
-        state,
-        file,
-        series_ref,
-        ExpressionSeriesResolution::Overview,
-        allow_external_series,
-    )? {
-        ValidatedExpressionLoad::Series { len } => Ok(len),
-        ValidatedExpressionLoad::Scalar => Err(format!(
-            "Reference {} resolved to a scalar, but a series is required",
-            series_ref.render()
-        )),
-    }
-}
-
-pub(super) fn validate_expression_scalar_ref(
-    state: &MultiChartState,
-    file: &File,
-    scalar_ref: &ExpressionScalarRef,
-) -> Result<(), String> {
-    match validate_expression_load_ref(
-        state,
-        file,
-        scalar_ref,
-        ExpressionSeriesResolution::Overview,
-        true,
-    )? {
-        ValidatedExpressionLoad::Scalar => Ok(()),
-        ValidatedExpressionLoad::Series { .. } => Err(format!(
-            "Reference {} resolved to a series, but a scalar is required",
-            scalar_ref.render()
-        )),
     }
 }
 
@@ -522,52 +377,6 @@ pub(super) fn preview_selection_len(
         SliceSelection::All => shape[selection.x],
         SliceSelection::FromTo(start, end) => end.saturating_sub(start),
     })
-}
-
-fn resolve_expression_item_points_by_selector(
-    state: &MultiChartState,
-    id: ChartItemId,
-    selectors: Option<&[ExpressionDatasetSelector]>,
-    resolution: ExpressionSeriesResolution,
-    reference: &str,
-) -> Result<ResolvedExpressionLoad, String> {
-    let item = state
-        .item_by_id(id)
-        .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
-    if !item.has_loaded_series() {
-        return Err(format!("Chart item reference ${} is still loading", id.0));
-    }
-    let points = sanitize_chart_points(match resolution {
-        ExpressionSeriesResolution::Overview => item.overview_series().points.clone(),
-        ExpressionSeriesResolution::Active => item.active_series().points.clone(),
-    });
-    let shape = [points.len()];
-    match infer_expression_array_selection(&shape, selectors, reference)? {
-        ExpressionArraySelection::Series(selection) => {
-            let len = preview_selection_len(&selection, &shape)?;
-            let start = match selection.slice {
-                SliceSelection::All => 0,
-                SliceSelection::FromTo(start, _) => start,
-            };
-            let series = points.into_iter().skip(start).take(len).collect::<Vec<_>>();
-            if series.is_empty() {
-                return Err(format!(
-                    "Reference {reference} resolved to no finite points"
-                ));
-            }
-            Ok(ResolvedExpressionLoad::Series(series))
-        }
-        ExpressionArraySelection::Scalar(indexes) => {
-            let index = indexes.first().copied().unwrap_or_default();
-            let (_, value) = points.get(index).copied().ok_or_else(|| {
-                format!(
-                    "Reference {reference} selects index {} out of bounds",
-                    index
-                )
-            })?;
-            require_finite_scalar_value(value, reference).map(ResolvedExpressionLoad::Scalar)
-        }
-    }
 }
 
 fn validate_expression_dataset_load(
@@ -863,26 +672,6 @@ fn preview_selection_to_hyperslab(
     Ok(Selection::Hyperslab(Hyperslab::from(slice_selections)))
 }
 
-pub(super) fn resolve_expression_scalar_value(
-    state: &MultiChartState,
-    file: &File,
-    scalar_ref: &ExpressionScalarRef,
-) -> Result<f64, String> {
-    match resolve_expression_load_value(
-        state,
-        file,
-        scalar_ref,
-        ExpressionSeriesResolution::Overview,
-        true,
-    )? {
-        ResolvedExpressionLoad::Scalar(value) => Ok(value),
-        ResolvedExpressionLoad::Series(_) => Err(format!(
-            "Reference {} resolved to a series, but a scalar is required",
-            scalar_ref.render()
-        )),
-    }
-}
-
 pub(super) fn normalize_absolute_object_path(path: &str) -> Result<String, String> {
     if !path.starts_with('/') {
         return Err(format!("Absolute path '{path}' must start with '/'"));
@@ -909,33 +698,9 @@ pub(super) fn normalize_absolute_object_path(path: &str) -> Result<String, Strin
     }
 }
 
-fn resolve_expression_target_path(
-    state: &MultiChartState,
-    target: &ExpressionObjectTarget,
-    reference: &str,
-) -> Result<String, String> {
+fn resolve_expression_target_path(target: &ExpressionObjectTarget) -> Result<String, String> {
     match target {
         ExpressionObjectTarget::AbsolutePath(path) => normalize_absolute_object_path(path),
-        ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Id(id)) => state
-            .item_by_id(*id)
-            .and_then(|item| item.source.dataset_source())
-            .map(|dataset_source| dataset_source.dataset_path.clone())
-            .ok_or_else(|| {
-                format!(
-                    "Reference {} requires chart item ${} to be dataset-backed",
-                    reference, id.0
-                )
-            }),
-        ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Name(name)) => state
-            .item_by_name(name)
-            .and_then(|item| item.source.dataset_source())
-            .map(|dataset_source| dataset_source.dataset_path.clone())
-            .ok_or_else(|| {
-                format!(
-                    "Reference {} requires chart item ${name} to be dataset-backed",
-                    reference
-                )
-            }),
     }
 }
 
@@ -1029,19 +794,6 @@ fn read_expression_numeric_scalar_attr(attr: &Attribute, reference: &str) -> Res
             "Attribute reference {reference} must be numeric; got {other}"
         )),
     }
-}
-
-fn validate_expression_numeric_scalar_attr(
-    attr: &Attribute,
-    reference: &str,
-) -> Result<(), String> {
-    let dtype = attr.dtype().map_err(|error| {
-        format!("Failed to inspect scalar attribute type for {reference}: {error}")
-    })?;
-    let type_desc = dtype.to_descriptor().map_err(|error| {
-        format!("Failed to inspect scalar attribute type for {reference}: {error}")
-    })?;
-    validate_scalar_type_descriptor(attr.is_scalar(), &type_desc, reference, "Attribute")
 }
 
 fn read_expression_numeric_series_attr(
@@ -1140,26 +892,6 @@ fn read_expression_numeric_series_attr(
         ));
     }
     Ok(points)
-}
-
-fn validate_expression_numeric_series_attr(
-    attr: &Attribute,
-    reference: &str,
-) -> Result<usize, String> {
-    let dtype = attr.dtype().map_err(|error| {
-        format!("Failed to inspect series attribute type for {reference}: {error}")
-    })?;
-    let type_desc = dtype.to_descriptor().map_err(|error| {
-        format!("Failed to inspect series attribute type for {reference}: {error}")
-    })?;
-    validate_series_type_descriptor(
-        attr.is_scalar(),
-        attr.shape().len(),
-        &type_desc,
-        reference,
-        "Attribute",
-    )?;
-    Ok(attr.shape()[0])
 }
 
 fn read_expression_numeric_scalar_dataset(
@@ -1411,49 +1143,6 @@ fn read_indexed_numeric_value(
         .get(IxDyn(indexes))
         .copied()
         .ok_or_else(|| format!("Reference {reference} index {:?} is out of bounds", indexes))
-}
-
-fn validate_expression_numeric_scalar_dataset(
-    dataset: &Dataset,
-    reference: &str,
-) -> Result<(), String> {
-    let dtype = dataset.dtype().map_err(|error| {
-        format!("Failed to inspect scalar dataset type for {reference}: {error}")
-    })?;
-    let type_desc = dtype.to_descriptor().map_err(|error| {
-        format!("Failed to inspect scalar dataset type for {reference}: {error}")
-    })?;
-    validate_scalar_type_descriptor(dataset.is_scalar(), &type_desc, reference, "Dataset")
-}
-
-fn validate_expression_numeric_series_dataset(
-    dataset: &Dataset,
-    series_ref: &ExpressionSeriesRef,
-) -> Result<usize, String> {
-    let shape = dataset.shape();
-    let preview_selection = series_ref.to_series_preview_selection(&shape)?;
-    let dtype = dataset.dtype().map_err(|error| {
-        format!(
-            "Failed to inspect dataset type for {}: {}",
-            series_ref.render(),
-            error
-        )
-    })?;
-    let type_desc = dtype.to_descriptor().map_err(|error| {
-        format!(
-            "Failed to inspect dataset type for {}: {}",
-            series_ref.render(),
-            error
-        )
-    })?;
-    validate_series_type_descriptor(
-        dataset.is_scalar(),
-        1,
-        &type_desc,
-        &series_ref.render(),
-        "Dataset",
-    )?;
-    preview_selection_len(&preview_selection, &shape)
 }
 
 fn validate_scalar_type_descriptor(

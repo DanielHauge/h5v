@@ -345,7 +345,6 @@ pub struct MultiChartState {
     pub modified: bool,
     pub height: u32,
     pub width: u32,
-    pub plot_buffer: Vec<u8>,
     pub picker: Picker,
     pub idx: usize,
     viewport: Option<ChartViewport>,
@@ -376,7 +375,6 @@ impl MultiChartState {
             idx: 0,
             height: 0,
             width: 0,
-            plot_buffer: Vec::new(),
             picker,
             viewport: None,
             tx_load,
@@ -525,19 +523,6 @@ impl MultiChartState {
                     self.item_by_name(name).map(|item| item.id)
                 }
             })
-            .chain(
-                refs.load_refs
-                    .iter()
-                    .filter_map(|load_ref| match &load_ref.target {
-                        ExpressionObjectTarget::ItemRef(expression::ExpressionItemTarget::Id(
-                            id,
-                        )) => Some(*id),
-                        ExpressionObjectTarget::ItemRef(
-                            expression::ExpressionItemTarget::Name(name),
-                        ) => self.item_by_name(name).map(|item| item.id),
-                        ExpressionObjectTarget::AbsolutePath(_) => None,
-                    }),
-            )
             .collect::<Vec<_>>();
         input_ids.sort_by_key(|id| id.0);
         input_ids.dedup();
@@ -709,6 +694,23 @@ impl MultiChartState {
         let series = ChartSeries::from_points(points)
             .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
         Ok((source, series))
+    }
+
+    fn apply_resolved_expression_item(
+        &mut self,
+        index: usize,
+        source: ChartSource,
+        series: ChartSeries,
+    ) {
+        let item = &mut self.items[index];
+        item.label = source.label();
+        item.source = source;
+        item.source_len = series.len();
+        item.sampled = false;
+        item.series = series;
+        item.visible = true;
+        item.clear_detail_state(true);
+        item.load_state = MultiChartLoadState::Ready;
     }
 
     fn invalid_expression_source(
@@ -903,14 +905,7 @@ impl MultiChartState {
                 .iter()
                 .position(|item| item.id == id)
                 .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-            self.items[index].label = source.label();
-            self.items[index].source = source;
-            self.items[index].source_len = series.len();
-            self.items[index].sampled = false;
-            self.items[index].series = series;
-            self.items[index].visible = true;
-            self.items[index].clear_detail_state(true);
-            self.items[index].load_state = MultiChartLoadState::Ready;
+            self.apply_resolved_expression_item(index, source, series);
         }
         Ok(())
     }
@@ -951,14 +946,7 @@ impl MultiChartState {
             .iter()
             .position(|item| item.id == id)
             .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-        self.items[index].label = source.label();
-        self.items[index].source = source;
-        self.items[index].source_len = series.len();
-        self.items[index].sampled = false;
-        self.items[index].series = series;
-        self.items[index].visible = true;
-        self.items[index].clear_detail_state(true);
-        self.items[index].load_state = MultiChartLoadState::Ready;
+        self.apply_resolved_expression_item(index, source, series);
         self.idx = index;
         let result = self.recompute_expression_dependents(previous_dependents, file);
         match result {
@@ -1224,26 +1212,8 @@ impl MultiChartState {
             }
             expected = Some(window);
         }
-        for load_ref in &refs.load_refs {
-            if let ExpressionObjectTarget::ItemRef(target) = &load_ref.target {
-                let item = match target {
-                    expression::ExpressionItemTarget::Id(id) => self
-                        .item_by_id(*id)
-                        .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
-                    expression::ExpressionItemTarget::Name(name) => self
-                        .item_by_name(name)
-                        .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
-                };
-                let Some(window) = item.detail_window else {
-                    return Ok(None);
-                };
-                if expected.is_some_and(|existing| existing != window) {
-                    return Ok(None);
-                }
-                expected = Some(window);
-            } else {
-                return Ok(None);
-            }
+        if !refs.load_refs.is_empty() {
+            return Ok(None);
         }
         Ok(expected)
     }
@@ -1695,9 +1665,7 @@ impl MultiChartState {
             "Adding a dataset by path requires an open file handle, but no file is loaded"
                 .to_string()
         })?;
-        let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target else {
-            unreachable!();
-        };
+        let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target;
         let dataset = file.dataset(path).map_err(|error| {
             format!(
                 "Dataset reference {} could not be opened: {}",

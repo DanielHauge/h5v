@@ -56,7 +56,6 @@ pub(super) enum ExpressionDatasetSelector {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum ExpressionObjectTarget {
     AbsolutePath(String),
-    ItemRef(ExpressionItemTarget),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -85,16 +84,13 @@ pub(super) struct ExpressionLoadRef {
 }
 
 pub(super) type ExpressionSeriesRef = ExpressionLoadRef;
+#[cfg(test)]
 pub(super) type ExpressionScalarRef = ExpressionLoadRef;
 
 impl ExpressionObjectTarget {
     pub(super) fn render(&self) -> String {
         match self {
             ExpressionObjectTarget::AbsolutePath(path) => path.clone(),
-            ExpressionObjectTarget::ItemRef(target) => match target {
-                ExpressionItemTarget::Id(id) => format!("${}", id.0),
-                ExpressionItemTarget::Name(name) => format!("${name}"),
-            },
         }
     }
 }
@@ -533,18 +529,6 @@ pub(super) fn parse_expression_load_ref(
     Ok(load_ref)
 }
 
-pub(super) fn parse_expression_series_ref(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionLoadRef, String> {
-    parse_expression_load_ref(chars)
-}
-
-pub(super) fn parse_expression_scalar_ref(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionLoadRef, String> {
-    parse_expression_load_ref(chars)
-}
-
 fn parse_expression_dataset_selectors(
     reference: &str,
     spec: &str,
@@ -777,6 +761,7 @@ pub(super) fn collect_parsed_expression_refs(expr: &ParsedExpression, out: &mut 
     }
 }
 
+#[cfg(test)]
 pub(super) fn collect_expression_input_ids(refs: &ExpressionRefs) -> Vec<ChartItemId> {
     let mut input_ids = refs
         .item_refs
@@ -785,15 +770,6 @@ pub(super) fn collect_expression_input_ids(refs: &ExpressionRefs) -> Vec<ChartIt
             ExpressionItemTarget::Id(id) => Some(id),
             ExpressionItemTarget::Name(_) => None,
         })
-        .chain(
-            refs.load_refs
-                .iter()
-                .filter_map(|load_ref| match &load_ref.target {
-                    ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Id(id)) => Some(*id),
-                    ExpressionObjectTarget::ItemRef(ExpressionItemTarget::Name(_)) => None,
-                    ExpressionObjectTarget::AbsolutePath(_) => None,
-                }),
-        )
         .collect::<Vec<_>>();
     input_ids.sort_by_key(|id| id.0);
     input_ids.dedup();
