@@ -563,6 +563,12 @@ fn main_recover_loop(
                     draw_closure(f, &mut state);
                 })?;
             }
+            AppEvent::MultiChartRender(result) => {
+                state.multi_chart.apply_render_result(result);
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
+            }
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
                     terminal.draw(|f| {
@@ -645,6 +651,7 @@ pub enum AppEvent {
     PreviewChartResized(ImageResizeResult),
     HeatmapLoad(HeatmapLoadedResult),
     MultiChartLoad(MultiChartLoadResult),
+    MultiChartRender(crate::ui::mchart::MultiChartRenderResult),
     PreviewDebounceExpired(u64),
     Toast(AppToast),
     FileChanged,

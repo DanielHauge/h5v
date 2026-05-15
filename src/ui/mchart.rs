@@ -1,4 +1,5 @@
 use hdf5_metno::File;
+use image::{DynamicImage, ImageBuffer, Rgb};
 use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use std::{
@@ -84,6 +85,33 @@ struct PreparedChartData {
     series: Vec<PreparedChartSeries>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MultiChartRenderRequest {
+    generation: u64,
+    chart_area: Rect,
+    width: u32,
+    height: u32,
+    x_axis_label: String,
+    prepared: PreparedChartData,
+}
+
+#[derive(Debug, Clone)]
+pub enum MultiChartRenderResult {
+    Success {
+        generation: u64,
+        chart_area: Rect,
+        width: u32,
+        height: u32,
+        rgb_bytes: Vec<u8>,
+        plot_x_range: std::ops::Range<i32>,
+        plot_y_range: std::ops::Range<i32>,
+    },
+    Failure {
+        generation: u64,
+        message: String,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ValidatedExpression {
     kind: DerivedExpressionKind,
@@ -149,58 +177,109 @@ pub enum MultiChartLoadResult {
     },
 }
 
+fn load_request_kind_key(kind: MultiChartLoadKind) -> bool {
+    matches!(kind, MultiChartLoadKind::Detail { .. })
+}
+
+fn coalesce_load_requests(
+    requests: impl IntoIterator<Item = MultiChartLoadRequest>,
+) -> Vec<MultiChartLoadRequest> {
+    let requests = requests.into_iter().collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    let mut coalesced = Vec::new();
+    for request in requests.into_iter().rev() {
+        let key = (request.item_id, load_request_kind_key(request.kind));
+        if seen.insert(key) {
+            coalesced.push(request);
+        }
+    }
+    coalesced.reverse();
+    coalesced
+}
+
 pub fn handle_mchart_load(tx_events: Sender<AppEvent>) -> Sender<MultiChartLoadRequest> {
     let (tx_load, rx_load) = channel::<MultiChartLoadRequest>();
     thread::spawn(move || loop {
-        let Ok(request) = rx_load.recv() else {
+        let Ok(first_request) = rx_load.recv() else {
             return;
         };
-        let _ = tx_events.send(AppEvent::MultiChartLoad(MultiChartLoadResult::Started {
-            item_id: request.item_id,
-            kind: request.kind,
-        }));
-        let result = match (&request.kind, request.source) {
-            (
-                MultiChartLoadKind::Overview { .. },
-                MultiChartLoadSource::Dataset { dataset, selection },
-            ) => plot_dataset_with_cap(
-                &dataset,
-                &selection,
-                configure::current_multichart_settings().overview_max_samples,
-            )
-            .map(|preview| MultiChartLoadResult::Success {
+        let mut pending_requests = vec![first_request];
+        while let Ok(request) = rx_load.try_recv() {
+            pending_requests.push(request);
+        }
+
+        for request in coalesce_load_requests(pending_requests) {
+            let _ = tx_events.send(AppEvent::MultiChartLoad(MultiChartLoadResult::Started {
                 item_id: request.item_id,
                 kind: request.kind,
-                points: preview.data,
-                source_len: preview.length,
-            })
-            .map_err(|error| format!("Failed loading sampled series: {error}")),
-            (
-                MultiChartLoadKind::Overview { .. },
-                MultiChartLoadSource::CompoundLeaf {
-                    dataset,
-                    meta,
-                    selection,
-                },
-            ) => plot_projected_with_cap(
-                &dataset,
-                meta.as_ref(),
-                &selection,
-                configure::current_multichart_settings().overview_max_samples,
-            )
-            .map(|preview| MultiChartLoadResult::Success {
-                item_id: request.item_id,
-                kind: request.kind,
-                points: preview.data,
-                source_len: preview.length,
-            })
-            .map_err(|error| format!("Failed loading sampled series: {error}")),
-            (
-                MultiChartLoadKind::Detail { window, .. },
-                MultiChartLoadSource::Dataset { dataset, selection },
-            ) => {
-                let detail_selection = selection_with_window(&selection, window.start, window.end);
-                plot_dataset_with_cap(&dataset, &detail_selection, window.sample_cap)
+            }));
+            let result = match (&request.kind, request.source) {
+                (
+                    MultiChartLoadKind::Overview { .. },
+                    MultiChartLoadSource::Dataset { dataset, selection },
+                ) => plot_dataset_with_cap(
+                    &dataset,
+                    &selection,
+                    configure::current_multichart_settings().overview_max_samples,
+                )
+                .map(|preview| MultiChartLoadResult::Success {
+                    item_id: request.item_id,
+                    kind: request.kind,
+                    points: preview.data,
+                    source_len: preview.length,
+                })
+                .map_err(|error| format!("Failed loading sampled series: {error}")),
+                (
+                    MultiChartLoadKind::Overview { .. },
+                    MultiChartLoadSource::CompoundLeaf {
+                        dataset,
+                        meta,
+                        selection,
+                    },
+                ) => plot_projected_with_cap(
+                    &dataset,
+                    meta.as_ref(),
+                    &selection,
+                    configure::current_multichart_settings().overview_max_samples,
+                )
+                .map(|preview| MultiChartLoadResult::Success {
+                    item_id: request.item_id,
+                    kind: request.kind,
+                    points: preview.data,
+                    source_len: preview.length,
+                })
+                .map_err(|error| format!("Failed loading sampled series: {error}")),
+                (
+                    MultiChartLoadKind::Detail { window, .. },
+                    MultiChartLoadSource::Dataset { dataset, selection },
+                ) => {
+                    let detail_selection =
+                        selection_with_window(&selection, window.start, window.end);
+                    plot_dataset_with_cap(&dataset, &detail_selection, window.sample_cap)
+                        .map(|preview| MultiChartLoadResult::Success {
+                            item_id: request.item_id,
+                            kind: request.kind,
+                            points: offset_points(preview.data, window.start),
+                            source_len: 0,
+                        })
+                        .map_err(|error| format!("Failed loading viewport detail: {error}"))
+                }
+                (
+                    MultiChartLoadKind::Detail { window, .. },
+                    MultiChartLoadSource::CompoundLeaf {
+                        dataset,
+                        meta,
+                        selection,
+                    },
+                ) => {
+                    let detail_selection =
+                        selection_with_window(&selection, window.start, window.end);
+                    plot_projected_with_cap(
+                        &dataset,
+                        meta.as_ref(),
+                        &detail_selection,
+                        window.sample_cap,
+                    )
                     .map(|preview| MultiChartLoadResult::Success {
                         item_id: request.item_id,
                         kind: request.kind,
@@ -208,41 +287,34 @@ pub fn handle_mchart_load(tx_events: Sender<AppEvent>) -> Sender<MultiChartLoadR
                         source_len: 0,
                     })
                     .map_err(|error| format!("Failed loading viewport detail: {error}"))
-            }
-            (
-                MultiChartLoadKind::Detail { window, .. },
-                MultiChartLoadSource::CompoundLeaf {
-                    dataset,
-                    meta,
-                    selection,
-                },
-            ) => {
-                let detail_selection = selection_with_window(&selection, window.start, window.end);
-                plot_projected_with_cap(
-                    &dataset,
-                    meta.as_ref(),
-                    &detail_selection,
-                    window.sample_cap,
-                )
-                .map(|preview| MultiChartLoadResult::Success {
+                }
+            };
+            let _ = tx_events.send(AppEvent::MultiChartLoad(match result {
+                Ok(result) => result,
+                Err(message) => MultiChartLoadResult::Failure {
                     item_id: request.item_id,
                     kind: request.kind,
-                    points: offset_points(preview.data, window.start),
-                    source_len: 0,
-                })
-                .map_err(|error| format!("Failed loading viewport detail: {error}"))
-            }
-        };
-        let _ = tx_events.send(AppEvent::MultiChartLoad(match result {
-            Ok(result) => result,
-            Err(message) => MultiChartLoadResult::Failure {
-                item_id: request.item_id,
-                kind: request.kind,
-                message,
-            },
-        }));
+                    message,
+                },
+            }));
+        }
     });
     tx_load
+}
+
+pub fn handle_mchart_render(tx_events: Sender<AppEvent>) -> Sender<MultiChartRenderRequest> {
+    let (tx_render, rx_render) = channel::<MultiChartRenderRequest>();
+    thread::spawn(move || loop {
+        let Ok(mut request) = rx_render.recv() else {
+            return;
+        };
+        while let Ok(next_request) = rx_render.try_recv() {
+            request = next_request;
+        }
+        let result = render::render_prepared_chart_request(request);
+        let _ = tx_events.send(AppEvent::MultiChartRender(result));
+    });
+    tx_render
 }
 
 fn selection_with_window(
@@ -278,7 +350,11 @@ pub struct MultiChartState {
     pub idx: usize,
     viewport: Option<ChartViewport>,
     tx_load: Sender<MultiChartLoadRequest>,
+    tx_render: Sender<MultiChartRenderRequest>,
     stateful_protocol: Option<StatefulProtocol>,
+    render_generation: u64,
+    pending_render_generation: Option<u64>,
+    render_error: Option<String>,
     next_id: u64,
     next_color_slot: usize,
     x_axis_policy: ChartXAxisPolicy,
@@ -289,7 +365,11 @@ pub struct MultiChartState {
 }
 
 impl MultiChartState {
-    pub fn new(picker: Picker, tx_load: Sender<MultiChartLoadRequest>) -> Self {
+    pub fn new(
+        picker: Picker,
+        tx_load: Sender<MultiChartLoadRequest>,
+        tx_render: Sender<MultiChartRenderRequest>,
+    ) -> Self {
         Self {
             items: Vec::new(),
             modified: false,
@@ -300,7 +380,11 @@ impl MultiChartState {
             picker,
             viewport: None,
             tx_load,
+            tx_render,
             stateful_protocol: None,
+            render_generation: 0,
+            pending_render_generation: None,
+            render_error: None,
             next_id: 1,
             next_color_slot: 0,
             x_axis_policy: ChartXAxisPolicy::SampleIndex,
@@ -313,6 +397,85 @@ impl MultiChartState {
 
     pub fn chart_items(&self) -> &[ChartItem] {
         &self.items
+    }
+
+    pub(crate) fn queue_chart_render(&mut self, chart_area: Rect) -> bool {
+        let Some(prepared) = self.prepared_chart_data() else {
+            self.pending_render_generation = None;
+            self.render_error = None;
+            self.stateful_protocol = None;
+            self.last_chart_area = None;
+            self.modified = false;
+            return false;
+        };
+        self.render_generation = self.render_generation.saturating_add(1);
+        let generation = self.render_generation;
+        let request = MultiChartRenderRequest {
+            generation,
+            chart_area,
+            width: self.width,
+            height: self.height,
+            x_axis_label: self.x_axis_policy.label().to_string(),
+            prepared,
+        };
+        self.pending_render_generation = Some(generation);
+        self.render_error = None;
+        self.modified = false;
+        if self.tx_render.send(request).is_err() {
+            self.pending_render_generation = None;
+            self.render_error = Some("multichart renderer unavailable".to_string());
+            return false;
+        }
+        true
+    }
+
+    pub(crate) fn apply_render_result(&mut self, result: MultiChartRenderResult) {
+        match result {
+            MultiChartRenderResult::Success {
+                generation,
+                chart_area,
+                width,
+                height,
+                rgb_bytes,
+                plot_x_range,
+                plot_y_range,
+            } => {
+                if generation != self.render_generation {
+                    return;
+                }
+                self.pending_render_generation = None;
+                self.render_error = None;
+                self.last_chart_panel_area = Some(chart_area);
+                self.last_chart_area = render::chart_plot_area_in_rect(
+                    chart_area,
+                    width,
+                    height,
+                    plot_x_range,
+                    plot_y_range,
+                );
+                let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb_bytes);
+                let Some(image) = image else {
+                    self.render_error =
+                        Some("Failed to create image buffer from plot buffer".to_string());
+                    self.stateful_protocol = None;
+                    return;
+                };
+                self.stateful_protocol = Some(
+                    self.picker
+                        .new_resize_protocol(DynamicImage::ImageRgb8(image)),
+                );
+            }
+            MultiChartRenderResult::Failure {
+                generation,
+                message,
+            } => {
+                if generation != self.render_generation {
+                    return;
+                }
+                self.pending_render_generation = None;
+                self.render_error = Some(message);
+            }
+        }
     }
 
     #[cfg(test)]

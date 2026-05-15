@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use image::{DynamicImage, ImageBuffer, Rgb};
 use plotters::{
     prelude::{BitMapBackend, IntoDrawingArea},
     style::{Color as _, IntoFont, RGBColor, ShapeStyle},
@@ -18,8 +17,8 @@ use crate::{configure, error::log_error};
 
 use super::{
     ChartSource, ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
-    ExpressionPromptSuggestion, ExpressionPromptSuggestionKind, MultiChartState,
-    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    ExpressionPromptSuggestion, ExpressionPromptSuggestionKind, MultiChartRenderRequest,
+    MultiChartRenderResult, MultiChartState, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 fn mchart_body_style() -> Style {
@@ -64,6 +63,114 @@ fn render_suggestion_label(
         spans.push(Span::styled(suggestion.label.clone(), base_style));
     }
     spans
+}
+
+pub(super) fn render_prepared_chart_request(
+    request: MultiChartRenderRequest,
+) -> MultiChartRenderResult {
+    let mut plot_buffer = vec![0; (request.width * request.height * 3) as usize];
+    let (plot_x_range, plot_y_range) = {
+        let root = BitMapBackend::with_buffer(&mut plot_buffer, (request.width, request.height))
+            .into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(error) = root.fill(&plot_bg) {
+            log_error(&error);
+            return MultiChartRenderResult::Failure {
+                generation: request.generation,
+                message: error.to_string(),
+            };
+        }
+        let y_label_area_size = format!("{:.4}", request.prepared.y_max).len() as u32 * 3 + 30;
+        let chart = plotters::prelude::ChartBuilder::on(&root)
+            .margin(10)
+            .x_label_area_size(30)
+            .y_label_area_size(y_label_area_size)
+            .build_cartesian_2d(
+                request.prepared.plot_x_min..request.prepared.plot_x_max,
+                request.prepared.y_min..request.prepared.y_max,
+            );
+
+        let mut chart = match chart {
+            Ok(chart) => chart,
+            Err(error) => {
+                log_error(&error);
+                return MultiChartRenderResult::Failure {
+                    generation: request.generation,
+                    message: error.to_string(),
+                };
+            }
+        };
+
+        let ranges = chart.plotting_area().get_pixel_range();
+
+        if let Err(error) = chart
+            .configure_mesh()
+            .x_desc(request.x_axis_label)
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+        {
+            log_error(&error);
+        }
+
+        for series in request.prepared.series {
+            let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+                colors.chart.series[series.color_slot % colors.chart.series.len()]
+            }));
+            let color = RGBColor(r, g, b);
+            let stroke_width = if series.is_selected { 4 } else { 3 };
+            let line_series = plotters::prelude::LineSeries::new(
+                series.points.iter().copied(),
+                ShapeStyle::from(&color).stroke_width(stroke_width),
+            );
+            let series_label = series.label.clone();
+            let drawn_series = match chart.draw_series(line_series) {
+                Ok(series) => series,
+                Err(error) => {
+                    log_error(&error);
+                    continue;
+                }
+            };
+            drawn_series.label(series_label).legend(move |(x, y)| {
+                plotters::element::PathElement::new(
+                    vec![(x, y), (x + 20, y)],
+                    color.stroke_width(3),
+                )
+            });
+        }
+
+        if let Err(error) = chart
+            .configure_series_labels()
+            .background_style(plot_bg.mix(0.85))
+            .border_style(axis.mix(0.8))
+            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .draw()
+        {
+            log_error(&error);
+        }
+        ranges
+    };
+
+    MultiChartRenderResult::Success {
+        generation: request.generation,
+        chart_area: request.chart_area,
+        width: request.width,
+        height: request.height,
+        rgb_bytes: plot_buffer,
+        plot_x_range,
+        plot_y_range,
+    }
 }
 
 impl MultiChartState {
@@ -764,20 +871,11 @@ impl MultiChartState {
             self.width = new_width;
             self.modified = true;
             self.stateful_protocol = None;
+            self.pending_render_generation = None;
         }
 
-        if self.render_chart_with_area(Some(chart_area)) {
-            let image = ImageBuffer::<Rgb<u8>, _>::from_raw(
-                self.width,
-                self.height,
-                self.plot_buffer.clone(),
-            );
-            let Some(image) = image else {
-                log_error("Failed to create image buffer from plot buffer");
-                return;
-            };
-            let dyn_img = DynamicImage::ImageRgb8(image);
-            self.stateful_protocol = Some(self.picker.new_resize_protocol(dyn_img));
+        if self.modified {
+            self.queue_chart_render(chart_area);
         }
         if self.should_defer_image_protocol_frame(chart_area) {
             return;
@@ -785,8 +883,24 @@ impl MultiChartState {
 
         match self.stateful_protocol {
             None => {
-                let paragraph = Paragraph::new("Rendering failed")
-                    .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
+                let (message, color) = if let Some(error) = &self.render_error {
+                    (
+                        error.as_str(),
+                        configure::themed_color(|colors| colors.text.error),
+                    )
+                } else if self.pending_render_generation.is_some() {
+                    (
+                        "Rendering chart...",
+                        configure::themed_color(|colors| colors.mchart.empty_state),
+                    )
+                } else {
+                    (
+                        "Rendering failed",
+                        configure::themed_color(|colors| colors.text.error),
+                    )
+                };
+                let paragraph = Paragraph::new(message)
+                    .style(Style::default().fg(color))
                     .alignment(Alignment::Center)
                     .wrap(Wrap { trim: true });
                 f.render_widget(paragraph, chart_area);

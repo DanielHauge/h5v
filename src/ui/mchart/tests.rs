@@ -17,8 +17,9 @@ use ndarray::Array;
 
 #[allow(deprecated)]
 fn make_state() -> MultiChartState {
-    let (tx, _rx) = channel();
-    MultiChartState::new(Picker::from_fontsize((7, 14)), tx)
+    let (tx_load, _rx_load) = channel();
+    let (tx_render, _rx_render) = channel();
+    MultiChartState::new(Picker::from_fontsize((7, 14)), tx_load, tx_render)
 }
 
 fn source(path: &str, selection: PreviewSelection) -> ChartSource {
@@ -1097,6 +1098,68 @@ fn chart_panel_title_includes_viewport_when_zoomed() {
         state.chart_panel_title(),
         "Overlay chart [x values] · view x=[2.0000, 6.0000] y=[4.0000, 12.0000]"
     );
+}
+
+#[test]
+fn coalesce_load_requests_keeps_latest_request_per_item_and_kind() {
+    let (file, path) = make_dataset_ref_test_file();
+    let dataset = file.dataset("/series").expect("series dataset");
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    let requests = coalesce_load_requests(vec![
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Detail {
+                generation: 1,
+                window: ChartLodWindow {
+                    start: 0,
+                    end: 10,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Detail {
+                generation: 2,
+                window: ChartLodWindow {
+                    start: 5,
+                    end: 15,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Overview { generation: 0 },
+            source: MultiChartLoadSource::Dataset { dataset, selection },
+        },
+    ]);
+
+    assert_eq!(requests.len(), 2);
+    assert!(matches!(
+        requests[0].kind,
+        MultiChartLoadKind::Detail { generation: 2, .. }
+    ));
+    assert!(matches!(
+        requests[1].kind,
+        MultiChartLoadKind::Overview { generation: 0 }
+    ));
+
+    drop(file);
+    fs::remove_file(path).expect("failed removing temp hdf5 file");
 }
 
 #[test]
