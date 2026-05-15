@@ -108,27 +108,27 @@ fn parses_index_command_with_optional_amount() {
 #[test]
 fn parses_multichart_add_command_with_dataset_spec() {
     let command =
-        parse_command_text("mchart add !/group/dataset[..,0]").expect("expected mchart add");
+        parse_command_text("mchart add load(/group/dataset)[..,0]").expect("expected mchart add");
     assert_eq!(command.id, CommandId::MultiChart);
     assert_eq!(
         command.args,
         vec![
             CommandArgValue::Word("add".to_string()),
-            CommandArgValue::Word("!/group/dataset[..,0]".to_string()),
+            CommandArgValue::Word("load(/group/dataset)[..,0]".to_string()),
         ]
     );
 }
 
 #[test]
 fn parses_multichart_expression_command_with_quoted_expression() {
-    let command = parse_command_text(r#"mchart expr "($1, !/ticks + #OFFSET)""#)
+    let command = parse_command_text(r#"mchart expr "($1, load(/ticks) + load(/OFFSET))""#)
         .expect("expected mchart expr");
     assert_eq!(command.id, CommandId::MultiChart);
     assert_eq!(
         command.args,
         vec![
             CommandArgValue::Word("expr".to_string()),
-            CommandArgValue::Word("($1, !/ticks + #OFFSET)".to_string()),
+            CommandArgValue::Word("($1, load(/ticks) + load(/OFFSET))".to_string()),
         ]
     );
 }

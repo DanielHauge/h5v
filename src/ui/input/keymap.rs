@@ -500,6 +500,32 @@ mod tests {
     }
 
     #[test]
+    fn multichart_zoom_keys_match_defaults() {
+        let keymaps = EffectiveKeymaps::default();
+        assert_eq!(
+            multichart_action(
+                &KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+                &keymaps
+            ),
+            Some(BoundAction::Action(MultiChartAction::ZoomIn))
+        );
+        assert_eq!(
+            multichart_action(
+                &KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            Some(BoundAction::Action(MultiChartAction::ZoomOut))
+        );
+        assert_eq!(
+            multichart_action(
+                &KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+                &keymaps
+            ),
+            Some(BoundAction::Action(MultiChartAction::ClearZoom))
+        );
+    }
+
+    #[test]
     fn custom_heatmap_binding_overrides_default_after_unbind() {
         let mut config = KeymapConfig::default();
         config

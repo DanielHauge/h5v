@@ -67,6 +67,24 @@ fn render_suggestion_label(
 }
 
 impl MultiChartState {
+    pub(super) fn chart_panel_title(&self) -> String {
+        let mut parts = vec![format!("Overlay chart [{}]", self.x_axis_policy.label())];
+        if self.viewport.is_some() {
+            parts.push(format!("view {}", self.viewport_summary()));
+        }
+        if self.loading_item_count() != 0 {
+            parts.push(format!("{} loading", self.loading_item_count()));
+        }
+        parts.join(" · ")
+    }
+
+    pub(super) fn should_defer_image_protocol_frame(&self, chart_area: Rect) -> bool {
+        self.expression_prompt.is_some()
+            && !self.modified
+            && self.stateful_protocol.is_some()
+            && self.last_chart_panel_area == Some(chart_area)
+    }
+
     pub(super) fn prepared_chart_data(&self) -> Option<super::PreparedChartData> {
         let visible_items = self
             .items
@@ -674,15 +692,7 @@ impl MultiChartState {
 
     fn render_chart_panel(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let block = Block::default()
-            .title(if self.loading_item_count() == 0 {
-                format!("Overlay chart [{}]", self.x_axis_policy.label())
-            } else {
-                format!(
-                    "Overlay chart [{}] · {} loading",
-                    self.x_axis_policy.label(),
-                    self.loading_item_count()
-                )
-            })
+            .title(self.chart_panel_title())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(
@@ -698,6 +708,7 @@ impl MultiChartState {
 
         if self.visible_item_count() == 0 {
             self.last_chart_area = None;
+            self.last_chart_panel_area = None;
             let paragraph = Paragraph::new(format!(
                 "All chart items are hidden.\nPress Space or 'v' to toggle the selected item back on.\nCurrent alignment: {}.",
                 self.x_axis_policy.description()
@@ -715,6 +726,7 @@ impl MultiChartState {
             .all(|item| !item.has_loaded_series())
         {
             self.last_chart_area = None;
+            self.last_chart_panel_area = None;
             let paragraph = Paragraph::new("Loading sampled chart data...")
                 .style(
                     Style::default()
@@ -727,10 +739,12 @@ impl MultiChartState {
         }
         if chart_area.width == 0 || chart_area.height == 0 {
             self.last_chart_area = None;
+            self.last_chart_panel_area = None;
             return;
         }
         if self.picker.protocol_type() == ProtocolType::Halfblocks {
             self.last_chart_area = Some(chart_area);
+            self.last_chart_panel_area = Some(chart_area);
             if !self.render_braille_chart_panel(f, chart_area) {
                 let paragraph = Paragraph::new("Rendering failed")
                     .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
@@ -744,6 +758,7 @@ impl MultiChartState {
         let (cell_w, cell_h) = self.picker.font_size();
         let new_height = chart_area.height as u32 * cell_h as u32;
         let new_width = chart_area.width as u32 * cell_w as u32;
+        self.last_chart_panel_area = Some(chart_area);
         if new_height != self.height || new_width != self.width {
             self.height = new_height;
             self.width = new_width;
@@ -763,6 +778,9 @@ impl MultiChartState {
             };
             let dyn_img = DynamicImage::ImageRgb8(image);
             self.stateful_protocol = Some(self.picker.new_resize_protocol(dyn_img));
+        }
+        if self.should_defer_image_protocol_frame(chart_area) {
+            return;
         }
 
         match self.stateful_protocol {
@@ -905,7 +923,7 @@ impl MultiChartState {
                         .bold(),
                 ),
                 Span::styled(
-                    "$1 + !/path[..,0]",
+                    "$1 + load(/path)[..,0]",
                     Style::default()
                         .fg(configure::themed_color(|colors| colors.text.type_desc))
                         .italic(),

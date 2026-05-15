@@ -136,7 +136,7 @@ impl DatasetChartSource {
 
     pub fn expression_reference(&self) -> String {
         if self.shape.is_empty() {
-            return format!("!{}", self.display_path);
+            return format!("load({})", self.display_path);
         }
         let selectors = (0..self.shape.len())
             .map(|dim| {
@@ -150,7 +150,7 @@ impl DatasetChartSource {
                 }
             })
             .collect::<Vec<_>>();
-        format!("!{}[{}]", self.display_path, selectors.join(","))
+        format!("load({})[{}]", self.display_path, selectors.join(","))
     }
 
     pub fn slice_summary(&self) -> String {

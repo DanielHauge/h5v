@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use hdf5_metno::File;
 
@@ -7,13 +7,8 @@ use crate::{
     search::{full_traversal, fuzzy_highlight_spans, fuzzy_match_score},
 };
 
-use super::eval::{
-    normalize_absolute_object_path, resolve_expression_scalar_value,
-    resolve_expression_series_value,
-};
-use super::expression::{
-    parse_expression_item_ref, parse_expression_scalar_ref, parse_expression_series_ref,
-};
+use super::eval::normalize_absolute_object_path;
+use super::expression::{parse_expression_item_ref, parse_expression_load_ref};
 use super::*;
 
 pub(super) const EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS: usize = 4;
@@ -83,6 +78,42 @@ struct ExpressionAbsolutePathEntry {
     detail: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ExpressionPromptLookupCache {
+    absolute_path_entries: Option<Vec<ExpressionAbsolutePathEntry>>,
+    attribute_names: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionReferenceFunction {
+    Load,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpressionCompletionContext {
+    ItemRef {
+        fragment: String,
+    },
+    CallTarget {
+        function: ExpressionReferenceFunction,
+        fragment: String,
+        target_prefix: String,
+    },
+    CallAttribute {
+        function: ExpressionReferenceFunction,
+        fragment: String,
+        target_prefix: String,
+        attr_prefix: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ExpressionPromptAnalysis {
+    messages: Vec<ExpressionPromptMessage>,
+    suggestions: Vec<ExpressionPromptSuggestion>,
+    input_segments: Vec<ExpressionPromptInputSegment>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExpressionPromptState {
     pub(super) buffer: String,
@@ -92,6 +123,7 @@ pub(super) struct ExpressionPromptState {
     pub(super) suggestions: Vec<ExpressionPromptSuggestion>,
     pub(super) selected_suggestion: Option<usize>,
     pub(super) input_segments: Vec<ExpressionPromptInputSegment>,
+    lookup_cache: ExpressionPromptLookupCache,
 }
 
 impl ExpressionPromptState {
@@ -104,6 +136,7 @@ impl ExpressionPromptState {
             suggestions: Vec::new(),
             selected_suggestion: None,
             input_segments: Vec::new(),
+            lookup_cache: ExpressionPromptLookupCache::default(),
         }
     }
 }
@@ -274,26 +307,27 @@ impl MultiChartState {
     }
 
     pub fn refresh_expression_prompt(&mut self, file: Option<&File>) {
-        let Some((buffer, cursor, selected_suggestion)) =
+        let Some((buffer, cursor, selected_suggestion, lookup_cache)) =
             self.expression_prompt.as_ref().map(|prompt| {
                 (
                     prompt.buffer.clone(),
                     prompt.cursor,
                     prompt.selected_suggestion,
+                    prompt.lookup_cache.clone(),
                 )
             })
         else {
             return;
         };
-        let messages = expression_prompt_messages(self, file, &buffer);
-        let suggestions = expression_prompt_suggestions(self, file, &buffer, cursor);
-        let input_segments = expression_prompt_input_segments(self, file, &buffer);
+        let mut lookup_cache = lookup_cache;
+        let analysis = expression_prompt_analysis(self, file, &buffer, cursor, &mut lookup_cache);
         if let Some(prompt) = self.expression_prompt.as_mut() {
-            prompt.messages = messages;
-            prompt.suggestions = suggestions;
+            prompt.messages = analysis.messages;
+            prompt.suggestions = analysis.suggestions;
             prompt.selected_suggestion =
                 selected_suggestion.filter(|selected| *selected < prompt.suggestions.len());
-            prompt.input_segments = input_segments;
+            prompt.input_segments = analysis.input_segments;
+            prompt.lookup_cache = lookup_cache;
         }
     }
 
@@ -342,17 +376,47 @@ impl MultiChartState {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn expression_prompt_messages(
     state: &MultiChartState,
     file: Option<&File>,
     buffer: &str,
+) -> Vec<ExpressionPromptMessage> {
+    let mut cache = ExpressionPromptLookupCache::default();
+    expression_prompt_analysis(state, file, buffer, buffer.len(), &mut cache).messages
+}
+
+fn expression_prompt_analysis(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+    cursor: usize,
+    cache: &mut ExpressionPromptLookupCache,
+) -> ExpressionPromptAnalysis {
+    let suggestions = expression_prompt_suggestions_with_cache(state, file, buffer, cursor, cache);
+    let messages = expression_prompt_messages_with_cache(state, file, buffer, cursor, &suggestions);
+    let input_segments = expression_prompt_input_segments(state, file, buffer);
+    ExpressionPromptAnalysis {
+        messages,
+        suggestions,
+        input_segments,
+    }
+}
+
+fn expression_prompt_messages_with_cache(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+    cursor: usize,
+    suggestions: &[ExpressionPromptSuggestion],
 ) -> Vec<ExpressionPromptMessage> {
     let trimmed = buffer.trim();
     if trimmed.is_empty() {
         return vec![
             ExpressionPromptMessage {
                 kind: ExpressionPromptMessageKind::Hint,
-                text: "Use $1, !/path[..,0], #/path:ATTR, or ($1, !/time[..])".to_string(),
+                text: "Use $1, load(/path)[..,0], load(/path:ATTR), or ($1, load(/time)[..])"
+                    .to_string(),
             },
             ExpressionPromptMessage {
                 kind: ExpressionPromptMessageKind::Hint,
@@ -361,7 +425,7 @@ pub(super) fn expression_prompt_messages(
         ];
     }
 
-    if expression_prompt_has_pending_completion(state, file, trimmed) {
+    if expression_prompt_has_pending_completion(buffer, cursor, suggestions) {
         return Vec::new();
     }
 
@@ -376,9 +440,9 @@ pub(super) fn expression_prompt_messages(
         }];
     }
 
-    match state.evaluate_expression_with_file(trimmed, file) {
-        Ok(evaluated) => {
-            let result_kind = match evaluated.kind {
+    match state.validate_expression_with_file(trimmed, file) {
+        Ok(validated) => {
+            let result_kind = match validated.kind {
                 DerivedExpressionKind::YSeries => "y-series",
                 DerivedExpressionKind::XySeries => "x/y series",
             };
@@ -386,7 +450,7 @@ pub(super) fn expression_prompt_messages(
                 kind: ExpressionPromptMessageKind::Valid,
                 text: format!(
                     "Valid {result_kind} with {} samples",
-                    evaluated.points.len()
+                    validated.sample_count
                 ),
             }]
         }
@@ -398,29 +462,14 @@ pub(super) fn expression_prompt_messages(
 }
 
 fn expression_prompt_has_pending_completion(
-    state: &MultiChartState,
-    file: Option<&File>,
     buffer: &str,
+    cursor: usize,
+    suggestions: &[ExpressionPromptSuggestion],
 ) -> bool {
-    let Some((_, end, fragment)) = current_expression_fragment(buffer, buffer.len()) else {
-        return false;
-    };
-    if end != buffer.len() || fragment.is_empty() {
-        return false;
-    }
-    if fragment.starts_with('$') {
-        return state.items.iter().any(|item| {
-            let candidate = format!("${}", item.id.0);
-            candidate.starts_with(&fragment)
-        });
-    }
-    if fragment.starts_with('!') || fragment.starts_with('#') {
-        let Some(file) = file else {
-            return false;
-        };
-        return !expression_path_suggestions(file, &fragment).is_empty();
-    }
-    false
+    matches!(
+        current_expression_fragment(buffer, cursor),
+        Some((_, end, fragment)) if end == buffer.len() && !fragment.is_empty() && !suggestions.is_empty()
+    )
 }
 
 pub(super) fn expression_prompt_input_segments(
@@ -435,7 +484,7 @@ pub(super) fn expression_prompt_input_segments(
 
     while idx < chars.len() {
         let (start, ch) = chars[idx];
-        if !matches!(ch, '$' | '!' | '#') {
+        if ch != '$' && is_expression_function_start(&chars, idx).is_none() {
             idx += 1;
             continue;
         }
@@ -485,28 +534,122 @@ pub(super) fn expression_prompt_input_segments(
     segments
 }
 
+fn expression_function_name(function: ExpressionReferenceFunction) -> &'static str {
+    match function {
+        ExpressionReferenceFunction::Load => "load",
+    }
+}
+
+fn is_expression_function_start(
+    chars: &[(usize, char)],
+    start_idx: usize,
+) -> Option<ExpressionReferenceFunction> {
+    let function = ExpressionReferenceFunction::Load;
+    if start_idx > 0 {
+        let prev = chars[start_idx - 1].1;
+        if prev.is_ascii_alphanumeric() || prev == '_' {
+            return None;
+        }
+    }
+    let ident = chars[start_idx..]
+        .iter()
+        .take(4)
+        .map(|(_, ch)| *ch)
+        .collect::<String>();
+    if ident != "load" {
+        return None;
+    }
+    let mut idx = start_idx + 4;
+    while idx < chars.len() && chars[idx].1.is_whitespace() {
+        idx += 1;
+    }
+    (chars.get(idx).map(|(_, ch)| *ch) == Some('(')).then_some(function)
+}
+
+fn expression_function_open_paren_index(
+    chars: &[(usize, char)],
+    start_idx: usize,
+) -> Option<usize> {
+    is_expression_function_start(chars, start_idx)?;
+    let mut idx = start_idx + 4;
+    while idx < chars.len() && chars[idx].1.is_whitespace() {
+        idx += 1;
+    }
+    Some(idx)
+}
+
 pub(super) fn consume_expression_reference_fragment(
     buffer: &str,
     chars: &[(usize, char)],
     start_idx: usize,
 ) -> usize {
     let start_char = chars[start_idx].1;
-    let mut cursor = start_idx + 1;
+    if start_char == '$' {
+        let mut cursor = start_idx + 1;
+        let mut bracket_depth = 0usize;
+        while cursor < chars.len() {
+            let ch = chars[cursor].1;
+            match ch {
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
+            let is_delimiter = ch.is_whitespace()
+                || (bracket_depth == 0 && matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'))
+                || ch == '/';
+            if is_delimiter {
+                break;
+            }
+            cursor += 1;
+        }
+        return chars
+            .get(cursor)
+            .map(|(offset, _)| *offset)
+            .unwrap_or(buffer.len());
+    }
+
+    let Some(open_paren_idx) = expression_function_open_paren_index(chars, start_idx) else {
+        return chars[start_idx].0;
+    };
+    let mut cursor = open_paren_idx + 1;
     let mut bracket_depth = 0usize;
+    let mut paren_depth = 1usize;
     while cursor < chars.len() {
         let ch = chars[cursor].1;
         match ch {
             '[' => bracket_depth += 1,
             ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '(' if bracket_depth == 0 => paren_depth += 1,
+            ')' if bracket_depth == 0 => {
+                paren_depth = paren_depth.saturating_sub(1);
+                cursor += 1;
+                if paren_depth == 0 {
+                    break;
+                }
+                continue;
+            }
             _ => {}
         }
-        let is_delimiter = ch.is_whitespace()
-            || (bracket_depth == 0 && matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'))
-            || (start_char == '$' && ch == '/');
-        if is_delimiter {
-            break;
-        }
         cursor += 1;
+    }
+    while cursor < chars.len() && chars[cursor].1 == '[' {
+        cursor += 1;
+        let mut selector_depth = 1usize;
+        while cursor < chars.len() {
+            match chars[cursor].1 {
+                '[' => selector_depth += 1,
+                ']' => {
+                    selector_depth = selector_depth.saturating_sub(1);
+                    cursor += 1;
+                    if selector_depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            cursor += 1;
+        }
     }
     chars
         .get(cursor)
@@ -526,38 +669,28 @@ fn validate_expression_reference_fragment(
             if chars.next().is_some() {
                 return Err(format!("Invalid chart item reference {fragment}"));
             }
-            let _ = resolve_expression_item_value(
+            let _ = super::resolve_expression_item_value(
                 state,
                 &item_ref,
                 super::ExpressionSeriesResolution::Overview,
             )?;
             Ok(())
         }
-        Some('!') => {
-            let mut chars = fragment[1..].chars().peekable();
-            let series_ref = parse_expression_series_ref(&mut chars)?;
+        Some('l') if fragment.starts_with("load") => {
+            let mut chars = fragment[4..].chars().peekable();
+            let load_ref = parse_expression_load_ref(&mut chars)?;
             if chars.next().is_some() {
-                return Err(format!("Invalid series reference {fragment}"));
+                return Err(format!("Invalid load reference {fragment}"));
             }
-            let file = file.ok_or_else(|| "No file loaded for series references".to_string())?;
-            let _ = resolve_expression_series_value(
+            let file = file.ok_or_else(|| "No file loaded for load(...) references".to_string())?;
+            super::validate_expression_load_ref(
                 state,
                 file,
-                &series_ref,
+                &load_ref,
                 super::ExpressionSeriesResolution::Overview,
                 true,
-            )?;
-            Ok(())
-        }
-        Some('#') => {
-            let mut chars = fragment[1..].chars().peekable();
-            let scalar_ref = parse_expression_scalar_ref(&mut chars)?;
-            if chars.next().is_some() {
-                return Err(format!("Invalid scalar reference {fragment}"));
-            }
-            let file = file.ok_or_else(|| "No file loaded for scalar references".to_string())?;
-            let _ = resolve_expression_scalar_value(state, file, &scalar_ref)?;
-            Ok(())
+            )
+            .map(|_| ())
         }
         _ => Ok(()),
     }
@@ -581,159 +714,187 @@ pub(super) fn current_expression_fragment(
         return None;
     }
     let chars: Vec<(usize, char)> = buffer.char_indices().collect();
-    let char_cursor = chars
-        .iter()
-        .take_while(|(offset, _)| *offset < cursor)
-        .count();
-    let initial_depth = chars[..char_cursor]
-        .iter()
-        .fold(0usize, |depth, (_, ch)| match ch {
-            '[' => depth + 1,
-            ']' => depth.saturating_sub(1),
-            _ => depth,
-        });
-
-    let mut start = cursor;
-    let mut depth = initial_depth;
-    let mut idx = char_cursor;
-    while idx > 0 {
-        let (offset, ch) = chars[idx - 1];
-        let is_delimiter =
-            depth == 0 && (ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'));
-        if is_delimiter {
-            break;
-        }
-        start = offset;
-        match ch {
-            ']' => depth += 1,
-            '[' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        idx -= 1;
-    }
-
-    let mut end = cursor;
-    let mut depth = initial_depth;
-    let mut idx = char_cursor;
+    let mut idx = 0;
     while idx < chars.len() {
-        let (_, ch) = chars[idx];
-        let is_delimiter =
-            depth == 0 && (ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | ',' | '(' | ')'));
-        if is_delimiter {
-            break;
+        let start = chars[idx].0;
+        if chars[idx].1 != '$' && is_expression_function_start(&chars, idx).is_none() {
+            idx += 1;
+            continue;
         }
-        end = chars
-            .get(idx + 1)
-            .map(|(next_offset, _)| *next_offset)
-            .unwrap_or(buffer.len());
-        match ch {
-            '[' => depth += 1,
-            ']' => depth = depth.saturating_sub(1),
-            _ => {}
+        let end = consume_expression_reference_fragment(buffer, &chars, idx);
+        if start < end && cursor >= start && cursor <= end {
+            return Some((start, end, buffer[start..end].to_string()));
         }
-        idx += 1;
+        while idx < chars.len() && chars[idx].0 < end {
+            idx += 1;
+        }
     }
-
-    if start >= end || !matches!(buffer[start..].chars().next(), Some('$' | '!' | '#')) {
-        return None;
-    }
-    Some((start, end, buffer[start..end].to_string()))
+    None
 }
 
+#[allow(dead_code)]
 pub(super) fn expression_prompt_suggestions(
     state: &MultiChartState,
     file: Option<&File>,
     buffer: &str,
     cursor: usize,
 ) -> Vec<ExpressionPromptSuggestion> {
-    let Some((_, _, fragment)) = current_expression_fragment(buffer, cursor) else {
-        return Vec::new();
-    };
+    let mut cache = ExpressionPromptLookupCache::default();
+    expression_prompt_suggestions_with_cache(state, file, buffer, cursor, &mut cache)
+}
+
+fn expression_prompt_suggestions_with_cache(
+    state: &MultiChartState,
+    file: Option<&File>,
+    buffer: &str,
+    cursor: usize,
+    cache: &mut ExpressionPromptLookupCache,
+) -> Vec<ExpressionPromptSuggestion> {
+    match current_expression_completion_context(buffer, cursor) {
+        Some(ExpressionCompletionContext::ItemRef { fragment }) => {
+            expression_item_ref_suggestions(state, &fragment)
+        }
+        Some(ExpressionCompletionContext::CallTarget {
+            function,
+            fragment,
+            target_prefix,
+        }) => {
+            if target_prefix.starts_with('$') {
+                return expression_item_target_suggestions(
+                    state,
+                    function,
+                    &fragment,
+                    &target_prefix,
+                );
+            }
+            let Some(file) = file else {
+                return Vec::new();
+            };
+            expression_path_suggestions(file, cache, function, &fragment, &target_prefix)
+        }
+        Some(ExpressionCompletionContext::CallAttribute {
+            function,
+            fragment,
+            target_prefix,
+            attr_prefix,
+        }) => {
+            let Some(file) = file else {
+                return Vec::new();
+            };
+            let Some(object_path) = resolve_completion_target_path(state, &target_prefix) else {
+                return Vec::new();
+            };
+            expression_attribute_suggestions(
+                file,
+                cache,
+                function,
+                &fragment,
+                &object_path,
+                &target_prefix,
+                &attr_prefix,
+            )
+        }
+        None => Vec::new(),
+    }
+}
+
+fn current_expression_completion_context(
+    buffer: &str,
+    cursor: usize,
+) -> Option<ExpressionCompletionContext> {
+    let (start, _, fragment) = current_expression_fragment(buffer, cursor)?;
     if fragment.starts_with('$') {
-        let mut suggestions = state
-            .items
-            .iter()
-            .filter_map(|item| {
-                let label = format!("${}", item.id.0);
-                let score = expression_suggestion_score(&label, &fragment, None)?;
-                Some((score, item, label))
-            })
-            .map(|(score, item, label)| {
-                (
-                    score,
-                    ExpressionPromptSuggestion {
-                        symbol: match &item.source {
-                            ChartSource::DatasetSelection(source) => match source.kind {
-                                DatasetChartKind::Dataset => {
-                                    configure::configured_symbol(|symbols| {
-                                        symbols.tree.dataset_icon
-                                    })
+        return Some(ExpressionCompletionContext::ItemRef { fragment });
+    }
+    let function = match fragment.chars().next()? {
+        'l' if fragment.starts_with("load") => ExpressionReferenceFunction::Load,
+        _ => return None,
+    };
+    let cursor_in_fragment = cursor.saturating_sub(start).min(fragment.len());
+    let typed_prefix = fragment[..cursor_in_fragment].to_string();
+    let open_paren = typed_prefix.find('(')?;
+    if typed_prefix[open_paren + 1..].contains(')') {
+        return None;
+    }
+    let inner = typed_prefix[open_paren + 1..].trim_start();
+    if let Some((target_prefix, attr_prefix)) = inner.split_once(':') {
+        return Some(ExpressionCompletionContext::CallAttribute {
+            function,
+            fragment,
+            target_prefix: target_prefix.trim().to_string(),
+            attr_prefix: attr_prefix.trim().to_string(),
+        });
+    }
+    Some(ExpressionCompletionContext::CallTarget {
+        function,
+        fragment,
+        target_prefix: inner.trim().to_string(),
+    })
+}
+
+fn expression_item_ref_suggestions(
+    state: &MultiChartState,
+    fragment: &str,
+) -> Vec<ExpressionPromptSuggestion> {
+    let mut suggestions = state
+        .items
+        .iter()
+        .filter_map(|item| {
+            let label = format!("${}", item.id.0);
+            let score = expression_suggestion_score(&label, fragment, None)?;
+            Some((score, item, label))
+        })
+        .map(|(score, item, label)| {
+            (
+                score,
+                ExpressionPromptSuggestion {
+                    symbol: match &item.source {
+                        ChartSource::DatasetSelection(source) => match source.kind {
+                            DatasetChartKind::Dataset => {
+                                configure::configured_symbol(|symbols| symbols.tree.dataset_icon)
                                     .to_string()
-                                }
-                                DatasetChartKind::CompoundLeaf => {
-                                    configure::configured_symbol(|symbols| {
-                                        symbols.tree.compound_leaf_icon
-                                    })
-                                    .to_string()
-                                }
-                            },
-                            ChartSource::DerivedExpression { .. } => {
+                            }
+                            DatasetChartKind::CompoundLeaf => {
                                 configure::configured_symbol(|symbols| {
-                                    symbols.chart.membership_marker
+                                    symbols.tree.compound_leaf_icon
                                 })
                                 .to_string()
                             }
                         },
-                        insert_text: label.clone(),
-                        label: label.clone(),
-                        detail: format!("{} | len {}", item.list_label(), item.series.len()),
-                        kind: match &item.source {
-                            ChartSource::DatasetSelection(source) => match source.kind {
-                                DatasetChartKind::Dataset => {
-                                    ExpressionPromptSuggestionKind::Dataset
-                                }
-                                DatasetChartKind::CompoundLeaf => {
-                                    ExpressionPromptSuggestionKind::CompoundLeaf
-                                }
-                            },
-                            ChartSource::DerivedExpression { .. } => {
-                                ExpressionPromptSuggestionKind::ItemRef
+                        ChartSource::DerivedExpression { .. } => {
+                            configure::configured_symbol(|symbols| symbols.chart.membership_marker)
+                                .to_string()
+                        }
+                    },
+                    insert_text: label.clone(),
+                    label: label.clone(),
+                    detail: format!("{} | len {}", item.list_label(), item.series.len()),
+                    kind: match &item.source {
+                        ChartSource::DatasetSelection(source) => match source.kind {
+                            DatasetChartKind::Dataset => ExpressionPromptSuggestionKind::Dataset,
+                            DatasetChartKind::CompoundLeaf => {
+                                ExpressionPromptSuggestionKind::CompoundLeaf
                             }
                         },
-                        highlight_spans: fuzzy_highlight_spans(&label, &fragment),
+                        ChartSource::DerivedExpression { .. } => {
+                            ExpressionPromptSuggestionKind::ItemRef
+                        }
                     },
-                )
-            })
-            .collect::<Vec<_>>();
-        suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
-            rhs_score
-                .cmp(lhs_score)
-                .then_with(|| lhs.label.cmp(&rhs.label))
-        });
-        return suggestions
-            .into_iter()
-            .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
-            .map(|(_, suggestion)| suggestion)
-            .collect();
-    }
-
-    if !(fragment.starts_with('!') || fragment.starts_with('#')) {
-        return Vec::new();
-    }
-
-    let Some(file) = file else {
-        return Vec::new();
-    };
-
-    if let Some((target, attr_prefix)) = fragment.split_once(':') {
-        let object_path = resolve_completion_target_path(state, target);
-        let Some(object_path) = object_path else {
-            return Vec::new();
-        };
-        return expression_attribute_suggestions(file, &object_path, target, attr_prefix);
-    }
-
-    expression_path_suggestions(file, &fragment)
+                    highlight_spans: fuzzy_highlight_spans(&label, fragment),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+        rhs_score
+            .cmp(lhs_score)
+            .then_with(|| lhs.label.cmp(&rhs.label))
+    });
+    suggestions
+        .into_iter()
+        .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+        .map(|(_, suggestion)| suggestion)
+        .collect()
 }
 
 pub(super) fn expression_suggestion_score(
@@ -749,7 +910,7 @@ pub(super) fn expression_suggestion_score(
         score += 10_000;
     }
     if let Some(basename) = basename {
-        let trimmed_query = query.trim_start_matches(&['!', '#', '/'][..]);
+        let trimmed_query = query.trim_start_matches(&['l', 'o', 'a', 'd', '(', '/', '$'][..]);
         if !trimmed_query.is_empty() && basename.starts_with(trimmed_query) {
             score += 5_000;
         }
@@ -765,49 +926,80 @@ fn shift_highlight_spans(spans: Vec<Range<usize>>, offset: usize) -> Vec<Range<u
 }
 
 fn resolve_completion_target_path(state: &MultiChartState, target: &str) -> Option<String> {
-    if let Some(path) = target
-        .strip_prefix("!$")
-        .or_else(|| target.strip_prefix("#$"))
-    {
+    if let Some(path) = target.strip_prefix('$') {
         let id = path.parse::<u64>().ok()?;
         return state
             .item_by_id(ChartItemId(id))
             .and_then(|item| item.source.dataset_source())
             .map(|source| source.dataset_path.clone());
     }
-    if let Some(path) = target
-        .strip_prefix('!')
-        .or_else(|| target.strip_prefix('#'))
-    {
-        return normalize_absolute_object_path(path).ok();
-    }
-    None
+    normalize_absolute_object_path(target).ok()
+}
+
+fn expression_item_target_suggestions(
+    state: &MultiChartState,
+    function: ExpressionReferenceFunction,
+    fragment: &str,
+    target_prefix: &str,
+) -> Vec<ExpressionPromptSuggestion> {
+    let function_name = expression_function_name(function);
+    let mut suggestions = state
+        .items
+        .iter()
+        .filter_map(|item| {
+            let target = format!("${}", item.id.0);
+            let score = expression_suggestion_score(&target, target_prefix, None)?;
+            let label = format!("{function_name}({target})");
+            Some((
+                score,
+                ExpressionPromptSuggestion {
+                    symbol: configure::configured_symbol(|symbols| symbols.chart.membership_marker)
+                        .to_string(),
+                    insert_text: label.clone(),
+                    label,
+                    detail: format!("{} | len {}", item.list_label(), item.series.len()),
+                    kind: ExpressionPromptSuggestionKind::ItemRef,
+                    highlight_spans: fuzzy_highlight_spans(
+                        &format!("{function_name}({target})"),
+                        fragment,
+                    ),
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+        rhs_score
+            .cmp(lhs_score)
+            .then_with(|| lhs.label.cmp(&rhs.label))
+    });
+    suggestions
+        .into_iter()
+        .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+        .map(|(_, suggestion)| suggestion)
+        .collect()
 }
 
 fn expression_attribute_suggestions(
     file: &File,
+    cache: &mut ExpressionPromptLookupCache,
+    function: ExpressionReferenceFunction,
+    fragment: &str,
     object_path: &str,
-    target: &str,
+    target_prefix: &str,
     attr_prefix: &str,
 ) -> Vec<ExpressionPromptSuggestion> {
-    let names = if object_path == "/" {
-        file.attr_names().ok()
-    } else if let Ok(group) = file.group(object_path) {
-        group.attr_names().ok()
-    } else if let Ok(dataset) = file.dataset(object_path) {
-        dataset.attr_names().ok()
-    } else {
-        None
-    }
-    .unwrap_or_default();
+    let names = cached_expression_attribute_names(file, cache, object_path);
+    let function_name = expression_function_name(function);
 
     let mut suggestions = names
         .into_iter()
         .filter_map(|name| {
             let score = expression_suggestion_score(&name, attr_prefix, Some(&name))?;
-            let label = format!("{target}:{name}");
-            let highlight_spans =
-                shift_highlight_spans(fuzzy_highlight_spans(&name, attr_prefix), target.len() + 1);
+            let label = format!("{function_name}({target_prefix}:{name})");
+            let highlight_spans = shift_highlight_spans(
+                fuzzy_highlight_spans(&name, attr_prefix),
+                fragment.find(':').unwrap_or(fragment.len()) + 1,
+            );
             Some((
                 score,
                 ExpressionPromptSuggestion {
@@ -833,39 +1025,33 @@ fn expression_attribute_suggestions(
         .collect()
 }
 
-fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPromptSuggestion> {
-    let target_kind = match fragment.chars().next() {
-        Some('!') => Some(ExpressionAbsolutePathKind::Dataset),
-        Some('#') => Some(ExpressionAbsolutePathKind::Dataset),
-        _ => None,
-    };
-    let mut suggestions = expression_absolute_path_entries(file)
+fn expression_path_suggestions(
+    file: &File,
+    cache: &mut ExpressionPromptLookupCache,
+    function: ExpressionReferenceFunction,
+    fragment: &str,
+    target_prefix: &str,
+) -> Vec<ExpressionPromptSuggestion> {
+    let function_name = expression_function_name(function);
+    let mut suggestions = expression_absolute_path_entries(file, cache)
         .into_iter()
         .filter_map(|entry| {
-            let kind_matches = match target_kind {
-                Some(ExpressionAbsolutePathKind::Dataset) => true,
-                Some(ExpressionAbsolutePathKind::Group) => {
-                    entry.kind == ExpressionAbsolutePathKind::Group
-                }
-                None => true,
-            };
-            if !kind_matches {
-                return None;
-            }
-            let label = format!("{}{}", &fragment[..1], entry.path);
-            let basename = entry.path.rsplit('/').next();
-            let score = expression_suggestion_score(&label, fragment, basename)?;
-            let insert_text = match (&fragment[..1], entry.kind, entry.shape.as_ref()) {
-                ("!", ExpressionAbsolutePathKind::Dataset, Some(shape)) if !shape.is_empty() => {
+            let label = match (function, entry.kind, entry.shape.as_ref()) {
+                (
+                    ExpressionReferenceFunction::Load,
+                    ExpressionAbsolutePathKind::Dataset,
+                    Some(shape),
+                ) if !shape.is_empty() => {
                     format!(
-                        "{}{}[{}]",
-                        &fragment[..1],
+                        "{function_name}({})[{}]",
                         entry.path,
                         vec![".."; shape.len()].join(",")
                     )
                 }
-                _ => label.clone(),
+                _ => format!("{function_name}({})", entry.path),
             };
+            let basename = entry.path.rsplit('/').next();
+            let score = expression_suggestion_score(&entry.path, target_prefix, basename)?;
             Some((
                 score,
                 ExpressionPromptSuggestion {
@@ -879,7 +1065,7 @@ fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPro
                                 .to_string()
                         }
                     },
-                    insert_text,
+                    insert_text: label.clone(),
                     label: label.clone(),
                     detail: entry.detail,
                     kind: match entry.kind {
@@ -905,11 +1091,17 @@ fn expression_path_suggestions(file: &File, fragment: &str) -> Vec<ExpressionPro
         .collect()
 }
 
-fn expression_absolute_path_entries(file: &File) -> Vec<ExpressionAbsolutePathEntry> {
+fn expression_absolute_path_entries(
+    file: &File,
+    cache: &mut ExpressionPromptLookupCache,
+) -> Vec<ExpressionAbsolutePathEntry> {
+    if let Some(entries) = &cache.absolute_path_entries {
+        return entries.clone();
+    }
     let Ok(root) = file.as_group() else {
         return Vec::new();
     };
-    full_traversal(&root)
+    let entries = full_traversal(&root)
         .into_iter()
         .filter_map(|path| {
             if let Ok(dataset) = file.dataset(&path) {
@@ -931,7 +1123,33 @@ fn expression_absolute_path_entries(file: &File) -> Vec<ExpressionAbsolutePathEn
                 None
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    cache.absolute_path_entries = Some(entries.clone());
+    entries
+}
+
+fn cached_expression_attribute_names(
+    file: &File,
+    cache: &mut ExpressionPromptLookupCache,
+    object_path: &str,
+) -> Vec<String> {
+    if let Some(names) = cache.attribute_names.get(object_path) {
+        return names.clone();
+    }
+    let names = if object_path == "/" {
+        file.attr_names().ok()
+    } else if let Ok(group) = file.group(object_path) {
+        group.attr_names().ok()
+    } else if let Ok(dataset) = file.dataset(object_path) {
+        dataset.attr_names().ok()
+    } else {
+        None
+    }
+    .unwrap_or_default();
+    cache
+        .attribute_names
+        .insert(object_path.to_string(), names.clone());
+    names
 }
 
 fn format_shape_suffix(shape: &[usize]) -> String {

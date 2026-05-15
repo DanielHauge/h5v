@@ -22,9 +22,9 @@ mod prompt;
 mod render;
 use eval::{
     dataset_ploting_data_from_points, eval_expression_at, resolve_expression_item_value,
-    resolve_expression_scalar_values, resolve_expression_series_values,
+    resolve_expression_load_value, validate_expression_load_ref,
     validate_expression_series_compatibility, EvaluatedExpression, ExpressionSeriesInput,
-    ExpressionSeriesResolution,
+    ExpressionSeriesResolution, ResolvedExpressionLoad, ValidatedExpressionLoad,
 };
 use expression::{
     collect_expression_input_ids, collect_parsed_expression_refs, parse_derived_expression,
@@ -82,6 +82,12 @@ struct PreparedChartData {
     y_min: f64,
     y_max: f64,
     series: Vec<PreparedChartSeries>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValidatedExpression {
+    kind: DerivedExpressionKind,
+    sample_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +284,7 @@ pub struct MultiChartState {
     x_axis_policy: ChartXAxisPolicy,
     expression_prompt: Option<ExpressionPromptState>,
     last_chart_area: Option<Rect>,
+    last_chart_panel_area: Option<Rect>,
     drag_state: Option<ChartDragState>,
 }
 
@@ -299,6 +306,7 @@ impl MultiChartState {
             x_axis_policy: ChartXAxisPolicy::SampleIndex,
             expression_prompt: None,
             last_chart_area: None,
+            last_chart_panel_area: None,
             drag_state: None,
         }
     }
@@ -342,7 +350,7 @@ impl MultiChartState {
         expression: &str,
     ) -> Result<Option<expression::ExpressionSeriesRef>, String> {
         let tokens = tokenize_expression(expression)?;
-        let Some(ExpressionToken::SeriesRef(series_ref)) = tokens.first() else {
+        let Some(ExpressionToken::LoadRef(series_ref)) = tokens.first() else {
             return Ok(None);
         };
         if tokens.len() != 1 {
@@ -619,6 +627,96 @@ impl MultiChartState {
         )
     }
 
+    fn validate_expression_with_file(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<ValidatedExpression, String> {
+        let tokens = tokenize_expression(expression)?;
+        let parsed = parse_derived_expression(&tokens)?;
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        refs.item_refs.sort_by(|lhs, rhs| {
+            lhs.id
+                .0
+                .cmp(&rhs.id.0)
+                .then_with(|| match (&lhs.slice, &rhs.slice) {
+                    (None, None) => std::cmp::Ordering::Equal,
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (Some(lhs), Some(rhs)) => lhs.start.cmp(&rhs.start).then(lhs.end.cmp(&rhs.end)),
+                })
+        });
+        refs.item_refs.dedup();
+        refs.load_refs.sort_by_key(|load_ref| load_ref.render());
+        refs.load_refs.dedup();
+        if refs.item_refs.is_empty() && refs.load_refs.is_empty() {
+            return Err(
+                "Expression must reference at least one series such as $3, load(/group/ds)[..,0], or load($3:ATTR)"
+                    .to_string(),
+            );
+        }
+
+        let mut series_inputs = refs
+            .item_refs
+            .iter()
+            .map(|item_ref| {
+                resolve_expression_item_value(self, item_ref, ExpressionSeriesResolution::Overview)
+                    .map(|points| ExpressionSeriesInput {
+                        label: item_ref.render(),
+                        points,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let file = if refs.load_refs.is_empty() {
+            None
+        } else {
+            Some(file.ok_or_else(|| {
+                "load(...) references require an open file handle, but no file is loaded"
+                    .to_string()
+            })?)
+        };
+
+        if let Some(file) = file {
+            for load_ref in &refs.load_refs {
+                match validate_expression_load_ref(
+                    self,
+                    file,
+                    load_ref,
+                    ExpressionSeriesResolution::Overview,
+                    true,
+                )? {
+                    ValidatedExpressionLoad::Series { len } => {
+                        series_inputs.push(ExpressionSeriesInput {
+                            label: load_ref.render(),
+                            points: (0..len).map(|idx| (idx as f64, idx as f64)).collect(),
+                        });
+                    }
+                    ValidatedExpressionLoad::Scalar => {}
+                }
+            }
+        }
+
+        let first = series_inputs.first().ok_or_else(|| {
+            "Expression must reference at least one chart item or dataset".to_string()
+        })?;
+        let expected_len = first.points.len();
+        if expected_len == 0 {
+            return Err("Cannot build an expression from empty series".to_string());
+        }
+        let require_matching_x = matches!(parsed, ParsedExpression::YSeries(_));
+        validate_expression_series_compatibility(&series_inputs, expected_len, require_matching_x)?;
+
+        Ok(ValidatedExpression {
+            kind: match parsed {
+                ParsedExpression::YSeries(_) => DerivedExpressionKind::YSeries,
+                ParsedExpression::XySeries(_, _) => DerivedExpressionKind::XySeries,
+            },
+            sample_count: expected_len,
+        })
+    }
+
     fn evaluate_expression_with_resolution(
         &self,
         expression: &str,
@@ -642,15 +740,11 @@ impl MultiChartState {
                 })
         });
         refs.item_refs.dedup();
-        refs.series_refs
-            .sort_by_key(|series_ref| series_ref.render());
-        refs.series_refs.dedup();
-        refs.scalar_refs
-            .sort_by_key(|scalar_ref| scalar_ref.render());
-        refs.scalar_refs.dedup();
-        if refs.item_refs.is_empty() && refs.series_refs.is_empty() {
+        refs.load_refs.sort_by_key(|load_ref| load_ref.render());
+        refs.load_refs.dedup();
+        if refs.item_refs.is_empty() && refs.load_refs.is_empty() {
             return Err(
-                "Expression must reference at least one series such as $3, !/group/ds[..,0], or !$3:ATTR"
+                "Expression must reference at least one series such as $3, load(/group/ds)[..,0], or load($3:ATTR)"
                     .to_string(),
             );
         }
@@ -664,13 +758,34 @@ impl MultiChartState {
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
 
-        let external_series = resolve_expression_series_values(
-            self,
-            file,
-            &refs.series_refs,
-            resolution,
-            allow_external_series,
-        )?;
+        let file = if refs.load_refs.is_empty() {
+            None
+        } else {
+            Some(file.ok_or_else(|| {
+                "load(...) references require an open file handle, but no file is loaded"
+                    .to_string()
+            })?)
+        };
+        let mut external_series = std::collections::HashMap::new();
+        let mut scalar_values = std::collections::HashMap::new();
+        if let Some(file) = file {
+            for load_ref in &refs.load_refs {
+                match resolve_expression_load_value(
+                    self,
+                    file,
+                    load_ref,
+                    resolution,
+                    allow_external_series,
+                )? {
+                    ResolvedExpressionLoad::Series(points) => {
+                        external_series.insert(load_ref.clone(), points);
+                    }
+                    ResolvedExpressionLoad::Scalar(value) => {
+                        scalar_values.insert(load_ref.clone(), value);
+                    }
+                }
+            }
+        }
         let mut series_inputs = item_values
             .iter()
             .map(|(item_ref, points)| ExpressionSeriesInput {
@@ -678,12 +793,12 @@ impl MultiChartState {
                 points: points.clone(),
             })
             .collect::<Vec<_>>();
-        for series_ref in &refs.series_refs {
-            let points = external_series.get(series_ref).cloned().ok_or_else(|| {
-                format!("Series reference {} was not resolved", series_ref.render())
-            })?;
+        for load_ref in &refs.load_refs {
+            let Some(points) = external_series.get(load_ref).cloned() else {
+                continue;
+            };
             series_inputs.push(ExpressionSeriesInput {
-                label: series_ref.render(),
+                label: load_ref.render(),
                 points,
             });
         }
@@ -697,8 +812,6 @@ impl MultiChartState {
         }
         let require_matching_x = matches!(parsed, ParsedExpression::YSeries(_));
         validate_expression_series_compatibility(&series_inputs, expected_len, require_matching_x)?;
-
-        let scalar_values = resolve_expression_scalar_values(self, file, &refs.scalar_refs)?;
 
         let mut points = Vec::with_capacity(expected_len);
         let kind = match &parsed {
@@ -764,8 +877,8 @@ impl MultiChartState {
             }
             expected = Some(window);
         }
-        for series_ref in &refs.series_refs {
-            if let ExpressionObjectTarget::ItemRef(id) = &series_ref.target {
+        for load_ref in &refs.load_refs {
+            if let ExpressionObjectTarget::ItemRef(id) = &load_ref.target {
                 let item = self
                     .item_by_id(*id)
                     .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?;
@@ -1178,6 +1291,7 @@ impl MultiChartState {
             if self.items.is_empty() {
                 self.clear_zoom();
                 self.stateful_protocol = None;
+                self.last_chart_panel_area = None;
             }
             self.modified = true;
         }
@@ -1189,6 +1303,7 @@ impl MultiChartState {
         self.idx = 0;
         self.clear_zoom();
         self.stateful_protocol = None;
+        self.last_chart_panel_area = None;
         self.modified = true;
     }
 
@@ -1209,14 +1324,16 @@ impl MultiChartState {
         if normalized.is_empty() {
             return Err("Dataset reference cannot be empty".to_string());
         }
-        let prefixed = if normalized.starts_with('!') {
+        let prefixed = if normalized.starts_with("load(") {
             normalized.to_string()
+        } else if let Some((path, selectors)) = normalized.split_once('[') {
+            format!("load({path})[{selectors}")
         } else {
-            format!("!{normalized}")
+            format!("load({normalized})")
         };
         let Some(series_ref) = Self::raw_dataset_reference(&prefixed)? else {
             return Err(format!(
-                "Dataset reference '{}' must look like !/path or !/path[..,0]",
+                "Dataset reference '{}' must look like load(/path) or load(/path)[..,0]",
                 dataset_spec
             ));
         };
@@ -1235,7 +1352,7 @@ impl MultiChartState {
             )
         })?;
         let shape = dataset.shape();
-        let selection = series_ref.to_preview_selection(&shape)?;
+        let selection = series_ref.to_series_preview_selection(&shape)?;
         let source = ChartSource::DatasetSelection(DatasetChartSource {
             dataset_path: dataset.name(),
             display_path: dataset.name(),

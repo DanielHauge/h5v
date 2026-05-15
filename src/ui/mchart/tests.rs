@@ -12,6 +12,7 @@ use std::{
 };
 
 use hdf5_metno::File;
+use image::{DynamicImage, ImageBuffer, Rgb};
 use ndarray::Array;
 
 #[allow(deprecated)]
@@ -332,37 +333,43 @@ fn expression_derived_rejects_mismatched_x_values() {
 
 #[test]
 fn tokenizes_explicit_scalar_references() {
-    let tokens =
-        tokenize_expression("$1 * #/parent/scalar + #/parent/otherds:BIAS + #$1:SCALE").unwrap();
+    let tokens = tokenize_expression(
+        "$1 * load(/parent/scalar) + load(/parent/otherds:BIAS) + load($1:SCALE)",
+    )
+    .unwrap();
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::ScalarRef(ExpressionScalarRef {
+        ExpressionToken::LoadRef(ExpressionScalarRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: None,
+            selectors: None,
         }) if path == "/parent/scalar"
     )));
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::ScalarRef(ExpressionScalarRef {
+        ExpressionToken::LoadRef(ExpressionScalarRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: Some(attr_name),
+            selectors: None,
         }) if path == "/parent/otherds" && attr_name == "BIAS"
     )));
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::ScalarRef(ExpressionScalarRef {
+        ExpressionToken::LoadRef(ExpressionScalarRef {
             target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
             attr_name: Some(attr_name),
+            selectors: None,
         }) if attr_name == "SCALE"
     )));
 }
 
 #[test]
 fn tokenizes_explicit_series_references() {
-    let tokens = tokenize_expression("!/series + !/matrix[.., 1] + !$1:TRACE").unwrap();
+    let tokens =
+        tokenize_expression("load(/series) + load(/matrix)[.., 1] + load($1:TRACE)").unwrap();
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::SeriesRef(ExpressionSeriesRef {
+        ExpressionToken::LoadRef(ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: None,
             selectors: None,
@@ -370,7 +377,7 @@ fn tokenizes_explicit_series_references() {
     )));
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::SeriesRef(ExpressionSeriesRef {
+        ExpressionToken::LoadRef(ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: None,
             selectors: Some(selectors),
@@ -383,7 +390,7 @@ fn tokenizes_explicit_series_references() {
     )));
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::SeriesRef(ExpressionSeriesRef {
+        ExpressionToken::LoadRef(ExpressionSeriesRef {
             target: ExpressionObjectTarget::ItemRef(ChartItemId(1)),
             attr_name: Some(attr_name),
             selectors: None,
@@ -393,10 +400,10 @@ fn tokenizes_explicit_series_references() {
 
 #[test]
 fn parses_dataset_slices_with_explicit_ranges() {
-    let tokens = tokenize_expression("!/matrix[2,..10,0] + !/matrix[5,5..15,0]").unwrap();
+    let tokens = tokenize_expression("load(/matrix)[2,..10,0] + load(/matrix)[5,5..15,0]").unwrap();
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::SeriesRef(ExpressionSeriesRef {
+        ExpressionToken::LoadRef(ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: None,
             selectors: Some(selectors),
@@ -410,7 +417,7 @@ fn parses_dataset_slices_with_explicit_ranges() {
     )));
     assert!(tokens.iter().any(|token| matches!(
         token,
-        ExpressionToken::SeriesRef(ExpressionSeriesRef {
+        ExpressionToken::LoadRef(ExpressionSeriesRef {
             target: ExpressionObjectTarget::AbsolutePath(path),
             attr_name: None,
             selectors: Some(selectors),
@@ -436,7 +443,9 @@ fn dataset_path_reference_builds_preview_selection() {
             ExpressionDatasetSelector::Index(3),
         ]),
     };
-    let selection = dataset_ref.to_preview_selection(&[4, 5, 6, 7]).unwrap();
+    let selection = dataset_ref
+        .to_series_preview_selection(&[4, 5, 6, 7])
+        .unwrap();
     assert_eq!(selection.x, 1);
     assert_eq!(selection.index, vec![1, 0, 2, 3]);
 }
@@ -455,7 +464,9 @@ fn dataset_path_reference_builds_preview_selection_from_range_slice() {
             ExpressionDatasetSelector::Index(0),
         ]),
     };
-    let selection = dataset_ref.to_preview_selection(&[10, 20, 3]).unwrap();
+    let selection = dataset_ref
+        .to_series_preview_selection(&[10, 20, 3])
+        .unwrap();
     assert_eq!(selection.x, 1);
     assert_eq!(selection.index, vec![5, 0, 0]);
     assert_eq!(selection.slice, SliceSelection::FromTo(5, 15));
@@ -471,29 +482,31 @@ fn dataset_path_reference_requires_exactly_one_axis_selector() {
             ExpressionDatasetSelector::Index(1),
         ]),
     };
-    let err = dataset_ref.to_preview_selection(&[3, 4]).unwrap_err();
+    let err = dataset_ref
+        .to_series_preview_selection(&[3, 4])
+        .unwrap_err();
     assert!(err.contains("exactly one slice axis selector"));
 }
 
 #[test]
 fn current_expression_fragment_keeps_commas_inside_dataset_selectors() {
-    let buffer = "!/matrix[..,2,0] + $1";
+    let buffer = "load(/matrix)[..,2,0] + $1";
     let cursor = buffer.find(",2").unwrap() + 1;
     let (_, _, fragment) = current_expression_fragment(buffer, cursor).unwrap();
-    assert_eq!(fragment, "!/matrix[..,2,0]");
+    assert_eq!(fragment, "load(/matrix)[..,2,0]");
 }
 
 #[test]
 fn consume_expression_reference_fragment_keeps_commas_inside_dataset_selectors() {
-    let buffer = "!/matrix[5,5..15,0] + $1";
+    let buffer = "load(/matrix)[5,5..15,0] + $1";
     let chars: Vec<(usize, char)> = buffer.char_indices().collect();
     let end = consume_expression_reference_fragment(buffer, &chars, 0);
-    assert_eq!(&buffer[..end], "!/matrix[5,5..15,0]");
+    assert_eq!(&buffer[..end], "load(/matrix)[5,5..15,0]");
 }
 
 #[test]
 fn parses_top_level_xy_expression_tuple() {
-    let tokens = tokenize_expression("($1 * 2, $2 + #/calibration/offset)").unwrap();
+    let tokens = tokenize_expression("($1 * 2, $2 + load(/calibration/offset))").unwrap();
     let parsed = parse_derived_expression(&tokens).unwrap();
     match parsed {
         ParsedExpression::XySeries(_, _) => {}
@@ -512,8 +525,8 @@ fn normalizes_absolute_expression_paths() {
 
 #[test]
 fn rejects_implicit_context_scalar_attributes() {
-    let err = tokenize_expression("$1 + #SCALE").unwrap_err();
-    assert!(err.contains("Scalar references must use an absolute path"));
+    let err = tokenize_expression("$1 + load(SCALE)").unwrap_err();
+    assert!(err.contains("Data references must use load("));
 }
 
 #[test]
@@ -535,9 +548,28 @@ fn expression_prompt_edits_do_not_invalidate_chart_render() {
 }
 
 #[test]
+fn expression_prompt_can_defer_cached_image_protocol_frames() {
+    let mut state = make_state();
+    state.last_chart_area = Some(ratatui::layout::Rect::new(5, 5, 20, 10));
+    state.last_chart_panel_area = Some(ratatui::layout::Rect::new(5, 5, 20, 10));
+    state.stateful_protocol = Some(state.picker.new_resize_protocol(DynamicImage::ImageRgb8(
+        ImageBuffer::<Rgb<u8>, _>::from_pixel(1, 1, Rgb([0, 0, 0])),
+    )));
+    state.expression_prompt = Some(ExpressionPromptState::new(
+        "load(/series)".to_string(),
+        "load(/series)".len(),
+        ExpressionPromptMode::New,
+    ));
+    state.modified = false;
+
+    assert!(state.should_defer_image_protocol_frame(ratatui::layout::Rect::new(5, 5, 20, 10)));
+    assert!(!state.should_defer_image_protocol_frame(ratatui::layout::Rect::new(5, 5, 21, 10)));
+}
+
+#[test]
 fn raw_dataset_reference_prompt_message_is_background_loading_hint() {
     let state = make_state();
-    let messages = expression_prompt_messages(&state, None, "!/big_dataset[266505050]");
+    let messages = expression_prompt_messages(&state, None, "load(/big_dataset)[266505050]");
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].kind, ExpressionPromptMessageKind::Valid);
     assert_eq!(
@@ -549,24 +581,19 @@ fn raw_dataset_reference_prompt_message_is_background_loading_hint() {
 #[test]
 fn suggestion_selection_wraps_within_visible_entries() {
     let mut state = make_state();
-    state.expression_prompt = Some(ExpressionPromptState {
-        buffer: "!/".to_string(),
-        cursor: 2,
-        mode: ExpressionPromptMode::New,
-        messages: Vec::new(),
-        suggestions: (0..6)
-            .map(|idx| ExpressionPromptSuggestion {
-                symbol: String::new(),
-                insert_text: format!("!/path{idx}"),
-                label: format!("!/path{idx}"),
-                detail: String::new(),
-                kind: ExpressionPromptSuggestionKind::Dataset,
-                highlight_spans: Vec::new(),
-            })
-            .collect(),
-        selected_suggestion: Some(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS - 1),
-        input_segments: Vec::new(),
-    });
+    let mut prompt = ExpressionPromptState::new("load(/".to_string(), 6, ExpressionPromptMode::New);
+    prompt.suggestions = (0..6)
+        .map(|idx| ExpressionPromptSuggestion {
+            symbol: String::new(),
+            insert_text: format!("load(/path{idx})"),
+            label: format!("load(/path{idx})"),
+            detail: String::new(),
+            kind: ExpressionPromptSuggestionKind::Dataset,
+            highlight_spans: Vec::new(),
+        })
+        .collect();
+    prompt.selected_suggestion = Some(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS - 1);
+    state.expression_prompt = Some(prompt);
 
     state.expression_select_next_suggestion();
     assert_eq!(
@@ -591,9 +618,14 @@ fn suggestion_selection_wraps_within_visible_entries() {
 
 #[test]
 fn suggestion_score_prefers_prefix_and_basename_matches() {
-    let prefix = expression_suggestion_score("!/group/series", "!/ser", Some("series")).unwrap();
-    let fuzzy =
-        expression_suggestion_score("!/group/alpha_series", "!/ser", Some("alpha_series")).unwrap();
+    let prefix =
+        expression_suggestion_score("load(/group/series)", "load(/ser", Some("series")).unwrap();
+    let fuzzy = expression_suggestion_score(
+        "load(/group/alpha_series)",
+        "load(/ser",
+        Some("alpha_series"),
+    )
+    .unwrap();
     assert!(prefix > fuzzy);
 }
 
@@ -757,7 +789,7 @@ fn updating_xy_series_recomputes_downstream_y_dependents() {
 
 #[test]
 fn collect_expression_input_ids_includes_item_targeted_series_refs() {
-    let tokens = tokenize_expression("(!$1, $2 + 1)").expect("tokenize");
+    let tokens = tokenize_expression("(load($1:TRACE), $2 + 1)").expect("tokenize");
     let parsed = parse_derived_expression(&tokens).expect("parse");
     let mut refs = ExpressionRefs::default();
     collect_parsed_expression_refs(&parsed, &mut refs);
@@ -796,7 +828,10 @@ fn expression_derived_supports_dataset_path_series_inputs() {
     let mut state = make_state();
 
     state
-        .create_expression_derived_with_file("!/series + !/matrix[..,1]".to_string(), Some(&file))
+        .create_expression_derived_with_file(
+            "load(/series) + load(/matrix)[..,1]".to_string(),
+            Some(&file),
+        )
         .unwrap();
 
     let derived = state.chart_items().last().unwrap();
@@ -815,7 +850,10 @@ fn expression_derived_supports_scalar_dataset_inputs() {
     let mut state = make_state();
 
     state
-        .create_expression_derived_with_file("!/series + #/scalar".to_string(), Some(&file))
+        .create_expression_derived_with_file(
+            "load(/series) + load(/scalar)".to_string(),
+            Some(&file),
+        )
         .unwrap();
 
     let derived = state.chart_items().last().unwrap();
@@ -834,7 +872,10 @@ fn expression_derived_dataset_path_refs_validate_series_lengths() {
     let mut state = make_state();
 
     let err = state
-        .create_expression_derived_with_file("!/series + !/matrix[1,..]".to_string(), Some(&file))
+        .create_expression_derived_with_file(
+            "load(/series) + load(/matrix)[1,..]".to_string(),
+            Some(&file),
+        )
         .unwrap_err();
     assert!(err.contains("lengths must match"));
 
@@ -926,7 +967,7 @@ fn expression_derived_supports_scalar_attributes_from_dataset_and_paths() {
 
     state
         .create_expression_derived_with_file(
-            "$1 * #$1:SCALE + #/parent/child:CHILD_OFFSET + #/parent/otherds:BIAS + #/parent/scalar"
+            "$1 * load($1:SCALE) + load(/parent/child:CHILD_OFFSET) + load(/parent/otherds:BIAS) + load(/parent/scalar)"
                 .to_string(),
             Some(&file),
         )
@@ -962,7 +1003,7 @@ fn expression_derived_rejects_non_numeric_scalar_attribute() {
     );
 
     let err = state
-        .create_expression_derived_with_file("$1 + #$1:FLAG".to_string(), Some(&file))
+        .create_expression_derived_with_file("$1 + load($1:FLAG)".to_string(), Some(&file))
         .unwrap_err();
     assert!(err.contains("must be numeric"));
 
@@ -993,7 +1034,10 @@ fn expression_derived_supports_series_attributes_on_dataset_items() {
     );
 
     state
-        .create_expression_derived_with_file("!$1:TRACE + #/parent/scalar".to_string(), Some(&file))
+        .create_expression_derived_with_file(
+            "load($1:TRACE) + load(/parent/scalar)".to_string(),
+            Some(&file),
+        )
         .unwrap();
 
     let derived = state.chart_items().last().unwrap();
@@ -1026,6 +1070,33 @@ fn zoom_in_anchor_ratio_biases_toward_hovered_side() {
     state.clear_zoom();
     assert!(state.zoom_with_anchor(10.0, 1.0, 0.0, true, ChartZoomMode::XOnly));
     assert_viewport(&state, Some((19.8, 99.0, 0.0, 99.0)));
+}
+
+#[test]
+fn chart_panel_title_includes_viewport_when_zoomed() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..10).map(|i| (i as f64, (i * 2) as f64)).collect(),
+    );
+
+    assert_eq!(state.chart_panel_title(), "Overlay chart [x values]");
+
+    state.viewport = Some(ChartViewport {
+        x_min: 2.0,
+        x_max: 6.0,
+        y_min: 4.0,
+        y_max: 12.0,
+    });
+    assert_eq!(
+        state.chart_panel_title(),
+        "Overlay chart [x values] · view x=[2.0000, 6.0000] y=[4.0000, 12.0000]"
+    );
 }
 
 #[test]

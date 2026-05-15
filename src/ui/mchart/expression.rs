@@ -14,8 +14,7 @@ pub(super) enum ExprBinaryOp {
 pub(super) enum ExpressionAst {
     Number(f64),
     ItemRef(ExpressionItemRef),
-    SeriesRef(ExpressionSeriesRef),
-    ScalarRef(ExpressionScalarRef),
+    LoadRef(ExpressionLoadRef),
     UnaryMinus(Box<ExpressionAst>),
     Binary {
         op: ExprBinaryOp,
@@ -27,8 +26,7 @@ pub(super) enum ExpressionAst {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum ExpressionToken {
     ItemRef(ExpressionItemRef),
-    SeriesRef(ExpressionSeriesRef),
-    ScalarRef(ExpressionScalarRef),
+    LoadRef(ExpressionLoadRef),
     Number(f64),
     Plus,
     Minus,
@@ -74,17 +72,14 @@ pub(super) struct ExpressionItemRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct ExpressionSeriesRef {
+pub(super) struct ExpressionLoadRef {
     pub(super) target: ExpressionObjectTarget,
     pub(super) attr_name: Option<String>,
     pub(super) selectors: Option<Vec<ExpressionDatasetSelector>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct ExpressionScalarRef {
-    pub(super) target: ExpressionObjectTarget,
-    pub(super) attr_name: Option<String>,
-}
+pub(super) type ExpressionSeriesRef = ExpressionLoadRef;
+pub(super) type ExpressionScalarRef = ExpressionLoadRef;
 
 impl ExpressionObjectTarget {
     pub(super) fn render(&self) -> String {
@@ -104,11 +99,11 @@ impl ExpressionItemRef {
     }
 }
 
-impl ExpressionSeriesRef {
+impl ExpressionLoadRef {
     pub(super) fn render(&self) -> String {
         let base = match &self.attr_name {
-            Some(attr_name) => format!("!{}:{attr_name}", self.target.render()),
-            None => format!("!{}", self.target.render()),
+            Some(attr_name) => format!("load({}:{attr_name})", self.target.render()),
+            None => format!("load({})", self.target.render()),
         };
         match &self.selectors {
             None => base,
@@ -131,7 +126,10 @@ impl ExpressionSeriesRef {
         }
     }
 
-    pub(super) fn to_preview_selection(&self, shape: &[usize]) -> Result<PreviewSelection, String> {
+    pub(super) fn to_series_preview_selection(
+        &self,
+        shape: &[usize],
+    ) -> Result<PreviewSelection, String> {
         let reference = self.render();
         if shape.is_empty() {
             return Err(format!(
@@ -142,7 +140,7 @@ impl ExpressionSeriesRef {
             None => {
                 if shape.len() != 1 {
                     return Err(format!(
-                        "Series reference {reference} needs an explicit selector like !/path[..,0] for rank-{} arrays",
+                        "Reference {reference} needs an explicit selector like load(/path)[..,0] for rank-{} arrays",
                         shape.len()
                     ));
                 }
@@ -227,15 +225,6 @@ impl ExpressionSeriesRef {
     }
 }
 
-impl ExpressionScalarRef {
-    pub(super) fn render(&self) -> String {
-        match &self.attr_name {
-            Some(attr_name) => format!("#{}:{attr_name}", self.target.render()),
-            None => format!("#{}", self.target.render()),
-        }
-    }
-}
-
 pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, String> {
     let mut chars = input.chars().peekable();
     let mut tokens = Vec::new();
@@ -248,18 +237,6 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
             '$' => {
                 chars.next();
                 tokens.push(ExpressionToken::ItemRef(parse_expression_item_ref(
-                    &mut chars,
-                )?));
-            }
-            '!' => {
-                chars.next();
-                tokens.push(ExpressionToken::SeriesRef(parse_expression_series_ref(
-                    &mut chars,
-                )?));
-            }
-            '#' => {
-                chars.next();
-                tokens.push(ExpressionToken::ScalarRef(parse_expression_scalar_ref(
                     &mut chars,
                 )?));
             }
@@ -282,6 +259,27 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
                     .parse::<f64>()
                     .map_err(|_| format!("Invalid numeric literal '{number}'"))?;
                 tokens.push(ExpressionToken::Number(value));
+            }
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let mut ident = String::new();
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_alphanumeric() || *next == '_' {
+                        ident.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                match ident.as_str() {
+                    "load" => tokens.push(ExpressionToken::LoadRef(parse_expression_load_ref(
+                        &mut chars,
+                    )?)),
+                    _ => {
+                        return Err(format!(
+                            "Unsupported function '{ident}' in expression. Use load(...), $id item references, numbers, + - * /, commas, and parentheses"
+                        ))
+                    }
+                }
             }
             '+' => {
                 chars.next();
@@ -313,7 +311,7 @@ pub(super) fn tokenize_expression(input: &str) -> Result<Vec<ExpressionToken>, S
             }
             other => {
                 return Err(format!(
-                    "Unsupported character '{}' in expression. Use $id item references, !series references, #scalar references, numbers, + - * /, commas, and parentheses",
+                    "Unsupported character '{}' in expression. Use $id item references, load(...) references, numbers, + - * /, commas, and parentheses",
                     other
                 ));
             }
@@ -423,25 +421,29 @@ fn parse_expression_absolute_path(
     Ok(path)
 }
 
+fn skip_expression_call_whitespace(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    while matches!(chars.peek(), Some(next) if next.is_whitespace()) {
+        chars.next();
+    }
+}
+
 fn parse_expression_object_target(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    prefix: char,
+    function_name: &str,
 ) -> Result<ExpressionObjectTarget, String> {
     match chars.peek().copied() {
-        Some('/') => Ok(ExpressionObjectTarget::AbsolutePath(parse_expression_absolute_path(
-            chars,
-        )?)),
+        Some('/') => Ok(ExpressionObjectTarget::AbsolutePath(
+            parse_expression_absolute_path(chars)?,
+        )),
         Some('$') => {
             chars.next();
-            Ok(ExpressionObjectTarget::ItemRef(parse_expression_item_id(chars)?))
+            Ok(ExpressionObjectTarget::ItemRef(parse_expression_item_id(
+                chars,
+            )?))
         }
-        _ => Err(match prefix {
-            '!' => {
-                "Series references must use an absolute path like !/group/dataset or an item-backed attribute like !$1:ATTR"
-                    .to_string()
-            }
-            '#' => {
-                "Scalar references must use an absolute path like #/group/scalar or an item-backed attribute like #$1:ATTR"
+        _ => Err(match function_name {
+            "load" => {
+                "Data references must use load(/group/dataset), load(/group/dataset:ATTR), or load($1:ATTR)"
                     .to_string()
             }
             _ => "Invalid expression reference".to_string(),
@@ -449,16 +451,21 @@ fn parse_expression_object_target(
     }
 }
 
-pub(super) fn parse_expression_series_ref(
+pub(super) fn parse_expression_load_ref(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionSeriesRef, String> {
-    let target = parse_expression_object_target(chars, '!')?;
+) -> Result<ExpressionLoadRef, String> {
+    skip_expression_call_whitespace(chars);
+    if chars.next() != Some('(') {
+        return Err("Data references must use load(...)".to_string());
+    }
+    skip_expression_call_whitespace(chars);
+    let target = parse_expression_object_target(chars, "load")?;
     let attr_name = if chars.peek() == Some(&':') {
         chars.next();
         let attr_name = parse_expression_attribute_name(chars);
         if attr_name.is_empty() {
             return Err(format!(
-                "Expected an attribute name after '{}:' in series reference",
+                "Expected an attribute name after '{}:' in load reference",
                 target.render()
             ));
         }
@@ -467,14 +474,19 @@ pub(super) fn parse_expression_series_ref(
         None
     };
 
-    if attr_name.is_some() && chars.peek() == Some(&'[') {
-        return Err(
-            "Series attribute references currently use the full attribute value and do not support selectors"
-                .to_string(),
-        );
+    let mut load_ref = ExpressionLoadRef {
+        target,
+        attr_name,
+        selectors: None,
+    };
+    skip_expression_call_whitespace(chars);
+    if chars.next() != Some(')') {
+        return Err(format!(
+            "Load reference {} is missing a closing ')'",
+            load_ref.render().trim_end_matches(')')
+        ));
     }
-
-    let selectors = if chars.peek() == Some(&'[') {
+    if chars.peek() == Some(&'[') {
         chars.next();
         let mut spec = String::new();
         let mut closed = false;
@@ -487,57 +499,28 @@ pub(super) fn parse_expression_series_ref(
         }
         if !closed {
             return Err(format!(
-                "Series reference '{}[{spec}' is missing a closing ']'",
-                match &attr_name {
-                    Some(attr_name) => format!("!{}:{attr_name}", target.render()),
-                    None => format!("!{}", target.render()),
-                }
+                "Load reference '{}[{spec}' is missing a closing ']'",
+                load_ref.render()
             ));
         }
-        Some(parse_expression_dataset_selectors(
-            &match &attr_name {
-                Some(attr_name) => format!("!{}:{attr_name}", target.render()),
-                None => format!("!{}", target.render()),
-            },
+        load_ref.selectors = Some(parse_expression_dataset_selectors(
+            &load_ref.render(),
             &spec,
-        )?)
-    } else {
-        None
-    };
+        )?);
+    }
+    Ok(load_ref)
+}
 
-    Ok(ExpressionSeriesRef {
-        target,
-        attr_name,
-        selectors,
-    })
+pub(super) fn parse_expression_series_ref(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<ExpressionLoadRef, String> {
+    parse_expression_load_ref(chars)
 }
 
 pub(super) fn parse_expression_scalar_ref(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Result<ExpressionScalarRef, String> {
-    let target = parse_expression_object_target(chars, '#')?;
-    let attr_name = if chars.peek() == Some(&':') {
-        chars.next();
-        let attr_name = parse_expression_attribute_name(chars);
-        if attr_name.is_empty() {
-            return Err(format!(
-                "Expected an attribute name after '{}:' in scalar reference",
-                target.render()
-            ));
-        }
-        Some(attr_name)
-    } else {
-        None
-    };
-
-    if matches!(target, ExpressionObjectTarget::ItemRef(_)) && attr_name.is_none() {
-        return Err("Scalar item references must name an attribute like #$1:OFFSET".to_string());
-    }
-    if chars.peek() == Some(&'[') {
-        return Err("Scalar references cannot use series selectors".to_string());
-    }
-
-    Ok(ExpressionScalarRef { target, attr_name })
+) -> Result<ExpressionLoadRef, String> {
+    parse_expression_load_ref(chars)
 }
 
 fn parse_expression_dataset_selectors(
@@ -662,13 +645,9 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(ExpressionAst::ItemRef(item_ref.clone()))
             }
-            ExpressionToken::SeriesRef(series_ref) => {
+            ExpressionToken::LoadRef(load_ref) => {
                 *pos += 1;
-                Ok(ExpressionAst::SeriesRef(series_ref.clone()))
-            }
-            ExpressionToken::ScalarRef(scalar_ref) => {
-                *pos += 1;
-                Ok(ExpressionAst::ScalarRef(scalar_ref.clone()))
+                Ok(ExpressionAst::LoadRef(load_ref.clone()))
             }
             ExpressionToken::Minus => {
                 *pos += 1;
@@ -750,16 +729,14 @@ fn split_top_level_tuple(
 #[derive(Debug, Default)]
 pub(super) struct ExpressionRefs {
     pub(super) item_refs: Vec<ExpressionItemRef>,
-    pub(super) series_refs: Vec<ExpressionSeriesRef>,
-    pub(super) scalar_refs: Vec<ExpressionScalarRef>,
+    pub(super) load_refs: Vec<ExpressionLoadRef>,
 }
 
 fn collect_expression_refs(expr: &ExpressionAst, out: &mut ExpressionRefs) {
     match expr {
         ExpressionAst::Number(_) => {}
         ExpressionAst::ItemRef(item_ref) => out.item_refs.push(item_ref.clone()),
-        ExpressionAst::SeriesRef(series_ref) => out.series_refs.push(series_ref.clone()),
-        ExpressionAst::ScalarRef(scalar_ref) => out.scalar_refs.push(scalar_ref.clone()),
+        ExpressionAst::LoadRef(load_ref) => out.load_refs.push(load_ref.clone()),
         ExpressionAst::UnaryMinus(inner) => collect_expression_refs(inner, out),
         ExpressionAst::Binary { lhs, rhs, .. } => {
             collect_expression_refs(lhs, out);
@@ -784,17 +761,9 @@ pub(super) fn collect_expression_input_ids(refs: &ExpressionRefs) -> Vec<ChartIt
         .iter()
         .map(|item_ref| item_ref.id)
         .chain(
-            refs.series_refs
+            refs.load_refs
                 .iter()
-                .filter_map(|series_ref| match &series_ref.target {
-                    ExpressionObjectTarget::ItemRef(id) => Some(*id),
-                    ExpressionObjectTarget::AbsolutePath(_) => None,
-                }),
-        )
-        .chain(
-            refs.scalar_refs
-                .iter()
-                .filter_map(|scalar_ref| match &scalar_ref.target {
+                .filter_map(|load_ref| match &load_ref.target {
                     ExpressionObjectTarget::ItemRef(id) => Some(*id),
                     ExpressionObjectTarget::AbsolutePath(_) => None,
                 }),
