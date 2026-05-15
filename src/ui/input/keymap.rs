@@ -142,6 +142,8 @@ pub enum CommandAction {
     Delete,
     MoveLeft,
     MoveRight,
+    MoveWordLeft,
+    MoveWordRight,
     InsertChar(char),
 }
 
@@ -363,6 +365,8 @@ pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
         (KeyCode::End, _) => Some(CommandAction::MoveToEnd),
         (KeyCode::Backspace, _) => Some(CommandAction::Backspace),
         (KeyCode::Delete, _) => Some(CommandAction::Delete),
+        (KeyCode::Left, KeyModifiers::CONTROL) => Some(CommandAction::MoveWordLeft),
+        (KeyCode::Right, KeyModifiers::CONTROL) => Some(CommandAction::MoveWordRight),
         (KeyCode::Left, _) => Some(CommandAction::MoveLeft),
         (KeyCode::Right, _) => Some(CommandAction::MoveRight),
         (KeyCode::Char(c), modifiers)

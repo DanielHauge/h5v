@@ -163,6 +163,30 @@ impl ExpressionPromptState {
 }
 
 impl MultiChartState {
+    fn prompt_word_boundary_left(buffer: &str, cursor: usize) -> usize {
+        let bytes = buffer.as_bytes();
+        let mut cursor = cursor.min(bytes.len());
+        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+            cursor -= 1;
+        }
+        while cursor > 0 && !bytes[cursor - 1].is_ascii_whitespace() {
+            cursor -= 1;
+        }
+        cursor
+    }
+
+    fn prompt_word_boundary_right(buffer: &str, cursor: usize) -> usize {
+        let bytes = buffer.as_bytes();
+        let mut cursor = cursor.min(bytes.len());
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        cursor
+    }
+
     pub fn open_expression_prompt(&mut self) {
         let buffer = String::new();
         let cursor = buffer.len();
@@ -289,6 +313,36 @@ impl MultiChartState {
         }
     }
 
+    pub fn expression_move_word_left(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_cursor =
+                        Self::prompt_word_boundary_left(&prompt.name_buffer, prompt.name_cursor);
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = Self::prompt_word_boundary_left(&prompt.buffer, prompt.cursor);
+                    prompt.selected_suggestion = None;
+                }
+            }
+        }
+    }
+
+    pub fn expression_move_word_right(&mut self) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            match prompt.focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_cursor =
+                        Self::prompt_word_boundary_right(&prompt.name_buffer, prompt.name_cursor);
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = Self::prompt_word_boundary_right(&prompt.buffer, prompt.cursor);
+                    prompt.selected_suggestion = None;
+                }
+            }
+        }
+    }
+
     pub fn expression_move_to_start(&mut self) {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             match prompt.focus {
@@ -336,6 +390,25 @@ impl MultiChartState {
                 ExpressionPromptFocus::Expression => ExpressionPromptFocus::Name,
             };
             prompt.selected_suggestion = None;
+        }
+    }
+
+    pub(super) fn expression_set_focus_cursor(
+        &mut self,
+        focus: ExpressionPromptFocus,
+        cursor: usize,
+    ) {
+        if let Some(prompt) = self.expression_prompt.as_mut() {
+            prompt.focus = focus;
+            match focus {
+                ExpressionPromptFocus::Name => {
+                    prompt.name_cursor = cursor.min(prompt.name_buffer.len());
+                }
+                ExpressionPromptFocus::Expression => {
+                    prompt.cursor = cursor.min(prompt.buffer.len());
+                    prompt.selected_suggestion = None;
+                }
+            }
         }
     }
 

@@ -72,6 +72,14 @@ pub(crate) fn handle_mchart_event(
                             state.multi_chart.expression_move_right();
                             Ok(EventResult::Redraw)
                         }
+                        Some(CommandAction::MoveWordLeft) => {
+                            state.multi_chart.expression_move_word_left();
+                            Ok(EventResult::Redraw)
+                        }
+                        Some(CommandAction::MoveWordRight) => {
+                            state.multi_chart.expression_move_word_right();
+                            Ok(EventResult::Redraw)
+                        }
                         Some(CommandAction::MoveToStart) => {
                             state.multi_chart.expression_move_to_start();
                             Ok(EventResult::Redraw)
@@ -252,6 +260,26 @@ pub(crate) fn handle_mchart_event(
             KeyEventKind::Release => Ok(EventResult::Continue),
         },
         Event::Mouse(mouse_event) => match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if state
+                    .multi_chart
+                    .click_item_hitbox(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
+                let file = state.file.clone();
+                match state
+                    .multi_chart
+                    .click_expression_editor(mouse_event.column, mouse_event.row)
+                {
+                    Ok(true) => {
+                        state.multi_chart.refresh_expression_prompt(file.as_ref());
+                        Ok(EventResult::Redraw)
+                    }
+                    Ok(false) => Ok(EventResult::Continue),
+                    Err(error) => Ok(EventResult::Toast(AppToast::Warning(error), false)),
+                }
+            }
             MouseEventKind::Down(MouseButton::Right) => {
                 state
                     .multi_chart

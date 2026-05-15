@@ -18,8 +18,9 @@ use crate::{configure, error::log_error};
 use super::{
     prompt::ExpressionPromptFocus, ChartSource, ExpressionPromptInputKind,
     ExpressionPromptMessageKind, ExpressionPromptMode, ExpressionPromptSuggestion,
-    ExpressionPromptSuggestionKind, MultiChartRenderRequest, MultiChartRenderResult,
-    MultiChartState, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    ExpressionPromptSuggestionKind, MultiChartEditorHitbox, MultiChartItemHitbox,
+    MultiChartRenderRequest, MultiChartRenderResult, MultiChartState,
+    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 fn mchart_body_style() -> Style {
@@ -418,7 +419,7 @@ impl MultiChartState {
         f.render_widget(paragraph, area);
     }
 
-    fn render_item_list(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
+    fn render_item_list(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let block = Block::default()
             .title(format!(
                 "Items ({}/{} visible, {} loading)",
@@ -438,6 +439,7 @@ impl MultiChartState {
             );
         let inner = block.inner(area);
         f.render_widget(block, area);
+        self.item_hitboxes.clear();
 
         let available_rows = inner.height as usize;
         let visible_items = available_rows / 2;
@@ -553,6 +555,18 @@ impl MultiChartState {
                 [first_line, second_line]
             })
             .collect::<Vec<_>>();
+        self.item_hitboxes = (start..end)
+            .enumerate()
+            .map(|(offset, absolute_idx)| MultiChartItemHitbox {
+                area: Rect::new(
+                    inner.x,
+                    inner.y.saturating_add((offset * 2) as u16),
+                    inner.width,
+                    2,
+                ),
+                index: absolute_idx,
+            })
+            .collect();
         f.render_widget(
             Paragraph::new(Text::from(lines)).style(mchart_body_style()),
             inner,
@@ -963,7 +977,7 @@ impl MultiChartState {
         true
     }
 
-    fn render_expression_prompt(&self, f: &mut ratatui::Frame<'_>, area: Rect) {
+    fn render_expression_prompt(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let prompt = self.expression_prompt.as_ref();
         let panel_bg = configure::themed_color(|colors| colors.surface.bg);
         let title = match prompt {
@@ -1135,11 +1149,81 @@ impl MultiChartState {
             .border_style(
                 Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
             );
+        let input_inner = input_block.inner(chunks[0]);
         f.render_widget(input_block.clone(), chunks[0]);
         f.render_widget(
             Paragraph::new(input_text).style(mchart_body_style().bg(panel_bg)),
-            input_block.inner(chunks[0]),
+            input_inner,
         );
+        self.editor_hitbox = if input_inner.height == 0 || input_inner.width == 0 {
+            None
+        } else if let Some(prompt) = prompt {
+            let id_width = format!("${} ", prompt.item_id.0).chars().count() as u16;
+            let name_text = if prompt.name_buffer.is_empty() {
+                "(?)".to_string()
+            } else {
+                format!("${}", prompt.name_buffer)
+            };
+            let expression_text = if prompt.buffer.is_empty() {
+                "$1 + load(/path)[..,0]".to_string()
+            } else {
+                prompt.buffer.clone()
+            };
+            let name_width = name_text.chars().count().max(1) as u16;
+            let expr_x = input_inner
+                .x
+                .saturating_add(id_width)
+                .saturating_add(name_width)
+                .saturating_add(3);
+            Some(MultiChartEditorHitbox {
+                area: input_inner,
+                name_area: Rect::new(
+                    input_inner.x.saturating_add(id_width),
+                    input_inner.y,
+                    name_width,
+                    1,
+                ),
+                expression_area: Rect::new(
+                    expr_x,
+                    input_inner.y,
+                    expression_text.chars().count().max(1) as u16,
+                    1,
+                ),
+            })
+        } else if let Some(item) = self.selected_item() {
+            let id_width = format!("${} ", item.id.0).chars().count() as u16;
+            let name_text = item
+                .name
+                .as_ref()
+                .map(|name| format!("${name}"))
+                .unwrap_or_else(|| "(?)".to_string());
+            let expression_text = item
+                .editable_expression()
+                .unwrap_or_else(|| "expression editor inactive".to_string());
+            let name_width = name_text.chars().count().max(1) as u16;
+            let expr_x = input_inner
+                .x
+                .saturating_add(id_width)
+                .saturating_add(name_width)
+                .saturating_add(3);
+            Some(MultiChartEditorHitbox {
+                area: input_inner,
+                name_area: Rect::new(
+                    input_inner.x.saturating_add(id_width),
+                    input_inner.y,
+                    name_width,
+                    1,
+                ),
+                expression_area: Rect::new(
+                    expr_x,
+                    input_inner.y,
+                    expression_text.chars().count().max(1) as u16,
+                    1,
+                ),
+            })
+        } else {
+            None
+        };
 
         let mut lines = Vec::new();
         if let Some(prompt) = prompt {

@@ -39,9 +39,9 @@ pub use model::{
     MultiChartLoadState, Point,
 };
 use prompt::{
-    ExpressionPromptInputKind, ExpressionPromptMessageKind, ExpressionPromptMode,
-    ExpressionPromptState, ExpressionPromptSuggestion, ExpressionPromptSuggestionKind,
-    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    ExpressionPromptFocus, ExpressionPromptInputKind, ExpressionPromptMessageKind,
+    ExpressionPromptMode, ExpressionPromptState, ExpressionPromptSuggestion,
+    ExpressionPromptSuggestionKind, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 #[allow(unused_imports)]
 use render::chart_plot_area_in_rect;
@@ -52,6 +52,19 @@ struct ChartViewport {
     x_max: f64,
     y_min: f64,
     y_max: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MultiChartItemHitbox {
+    pub(super) area: Rect,
+    pub(super) index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MultiChartEditorHitbox {
+    pub(super) area: Rect,
+    pub(super) name_area: Rect,
+    pub(super) expression_area: Rect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,9 +374,18 @@ pub struct MultiChartState {
     last_chart_area: Option<Rect>,
     last_chart_panel_area: Option<Rect>,
     drag_state: Option<ChartDragState>,
+    pub(super) item_hitboxes: Vec<MultiChartItemHitbox>,
+    pub(super) editor_hitbox: Option<MultiChartEditorHitbox>,
 }
 
 impl MultiChartState {
+    fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
+        column >= rect.x
+            && column < rect.x.saturating_add(rect.width)
+            && row >= rect.y
+            && row < rect.y.saturating_add(rect.height)
+    }
+
     pub fn new(
         picker: Picker,
         tx_load: Sender<MultiChartLoadRequest>,
@@ -390,6 +412,8 @@ impl MultiChartState {
             last_chart_area: None,
             last_chart_panel_area: None,
             drag_state: None,
+            item_hitboxes: Vec::new(),
+            editor_hitbox: None,
         }
     }
 
@@ -511,6 +535,62 @@ impl MultiChartState {
         self.items
             .iter()
             .find(|item| item.name.as_deref() == Some(name))
+    }
+
+    pub fn click_item_hitbox(&mut self, column: u16, row: u16) -> bool {
+        let Some(hitbox) = self
+            .item_hitboxes
+            .iter()
+            .find(|hitbox| Self::point_in_rect(hitbox.area, column, row))
+            .copied()
+        else {
+            return false;
+        };
+        self.idx = hitbox.index.min(self.items.len().saturating_sub(1));
+        self.modified = true;
+        true
+    }
+
+    fn name_cursor_from_click(&self, column: u16, hitbox: MultiChartEditorHitbox) -> usize {
+        let Some(prompt) = self.expression_prompt.as_ref() else {
+            return 0;
+        };
+        if prompt.name_buffer.is_empty() {
+            return 0;
+        }
+        let local = column.saturating_sub(hitbox.name_area.x) as usize;
+        local.saturating_sub(1).min(prompt.name_buffer.len())
+    }
+
+    fn expression_cursor_from_click(&self, column: u16, hitbox: MultiChartEditorHitbox) -> usize {
+        let Some(prompt) = self.expression_prompt.as_ref() else {
+            return 0;
+        };
+        if prompt.buffer.is_empty() {
+            return 0;
+        }
+        let local = column.saturating_sub(hitbox.expression_area.x) as usize;
+        local.min(prompt.buffer.len())
+    }
+
+    pub fn click_expression_editor(&mut self, column: u16, row: u16) -> Result<bool, String> {
+        let Some(hitbox) = self.editor_hitbox else {
+            return Ok(false);
+        };
+        if !Self::point_in_rect(hitbox.area, column, row) {
+            return Ok(false);
+        }
+        if !self.is_expression_prompt_active() {
+            self.open_selected_item_for_edit()?;
+        }
+        if Self::point_in_rect(hitbox.name_area, column, row) {
+            let cursor = self.name_cursor_from_click(column, hitbox);
+            self.expression_set_focus_cursor(ExpressionPromptFocus::Name, cursor);
+        } else {
+            let cursor = self.expression_cursor_from_click(column, hitbox);
+            self.expression_set_focus_cursor(ExpressionPromptFocus::Expression, cursor);
+        }
+        Ok(true)
     }
 
     fn collect_expression_input_ids(&self, refs: &ExpressionRefs) -> Vec<ChartItemId> {

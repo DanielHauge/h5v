@@ -757,6 +757,90 @@ fn recursive_name_assignment_is_rejected() {
 }
 
 #[test]
+fn click_item_hitbox_selects_item() {
+    let mut state = make_state();
+    state.add_chart_item(
+        source(
+            "/group/a",
+            PreviewSelection {
+                index: vec![0, 0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+        ),
+        vec![(0.0, 1.0), (1.0, 2.0)],
+    );
+    state.add_chart_item(
+        source(
+            "/group/b",
+            PreviewSelection {
+                index: vec![0, 0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+        ),
+        vec![(0.0, 3.0), (1.0, 4.0)],
+    );
+    state.item_hitboxes = vec![
+        MultiChartItemHitbox {
+            area: ratatui::layout::Rect::new(0, 0, 10, 2),
+            index: 0,
+        },
+        MultiChartItemHitbox {
+            area: ratatui::layout::Rect::new(0, 2, 10, 2),
+            index: 1,
+        },
+    ];
+
+    assert!(state.click_item_hitbox(1, 3));
+    assert_eq!(state.idx, 1);
+}
+
+#[test]
+fn click_expression_editor_opens_prompt_and_moves_name_cursor() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create derived");
+    state
+        .set_selected_item_name("temp", Some(ChartItemId(2)))
+        .expect("rename derived item");
+    state.editor_hitbox = Some(MultiChartEditorHitbox {
+        area: ratatui::layout::Rect::new(0, 0, 40, 1),
+        name_area: ratatui::layout::Rect::new(3, 0, 5, 1),
+        expression_area: ratatui::layout::Rect::new(11, 0, 12, 1),
+    });
+
+    assert!(state.click_expression_editor(6, 0).expect("click editor"));
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.focus, ExpressionPromptFocus::Name);
+    assert_eq!(prompt.name_cursor, 2);
+}
+
+#[test]
+fn prompt_word_movement_uses_word_boundaries() {
+    let mut state = make_state();
+    state.open_expression_prompt();
+    if let Some(prompt) = state.expression_prompt.as_mut() {
+        prompt.buffer = "alpha beta gamma".to_string();
+        prompt.cursor = prompt.buffer.len();
+    }
+
+    state.expression_move_word_left();
+    assert_eq!(state.expression_prompt.as_ref().unwrap().cursor, 11);
+    state.expression_move_word_left();
+    assert_eq!(state.expression_prompt.as_ref().unwrap().cursor, 6);
+    state.expression_move_word_right();
+    assert_eq!(state.expression_prompt.as_ref().unwrap().cursor, 10);
+}
+
+#[test]
 fn invalid_expression_submit_is_saved_hidden_and_editable() {
     let mut state = make_state();
     state
