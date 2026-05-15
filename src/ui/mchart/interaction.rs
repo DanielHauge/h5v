@@ -1,6 +1,6 @@
 use ratatui::layout::Rect;
 
-use super::{ChartDragState, ChartViewport, ChartZoomMode, MultiChartState};
+use super::*;
 
 fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
     column >= rect.x
@@ -100,7 +100,7 @@ fn zoom_axis_range(
 }
 
 impl MultiChartState {
-    fn bounds_from_points<'a>(
+    pub(super) fn bounds_from_points<'a>(
         points: impl Iterator<Item = &'a (f64, f64)>,
     ) -> Option<ChartViewport> {
         let mut iter = points
@@ -146,7 +146,11 @@ impl MultiChartState {
         self.viewport.or_else(|| self.visible_data_bounds())
     }
 
-    fn clamp_viewport(&self, viewport: ChartViewport, bounds: ChartViewport) -> ChartViewport {
+    pub(super) fn clamp_viewport(
+        &self,
+        viewport: ChartViewport,
+        bounds: ChartViewport,
+    ) -> ChartViewport {
         let (x_min, x_max) =
             clamp_axis_range(viewport.x_min, viewport.x_max, bounds.x_min, bounds.x_max);
         let (y_min, y_max) =
@@ -159,7 +163,7 @@ impl MultiChartState {
         }
     }
 
-    fn set_explicit_viewport(&mut self, viewport: Option<ChartViewport>) -> bool {
+    pub(super) fn set_explicit_viewport(&mut self, viewport: Option<ChartViewport>) -> bool {
         let Some(full_bounds) = self.visible_data_bounds() else {
             return false;
         };
@@ -181,7 +185,7 @@ impl MultiChartState {
         true
     }
 
-    fn set_viewport_from_bounds(&mut self, viewport: ChartViewport) -> bool {
+    pub(super) fn set_viewport_from_bounds(&mut self, viewport: ChartViewport) -> bool {
         self.set_explicit_viewport(Some(viewport))
     }
 
@@ -342,7 +346,7 @@ impl MultiChartState {
         true
     }
 
-    fn apply_drag_position(&mut self, column: u16, row: u16) -> bool {
+    pub(super) fn apply_drag_position(&mut self, column: u16, row: u16) -> bool {
         let Some(chart_area) = self.last_chart_area else {
             return false;
         };
@@ -388,7 +392,7 @@ impl MultiChartState {
         self.drag_state = None;
     }
 
-    fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
+    pub(super) fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
         let Some(bounds) = self.visible_data_bounds() else {
             return false;
         };
@@ -423,5 +427,201 @@ impl MultiChartState {
             ),
             None => "auto-fit visible".to_string(),
         }
+    }
+}
+
+impl MultiChartState {
+    pub(super) fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
+        self.items.iter().find(|item| item.id == id)
+    }
+
+    pub(super) fn item_by_name(&self, name: &str) -> Option<&ChartItem> {
+        self.items
+            .iter()
+            .find(|item| item.name.as_deref() == Some(name))
+    }
+
+    pub fn click_item_hitbox(&mut self, column: u16, row: u16) -> bool {
+        let Some(hitbox) = self
+            .item_hitboxes
+            .iter()
+            .find(|hitbox| point_in_rect(hitbox.area, column, row))
+            .copied()
+        else {
+            return false;
+        };
+        self.idx = hitbox.index.min(self.items.len().saturating_sub(1));
+        self.modified = true;
+        true
+    }
+
+    pub(super) fn name_cursor_from_click(
+        &self,
+        column: u16,
+        hitbox: MultiChartEditorHitbox,
+    ) -> usize {
+        let Some(prompt) = self.expression_prompt.as_ref() else {
+            return 0;
+        };
+        if prompt.name_buffer.is_empty() {
+            return 0;
+        }
+        let local = column.saturating_sub(hitbox.name_area.x) as usize;
+        local.saturating_sub(1).min(prompt.name_buffer.len())
+    }
+
+    pub(super) fn expression_cursor_from_click(
+        &self,
+        column: u16,
+        hitbox: MultiChartEditorHitbox,
+    ) -> usize {
+        let Some(prompt) = self.expression_prompt.as_ref() else {
+            return 0;
+        };
+        if prompt.buffer.is_empty() {
+            return 0;
+        }
+        let local = column.saturating_sub(hitbox.expression_area.x) as usize;
+        local.min(prompt.buffer.len())
+    }
+
+    pub fn click_expression_editor(&mut self, column: u16, row: u16) -> Result<bool, String> {
+        let Some(hitbox) = self.editor_hitbox else {
+            return Ok(false);
+        };
+        if !point_in_rect(hitbox.area, column, row) {
+            return Ok(false);
+        }
+        if !self.is_expression_prompt_active() {
+            self.open_selected_item_for_edit()?;
+        }
+        if point_in_rect(hitbox.name_area, column, row) {
+            let cursor = self.name_cursor_from_click(column, hitbox);
+            self.expression_set_focus_cursor(ExpressionPromptFocus::Name, cursor);
+        } else {
+            let cursor = self.expression_cursor_from_click(column, hitbox);
+            self.expression_set_focus_cursor(ExpressionPromptFocus::Expression, cursor);
+        }
+        Ok(true)
+    }
+
+    pub(super) fn collect_expression_input_ids(&self, refs: &ExpressionRefs) -> Vec<ChartItemId> {
+        let mut input_ids = refs
+            .item_refs
+            .iter()
+            .filter_map(|item_ref| match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => Some(*id),
+                expression::ExpressionItemTarget::Name(name) => {
+                    self.item_by_name(name).map(|item| item.id)
+                }
+            })
+            .collect::<Vec<_>>();
+        input_ids.sort_by_key(|id| id.0);
+        input_ids.dedup();
+        input_ids
+    }
+
+    pub(super) fn normalized_item_name(
+        &self,
+        name: &str,
+        current_id: Option<ChartItemId>,
+    ) -> Result<Option<String>, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let mut chars = trimmed.chars();
+        let first = chars.next().unwrap_or_default();
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return Err("Series names must start with a letter or '_'".to_string());
+        }
+        if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            return Err("Series names may only use letters, digits, and '_'".to_string());
+        }
+        if self.items.iter().any(|item| {
+            item.id != current_id.unwrap_or(ChartItemId(u64::MAX))
+                && item.name.as_deref() == Some(trimmed)
+        }) {
+            return Err(format!("Series name '${trimmed}' is already in use"));
+        }
+        if let Some(current_id) = current_id {
+            let Some(item) = self.item_by_id(current_id) else {
+                return Err(format!("Chart item ${} no longer exists", current_id.0));
+            };
+            if item
+                .editable_expression()
+                .is_some_and(|expression| Self::expression_references_name(&expression, trimmed))
+            {
+                return Err(format!(
+                    "Series ${} cannot be named '${trimmed}' because its expression references ${trimmed}",
+                    current_id.0
+                ));
+            }
+        }
+        Ok(Some(trimmed.to_string()))
+    }
+
+    pub(super) fn expression_references_name(expression: &str, name: &str) -> bool {
+        let Ok(tokens) = tokenize_expression(expression) else {
+            return false;
+        };
+        let Ok(parsed) = parse_derived_expression(&tokens) else {
+            return false;
+        };
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        refs.item_refs.iter().any(|item_ref| {
+            matches!(
+                &item_ref.target,
+                expression::ExpressionItemTarget::Name(candidate) if candidate == name
+            )
+        })
+    }
+
+    pub(super) fn set_selected_item_name(
+        &mut self,
+        name: &str,
+        current_id: Option<ChartItemId>,
+    ) -> Result<(), String> {
+        let normalized = self.normalized_item_name(name, current_id)?;
+        let Some(item) = self.items.get_mut(self.idx) else {
+            return Ok(());
+        };
+        item.name = normalized;
+        item.label = item.list_label();
+        self.modified = true;
+        Ok(())
+    }
+
+    pub(super) fn expression_detail_window(
+        &self,
+        expression: &str,
+    ) -> Result<Option<ChartLodWindow>, String> {
+        let tokens = tokenize_expression(expression)?;
+        let parsed = parse_derived_expression(&tokens)?;
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        let mut expected = None::<ChartLodWindow>;
+        for item_ref in &refs.item_refs {
+            let item = match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => self
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                expression::ExpressionItemTarget::Name(name) => self
+                    .item_by_name(name)
+                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+            };
+            let Some(window) = item.detail_window else {
+                return Ok(None);
+            };
+            if expected.is_some_and(|existing| existing != window) {
+                return Ok(None);
+            }
+            expected = Some(window);
+        }
+        if !refs.load_refs.is_empty() {
+            return Ok(None);
+        }
+        Ok(expected)
     }
 }

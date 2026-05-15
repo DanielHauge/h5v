@@ -1,0 +1,624 @@
+use super::load::coalesce_load_requests;
+use super::tests::{assert_viewport, make_dataset_ref_test_file, make_state, source};
+use super::*;
+use std::fs;
+
+#[test]
+fn zoom_in_anchor_ratio_biases_toward_hovered_side() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+
+    assert!(state.zoom_in_x(10.0));
+    assert_viewport(&state, Some((9.9, 89.1, 0.0, 99.0)));
+
+    state.clear_zoom();
+    assert!(state.zoom_with_anchor(10.0, 0.0, 0.0, true, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
+
+    state.clear_zoom();
+    assert!(state.zoom_with_anchor(10.0, 1.0, 0.0, true, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((19.8, 99.0, 0.0, 99.0)));
+}
+
+#[test]
+fn chart_panel_title_includes_viewport_when_zoomed() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..10).map(|i| (i as f64, (i * 2) as f64)).collect(),
+    );
+
+    assert_eq!(state.chart_panel_title(), "Overlay chart [x values]");
+
+    state.viewport = Some(ChartViewport {
+        x_min: 2.0,
+        x_max: 6.0,
+        y_min: 4.0,
+        y_max: 12.0,
+    });
+    assert_eq!(
+        state.chart_panel_title(),
+        "Overlay chart [x values] · view x=[2.0000, 6.0000] y=[4.0000, 12.0000]"
+    );
+}
+
+#[test]
+fn coalesce_load_requests_keeps_latest_request_per_item_and_kind() {
+    let (file, path) = make_dataset_ref_test_file();
+    let dataset = file.dataset("/series").expect("series dataset");
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    let requests = coalesce_load_requests(vec![
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Detail {
+                generation: 1,
+                window: ChartLodWindow {
+                    start: 0,
+                    end: 10,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Detail {
+                generation: 2,
+                window: ChartLodWindow {
+                    start: 5,
+                    end: 15,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Overview { generation: 0 },
+            source: MultiChartLoadSource::Dataset { dataset, selection },
+        },
+    ]);
+
+    assert_eq!(requests.len(), 2);
+    assert!(matches!(
+        requests[0].kind,
+        MultiChartLoadKind::Detail { generation: 2, .. }
+    ));
+    assert!(matches!(
+        requests[1].kind,
+        MultiChartLoadKind::Overview { generation: 0 }
+    ));
+
+    drop(file);
+    fs::remove_file(path).expect("failed removing temp hdf5 file");
+}
+
+#[test]
+fn zoom_at_position_only_applies_inside_chart_area() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
+
+    assert!(!state.zoom_in_at_position(5, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, None);
+
+    assert!(state.zoom_in_at_position(10, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
+}
+
+#[test]
+fn chart_plot_area_conversion_respects_padding() {
+    let plot_area =
+        chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, 40..180, 10..70).unwrap();
+    assert_eq!(plot_area, Rect::new(14, 6, 14, 6));
+}
+
+#[test]
+fn zoom_at_position_ignores_chart_padding() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.last_chart_area =
+        chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, 40..180, 10..70);
+
+    assert!(!state.zoom_in_at_position(11, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, None);
+
+    assert!(state.zoom_in_at_position(14, 6, 10.0, ChartZoomMode::XOnly));
+    assert_viewport(&state, Some((0.0, 79.2, 0.0, 99.0)));
+}
+
+#[test]
+fn drag_pan_applies_snapshot_on_release_in_both_axes() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 20.0,
+        x_max: 80.0,
+        y_min: 20.0,
+        y_max: 80.0,
+    });
+    state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
+
+    assert!(state.start_drag_at_position(20, 6));
+    assert!(!state.drag_to_position(15, 4));
+    assert_viewport(&state, Some((20.0, 80.0, 20.0, 80.0)));
+
+    assert!(state.finish_drag_at_position(15, 4));
+    assert_viewport(
+        &state,
+        Some((
+            35.78947368421053,
+            95.78947368421052,
+            2.8571428571428577,
+            62.85714285714286,
+        )),
+    );
+
+    state.end_drag();
+    assert!(!state.drag_to_position(25, 4));
+}
+
+#[test]
+fn drag_pan_only_starts_inside_chart_area() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 20.0,
+        x_max: 80.0,
+        y_min: 20.0,
+        y_max: 80.0,
+    });
+    state.last_chart_area = Some(Rect::new(10, 5, 20, 8));
+
+    assert!(!state.start_drag_at_position(5, 6));
+    assert!(!state.drag_to_position(15, 5));
+    assert_viewport(&state, Some((20.0, 80.0, 20.0, 80.0)));
+}
+
+#[test]
+fn fit_selected_uses_selected_series_bounds() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.add_chart_item(
+        source(
+            "/group/b",
+            PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+        ),
+        vec![(-10.0, -5.0), (5.0, 10.0)],
+    );
+    state.idx = 1;
+
+    assert!(state.fit_selected());
+    assert_viewport(&state, Some((-10.0, 5.0, -5.0, 10.0)));
+}
+
+#[test]
+fn fit_all_clears_explicit_viewport() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..100).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 20.0,
+        y_min: 10.0,
+        y_max: 20.0,
+    });
+
+    assert!(state.fit_all());
+    assert_viewport(&state, None);
+}
+
+#[test]
+fn chart_series_filters_non_finite_points() {
+    let series = ChartSeries::from_points(vec![
+        (0.0, 1.0),
+        (1.0, f64::NAN),
+        (f64::INFINITY, 2.0),
+        (2.0, 3.0),
+    ])
+    .expect("finite points should remain");
+    assert_eq!(series.points, vec![(0.0, 1.0), (2.0, 3.0)]);
+    assert_eq!(series.y_min, 1.0);
+    assert_eq!(series.y_max, 3.0);
+}
+
+#[test]
+fn dataset_plot_preview_filters_non_finite_points() {
+    let preview = dataset_ploting_data_from_points(vec![
+        (0.0, f64::NAN),
+        (1.0, 4.0),
+        (2.0, f64::INFINITY),
+        (3.0, 6.0),
+    ])
+    .expect("finite preview points");
+    assert_eq!(preview.data, vec![(1.0, 4.0), (3.0, 6.0)]);
+    assert_eq!(preview.min, 4.0);
+    assert_eq!(preview.max, 6.0);
+}
+
+#[test]
+fn prepared_chart_data_filters_legacy_non_finite_points() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+    );
+    state.items[0].series.points[1] = (1.0, f64::NAN);
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    assert_eq!(prepared.series.len(), 1);
+    assert_eq!(prepared.series[0].points, vec![(0.0, 1.0), (2.0, 3.0)]);
+    assert_eq!(prepared.y_min, 1.0);
+    assert_eq!(prepared.y_max, 3.0);
+}
+
+#[test]
+fn prepared_chart_data_respects_visibility_and_viewport() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        (0..6).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.add_chart_item(
+        source("/group/b", selection),
+        (0..6).map(|i| (i as f64, (i * 10) as f64)).collect(),
+    );
+    state.items[1].visible = false;
+    state.viewport = Some(ChartViewport {
+        x_min: 1.0,
+        x_max: 3.0,
+        y_min: 100.0,
+        y_max: 200.0,
+    });
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    assert_eq!(prepared.series.len(), 1);
+    assert_eq!(
+        prepared.series[0].points,
+        vec![(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+    );
+    assert_eq!(prepared.plot_x_min, 1.0);
+    assert_eq!(prepared.plot_x_max, 3.0);
+    assert_eq!(prepared.y_min, 100.0);
+    assert_eq!(prepared.y_max, 200.0);
+}
+
+#[test]
+fn detail_window_targets_viewport_slice_for_large_dataset_series() {
+    let source = DatasetChartSource {
+        dataset_path: "/big".to_string(),
+        display_path: "/big".to_string(),
+        selection: PreviewSelection {
+            index: vec![0],
+            x: 0,
+            slice: SliceSelection::All,
+        },
+        shape: vec![100_000],
+        kind: DatasetChartKind::Dataset,
+    };
+    let window = MultiChartState::detail_window_for_viewport(
+        &source,
+        ChartViewport {
+            x_min: 1_000.0,
+            x_max: 1_500.0,
+            y_min: -1.0,
+            y_max: 1.0,
+        },
+        2_048,
+    )
+    .expect("detail window");
+    assert!(window.start <= 1_000);
+    assert!(window.end >= 1_500);
+    assert_eq!(window.sample_cap, 2_048);
+}
+
+#[test]
+fn detail_load_replaces_active_series_without_losing_overview() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let item_id = state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].source_len = 10_000;
+    state.items[0].sampled = true;
+    state.items[0].detail_generation = 1;
+
+    state
+        .apply_loaded_item(
+            item_id,
+            MultiChartLoadKind::Detail {
+                generation: 1,
+                window: ChartLodWindow {
+                    start: 100,
+                    end: 140,
+                    sample_cap: 512,
+                },
+            },
+            vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)],
+            0,
+        )
+        .expect("detail load");
+
+    let item = state.item_by_id(item_id).expect("item");
+    assert_eq!(item.series.len(), 8);
+    assert_eq!(
+        item.active_series().points,
+        vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]
+    );
+    assert_eq!(
+        item.detail_window,
+        Some(ChartLodWindow {
+            start: 100,
+            end: 140,
+            sample_cap: 512,
+        })
+    );
+}
+
+#[test]
+fn clearing_zoom_discards_detail_series() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].detail_series = ChartSeries::from_points(vec![(10.0, 2.0), (11.0, 3.0)]);
+    state.items[0].detail_window = Some(ChartLodWindow {
+        start: 10,
+        end: 12,
+        sample_cap: 512,
+    });
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 12.0,
+        y_min: 2.0,
+        y_max: 3.0,
+    });
+
+    assert!(state.clear_zoom());
+    assert!(state.items[0].detail_series.is_none());
+    assert!(state.items[0].detail_window.is_none());
+}
+
+#[test]
+fn clearing_zoom_invalidates_inflight_detail_results() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let item_id = state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].detail_generation = 4;
+    state.items[0].pending_detail_window = Some(ChartLodWindow {
+        start: 10,
+        end: 20,
+        sample_cap: 512,
+    });
+    state.viewport = Some(ChartViewport {
+        x_min: 10.0,
+        x_max: 20.0,
+        y_min: 0.0,
+        y_max: 20.0,
+    });
+    assert!(state.clear_zoom());
+
+    state
+        .apply_loaded_item(
+            item_id,
+            MultiChartLoadKind::Detail {
+                generation: 4,
+                window: ChartLodWindow {
+                    start: 10,
+                    end: 20,
+                    sample_cap: 512,
+                },
+            },
+            vec![(10.0, 10.0), (11.0, 11.0)],
+            0,
+        )
+        .expect("stale detail load ignored");
+
+    assert!(state.items[0].detail_series.is_none());
+    assert!(state.items[0].detail_window.is_none());
+}
+
+#[test]
+fn derived_series_builds_detail_from_matching_input_windows() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+        )
+        .expect("source a");
+    state
+        .add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+        )
+        .expect("source b");
+    state
+        .create_expression_derived("$1 + $2".to_string())
+        .expect("derived");
+
+    let window = ChartLodWindow {
+        start: 100,
+        end: 120,
+        sample_cap: 256,
+    };
+    state.items[0].detail_series =
+        ChartSeries::from_points(vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]);
+    state.items[0].detail_window = Some(window);
+    state.items[1].detail_series =
+        ChartSeries::from_points(vec![(100.0, 10.0), (110.0, 20.0), (120.0, 30.0)]);
+    state.items[1].detail_window = Some(window);
+
+    state
+        .refresh_expression_detail_series(None)
+        .expect("refresh detail");
+
+    let derived = state.item_by_id(ChartItemId(3)).expect("derived");
+    assert_eq!(derived.detail_window, Some(window));
+    assert_eq!(
+        derived.active_series().points,
+        vec![(100.0, 11.0), (110.0, 22.0), (120.0, 33.0)]
+    );
+}
+
+#[test]
+fn derived_series_detail_clears_when_inputs_do_not_share_window() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(
+            source("/group/a", selection.clone()),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+        )
+        .expect("source a");
+    state
+        .add_chart_item(
+            source("/group/b", selection),
+            vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+        )
+        .expect("source b");
+    state
+        .create_expression_derived("$1 + $2".to_string())
+        .expect("derived");
+
+    state.items[0].detail_series =
+        ChartSeries::from_points(vec![(100.0, 1.0), (110.0, 2.0), (120.0, 3.0)]);
+    state.items[0].detail_window = Some(ChartLodWindow {
+        start: 100,
+        end: 120,
+        sample_cap: 256,
+    });
+    state.items[1].detail_series =
+        ChartSeries::from_points(vec![(200.0, 10.0), (210.0, 20.0), (220.0, 30.0)]);
+    state.items[1].detail_window = Some(ChartLodWindow {
+        start: 200,
+        end: 220,
+        sample_cap: 256,
+    });
+
+    state
+        .refresh_expression_detail_series(None)
+        .expect("refresh detail");
+
+    let derived = state.item_by_id(ChartItemId(3)).expect("derived");
+    assert!(derived.detail_series.is_none());
+    assert!(derived.detail_window.is_none());
+}
