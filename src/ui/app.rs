@@ -202,9 +202,9 @@ fn main_recover_loop(
             && matches!(state.command_return_mode, Mode::MultiChart);
         state.ui_layout = state::UiLayoutState::default();
         let content_area = render_header(frame, frame.area(), state, new_version);
-        let (content_area, command_area) = match state.mode {
-            Mode::Command => split_command_bar(content_area),
-            _ => (content_area, Rect::new(0, 0, 0, 0)),
+        let command_area = match state.mode {
+            Mode::Command => command_modal_area(content_area),
+            _ => Rect::new(0, 0, 0, 0),
         };
 
         if let Mode::Help = state.mode {
@@ -933,15 +933,18 @@ fn render_header(
     body_area
 }
 
-fn split_command_bar(area: Rect) -> (Rect, Rect) {
-    if area.height <= COMMAND_BAR_HEIGHT {
-        (area, area)
-    } else {
-        let sections =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(COMMAND_BAR_HEIGHT)])
-                .split(area);
-        (sections[0], sections[1])
+fn command_modal_area(area: Rect) -> Rect {
+    if area.width == 0 || area.height == 0 {
+        return Rect::new(0, 0, 0, 0);
     }
+    let width = area.width.min(96).max(24).min(area.width);
+    let height = area.height.min(COMMAND_BAR_HEIGHT.max(6));
+    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+    let y = area
+        .y
+        .saturating_add(3)
+        .min(area.bottom().saturating_sub(height).max(area.y));
+    Rect::new(x, y, width, height)
 }
 
 fn render_toast_overlay(frame: &mut Frame<'_>, state: &AppState, command_area: Rect) {
@@ -981,7 +984,9 @@ fn toast_overlay_area(frame_area: Rect, command_area: Rect) -> Rect {
     if frame_area.width == 0 || frame_area.height == 0 {
         return Rect::new(0, 0, 0, 0);
     }
-    let y = if command_area.height > 0 && command_area.y > frame_area.y {
+    let command_is_bottom_docked =
+        command_area.height > 0 && command_area.y > frame_area.y + frame_area.height / 2;
+    let y = if command_is_bottom_docked && command_area.y > frame_area.y {
         command_area.y.saturating_sub(1)
     } else {
         frame_area.bottom().saturating_sub(1)

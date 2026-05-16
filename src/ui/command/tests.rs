@@ -43,6 +43,13 @@ fn parses_seek_col_command() {
 }
 
 #[test]
+fn parses_seek_page_command() {
+    let command = parse_command_text("seek-page 3").expect("expected seek-page command");
+    assert_eq!(command.id, CommandId::SeekPage);
+    assert_eq!(command.args, vec![CommandArgValue::UnsignedInt(3)]);
+}
+
+#[test]
 fn parses_goto_command_with_path_argument() {
     let command = parse_command_text("goto /group/dataset").expect("expected goto command");
     assert_eq!(command.id, CommandId::Goto);

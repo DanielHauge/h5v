@@ -39,6 +39,13 @@ pub(super) fn handle_seek_col(
     state.seek_col_absolute(command.usize_arg(0)?)
 }
 
+pub(super) fn handle_seek_page(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    state.seek_page_absolute(command.usize_arg(0)?)
+}
+
 pub(super) fn handle_goto(
     state: &mut AppState<'_>,
     command: &CommandInvocation,

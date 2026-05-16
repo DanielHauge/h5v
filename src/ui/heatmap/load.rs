@@ -7,8 +7,8 @@ use crate::{
     h5f::{read_projected_values_2d, DatasetMeta},
     ui::render::MatrixRenderType,
     ui::state::{
-        HeatmapLineProfile, HeatmapLineSelection, HeatmapLoadedPage, HeatmapProfileSample,
-        HeatmapRenderKey, HeatmapSegmentAxis, HeatmapSliceSummary, HeatmapViewport,
+        HeatmapLineProfile, HeatmapLineSelection, HeatmapLoadedPage, HeatmapPageAxis,
+        HeatmapProfileSample, HeatmapRenderKey, HeatmapSliceSummary, HeatmapViewport,
     },
 };
 
@@ -34,11 +34,11 @@ pub(super) fn build_heatmap_page(
         col_start: 0,
         col_len: source_cols.max(1),
     });
-    let ((row_start, row_end), (col_start, col_end)) = match key.segment_axis {
-        Some(HeatmapSegmentAxis::Rows) => (
+    let ((row_start, row_end), (col_start, col_end)) = match key.page_axis {
+        Some(HeatmapPageAxis::Rows) => (
             (
-                base_viewport.row_start + key.segment_start,
-                (base_viewport.row_start + key.segment_start + key.segment_len)
+                base_viewport.row_start + key.page_start,
+                (base_viewport.row_start + key.page_start + key.page_len)
                     .min(base_viewport.row_start + base_viewport.row_len),
             ),
             (
@@ -46,14 +46,14 @@ pub(super) fn build_heatmap_page(
                 base_viewport.col_start + base_viewport.col_len,
             ),
         ),
-        Some(HeatmapSegmentAxis::Cols) => (
+        Some(HeatmapPageAxis::Cols) => (
             (
                 base_viewport.row_start,
                 base_viewport.row_start + base_viewport.row_len,
             ),
             (
-                base_viewport.col_start + key.segment_start,
-                (base_viewport.col_start + key.segment_start + key.segment_len)
+                base_viewport.col_start + key.page_start,
+                (base_viewport.col_start + key.page_start + key.page_len)
                     .min(base_viewport.col_start + base_viewport.col_len),
             ),
         ),

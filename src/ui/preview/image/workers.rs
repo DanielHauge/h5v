@@ -87,8 +87,8 @@ pub(crate) fn handle_chartpreview_load(
             let width = req.width as u32 * x as u32;
 
             let mut buffer = vec![0; (height * width * 3) as usize];
-            let x_min = if req.segment_state.idx > 0 {
-                MAX_SEGMENT_SIZE as f64 * req.segment_state.idx as f64
+            let x_min = if req.page_state.idx > 0 {
+                MAX_PAGE_SIZE as f64 * req.page_state.idx as f64
             } else {
                 0.0
             };

@@ -11,7 +11,7 @@ use ratatui::{
 use crate::{configure, h5f::H5FNode};
 
 use super::{
-    segment_scroll::{compact_count, SegmentDisplayInfo},
+    page_scroll::{compact_count, PageDisplayInfo},
     state::AppState,
 };
 
@@ -21,7 +21,7 @@ pub fn render_dim_selector(
     node: &mut H5FNode,
     shape: &[usize],
     row_columns: bool,
-    segment_info: Option<&SegmentDisplayInfo<'_>>,
+    page_info: Option<&PageDisplayInfo<'_>>,
 ) -> Result<(), Error> {
     node.sync_selection_rank(shape.len());
     let x_selection = node.selected_x;
@@ -74,7 +74,7 @@ pub fn render_dim_selector(
     let bounds: Vec<u16> = shape_strings.iter().map(|s| s.len() as u16).collect();
     let dims_width = bounds.iter().map(|s| s.max(&3)).copied().sum::<u16>()
         + shape.len().saturating_sub(1) as u16 * 3;
-    let (dims_area, segment_area) = if segment_info.is_some() && dims_area.width > dims_width + 14 {
+    let (dims_area, page_area) = if page_info.is_some() && dims_area.width > dims_width + 14 {
         let split = Layout::horizontal([Constraint::Length(dims_width), Constraint::Min(12)])
             .spacing(2)
             .split(dims_area);
@@ -181,14 +181,14 @@ pub fn render_dim_selector(
         }
     }
 
-    if let (Some(info), Some(segment_area)) = (segment_info, segment_area) {
-        render_inline_segment_info(f, &segment_area, info);
+    if let (Some(info), Some(page_area)) = (page_info, page_area) {
+        render_inline_page_info(f, &page_area, info);
     }
 
     Ok(())
 }
 
-fn render_inline_segment_info(f: &mut Frame, area: &Rect, info: &SegmentDisplayInfo<'_>) {
+fn render_inline_page_info(f: &mut Frame, area: &Rect, info: &PageDisplayInfo<'_>) {
     if area.width == 0 || area.height == 0 {
         return;
     }

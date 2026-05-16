@@ -260,7 +260,7 @@ pub(super) fn render_heatmap_region_panel(
             .fg(configure::themed_color(|colors| colors.file.label))
             .bold(),
     )]));
-    if let Some(window) = state.heatmap_render.segment.as_ref() {
+    if let Some(window) = state.heatmap_render.page_window.as_ref() {
         let (start, end) = window.current_range();
         lines.push(Line::from(Span::styled(
             format!(

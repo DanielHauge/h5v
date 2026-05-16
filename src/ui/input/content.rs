@@ -280,9 +280,9 @@ fn enum_value_to_string(enum_type: &EnumType, value: u64) -> String {
 fn chart_preview_selection(
     node: &mut H5FNode,
     shape: &[usize],
-    segment_idx: i32,
+    page_idx: i32,
 ) -> Option<PreviewSelection> {
-    preview_selection_for_node(node, shape, segment_idx)
+    preview_selection_for_node(node, shape, page_idx)
 }
 
 fn preview_text_value(
@@ -465,8 +465,7 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
     }
 
     let shape = dataset.shape();
-    let Some(selection) = chart_preview_selection(&mut node, &shape, state.segment_state.idx)
-    else {
+    let Some(selection) = chart_preview_selection(&mut node, &shape, state.page_state.idx) else {
         return Ok(EventResult::Toast(
             AppToast::Warning("Current preview cannot be copied".to_string()),
             false,
@@ -678,7 +677,7 @@ fn apply_content_edit_request(
     state.heatmap_render.viewport = None;
     state.heatmap_render.selected_cells = None;
     state.heatmap_render.selected_line = None;
-    state.heatmap_render.segment = None;
+    state.heatmap_render.page_window = None;
     state.heatmap_render.cached_pages.clear();
     state.heatmap_render.pending_keys.clear();
     state.acknowledge_file_write();

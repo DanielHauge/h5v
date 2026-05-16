@@ -1,9 +1,11 @@
 use ndarray::arr2;
+use ratatui::layout::Rect;
 
 use super::{
+    compute_heatmap_page_window,
     load::compute_line_profile,
     render::{compute_heatmap_color_scale, compute_region_selection, viewport_partition},
-    HeatmapPageWindow, HeatmapSegmentAxis,
+    HeatmapPageAxis, HeatmapPageWindow,
 };
 use crate::{
     h5f::{DatasetMeta, Encoding},
@@ -30,7 +32,7 @@ fn viewport_partition_keeps_single_source_pixel_visible() {
 fn heatmap_page_window_last_page_clamps_to_tail() {
     let window = HeatmapPageWindow {
         ds_path: "/x".to_string(),
-        axis: HeatmapSegmentAxis::Cols,
+        axis: HeatmapPageAxis::Cols,
         len: 100,
         total: 250,
         page: 3,
@@ -39,6 +41,31 @@ fn heatmap_page_window_last_page_clamps_to_tail() {
     assert_eq!(window.range_for_page(0), (0, 100));
     assert_eq!(window.range_for_page(1), (50, 150));
     assert_eq!(window.current_range(), (150, 250));
+}
+
+#[test]
+fn resized_heatmap_page_window_keeps_current_page_index() {
+    let current = HeatmapPageWindow {
+        ds_path: "/x".to_string(),
+        axis: HeatmapPageAxis::Cols,
+        len: 500,
+        total: 1_000,
+        page: 2,
+        page_count: 3,
+    };
+    let resized = compute_heatmap_page_window(
+        "/x",
+        100,
+        1_000,
+        Rect::new(0, 0, 30, 10),
+        (1, 1),
+        Some(&current),
+    )
+    .expect("expected paged heatmap");
+
+    assert_eq!(resized.axis, HeatmapPageAxis::Cols);
+    assert_eq!(resized.page, 2);
+    assert_eq!(resized.current_range(), (300, 600));
 }
 
 #[test]

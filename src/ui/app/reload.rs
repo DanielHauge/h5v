@@ -30,7 +30,7 @@ struct ReloadSnapshot {
     focus: Focus,
     show_tree_view: bool,
     content_mode: ContentShowMode,
-    segment_state: state::SegmentState,
+    page_state: state::PageState,
     matrix_view_state: MatrixViewState,
     img_idx_to_load: i32,
 }
@@ -84,7 +84,7 @@ fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
         focus: state.focus.clone(),
         show_tree_view: state.show_tree_view,
         content_mode: state.content_mode,
-        segment_state: state.segment_state.clone(),
+        page_state: state.page_state.clone(),
         matrix_view_state: state.matrix_view_state.clone(),
         img_idx_to_load: state.img_state.idx_to_load,
     }
@@ -176,7 +176,7 @@ fn restore_selected_node_state(state: &mut AppState<'_>, snapshot: &ReloadSnapsh
 
 fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.clear_preview_debounce();
-    state.segment_state = snapshot.segment_state.clone();
+    state.page_state = snapshot.page_state.clone();
     state.matrix_view_state = snapshot.matrix_view_state.clone();
     state.img_state.protocol = None;
     state.img_state.clipboard_image = None;
@@ -210,7 +210,7 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.heatmap_render.selected_cells = None;
     state.heatmap_render.selected_line = None;
     state.heatmap_render.drag_state = None;
-    state.heatmap_render.segment = None;
+    state.heatmap_render.page_window = None;
     state.heatmap_render.cached_pages.clear();
     state.heatmap_render.pending_keys.clear();
 }

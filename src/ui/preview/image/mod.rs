@@ -26,12 +26,12 @@ use crate::{
     h5f::{plot_projected, H5FNode, ImageType, InterlaceMode, Node},
     ui::{
         app::AppEvent,
-        preview::chart::{render_image_chart, MAX_SEGMENT_SIZE},
-        segment_scroll::render_position_scroll,
+        page_scroll::render_position_scroll,
+        preview::chart::{render_image_chart, MAX_PAGE_SIZE},
         state::{
             AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource,
             ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
-            ImageWindowState, RawImageLoadRequest, SegmentType, VarLenImageLoadRequest,
+            ImageWindowState, PageType, RawImageLoadRequest, VarLenImageLoadRequest,
         },
     },
 };
@@ -558,13 +558,13 @@ fn render_ds_img(
         .map(|(frames, _, _)| frames)
         .unwrap_or(1);
     if frame_count > 1 {
-        state.segment_state.segumented = SegmentType::Image;
-        state.segment_state.segment_count = frame_count as i32;
-        state.segment_state.idx = state.img_state.idx_to_load;
+        state.page_state.paged = PageType::Image;
+        state.page_state.page_count = frame_count as i32;
+        state.page_state.idx = state.img_state.idx_to_load;
     } else {
-        state.segment_state.segumented = SegmentType::NoSegment;
-        state.segment_state.segment_count = 0;
-        state.segment_state.idx = 0;
+        state.page_state.paged = PageType::Unpaged;
+        state.page_state.page_count = 0;
+        state.page_state.idx = 0;
         state.img_state.idx_to_load = 0;
     }
     let has_stack = frame_count > 1;
@@ -599,7 +599,7 @@ fn render_ds_img(
     let render_area = render_image_chrome(
         f,
         area,
-        has_stack.then_some((state.segment_state.idx, state.segment_state.segment_count)),
+        has_stack.then_some((state.page_state.idx, state.page_state.page_count)),
         desired_window.as_ref(),
         state.img_state.pending_keys.contains(&desired_key),
     )?;
@@ -694,18 +694,18 @@ fn render_raw_img(
             .idx_loaded
             .clamp(0, frame_count.saturating_sub(1));
         if frame_count > 1 {
-            state.segment_state.segumented = SegmentType::Image;
-            state.segment_state.segment_count = frame_count;
-            state.segment_state.idx = clamped_idx;
+            state.page_state.paged = PageType::Image;
+            state.page_state.page_count = frame_count;
+            state.page_state.idx = clamped_idx;
         } else {
-            state.segment_state.segumented = SegmentType::NoSegment;
-            state.segment_state.segment_count = 0;
-            state.segment_state.idx = 0;
+            state.page_state.paged = PageType::Unpaged;
+            state.page_state.page_count = 0;
+            state.page_state.idx = 0;
         }
     } else {
-        state.segment_state.segumented = SegmentType::NoSegment;
-        state.segment_state.segment_count = 0;
-        state.segment_state.idx = 0;
+        state.page_state.paged = PageType::Unpaged;
+        state.page_state.page_count = 0;
+        state.page_state.idx = 0;
         state.img_state.idx_to_load = 0;
     }
 
@@ -726,7 +726,7 @@ fn render_raw_img(
         render_image_chrome(
             f,
             area,
-            Some((state.segment_state.idx, state.segment_state.segment_count)),
+            Some((state.page_state.idx, state.page_state.page_count)),
             None,
             show_loading,
         )?
@@ -795,7 +795,7 @@ fn render_raw_img(
             match typedesc {
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
-                    state.segment_state.segumented = SegmentType::NoSegment;
+                    state.page_state.paged = PageType::Unpaged;
                     state
                         .img_state
                         .begin_loading(desired_key.clone(), state.img_state.idx_to_load);

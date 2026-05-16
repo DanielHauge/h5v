@@ -3,7 +3,7 @@ use super::{
         handle_attr, handle_col, handle_configure, handle_dim, handle_down, handle_focus,
         handle_goto, handle_heatmap, handle_help, handle_index, handle_left, handle_mchart,
         handle_mode, handle_page_down, handle_page_up, handle_press, handle_reload, handle_repeat,
-        handle_right, handle_row, handle_seek, handle_seek_col, handle_seek_row,
+        handle_right, handle_row, handle_seek, handle_seek_col, handle_seek_page, handle_seek_row,
         handle_toggle_tree, handle_up, handle_x,
     },
     CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor, CommandId,
@@ -38,6 +38,14 @@ const COL_INDEX_ARG: CommandArgSpec = CommandArgSpec {
     kind: CommandArgKind::UnsignedInt,
     required: true,
     help: "Absolute column index to bring into view.",
+    values: &[],
+};
+
+const PAGE_INDEX_ARG: CommandArgSpec = CommandArgSpec {
+    name: "page",
+    kind: CommandArgKind::UnsignedInt,
+    required: true,
+    help: "1-based page number to bring into view.",
     values: &[],
 };
 
@@ -271,6 +279,17 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         args: &[COL_INDEX_ARG],
         example: "seek-col 25",
         handler: handle_seek_col,
+    },
+    CommandDescriptor {
+        id: CommandId::SeekPage,
+        name: "seek-page",
+        aliases: &["page-seek"],
+        description: "Jump to a 1-based page in paged preview or heatmap views",
+        category: CommandCategory::Navigation,
+        keybindings: &[],
+        args: &[PAGE_INDEX_ARG],
+        example: "seek-page 3",
+        handler: handle_seek_page,
     },
     CommandDescriptor {
         id: CommandId::Goto,

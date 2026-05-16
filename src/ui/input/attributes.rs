@@ -380,7 +380,7 @@ fn navigate_dataset_region_target(
     state.heatmap_render.current_line_profile = None;
     state.heatmap_render.current_legend_summary = None;
     state.heatmap_render.current_slice_summary = None;
-    state.heatmap_render.segment = None;
+    state.heatmap_render.page_window = None;
     state.heatmap_render.selected_cells = None;
     state.heatmap_render.selected_line = None;
     state.heatmap_render.viewport = None;

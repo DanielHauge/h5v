@@ -896,57 +896,50 @@ impl MultiChartState {
                 .split(panes[0]);
             let main_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(7)])
+                .constraints([Constraint::Length(7), Constraint::Min(10)])
                 .split(panes[1]);
 
             self.render_item_list(f, sidebar_chunks[0]);
             self.render_selected_details(f, sidebar_chunks[1]);
             self.render_selected_statistics(f, sidebar_chunks[2]);
 
-            if self.items.is_empty() {
-                self.render_empty(f, main_chunks[0]);
-            } else {
-                self.render_chart_panel(f, main_chunks[0]);
-            }
+            self.render_expression_prompt(f, main_chunks[0]);
 
-            self.render_expression_prompt(f, main_chunks[1]);
+            if self.items.is_empty() {
+                self.render_empty(f, main_chunks[1]);
+            } else {
+                self.render_chart_panel(f, main_chunks[1]);
+            }
             return;
         }
 
         let panes = {
             let split = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(7)])
+                .constraints([Constraint::Length(7), Constraint::Min(10)])
                 .split(inner_area);
-            let workspace_area = split[0];
-            let prompt_area = split[1];
+            let prompt_area = split[0];
+            let workspace_area = split[1];
+            self.render_expression_prompt(f, prompt_area);
             if self.items.is_empty() {
                 self.render_empty(f, workspace_area);
-                self.render_expression_prompt(f, prompt_area);
                 return;
             }
 
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(11),
                     Constraint::Min(12),
+                    Constraint::Length(11),
                     Constraint::Length(8),
                     Constraint::Length(8),
                 ])
                 .split(workspace_area)
         };
-        self.render_item_list(f, panes[0]);
-        self.render_chart_panel(f, panes[1]);
+        self.render_chart_panel(f, panes[0]);
+        self.render_item_list(f, panes[1]);
         self.render_selected_details(f, panes[2]);
         self.render_selected_statistics(f, panes[3]);
-        self.render_expression_prompt(
-            f,
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(10), Constraint::Length(7)])
-                .split(inner_area)[1],
-        );
     }
 
     fn render_empty(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {

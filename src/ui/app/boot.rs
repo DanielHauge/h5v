@@ -144,10 +144,10 @@ pub(super) fn prepare_app<'a>(
         Err(error) => (None, Some(error.to_string())),
     };
 
-    let segment_state = state::SegmentState {
+    let page_state = state::PageState {
         idx: 0,
-        segment_count: 0,
-        segumented: state::SegmentType::NoSegment,
+        page_count: 0,
+        paged: state::PageType::Unpaged,
     };
 
     let command_state = CommandState {
@@ -182,7 +182,7 @@ pub(super) fn prepare_app<'a>(
             tx_render_mchart,
             tx_expression_refresh,
         ),
-        segment_state,
+        page_state,
         edit_pause: edit_pause.clone(),
         command_state,
         attribute_create_dialog: None,
@@ -226,7 +226,7 @@ pub(super) fn prepare_app<'a>(
             selected_cells: None,
             selected_line: None,
             drag_state: None,
-            segment: None,
+            page_window: None,
             cached_pages: Default::default(),
             pending_keys: Default::default(),
             tx_load_heatmap,

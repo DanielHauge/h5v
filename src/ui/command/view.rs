@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -171,6 +171,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     .style(command_body_style())
     .wrap(Wrap { trim: true });
 
+    f.render_widget(Clear, area);
     f.render_widget(command_text_widget, area);
     let cursor_position = Position::new(area.x + 3 + state.command_state.cursor as u16, area.y + 1);
     f.set_cursor_position(cursor_position);

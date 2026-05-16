@@ -24,7 +24,7 @@ use crate::{
 use super::{
     command::{execute_command, CommandState},
     input::EventResult,
-    preview::chart::MAX_SEGMENT_SIZE,
+    preview::chart::MAX_PAGE_SIZE,
     tree_view::TreeItem,
 };
 
@@ -46,9 +46,9 @@ use heatmap::heatmap_anchor_fraction;
 pub use heatmap::{
     HeatmapCachedPage, HeatmapColormap, HeatmapCustomRangeMode, HeatmapDragState,
     HeatmapLegendSummary, HeatmapLineProfile, HeatmapLineSelection, HeatmapLoadPriority,
-    HeatmapLoadRequest, HeatmapLoadedPage, HeatmapNormalization, HeatmapPageWindow,
-    HeatmapProfileSample, HeatmapRangeBound, HeatmapRangeMode, HeatmapRegionSelection,
-    HeatmapRenderKey, HeatmapRenderState, HeatmapSegmentAxis, HeatmapSelectedCells,
+    HeatmapLoadRequest, HeatmapLoadedPage, HeatmapNormalization, HeatmapPageAxis,
+    HeatmapPageWindow, HeatmapProfileSample, HeatmapRangeBound, HeatmapRangeMode,
+    HeatmapRegionSelection, HeatmapRenderKey, HeatmapRenderState, HeatmapSelectedCells,
     HeatmapSettingField, HeatmapSettings, HeatmapSliceSummary, HeatmapStoredFloat, HeatmapViewport,
     HEATMAP_SETTING_FIELDS,
 };
@@ -59,8 +59,8 @@ pub use help_state::{
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
     ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
-    PreviewExpressionState, RawImageLoadRequest, SegmentState, SegmentType, VarLenImageLoadRequest,
+    ImgState, PageState, PageType, PreviewExpressionKey, PreviewExpressionRequest,
+    PreviewExpressionResult, PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
     CHART_PREVIEW_CACHE_CAPACITY,
 };
 pub use ui_layout::{
@@ -108,7 +108,7 @@ pub struct AppState<'a> {
     pub heatmap_render: HeatmapRenderState,
     pub chart_preview_state: ChartPreviwState,
     pub preview_expression_state: PreviewExpressionState,
-    pub segment_state: SegmentState,
+    pub page_state: PageState,
     pub command_state: CommandState,
     pub attribute_create_dialog: Option<AttributeCreateDialogState>,
     pub attribute_delete_dialog: Option<AttributeDeleteDialogState>,
@@ -134,20 +134,10 @@ fn clamp_absolute_seek_start(target: usize, total: usize, visible: usize) -> usi
     target.min(total.saturating_sub(visible.max(1)))
 }
 
-fn heatmap_page_for_target(window: &HeatmapPageWindow, target: usize) -> i32 {
-    for page in 0..window.page_count {
-        let (start, end) = window.range_for_page(page);
-        if target >= start && target < end {
-            return page;
-        }
-    }
-    window.page_count.saturating_sub(1)
-}
-
 pub(crate) fn preview_selection_for_node(
     node: &mut H5FNode,
     shape: &[usize],
-    segment_idx: i32,
+    page_idx: i32,
 ) -> Option<PreviewSelection> {
     let total_dims = shape.len();
     node.sync_selection_rank(total_dims);
@@ -180,9 +170,9 @@ pub(crate) fn preview_selection_for_node(
             .unwrap_or(0);
     }
 
-    let slice = if shape[node.selected_x] > MAX_SEGMENT_SIZE {
-        let start = MAX_SEGMENT_SIZE * segment_idx.max(0) as usize;
-        let end = (start + MAX_SEGMENT_SIZE).min(shape[node.selected_x]);
+    let slice = if shape[node.selected_x] > MAX_PAGE_SIZE {
+        let start = MAX_PAGE_SIZE * page_idx.max(0) as usize;
+        let end = (start + MAX_PAGE_SIZE).min(shape[node.selected_x]);
         SliceSelection::FromTo(start, end)
     } else {
         SliceSelection::All
@@ -838,7 +828,7 @@ impl AppState<'_> {
                 let meta = dsattr.clone();
                 let shape = dsattr.shape.clone();
                 let Some(selection) =
-                    preview_selection_for_node(&mut node, &shape, self.segment_state.idx)
+                    preview_selection_for_node(&mut node, &shape, self.page_state.idx)
                 else {
                     return Ok(None);
                 };
@@ -1046,8 +1036,8 @@ impl AppState<'_> {
 
     pub fn up(&mut self, dec: usize) -> Result<EventResult> {
         match self.active_content_mode() {
-            ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
                     if self.img_state.idx_to_load >= (dec as i32)
                         && self.img_state.idx_to_load - dec as i32 >= 0
                     {
@@ -1057,25 +1047,25 @@ impl AppState<'_> {
                         Ok(EventResult::Continue)
                     }
                 }
-                SegmentType::Chart => {
-                    let Some(max_index) = self.segment_state.max_index() else {
-                        self.segment_state.idx = 0;
+                PageType::Chart => {
+                    let Some(max_index) = self.page_state.max_index() else {
+                        self.page_state.idx = 0;
                         return Ok(EventResult::Continue);
                     };
-                    self.segment_state.idx = self
-                        .segment_state
+                    self.page_state.idx = self
+                        .page_state
                         .idx
                         .saturating_sub(dec as i32)
                         .clamp(0, max_index);
                     Ok(EventResult::Redraw)
                 }
-                SegmentType::NoSegment => {
+                PageType::Unpaged => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) * dec.max(1)) as isize;
                         window.shift_by(-step);
                         return Ok(EventResult::Redraw);
                     }
-                    self.img_state.idx_to_load = self.segment_state.idx;
+                    self.img_state.idx_to_load = self.page_state.idx;
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
                     let new_offset = node.line_offset as isize - dec as isize;
@@ -1110,7 +1100,7 @@ impl AppState<'_> {
             }
             ContentShowMode::Heatmap => {
                 if dec > 1 {
-                    if let Some(window) = self.heatmap_render.segment.as_mut() {
+                    if let Some(window) = self.heatmap_render.page_window.as_mut() {
                         let next_page = window
                             .page
                             .saturating_sub(1)
@@ -1134,9 +1124,9 @@ impl AppState<'_> {
 
     pub fn down(&mut self, inc: usize) -> Result<EventResult> {
         match self.active_content_mode() {
-            ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => {
-                    let Some(max_index) = self.segment_state.max_index() else {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
+                    let Some(max_index) = self.page_state.max_index() else {
                         self.img_state.idx_to_load = 0;
                         return Ok(EventResult::Continue);
                     };
@@ -1148,27 +1138,27 @@ impl AppState<'_> {
                         Ok(EventResult::Continue)
                     }
                 }
-                SegmentType::Chart => {
-                    let Some(max_index) = self.segment_state.max_index() else {
-                        self.segment_state.idx = 0;
+                PageType::Chart => {
+                    let Some(max_index) = self.page_state.max_index() else {
+                        self.page_state.idx = 0;
                         return Ok(EventResult::Continue);
                     };
-                    self.segment_state.idx = self
-                        .segment_state
+                    self.page_state.idx = self
+                        .page_state
                         .idx
                         .saturating_add(inc as i32)
                         .clamp(0, max_index);
                     Ok(EventResult::Redraw)
                 }
-                SegmentType::NoSegment => {
+                PageType::Unpaged => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) * inc.max(1)) as isize;
                         window.shift_by(step);
                         return Ok(EventResult::Redraw);
                     }
-                    self.img_state.idx_to_load = self.segment_state.idx;
+                    self.img_state.idx_to_load = self.page_state.idx;
 
-                    self.img_state.idx_to_load = self.segment_state.idx;
+                    self.img_state.idx_to_load = self.page_state.idx;
                     let current_node = &self.treeview[self.tree_view_cursor];
                     let mut node = current_node.node.borrow_mut();
                     let new_offset = node.line_offset + inc;
@@ -1193,7 +1183,7 @@ impl AppState<'_> {
             }
             ContentShowMode::Heatmap => {
                 if inc > 1 {
-                    if let Some(window) = self.heatmap_render.segment.as_mut() {
+                    if let Some(window) = self.heatmap_render.page_window.as_mut() {
                         let next_page = window
                             .page
                             .saturating_add(1)
@@ -1217,33 +1207,33 @@ impl AppState<'_> {
 
     pub fn set(&mut self, idx: usize) -> Result<EventResult> {
         match self.active_content_mode() {
-            ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
                     if let Some(window) = self.active_image_window_mut() {
                         window.center_on(idx);
                         return Ok(EventResult::Redraw);
                     }
-                    if idx < self.segment_state.segment_count.max(0) as usize {
+                    if idx < self.page_state.page_count.max(0) as usize {
                         self.img_state.idx_to_load = idx as i32;
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
                     }
                 }
-                SegmentType::Chart => {
-                    let Some(max_index) = self.segment_state.max_index() else {
-                        self.segment_state.idx = 0;
+                PageType::Chart => {
+                    let Some(max_index) = self.page_state.max_index() else {
+                        self.page_state.idx = 0;
                         return Ok(EventResult::Continue);
                     };
                     if idx > 0 {
-                        self.segment_state.idx = ((idx - 1) as i32).clamp(0, max_index);
+                        self.page_state.idx = ((idx - 1) as i32).clamp(0, max_index);
                         Ok(EventResult::Redraw)
                     } else {
-                        self.segment_state.idx = 0;
+                        self.page_state.idx = 0;
                         Ok(EventResult::Redraw)
                     }
                 }
-                SegmentType::NoSegment => {
+                PageType::Unpaged => {
                     if let Some(window) = self.active_image_window_mut() {
                         window.center_on(idx);
                         return Ok(EventResult::Redraw);
@@ -1334,6 +1324,49 @@ impl AppState<'_> {
         }
     }
 
+    pub fn seek_page_absolute(&mut self, page: usize) -> Result<EventResult> {
+        let page = page.saturating_sub(1);
+        match self.active_content_mode() {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
+                    let Some(max_index) = self.page_state.max_index() else {
+                        self.img_state.idx_to_load = 0;
+                        self.page_state.idx = 0;
+                        return Ok(EventResult::Continue);
+                    };
+                    let target = (page as i32).clamp(0, max_index);
+                    self.img_state.idx_to_load = target;
+                    self.page_state.idx = target;
+                    Ok(EventResult::Redraw)
+                }
+                PageType::Chart => {
+                    let Some(max_index) = self.page_state.max_index() else {
+                        self.page_state.idx = 0;
+                        return Ok(EventResult::Continue);
+                    };
+                    self.page_state.idx = (page as i32).clamp(0, max_index);
+                    Ok(EventResult::Redraw)
+                }
+                PageType::Unpaged => Err(AppError::InvalidCommand(
+                    "seek-page is only available when the current preview is paged".to_string(),
+                )),
+            },
+            ContentShowMode::Heatmap => {
+                let Some(window) = self.heatmap_render.page_window.as_mut() else {
+                    return Err(AppError::InvalidCommand(
+                        "seek-page is only available when the current heatmap is paged".to_string(),
+                    ));
+                };
+                window.page = (page as i32).clamp(0, window.page_count.saturating_sub(1));
+                self.heatmap_render.current_key = None;
+                Ok(EventResult::Redraw)
+            }
+            _ => Err(AppError::InvalidCommand(
+                "seek-page is only available in preview or heatmap mode".to_string(),
+            )),
+        }
+    }
+
     fn smart_2d_seek_axis(&self) -> Result<Option<SeekAxis>> {
         match self.active_content_mode() {
             ContentShowMode::Matrix => {
@@ -1374,15 +1407,15 @@ impl AppState<'_> {
                 let row_seekable = base_viewport.row_len < source_rows
                     || self
                         .heatmap_render
-                        .segment
+                        .page_window
                         .as_ref()
-                        .is_some_and(|window| matches!(window.axis, HeatmapSegmentAxis::Rows));
+                        .is_some_and(|window| matches!(window.axis, HeatmapPageAxis::Rows));
                 let col_seekable = base_viewport.col_len < source_cols
                     || self
                         .heatmap_render
-                        .segment
+                        .page_window
                         .as_ref()
-                        .is_some_and(|window| matches!(window.axis, HeatmapSegmentAxis::Cols));
+                        .is_some_and(|window| matches!(window.axis, HeatmapPageAxis::Cols));
                 Ok(Some(preferred_seek_axis(row_seekable, col_seekable)))
             }
             _ => Ok(None),
@@ -1459,12 +1492,12 @@ impl AppState<'_> {
             viewport.row_start = clamp_absolute_seek_start(row, source_rows, viewport.row_len);
             self.heatmap_render.viewport = Some(viewport);
         }
-        if let Some(window) = self.heatmap_render.segment.as_mut() {
-            if matches!(window.axis, HeatmapSegmentAxis::Rows) {
+        if let Some(window) = self.heatmap_render.page_window.as_mut() {
+            if matches!(window.axis, HeatmapPageAxis::Rows) {
                 let relative = row
                     .saturating_sub(viewport.row_start)
                     .min(viewport.row_len.saturating_sub(1));
-                window.page = heatmap_page_for_target(window, relative);
+                window.page = window.page_for_target(relative);
             }
         }
         self.heatmap_render.current_key = None;
@@ -1495,12 +1528,12 @@ impl AppState<'_> {
             viewport.col_start = clamp_absolute_seek_start(col, source_cols, viewport.col_len);
             self.heatmap_render.viewport = Some(viewport);
         }
-        if let Some(window) = self.heatmap_render.segment.as_mut() {
-            if matches!(window.axis, HeatmapSegmentAxis::Cols) {
+        if let Some(window) = self.heatmap_render.page_window.as_mut() {
+            if matches!(window.axis, HeatmapPageAxis::Cols) {
                 let relative = col
                     .saturating_sub(viewport.col_start)
                     .min(viewport.col_len.saturating_sub(1));
-                window.page = heatmap_page_for_target(window, relative);
+                window.page = window.page_for_target(relative);
             }
         }
         self.heatmap_render.current_key = None;
@@ -1579,8 +1612,8 @@ impl AppState<'_> {
 
     pub fn right(&mut self, inc: isize) -> Result<EventResult> {
         match self.active_content_mode() {
-            ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) as isize) * inc.max(1);
                         window.shift_by(step);
@@ -1589,8 +1622,8 @@ impl AppState<'_> {
                         self.down(1)
                     }
                 }
-                SegmentType::Chart => Ok(EventResult::Continue),
-                SegmentType::NoSegment => {
+                PageType::Chart => Ok(EventResult::Continue),
+                PageType::Unpaged => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) as isize) * inc.max(1);
                         window.shift_by(step);
@@ -1644,8 +1677,8 @@ impl AppState<'_> {
 
     pub fn left(&mut self, inc: isize) -> Result<EventResult> {
         match self.active_content_mode() {
-            ContentShowMode::Preview => match self.segment_state.segumented {
-                SegmentType::Image => {
+            ContentShowMode::Preview => match self.page_state.paged {
+                PageType::Image => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) as isize) * inc.max(1);
                         window.shift_by(-step);
@@ -1654,8 +1687,8 @@ impl AppState<'_> {
                         self.up(1)
                     }
                 }
-                SegmentType::Chart => Ok(EventResult::Continue),
-                SegmentType::NoSegment => {
+                PageType::Chart => Ok(EventResult::Continue),
+                PageType::Unpaged => {
                     if let Some(window) = self.active_image_window_mut() {
                         let step = ((window.len / 4).max(1) as isize) * inc.max(1);
                         window.shift_by(-step);
@@ -1720,9 +1753,9 @@ impl AppState<'_> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        heatmap_anchor_fraction, heatmap_page_for_target, preferred_seek_axis, HeatmapPageWindow,
-        HeatmapSegmentAxis, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
-        HelpTab, HelpViewState, SeekAxis,
+        heatmap_anchor_fraction, preferred_seek_axis, HeatmapPageAxis, HeatmapPageWindow,
+        HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab, HelpViewState,
+        SeekAxis,
     };
 
     #[test]
@@ -1782,15 +1815,15 @@ mod tests {
     fn heatmap_page_for_target_picks_page_covering_target() {
         let window = HeatmapPageWindow {
             ds_path: "test.h5:/data".to_string(),
-            axis: HeatmapSegmentAxis::Cols,
+            axis: HeatmapPageAxis::Cols,
             len: 100,
             total: 1_000,
             page: 0,
             page_count: 19,
         };
-        assert_eq!(heatmap_page_for_target(&window, 0), 0);
-        assert_eq!(heatmap_page_for_target(&window, 75), 0);
-        assert_eq!(heatmap_page_for_target(&window, 125), 1);
-        assert_eq!(heatmap_page_for_target(&window, 950), 18);
+        assert_eq!(window.page_for_target(0), 0);
+        assert_eq!(window.page_for_target(75), 0);
+        assert_eq!(window.page_for_target(125), 1);
+        assert_eq!(window.page_for_target(950), 18);
     }
 }

@@ -6,7 +6,7 @@ use ratatui::{
 
 use crate::error::AppError;
 
-pub struct SegmentDisplayInfo<'a> {
+pub struct PageDisplayInfo<'a> {
     pub title: &'a str,
     pub current: usize,
     pub total: usize,

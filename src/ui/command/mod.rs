@@ -39,6 +39,7 @@ pub enum CommandId {
     Seek,
     SeekRow,
     SeekCol,
+    SeekPage,
     Goto,
     Up,
     Down,

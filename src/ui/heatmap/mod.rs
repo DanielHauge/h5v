@@ -16,11 +16,11 @@ use crate::{
     h5f::{DatasetMeta, H5FNode, Node},
     ui::{
         app::{AppEvent, HeatmapLoadedResult},
+        page_scroll::PageDisplayInfo,
         render::MatrixRenderType,
-        segment_scroll::SegmentDisplayInfo,
         state::{
-            AppState, HeatmapLoadPriority, HeatmapLoadRequest, HeatmapPageWindow, HeatmapRenderKey,
-            HeatmapSegmentAxis, HeatmapViewport,
+            AppState, HeatmapLoadPriority, HeatmapLoadRequest, HeatmapPageAxis, HeatmapPageWindow,
+            HeatmapRenderKey, HeatmapViewport,
         },
     },
 };
@@ -151,17 +151,18 @@ fn render_heatmap_with_dataset(
     let show_profile_panel = state.heatmap_render.selected_line.is_some()
         || state.heatmap_render.current_line_profile.is_some();
     let (heatmap_body, profile_area) = split_heatmap_body(layout.body, show_profile_panel);
+    let heatmap_body_inner = panels::heatmap_frame_inner(&heatmap_body);
     let header_page_window = compute_heatmap_page_window(
         ds_path,
         base_viewport.row_len,
         base_viewport.col_len,
-        heatmap_body,
+        heatmap_body_inner,
         state.image_cell_size,
-        state.heatmap_render.segment.as_ref(),
+        state.heatmap_render.page_window.as_ref(),
     );
-    let header_segment_info = header_page_window.as_ref().map(|window| {
+    let header_page_info = header_page_window.as_ref().map(|window| {
         let (range_start, range_end) = window.current_range();
-        SegmentDisplayInfo {
+        PageDisplayInfo {
             title: "Page",
             current: window.page.max(0) as usize,
             total: window.page_count.max(1) as usize,
@@ -177,7 +178,7 @@ fn render_heatmap_with_dataset(
         node,
         &attr.shape,
         true,
-        header_segment_info.as_ref(),
+        header_page_info.as_ref(),
     )?;
     if let Some(settings_area) = layout.settings {
         panels::render_heatmap_settings(f, &settings_area, state);
@@ -192,6 +193,7 @@ fn render_heatmap_with_dataset(
         state,
         ds,
         ds_path,
+        header_page_window,
     )?;
     panels::render_heatmap_region_panel(f, &layout.region, attr, node, state);
     if let Some(profile_area) = profile_area {
@@ -212,7 +214,7 @@ fn clear_heatmap_render_state(state: &mut AppState<'_>) {
     state.heatmap_render.selected_cells = None;
     state.heatmap_render.selected_line = None;
     state.heatmap_render.drag_state = None;
-    state.heatmap_render.segment = None;
+    state.heatmap_render.page_window = None;
     state.heatmap_render.cached_pages.clear();
     state.heatmap_render.pending_keys.clear();
 }
@@ -409,6 +411,7 @@ fn render_heatmap_body(
     state: &mut AppState,
     ds: &Dataset,
     ds_path: &str,
+    page_window: Option<HeatmapPageWindow>,
 ) -> Result<(), AppError> {
     let previous_key = state.heatmap_render.current_key.clone();
     let heatmap_inner = panels::heatmap_frame_inner(area);
@@ -428,15 +431,7 @@ fn render_heatmap_body(
         source_rows,
         source_cols,
     );
-    let page_window = compute_heatmap_page_window(
-        ds_path,
-        base_viewport.row_len,
-        base_viewport.col_len,
-        *area,
-        state.image_cell_size,
-        state.heatmap_render.segment.as_ref(),
-    );
-    state.heatmap_render.segment = page_window.clone();
+    state.heatmap_render.page_window = page_window.clone();
     let page_range = page_window.as_ref().map(|window| window.current_range());
     let ((row_start, row_end), (col_start, col_end)) =
         page_ranges(page_window.as_ref(), base_viewport);
@@ -468,9 +463,9 @@ fn render_heatmap_body(
         cell_width: state.image_cell_size.0,
         cell_height: state.image_cell_size.1,
         viewport: state.heatmap_render.viewport,
-        segment_axis: page_window.as_ref().map(|window| window.axis),
-        segment_start: page_range.map_or(0, |range| range.0),
-        segment_len: page_range.map_or(0, |range| range.1.saturating_sub(range.0)),
+        page_axis: page_window.as_ref().map(|window| window.axis),
+        page_start: page_range.map_or(0, |range| range.0),
+        page_len: page_range.map_or(0, |range| range.1.saturating_sub(range.0)),
         selected_row: node.selected_row,
         selected_col: node.selected_col,
         selected_indexes: node.selected_indexes.clone(),
@@ -573,10 +568,10 @@ fn compute_heatmap_page_window(
     let viewport_aspect = viewport_width / viewport_height;
     let candidate = if (source_cols as f32 / source_rows.max(1) as f32) > viewport_aspect {
         let len = ((source_rows as f32 * viewport_aspect).floor() as usize).clamp(1, source_cols);
-        (len < source_cols).then_some((HeatmapSegmentAxis::Cols, source_cols, len))
+        (len < source_cols).then_some((HeatmapPageAxis::Cols, source_cols, len))
     } else {
         let len = ((source_cols as f32 / viewport_aspect).floor() as usize).clamp(1, source_rows);
-        (len < source_rows).then_some((HeatmapSegmentAxis::Rows, source_rows, len))
+        (len < source_rows).then_some((HeatmapPageAxis::Rows, source_rows, len))
     }?;
 
     let (axis, total, len) = candidate;
@@ -591,26 +586,21 @@ fn compute_heatmap_page_window(
     } else {
         1 + total.saturating_sub(len).div_ceil(step)
     } as i32;
-    let page = match current {
-        Some(existing)
-            if existing.ds_path == ds_path
-                && existing.axis == axis
-                && existing.total == total
-                && existing.len == len =>
-        {
-            existing.page.clamp(0, page_count.saturating_sub(1))
-        }
-        _ => 0,
-    };
-
-    Some(HeatmapPageWindow {
+    let mut window = HeatmapPageWindow {
         ds_path: ds_path.to_string(),
         axis,
         len,
         total,
-        page,
+        page: 0,
         page_count,
-    })
+    };
+    if let Some(existing) = current {
+        if existing.ds_path == ds_path && existing.axis == axis && existing.total == total {
+            window.page = existing.page.clamp(0, page_count.saturating_sub(1));
+        }
+    }
+
+    Some(window)
 }
 
 fn clamp_heatmap_viewport(
@@ -637,7 +627,7 @@ fn page_ranges(
         Some(window) => {
             let (start, end) = window.current_range();
             match window.axis {
-                HeatmapSegmentAxis::Rows => (
+                HeatmapPageAxis::Rows => (
                     (
                         base_viewport.row_start + start,
                         base_viewport.row_start + end,
@@ -647,7 +637,7 @@ fn page_ranges(
                         base_viewport.col_start + base_viewport.col_len,
                     ),
                 ),
-                HeatmapSegmentAxis::Cols => (
+                HeatmapPageAxis::Cols => (
                     (
                         base_viewport.row_start,
                         base_viewport.row_start + base_viewport.row_len,
@@ -691,10 +681,10 @@ fn schedule_heatmap_prefetch(
         if page < 0 || page >= window.page_count {
             continue;
         }
-        let (segment_start, segment_end) = window.range_for_page(page);
+        let (page_start, page_end) = window.range_for_page(page);
         let mut key = current_key.clone();
-        key.segment_start = segment_start;
-        key.segment_len = segment_end.saturating_sub(segment_start);
+        key.page_start = page_start;
+        key.page_len = page_end.saturating_sub(page_start);
         if state
             .heatmap_render
             .cached_pages

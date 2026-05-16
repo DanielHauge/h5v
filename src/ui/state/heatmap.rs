@@ -393,7 +393,7 @@ impl Default for HeatmapSettings {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HeatmapSegmentAxis {
+pub enum HeatmapPageAxis {
     Rows,
     Cols,
 }
@@ -401,7 +401,7 @@ pub enum HeatmapSegmentAxis {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeatmapPageWindow {
     pub ds_path: String,
-    pub axis: HeatmapSegmentAxis,
+    pub axis: HeatmapPageAxis,
     pub len: usize,
     pub total: usize,
     pub page: i32,
@@ -411,6 +411,16 @@ pub struct HeatmapPageWindow {
 impl HeatmapPageWindow {
     pub fn step_len(&self) -> usize {
         (self.len / 2).max(1)
+    }
+
+    pub fn page_for_target(&self, target: usize) -> i32 {
+        for page in 0..self.page_count {
+            let (start, end) = self.range_for_page(page);
+            if target >= start && target < end {
+                return page;
+            }
+        }
+        self.page_count.saturating_sub(1)
     }
 
     pub fn start_for_page(&self, page: i32) -> usize {
@@ -430,8 +440,8 @@ impl HeatmapPageWindow {
 
     pub fn label(&self) -> &'static str {
         match self.axis {
-            HeatmapSegmentAxis::Rows => "rows",
-            HeatmapSegmentAxis::Cols => "cols",
+            HeatmapPageAxis::Rows => "rows",
+            HeatmapPageAxis::Cols => "cols",
         }
     }
 }
@@ -475,9 +485,9 @@ pub struct HeatmapRenderKey {
     pub cell_width: u16,
     pub cell_height: u16,
     pub viewport: Option<HeatmapViewport>,
-    pub segment_axis: Option<HeatmapSegmentAxis>,
-    pub segment_start: usize,
-    pub segment_len: usize,
+    pub page_axis: Option<HeatmapPageAxis>,
+    pub page_start: usize,
+    pub page_len: usize,
     pub selected_row: usize,
     pub selected_col: usize,
     pub selected_indexes: Vec<usize>,
@@ -538,7 +548,7 @@ pub struct HeatmapRenderState {
     pub selected_cells: Option<HeatmapSelectedCells>,
     pub selected_line: Option<HeatmapLineSelection>,
     pub drag_state: Option<HeatmapDragState>,
-    pub segment: Option<HeatmapPageWindow>,
+    pub page_window: Option<HeatmapPageWindow>,
     pub cached_pages: VecDeque<HeatmapCachedPage>,
     pub pending_keys: HashSet<HeatmapRenderKey>,
     pub tx_load_heatmap: Sender<HeatmapLoadRequest>,
@@ -663,18 +673,18 @@ impl AppState<'_> {
     fn current_heatmap_visible_viewport(&self) -> Option<HeatmapViewport> {
         let (rows, cols) = self.active_heatmap_shape()?;
         let base = clamp_heatmap_viewport(self.base_heatmap_viewport(rows, cols), rows, cols);
-        let Some(window) = self.heatmap_render.segment.as_ref() else {
+        let Some(window) = self.heatmap_render.page_window.as_ref() else {
             return Some(base);
         };
         let (start, end) = window.current_range();
         Some(match window.axis {
-            HeatmapSegmentAxis::Rows => HeatmapViewport {
+            HeatmapPageAxis::Rows => HeatmapViewport {
                 row_start: base.row_start + start,
                 row_len: end.saturating_sub(start).max(1),
                 col_start: base.col_start,
                 col_len: base.col_len,
             },
-            HeatmapSegmentAxis::Cols => HeatmapViewport {
+            HeatmapPageAxis::Cols => HeatmapViewport {
                 row_start: base.row_start,
                 row_len: base.row_len,
                 col_start: base.col_start + start,
@@ -693,7 +703,7 @@ impl AppState<'_> {
         self.heatmap_render.current_legend_summary = None;
         self.heatmap_render.current_slice_summary = None;
         if clear_segment {
-            self.heatmap_render.segment = None;
+            self.heatmap_render.page_window = None;
         }
     }
 

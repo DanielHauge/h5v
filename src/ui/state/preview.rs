@@ -17,7 +17,7 @@ use crate::{
 pub struct ChartPreviewLoadRequest {
     pub ds_path: String,
     pub source: ChartPreviewSource,
-    pub segment_state: SegmentState,
+    pub page_state: PageState,
     pub selection: PreviewSelection,
     pub width: u16,
     pub height: u16,
@@ -293,22 +293,22 @@ impl ChartPreviwState {
 }
 
 #[derive(Clone)]
-pub enum SegmentType {
+pub enum PageType {
     Image,
     Chart,
-    NoSegment,
+    Unpaged,
 }
 
 #[derive(Clone)]
-pub struct SegmentState {
+pub struct PageState {
     pub idx: i32,
-    pub segumented: SegmentType,
-    pub segment_count: i32,
+    pub paged: PageType,
+    pub page_count: i32,
 }
 
-impl SegmentState {
+impl PageState {
     pub fn max_index(&self) -> Option<i32> {
-        (self.segment_count > 0).then_some(self.segment_count.saturating_sub(1))
+        (self.page_count > 0).then_some(self.page_count.saturating_sub(1))
     }
 }
 
