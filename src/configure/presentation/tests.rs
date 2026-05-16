@@ -1,11 +1,11 @@
 use ratatui::style::Color;
 
 use crate::configure::{
-    available_color_names, color_to_lua_string, current_auto_layout_settings,
-    current_config_generation, current_theme_name, ordered_content_modes, parse_color,
-    reset_config, set_auto_layout_settings, set_color_override, set_content_mode_order,
-    theme_named_colors, themed_color, AutoLayoutSettings, LayoutSize, PanelLayoutSizes,
-    SymbolThemeName, ThemeName,
+    available_color_names, available_symbol_names, color_to_lua_string,
+    current_auto_layout_settings, current_config_generation, current_theme_name,
+    ordered_content_modes, parse_color, reset_config, set_auto_layout_settings, set_color_override,
+    set_content_mode_order, theme_named_colors, themed_color, AutoLayoutSettings, LayoutSize,
+    PanelLayoutSizes, SymbolThemeName, ThemeName,
 };
 use crate::ui::state::ContentShowMode;
 
@@ -44,10 +44,18 @@ fn exposes_named_colors_for_scaffolding() {
     let names = available_color_names();
     assert!(names.contains(&"content.app_brand"));
     assert!(names.contains(&"chart.series_8"));
+    assert!(names.contains(&"mchart.item_id"));
 
     let dark = theme_named_colors(ThemeName::Dark);
     assert!(dark.iter().any(|(name, _)| *name == "surface.panel_border"));
     assert_eq!(color_to_lua_string(Color::Rgb(12, 34, 56)), "#0c2238");
+}
+
+#[test]
+fn exposes_named_symbols_for_scaffolding() {
+    let names = available_symbol_names();
+    assert!(names.contains(&"chart.error_marker"));
+    assert!(names.contains(&"chart.loading_indicator"));
 }
 
 #[test]

@@ -35,6 +35,14 @@ fn mchart_body_span(content: impl Into<String>) -> Span<'static> {
     Span::styled(content.into(), mchart_body_style())
 }
 
+fn mchart_soft_muted(style: Style) -> Style {
+    if configure::prefers_strong_text() {
+        style
+    } else {
+        style.dim()
+    }
+}
+
 fn mchart_mode_tab_style(selected: bool) -> Style {
     if selected {
         Style::default()
@@ -1291,20 +1299,21 @@ impl MultiChartState {
                     })
                 };
                 let marker = if has_error {
-                    "⚠"
+                    configure::configured_symbol(|symbols| symbols.chart.error_marker)
                 } else if item.visible {
                     configure::configured_symbol(|symbols| symbols.chart.visibility_visible)
                 } else {
                     configure::configured_symbol(|symbols| symbols.chart.visibility_hidden)
                 };
                 let row_style = match (has_error, is_selected, item.visible) {
-                    (true, true, _) => Style::default()
-                        .fg(configure::themed_color(|colors| colors.text.error))
-                        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
-                        .dim(),
-                    (true, false, _) => Style::default()
-                        .fg(configure::themed_color(|colors| colors.text.error))
-                        .dim(),
+                    (true, true, _) => mchart_soft_muted(
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.text.error))
+                            .bg(configure::themed_color(|colors| colors.surface.focus_bg)),
+                    ),
+                    (true, false, _) => mchart_soft_muted(
+                        Style::default().fg(configure::themed_color(|colors| colors.text.error)),
+                    ),
                     (false, true, true) => Style::default()
                         .fg(configure::themed_color(|colors| colors.text.primary))
                         .bg(configure::themed_color(|colors| colors.surface.focus_bg))
@@ -1312,13 +1321,13 @@ impl MultiChartState {
                     (false, true, false) => Style::default()
                         .fg(configure::themed_color(|colors| colors.text.primary))
                         .bg(configure::themed_color(|colors| colors.surface.focus_bg))
-                        .bold()
-                        .dim(),
+                        .bold(),
                     (false, false, true) => Style::default()
                         .fg(configure::themed_color(|colors| colors.mchart.item_visible)),
-                    (false, false, false) => Style::default()
-                        .fg(configure::themed_color(|colors| colors.mchart.item_hidden))
-                        .dim(),
+                    (false, false, false) => mchart_soft_muted(
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.mchart.item_hidden)),
+                    ),
                 };
                 let id_text = format!("${}", item.id.0);
                 let prefix_width = 5 + id_text.chars().count();
@@ -1328,26 +1337,26 @@ impl MultiChartState {
                     is_selected.then(|| configure::themed_color(|colors| colors.surface.focus_bg));
                 let label_style = if item.name.is_some() {
                     let mut style = Style::default()
-                        .fg(configure::themed_color(|colors| colors.tree.dataset_file))
+                        .fg(configure::themed_color(|colors| colors.mchart.item_named))
                         .underlined();
                     if let Some(bg) = selected_bg {
                         style = style.bg(bg);
                     }
                     if !item.visible || has_error {
-                        style = style.dim();
+                        style = mchart_soft_muted(style);
                     }
                     style
                 } else {
                     row_style
                 };
                 let mut id_style = Style::default()
-                    .fg(configure::themed_color(|colors| colors.toast.warning))
+                    .fg(configure::themed_color(|colors| colors.mchart.item_id))
                     .bold();
                 if let Some(bg) = selected_bg {
                     id_style = id_style.bg(bg);
                 }
                 if !item.visible || has_error {
-                    id_style = id_style.dim();
+                    id_style = mchart_soft_muted(id_style);
                 }
                 let first_line = Line::from(vec![
                     Span::styled(" ", row_style),
@@ -1366,13 +1375,15 @@ impl MultiChartState {
                     Span::styled(
                         format!("[{}]", state_label),
                         if has_error {
-                            row_style
-                                .fg(configure::themed_color(|colors| colors.text.error))
-                                .dim()
+                            mchart_soft_muted(
+                                row_style.fg(configure::themed_color(|colors| colors.text.error)),
+                            )
                         } else {
-                            row_style
-                                .fg(configure::themed_color(|colors| colors.mchart.detail_label))
-                                .dim()
+                            mchart_soft_muted(
+                                row_style.fg(configure::themed_color(|colors| {
+                                    colors.mchart.detail_label
+                                })),
+                            )
                         },
                     ),
                 ]);

@@ -73,6 +73,8 @@ pub(crate) struct MchartColors {
     pub(crate) item_selected_hidden: Color,
     pub(crate) item_visible: Color,
     pub(crate) item_hidden: Color,
+    pub(crate) item_named: Color,
+    pub(crate) item_id: Color,
     pub(crate) prefix_selected: Color,
     pub(crate) prefix: Color,
     pub(crate) detail_label: Color,
@@ -362,6 +364,8 @@ pub(crate) struct ChartSymbols {
     pub(crate) membership_marker: &'static str,
     pub(crate) visibility_visible: &'static str,
     pub(crate) visibility_hidden: &'static str,
+    pub(crate) error_marker: &'static str,
+    pub(crate) loading_indicator: &'static str,
     pub(crate) r#enum: [&'static str; 8],
 }
 

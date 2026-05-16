@@ -81,7 +81,7 @@ fn raw_image_frame_count(
 fn render_image_loading_indicator(f: &mut Frame, area: Rect) {
     let indicator = Block::default()
         .title(Span::styled(
-            " * ",
+            crate::configure::configured_symbol(|symbols| symbols.chart.loading_indicator),
             Style::default().fg(crate::configure::themed_color(|colors| {
                 colors.help.description
             })),

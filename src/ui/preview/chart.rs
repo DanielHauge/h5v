@@ -45,7 +45,7 @@ const PREVIEW_SELECTED_POINT_MARKER_RADIUS: i32 = 7;
 fn render_chart_loading_indicator(f: &mut Frame, area: Rect) {
     let indicator = Block::default()
         .title(Span::styled(
-            " * ",
+            configure::configured_symbol(|symbols| symbols.chart.loading_indicator),
             Style::default().fg(configure::themed_color(|colors| colors.help.description)),
         ))
         .title_alignment(Alignment::Right);
