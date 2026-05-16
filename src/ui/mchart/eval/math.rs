@@ -1,4 +1,8 @@
 use super::*;
+use crate::ui::mchart::functions::{
+    find_mchart_function, MchartFunctionExecutionKind, MchartReducerKind, MchartRollingKind,
+    MchartScalarCompareKind, MchartUnaryMathKind,
+};
 
 pub(crate) fn eval_expression_at(
     expr: &ExpressionAst,
@@ -76,39 +80,15 @@ pub(crate) fn eval_expression_at(
                 }
             }
         }
-        ExpressionAst::FunctionCall { name, args } => match name.as_str() {
-            "exp" => {
-                if args.len() != 2 {
-                    return Err("exp() expects exactly 2 arguments".to_string());
-                }
-                let lhs = eval_expression_at(
-                    &args[0],
-                    idx,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                let rhs = eval_expression_at(
-                    &args[1],
-                    idx,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                Ok(lhs.powf(rhs))
-            }
-            "abs" | "sqrt" | "ln" | "log10" | "sin" | "cos" | "tan" | "floor" | "ceil"
-            | "round" => {
-                if args.len() != 1 {
-                    return Err(format!("{name}() expects exactly 1 argument"));
-                }
-                apply_unary_math_function(
-                    name,
-                    eval_expression_at(
+        ExpressionAst::FunctionCall { name, args } => {
+            let function = find_mchart_function(name)
+                .ok_or_else(|| format!("Unsupported function '{name}'"))?;
+            match function.execution {
+                MchartFunctionExecutionKind::Power => {
+                    if args.len() != 2 {
+                        return Err("exp() expects exactly 2 arguments".to_string());
+                    }
+                    let lhs = eval_expression_at(
                         &args[0],
                         idx,
                         item_series_values,
@@ -116,73 +96,101 @@ pub(crate) fn eval_expression_at(
                         series_values,
                         scalar_values,
                         series_sample_count,
-                    )?,
-                )
-            }
-            "rolling_mean" | "rolling_median" | "rolling_stddev" | "rolling_min"
-            | "rolling_max" => eval_rolling_series_function(
-                name,
-                args,
-                idx,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-            ),
-            "rolling_quantile" => eval_rolling_quantile_function(
-                args,
-                idx,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-            ),
-            "threshold" => {
-                if args.len() != 2 {
-                    return Err("threshold() expects exactly 2 arguments".to_string());
+                    )?;
+                    let rhs = eval_expression_at(
+                        &args[1],
+                        idx,
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    Ok(lhs.powf(rhs))
                 }
-                let value = eval_expression_at(
-                    &args[0],
+                MchartFunctionExecutionKind::UnaryMath(op) => {
+                    if args.len() != 1 {
+                        return Err(format!("{name}() expects exactly 1 argument"));
+                    }
+                    apply_unary_math_function(
+                        op,
+                        name,
+                        eval_expression_at(
+                            &args[0],
+                            idx,
+                            item_series_values,
+                            item_scalar_values,
+                            series_values,
+                            scalar_values,
+                            series_sample_count,
+                        )?,
+                    )
+                }
+                MchartFunctionExecutionKind::Rolling(kind) => eval_rolling_series_function(
+                    kind,
+                    args,
                     idx,
                     item_series_values,
                     item_scalar_values,
                     series_values,
                     scalar_values,
                     series_sample_count,
-                )?;
-                let threshold = eval_scalar_expression(
-                    &args[1],
+                ),
+                MchartFunctionExecutionKind::RollingQuantile => eval_rolling_quantile_function(
+                    args,
+                    idx,
                     item_series_values,
                     item_scalar_values,
                     series_values,
                     scalar_values,
                     series_sample_count,
-                )?;
-                Ok(if value >= threshold { 1.0 } else { 0.0 })
-            }
-            "diff" => eval_diff_series_function(
-                args,
-                idx,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-            ),
-            "avg" | "mean" | "min" | "max" | "stddev" | "len" | "max2" | "min2" => {
-                eval_scalar_expression(
+                ),
+                MchartFunctionExecutionKind::Threshold => {
+                    if args.len() != 2 {
+                        return Err("threshold() expects exactly 2 arguments".to_string());
+                    }
+                    let value = eval_expression_at(
+                        &args[0],
+                        idx,
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    let threshold = eval_scalar_expression(
+                        &args[1],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    Ok(if value >= threshold { 1.0 } else { 0.0 })
+                }
+                MchartFunctionExecutionKind::Diff => eval_diff_series_function(
+                    args,
+                    idx,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                ),
+                MchartFunctionExecutionKind::Reducer(_)
+                | MchartFunctionExecutionKind::ScalarCompare(_) => eval_scalar_expression(
                     expr,
                     item_series_values,
                     item_scalar_values,
                     series_values,
                     scalar_values,
                     series_sample_count,
-                )
+                ),
+                MchartFunctionExecutionKind::Interp | MchartFunctionExecutionKind::Slice => {
+                    Err(format!("Unsupported function '{name}'"))
+                }
             }
-            _ => Err(format!("Unsupported function '{name}'")),
-        },
+        }
     }
 }
 
@@ -242,161 +250,115 @@ pub(crate) fn eval_scalar_expression(
                 }
             }
         }
-        ExpressionAst::FunctionCall { name, args } => match name.as_str() {
-            "exp" => {
-                if args.len() != 2 {
-                    return Err("exp() expects exactly 2 arguments".to_string());
-                }
-                let lhs = eval_scalar_expression(
-                    &args[0],
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                let rhs = eval_scalar_expression(
-                    &args[1],
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                Ok(lhs.powf(rhs))
-            }
-            "abs" | "sqrt" | "ln" | "log10" | "sin" | "cos" | "tan" | "floor" | "ceil"
-            | "round" => {
-                if args.len() != 1 {
-                    return Err(format!("{name}() expects exactly 1 argument"));
-                }
-                apply_unary_math_function(
-                    name,
-                    eval_scalar_expression(
+        ExpressionAst::FunctionCall { name, args } => {
+            let function = find_mchart_function(name)
+                .ok_or_else(|| format!("Unsupported function '{name}'"))?;
+            match function.execution {
+                MchartFunctionExecutionKind::Power => {
+                    if args.len() != 2 {
+                        return Err("exp() expects exactly 2 arguments".to_string());
+                    }
+                    let lhs = eval_scalar_expression(
                         &args[0],
                         item_series_values,
                         item_scalar_values,
                         series_values,
                         scalar_values,
                         series_sample_count,
-                    )?,
-                )
-            }
-            "threshold" => {
-                if args.len() != 2 {
-                    return Err("threshold() expects exactly 2 arguments".to_string());
+                    )?;
+                    let rhs = eval_scalar_expression(
+                        &args[1],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    Ok(lhs.powf(rhs))
                 }
-                let value = eval_scalar_expression(
-                    &args[0],
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                let threshold = eval_scalar_expression(
-                    &args[1],
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                Ok(if value >= threshold { 1.0 } else { 0.0 })
-            }
-            "avg" | "mean" => reduce_series_function(
-                name,
-                args,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-                |values| Ok(values.iter().sum::<f64>() / values.len() as f64),
-            ),
-            "min" => reduce_series_function(
-                "min",
-                args,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-                |values| Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
-            ),
-            "max" => reduce_series_function(
-                "max",
-                args,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-                |values| Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
-            ),
-            "stddev" => reduce_series_function(
-                "stddev",
-                args,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-                |values| {
-                    let mean = values.iter().sum::<f64>() / values.len() as f64;
-                    let variance = if values.len() <= 1 {
-                        0.0
-                    } else {
-                        values
-                            .iter()
-                            .map(|value| {
-                                let delta = *value - mean;
-                                delta * delta
-                            })
-                            .sum::<f64>()
-                            / values.len() as f64
-                    };
-                    Ok(variance.sqrt())
-                },
-            ),
-            "len" => reduce_series_function(
-                "len",
-                args,
-                item_series_values,
-                item_scalar_values,
-                series_values,
-                scalar_values,
-                series_sample_count,
-                |values| Ok(values.len() as f64),
-            ),
-            "max2" | "min2" => {
-                if args.len() != 2 {
-                    return Err(format!("{name}() expects exactly 2 arguments"));
+                MchartFunctionExecutionKind::UnaryMath(op) => {
+                    if args.len() != 1 {
+                        return Err(format!("{name}() expects exactly 1 argument"));
+                    }
+                    apply_unary_math_function(
+                        op,
+                        name,
+                        eval_scalar_expression(
+                            &args[0],
+                            item_series_values,
+                            item_scalar_values,
+                            series_values,
+                            scalar_values,
+                            series_sample_count,
+                        )?,
+                    )
                 }
-                let lhs = eval_scalar_expression(
-                    &args[0],
+                MchartFunctionExecutionKind::Threshold => {
+                    if args.len() != 2 {
+                        return Err("threshold() expects exactly 2 arguments".to_string());
+                    }
+                    let value = eval_scalar_expression(
+                        &args[0],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    let threshold = eval_scalar_expression(
+                        &args[1],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    Ok(if value >= threshold { 1.0 } else { 0.0 })
+                }
+                MchartFunctionExecutionKind::Reducer(kind) => reduce_series_function(
+                    name,
+                    args,
                     item_series_values,
                     item_scalar_values,
                     series_values,
                     scalar_values,
                     series_sample_count,
-                )?;
-                let rhs = eval_scalar_expression(
-                    &args[1],
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                )?;
-                Ok(if name == "max2" {
-                    lhs.max(rhs)
-                } else {
-                    lhs.min(rhs)
-                })
+                    reducer_for_kind(kind),
+                ),
+                MchartFunctionExecutionKind::ScalarCompare(kind) => {
+                    if args.len() != 2 {
+                        return Err(format!("{name}() expects exactly 2 arguments"));
+                    }
+                    let lhs = eval_scalar_expression(
+                        &args[0],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    let rhs = eval_scalar_expression(
+                        &args[1],
+                        item_series_values,
+                        item_scalar_values,
+                        series_values,
+                        scalar_values,
+                        series_sample_count,
+                    )?;
+                    Ok(match kind {
+                        MchartScalarCompareKind::Max => lhs.max(rhs),
+                        MchartScalarCompareKind::Min => lhs.min(rhs),
+                    })
+                }
+                MchartFunctionExecutionKind::Rolling(_)
+                | MchartFunctionExecutionKind::RollingQuantile
+                | MchartFunctionExecutionKind::Diff
+                | MchartFunctionExecutionKind::Interp
+                | MchartFunctionExecutionKind::Slice => {
+                    Err(format!("Unsupported function '{name}'"))
+                }
             }
-            _ => Err(format!("Unsupported function '{name}'")),
-        },
+        }
     }
 }
 
@@ -435,7 +397,7 @@ where
 }
 
 fn eval_rolling_series_function(
-    name: &str,
+    kind: MchartRollingKind,
     args: &[ExpressionAst],
     idx: usize,
     item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
@@ -445,10 +407,13 @@ fn eval_rolling_series_function(
     series_sample_count: usize,
 ) -> Result<f64, String> {
     if args.len() != 2 {
-        return Err(format!("{name}() expects exactly 2 arguments"));
+        return Err(format!(
+            "{}() expects exactly 2 arguments",
+            rolling_function_name(kind)
+        ));
     }
     let window = eval_window_size(
-        name,
+        rolling_function_name(kind),
         &args[1],
         item_series_values,
         item_scalar_values,
@@ -467,10 +432,10 @@ fn eval_rolling_series_function(
         series_sample_count,
     )?;
     let mut values = values;
-    match name {
-        "rolling_mean" => Ok(values.iter().sum::<f64>() / values.len() as f64),
-        "rolling_median" => rolling_quantile_from_sorted(&mut values, 0.5),
-        "rolling_stddev" => {
+    match kind {
+        MchartRollingKind::Mean => Ok(values.iter().sum::<f64>() / values.len() as f64),
+        MchartRollingKind::Median => rolling_quantile_from_sorted(&mut values, 0.5),
+        MchartRollingKind::Stddev => {
             let mean = values.iter().sum::<f64>() / values.len() as f64;
             let variance = if values.len() <= 1 {
                 0.0
@@ -486,9 +451,8 @@ fn eval_rolling_series_function(
             };
             Ok(variance.sqrt())
         }
-        "rolling_min" => Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
-        "rolling_max" => Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
-        _ => Err(format!("Unsupported function '{name}'")),
+        MchartRollingKind::Min => Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
+        MchartRollingKind::Max => Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
     }
 }
 
@@ -644,23 +608,61 @@ fn rolling_quantile_from_sorted(values: &mut Vec<f64>, quantile: f64) -> Result<
     }
 }
 
-fn apply_unary_math_function(name: &str, value: f64) -> Result<f64, String> {
-    let output = match name {
-        "abs" => value.abs(),
-        "sqrt" => value.sqrt(),
-        "ln" => value.ln(),
-        "log10" => value.log10(),
-        "sin" => value.sin(),
-        "cos" => value.cos(),
-        "tan" => value.tan(),
-        "floor" => value.floor(),
-        "ceil" => value.ceil(),
-        "round" => value.round(),
-        _ => return Err(format!("Unsupported function '{name}'")),
+fn apply_unary_math_function(
+    kind: MchartUnaryMathKind,
+    name: &str,
+    value: f64,
+) -> Result<f64, String> {
+    let output = match kind {
+        MchartUnaryMathKind::Abs => value.abs(),
+        MchartUnaryMathKind::Sqrt => value.sqrt(),
+        MchartUnaryMathKind::Ln => value.ln(),
+        MchartUnaryMathKind::Log10 => value.log10(),
+        MchartUnaryMathKind::Sin => value.sin(),
+        MchartUnaryMathKind::Cos => value.cos(),
+        MchartUnaryMathKind::Tan => value.tan(),
+        MchartUnaryMathKind::Floor => value.floor(),
+        MchartUnaryMathKind::Ceil => value.ceil(),
+        MchartUnaryMathKind::Round => value.round(),
     };
     if output.is_finite() {
         Ok(output)
     } else {
         Err(format!("{name}() produced a non-finite value"))
+    }
+}
+
+fn reducer_for_kind(kind: MchartReducerKind) -> impl FnOnce(&[f64]) -> Result<f64, String> {
+    move |values| match kind {
+        MchartReducerKind::Mean => Ok(values.iter().sum::<f64>() / values.len() as f64),
+        MchartReducerKind::Min => Ok(values.iter().copied().fold(f64::INFINITY, f64::min)),
+        MchartReducerKind::Max => Ok(values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
+        MchartReducerKind::Stddev => {
+            let mean = values.iter().sum::<f64>() / values.len() as f64;
+            let variance = if values.len() <= 1 {
+                0.0
+            } else {
+                values
+                    .iter()
+                    .map(|value| {
+                        let delta = *value - mean;
+                        delta * delta
+                    })
+                    .sum::<f64>()
+                    / values.len() as f64
+            };
+            Ok(variance.sqrt())
+        }
+        MchartReducerKind::Len => Ok(values.len() as f64),
+    }
+}
+
+fn rolling_function_name(kind: MchartRollingKind) -> &'static str {
+    match kind {
+        MchartRollingKind::Mean => "rolling_mean",
+        MchartRollingKind::Median => "rolling_median",
+        MchartRollingKind::Stddev => "rolling_stddev",
+        MchartRollingKind::Min => "rolling_min",
+        MchartRollingKind::Max => "rolling_max",
     }
 }

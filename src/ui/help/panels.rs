@@ -14,6 +14,7 @@ use crate::{
             AttributesAction, BoundAction, ContentAction, Direction, EffectiveKeymaps,
             GlobalAction, KeyBinding, MultiChartAction, NormalAction, TreeAction, WindowAction,
         },
+        mchart::functions::{mchart_functions, MchartFunctionCategory, MchartFunctionDefinition},
         state::{
             HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection,
         },
@@ -513,313 +514,27 @@ fn multichart_expressions_panel() -> (String, Vec<Line<'static>>) {
 }
 
 fn multichart_function_reducers_panel() -> (String, Vec<Line<'static>>) {
-    let mut lines = vec![
-        paragraph_line("Reducers collapse a whole series to one scalar value. They are useful for labels, normalization, thresholds, and scalar-only derived items."),
-    ];
-    for entry in [
-        function_card(
-            "avg",
-            &[("series", "Series")],
-            "scalar",
-            "Alias of mean(...); returns the arithmetic mean of the series values.",
-            &[("series", "The input series to reduce.")],
-            "avg($1)",
-        ),
-        function_card(
-            "mean",
-            &[("series", "Series")],
-            "scalar",
-            "Returns the arithmetic mean of the series values.",
-            &[("series", "The input series to reduce.")],
-            "mean($1)",
-        ),
-        function_card(
-            "min",
-            &[("series", "Series")],
-            "scalar",
-            "Returns the minimum y-value in the series.",
-            &[("series", "The input series to reduce.")],
-            "min($1)",
-        ),
-        function_card(
-            "max",
-            &[("series", "Series")],
-            "scalar",
-            "Returns the maximum y-value in the series.",
-            &[("series", "The input series to reduce.")],
-            "max($1)",
-        ),
-        function_card(
-            "stddev",
-            &[("series", "Series")],
-            "scalar",
-            "Returns the standard deviation of the series values.",
-            &[("series", "The input series to reduce.")],
-            "stddev($1)",
-        ),
-        function_card(
-            "len",
-            &[("series", "Series")],
-            "scalar",
-            "Returns the number of samples in the series.",
-            &[("series", "The input series to count.")],
-            "len($1)",
-        ),
-        function_card(
-            "max2",
-            &[("lhs", "Scalar"), ("rhs", "Scalar")],
-            "scalar",
-            "Returns the larger of two scalar values.",
-            &[
-                ("lhs", "Left scalar value."),
-                ("rhs", "Right scalar value."),
-            ],
-            "max2(mean($1), mean($2))",
-        ),
-        function_card(
-            "min2",
-            &[("lhs", "Scalar"), ("rhs", "Scalar")],
-            "scalar",
-            "Returns the smaller of two scalar values.",
-            &[
-                ("lhs", "Left scalar value."),
-                ("rhs", "Right scalar value."),
-            ],
-            "min2(max($1), max($2))",
-        ),
-    ] {
-        lines.extend(entry);
-        lines.push(Line::raw(""));
-    }
-    ("Functions · reducers".to_string(), lines)
+    multichart_function_panel(
+        "Functions · reducers",
+        "Reducers collapse a whole series to one scalar value. They are useful for labels, normalization, thresholds, and scalar-only derived items.",
+        MchartFunctionCategory::Reducer,
+    )
 }
 
 fn multichart_function_math_panel() -> (String, Vec<Line<'static>>) {
-    let mut lines = vec![
-        paragraph_line("These helpers preserve shape: series stay series, scalars stay scalars. Use them for cleanup, scaling, and nonlinear transforms."),
-    ];
-    for entry in [
-        function_card(
-            "abs",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Absolute value.",
-            &[("value", "Scalar or series to transform.")],
-            "abs($1)",
-        ),
-        function_card(
-            "sqrt",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Square root.",
-            &[("value", "Scalar or series to transform.")],
-            "sqrt(abs($1))",
-        ),
-        function_card(
-            "ln",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Natural logarithm.",
-            &[("value", "Scalar or series to transform.")],
-            "ln($1)",
-        ),
-        function_card(
-            "log10",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Base-10 logarithm.",
-            &[("value", "Scalar or series to transform.")],
-            "log10($1)",
-        ),
-        function_card(
-            "sin",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Sine.",
-            &[("value", "Scalar or series to transform.")],
-            "sin($1)",
-        ),
-        function_card(
-            "cos",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Cosine.",
-            &[("value", "Scalar or series to transform.")],
-            "cos($1)",
-        ),
-        function_card(
-            "tan",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Tangent.",
-            &[("value", "Scalar or series to transform.")],
-            "tan($1)",
-        ),
-        function_card(
-            "floor",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Round toward negative infinity.",
-            &[("value", "Scalar or series to transform.")],
-            "floor($1)",
-        ),
-        function_card(
-            "ceil",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Round toward positive infinity.",
-            &[("value", "Scalar or series to transform.")],
-            "ceil($1)",
-        ),
-        function_card(
-            "round",
-            &[("value", "Scalar | Series")],
-            "same shape",
-            "Round to the nearest integer value.",
-            &[("value", "Scalar or series to transform.")],
-            "round($1)",
-        ),
-        function_card(
-            "exp",
-            &[("base", "Scalar | Series"), ("power", "Scalar | Series")],
-            "same shape",
-            "Raises base to power element-wise.",
-            &[
-                ("base", "Base value or series."),
-                ("power", "Exponent value or series."),
-            ],
-            "exp($1, 2)",
-        ),
-    ] {
-        lines.extend(entry);
-        lines.push(Line::raw(""));
-    }
-    ("Functions · math".to_string(), lines)
+    multichart_function_panel(
+        "Functions · math",
+        "These helpers preserve shape: series stay series, scalars stay scalars. Use them for cleanup, scaling, and nonlinear transforms.",
+        MchartFunctionCategory::Math,
+    )
 }
 
 fn multichart_function_transforms_panel() -> (String, Vec<Line<'static>>) {
-    let mut lines = vec![
-        paragraph_line("Transforms build new series from existing ones. rolling_* helpers work anywhere; interp(...) and slice(...) must stay at the top level of the expression."),
-    ];
-    for entry in [
-        function_card(
-            "rolling_mean",
-            &[("series", "Series"), ("window", "Scalar")],
-            "series",
-            "Sliding-window mean.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-            ],
-            "rolling_mean($1, 16)",
-        ),
-        function_card(
-            "rolling_median",
-            &[("series", "Series"), ("window", "Scalar")],
-            "series",
-            "Sliding-window median.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-            ],
-            "rolling_median($1, 16)",
-        ),
-        function_card(
-            "rolling_stddev",
-            &[("series", "Series"), ("window", "Scalar")],
-            "series",
-            "Sliding-window standard deviation.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-            ],
-            "rolling_stddev($1, 16)",
-        ),
-        function_card(
-            "rolling_min",
-            &[("series", "Series"), ("window", "Scalar")],
-            "series",
-            "Sliding-window minimum.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-            ],
-            "rolling_min($1, 16)",
-        ),
-        function_card(
-            "rolling_max",
-            &[("series", "Series"), ("window", "Scalar")],
-            "series",
-            "Sliding-window maximum.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-            ],
-            "rolling_max($1, 16)",
-        ),
-        function_card(
-            "rolling_quantile",
-            &[("series", "Series"), ("window", "Scalar"), ("q", "Scalar")],
-            "series",
-            "Sliding-window quantile.",
-            &[
-                ("series", "Input series."),
-                ("window", "Window size in samples."),
-                ("q", "Quantile from 0.0 to 1.0."),
-            ],
-            "rolling_quantile($1, 32, 0.95)",
-        ),
-        function_card(
-            "threshold",
-            &[("value", "Scalar | Series"), ("threshold", "Scalar")],
-            "same shape",
-            "Returns 1.0 where value >= threshold, otherwise 0.0.",
-            &[
-                ("value", "Scalar or series to test."),
-                ("threshold", "Threshold value."),
-            ],
-            "threshold($1, 0.5)",
-        ),
-        function_card(
-            "diff",
-            &[("series", "Series")],
-            "series",
-            "Returns the first difference of a series.",
-            &[("series", "Input series.")],
-            "diff($1)",
-        ),
-        function_card(
-            "interp",
-            &[("series", "Series"), ("step", "Scalar")],
-            "series",
-            "Top-level transform that resamples a series to a fixed x-step.",
-            &[
-                ("series", "Direct chart item reference like $1."),
-                ("step", "Target spacing between samples."),
-            ],
-            "interp($1, 0.05)",
-        ),
-        function_card(
-            "slice",
-            &[
-                ("series", "Series"),
-                ("start_x", "Scalar"),
-                ("end_x", "Scalar"),
-            ],
-            "series",
-            "Top-level transform that keeps only the requested x-range.",
-            &[
-                ("series", "Direct chart item reference like $1."),
-                ("start_x", "Inclusive starting x value."),
-                ("end_x", "Inclusive ending x value."),
-            ],
-            "slice($1, 25.5, 250.5)",
-        ),
-    ] {
-        lines.extend(entry);
-        lines.push(Line::raw(""));
-    }
-    ("Functions · transforms".to_string(), lines)
+    multichart_function_panel(
+        "Functions · transforms",
+        "Transforms build new series from existing ones. rolling_* helpers work anywhere; interp(...) and slice(...) must stay at the top level of the expression.",
+        MchartFunctionCategory::Transform,
+    )
 }
 
 pub(super) fn heatmap_help_lines() -> Vec<Line<'static>> {
@@ -1090,49 +805,64 @@ fn expression_editor_example(
     lines
 }
 
-fn function_card(
-    name: &str,
-    args: &[(&str, &str)],
-    returns: &str,
-    description: &str,
-    params: &[(&str, &str)],
-    example: &str,
-) -> Vec<Line<'static>> {
-    let mut lines = vec![function_signature_line(name, args, returns)];
-    lines.push(paragraph_line(description));
-    for (index, (arg_name, arg_desc)) in params.iter().enumerate() {
+fn function_card(function: &MchartFunctionDefinition) -> Vec<Line<'static>> {
+    let mut lines = vec![function_signature_line(function)];
+    lines.push(paragraph_line(function.summary));
+    for (index, arg) in function.params.iter().enumerate() {
         lines.push(Line::from(vec![
             Span::styled("  ", help_muted_style()),
-            Span::styled(format!("{arg_name}: "), help_arg_style(index)),
-            Span::styled(arg_desc.to_string(), help_muted_style()),
+            Span::styled(format!("{}: ", arg.name), help_arg_style(index)),
+            Span::styled(arg.detail.to_string(), help_muted_style()),
         ]));
     }
     lines.extend(multichart_prompt_example(
         7,
-        &format!("{name}-demo"),
-        example,
+        &format!("{}-demo", function.name),
+        function.example,
         "prompt",
     ));
     lines
 }
 
-fn function_signature_line(name: &str, args: &[(&str, &str)], returns: &str) -> Line<'static> {
+fn function_signature_line(function: &MchartFunctionDefinition) -> Line<'static> {
     let mut spans = vec![
-        Span::styled(name.to_string(), help_function_name_style()),
+        Span::styled(function.name.to_string(), help_function_name_style()),
         Span::styled("(".to_string(), help_muted_style()),
     ];
-    for (index, (arg_name, arg_kind)) in args.iter().enumerate() {
+    for (index, arg) in function.params.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(", ".to_string(), help_muted_style()));
         }
-        spans.push(Span::styled(arg_name.to_string(), help_arg_style(index)));
+        spans.push(Span::styled(arg.name.to_string(), help_arg_style(index)));
         spans.push(Span::styled(": ".to_string(), help_muted_style()));
-        spans.push(Span::styled(arg_kind.to_string(), help_desc_style()));
+        spans.push(Span::styled(arg.kind_label.to_string(), help_desc_style()));
     }
     spans.push(Span::styled(")".to_string(), help_muted_style()));
     spans.push(Span::styled(" -> ".to_string(), help_muted_style()));
-    spans.push(Span::styled(returns.to_string(), help_return_style()));
+    spans.push(Span::styled(
+        function.return_label.to_string(),
+        help_return_style(),
+    ));
     Line::from(spans)
+}
+
+fn multichart_function_panel(
+    title: &str,
+    intro: &str,
+    category: MchartFunctionCategory,
+) -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![paragraph_line(intro)];
+    let functions = mchart_functions()
+        .iter()
+        .filter(|function| function.category == category)
+        .collect::<Vec<_>>();
+    for (index, function) in functions.iter().enumerate() {
+        lines.extend(function_card(function));
+        if index + 1 != functions.len() {
+            lines.push(Line::raw(""));
+        }
+    }
+    (title.to_string(), lines)
 }
 
 fn highlighted_code_block(language: &str, title: &str, source: &str) -> Vec<Line<'static>> {

@@ -1851,6 +1851,10 @@ impl MultiChartState {
                     .enumerate()
                     .flat_map(|(idx, suggestion)| {
                         let (symbol_color, label_color) = match suggestion.kind {
+                            ExpressionPromptSuggestionKind::Function => (
+                                configure::themed_color(|colors| colors.mchart.detail_label),
+                                configure::themed_color(|colors| colors.text.type_desc),
+                            ),
                             ExpressionPromptSuggestionKind::Group => (
                                 configure::themed_color(|colors| colors.tree.group),
                                 configure::themed_color(|colors| colors.tree.group_name),

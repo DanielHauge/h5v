@@ -9,6 +9,7 @@ use crate::{
 
 use super::eval::normalize_absolute_object_path;
 use super::expression::{parse_expression_item_ref, parse_expression_load_ref};
+use super::functions::mchart_functions;
 use super::*;
 
 pub(super) const EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS: usize = 4;
@@ -44,6 +45,7 @@ pub(super) struct ExpressionPromptSuggestion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ExpressionPromptSuggestionKind {
+    Function,
     ItemRef,
     Group,
     Dataset,
@@ -91,6 +93,9 @@ enum ExpressionReferenceFunction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ExpressionCompletionContext {
+    FunctionName {
+        fragment: String,
+    },
     ItemRef {
         fragment: String,
     },
@@ -991,7 +996,63 @@ pub(super) fn current_expression_fragment(
             idx += 1;
         }
     }
-    None
+    current_expression_identifier_fragment(buffer, cursor)
+}
+
+fn current_expression_identifier_fragment(
+    buffer: &str,
+    cursor: usize,
+) -> Option<(usize, usize, String)> {
+    if cursor > buffer.len() || buffer.is_empty() {
+        return None;
+    }
+    let chars: Vec<(usize, char)> = buffer.char_indices().collect();
+    let mut containing = None;
+    for idx in 0..chars.len() {
+        let start = chars[idx].0;
+        let end = chars
+            .get(idx + 1)
+            .map(|(offset, _)| *offset)
+            .unwrap_or(buffer.len());
+        if cursor >= start && cursor <= end {
+            containing = Some(idx);
+            break;
+        }
+    }
+    let mut left = containing?;
+    if !is_identifier_char(chars[left].1) {
+        if cursor == buffer.len() && left > 0 && is_identifier_char(chars[left - 1].1) {
+            left -= 1;
+        } else {
+            return None;
+        }
+    }
+    let mut start_idx = left;
+    while start_idx > 0 && is_identifier_char(chars[start_idx - 1].1) {
+        start_idx -= 1;
+    }
+    if start_idx > 0 && chars[start_idx - 1].1 == '$' {
+        return None;
+    }
+    let mut end_idx = left + 1;
+    while end_idx < chars.len() && is_identifier_char(chars[end_idx].1) {
+        end_idx += 1;
+    }
+    let start = chars[start_idx].0;
+    let end = chars
+        .get(end_idx)
+        .map(|(offset, _)| *offset)
+        .unwrap_or(buffer.len());
+    let fragment = &buffer[start..end];
+    is_identifier_fragment(fragment).then_some((start, end, fragment.to_string()))
+}
+
+fn is_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+fn is_identifier_fragment(fragment: &str) -> bool {
+    !fragment.is_empty() && fragment.chars().all(is_identifier_char)
 }
 
 fn expression_prompt_suggestions_with_cache(
@@ -1002,6 +1063,9 @@ fn expression_prompt_suggestions_with_cache(
     cache: &mut ExpressionPromptLookupCache,
 ) -> Vec<ExpressionPromptSuggestion> {
     match current_expression_completion_context(buffer, cursor) {
+        Some(ExpressionCompletionContext::FunctionName { fragment }) => {
+            expression_function_suggestions(&fragment)
+        }
         Some(ExpressionCompletionContext::ItemRef { fragment }) => {
             expression_item_ref_suggestions(state, &fragment)
         }
@@ -1059,7 +1123,12 @@ fn current_expression_completion_context(
     }
     let function = match fragment.chars().next()? {
         'l' if fragment.starts_with("load") => ExpressionReferenceFunction::Load,
-        _ => return None,
+        _ => {
+            if is_identifier_fragment(&fragment) {
+                return Some(ExpressionCompletionContext::FunctionName { fragment });
+            }
+            return None;
+        }
     };
     let cursor_in_fragment = cursor.saturating_sub(start).min(fragment.len());
     let typed_prefix = fragment[..cursor_in_fragment].to_string();
@@ -1139,6 +1208,36 @@ fn expression_item_ref_suggestions(
                     highlight_spans: fuzzy_highlight_spans(&label, fragment),
                 },
             )
+        })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {
+        rhs_score
+            .cmp(lhs_score)
+            .then_with(|| lhs.label.cmp(&rhs.label))
+    });
+    suggestions
+        .into_iter()
+        .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
+        .map(|(_, suggestion)| suggestion)
+        .collect()
+}
+
+fn expression_function_suggestions(fragment: &str) -> Vec<ExpressionPromptSuggestion> {
+    let mut suggestions = mchart_functions()
+        .iter()
+        .filter_map(|function| {
+            let score = expression_suggestion_score(function.name, fragment, None)?;
+            Some((
+                score,
+                ExpressionPromptSuggestion {
+                    symbol: "fx".to_string(),
+                    insert_text: function.completion_insert.to_string(),
+                    label: function.signature(),
+                    detail: function.summary.to_string(),
+                    kind: ExpressionPromptSuggestionKind::Function,
+                    highlight_spans: fuzzy_highlight_spans(function.name, fragment),
+                },
+            ))
         })
         .collect::<Vec<_>>();
     suggestions.sort_by(|(lhs_score, lhs), (rhs_score, rhs)| {

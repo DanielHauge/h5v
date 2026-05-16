@@ -491,6 +491,13 @@ fn current_expression_fragment_keeps_commas_inside_dataset_selectors() {
 }
 
 #[test]
+fn current_expression_fragment_supports_function_identifiers() {
+    let buffer = "rolling_me";
+    let (_, _, fragment) = current_expression_fragment(buffer, buffer.len()).unwrap();
+    assert_eq!(fragment, "rolling_me");
+}
+
+#[test]
 fn consume_expression_reference_fragment_keeps_commas_inside_dataset_selectors() {
     let buffer = "load(/matrix)[5,5..15,0] + $1";
     let chars: Vec<(usize, char)> = buffer.char_indices().collect();
@@ -658,6 +665,25 @@ fn suggestion_score_prefers_prefix_and_basename_matches() {
     )
     .unwrap();
     assert!(prefix > fuzzy);
+}
+
+#[test]
+fn expression_prompt_suggests_registry_functions() {
+    let mut state = make_state();
+    state.expression_prompt = Some(ExpressionPromptState::new(
+        ChartItemId(1),
+        String::new(),
+        "rolling_me".to_string(),
+        "rolling_me".len(),
+        ExpressionPromptMode::New,
+    ));
+
+    state.refresh_expression_prompt(None);
+
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert!(prompt.suggestions.iter().any(|suggestion| suggestion.kind
+        == ExpressionPromptSuggestionKind::Function
+        && suggestion.insert_text == "rolling_mean($1, 16)"));
 }
 
 #[test]

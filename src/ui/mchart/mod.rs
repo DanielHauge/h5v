@@ -19,6 +19,7 @@ pub(crate) mod background;
 mod derived;
 mod eval;
 mod expression;
+pub(crate) mod functions;
 mod interaction;
 mod load;
 mod model;
