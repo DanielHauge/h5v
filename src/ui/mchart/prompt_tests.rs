@@ -48,6 +48,40 @@ fn prompt_word_movement_uses_word_boundaries() {
 }
 
 #[test]
+fn click_expression_editor_uses_character_boundaries_for_unicode_names() {
+    let mut state = make_state();
+    state.expression_prompt = Some(ExpressionPromptState::new(
+        ChartItemId(1),
+        "må".to_string(),
+        "éxpr".to_string(),
+        0,
+        ExpressionPromptMode::New,
+    ));
+    state.editor_hitbox = Some(MultiChartEditorHitbox {
+        area: ratatui::layout::Rect::new(0, 0, 40, 1),
+        name_area: ratatui::layout::Rect::new(3, 0, 5, 1),
+        expression_area: ratatui::layout::Rect::new(11, 0, 12, 1),
+    });
+
+    assert!(state.click_expression_editor(5, 0).expect("click name"));
+    assert_eq!(
+        state
+            .expression_prompt
+            .as_ref()
+            .expect("prompt")
+            .name_cursor,
+        "m".len()
+    );
+
+    assert!(state
+        .click_expression_editor(12, 0)
+        .expect("click expression"));
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.focus, ExpressionPromptFocus::Expression);
+    assert_eq!(prompt.cursor, "é".len());
+}
+
+#[test]
 fn invalid_expression_submit_is_saved_hidden_and_editable() {
     let mut state = make_state();
     state

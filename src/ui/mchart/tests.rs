@@ -536,6 +536,35 @@ fn expression_prompt_edits_do_not_invalidate_chart_render() {
 }
 
 #[test]
+fn expression_prompt_handles_unicode_cursor_editing() {
+    let mut state = make_state();
+    state.open_expression_prompt();
+    state.expression_toggle_focus();
+    state.expression_insert_char('é');
+    state.expression_insert_char('x');
+    state.expression_move_left();
+    state.expression_backspace();
+    state.expression_delete();
+    state.expression_set_focus_cursor(ExpressionPromptFocus::Name, 1);
+    state.expression_insert_char('ø');
+
+    state.expression_toggle_focus();
+    state.expression_insert_char('é');
+    state.expression_insert_char('x');
+    state.expression_move_left();
+    state.expression_backspace();
+    state.expression_delete();
+    state.expression_set_focus_cursor(ExpressionPromptFocus::Expression, 1);
+    state.expression_insert_char('ø');
+
+    let prompt = state.expression_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.name_buffer, "ø");
+    assert_eq!(prompt.buffer, "ø");
+    assert_eq!(prompt.name_cursor, "ø".len());
+    assert_eq!(prompt.cursor, "ø".len());
+}
+
+#[test]
 fn expression_prompt_can_defer_cached_image_protocol_frames() {
     let mut state = make_state();
     state.last_chart_area = Some(ratatui::layout::Rect::new(5, 5, 20, 10));

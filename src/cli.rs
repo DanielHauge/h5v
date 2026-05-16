@@ -78,8 +78,7 @@ pub(crate) fn normalize_cli_args(args: impl IntoIterator<Item = OsString>) -> Ve
 }
 
 pub(crate) fn collect_startup_commands(args: &Args) -> Result<CollectedStartupCommands, AppError> {
-    let should_read_stdin =
-        args.scripts.iter().any(|script| script == "-") || !io::stdin().is_terminal();
+    let should_read_stdin = should_read_startup_stdin(args);
     let stdin_content = if should_read_stdin {
         let mut content = String::new();
         io::stdin().read_to_string(&mut content)?;
@@ -88,6 +87,10 @@ pub(crate) fn collect_startup_commands(args: &Args) -> Result<CollectedStartupCo
         None
     };
     collect_startup_commands_from_inputs(args, stdin_content.as_deref())
+}
+
+fn should_read_startup_stdin(args: &Args) -> bool {
+    args.scripts.iter().any(|script| script == "-")
 }
 
 fn collect_startup_commands_from_inputs(
@@ -314,14 +317,13 @@ mod tests {
     }
 
     #[test]
-    fn collects_implicit_stdin_commands_without_warning() {
+    fn stdin_is_only_read_for_explicit_script_dash() {
         let args = test_args();
-        let collected = collect_startup_commands_from_inputs(&args, Some("seek 1; down 2\n"))
-            .expect("stdin commands");
-        assert_eq!(collected.commands.len(), 2);
-        assert!(collected.warnings.is_empty());
-        assert_eq!(collected.commands[0].origin, "stdin:1");
-        assert_eq!(collected.commands[1].origin, "stdin:1[2]");
+        assert!(!super::should_read_startup_stdin(&args));
+
+        let mut args = test_args();
+        args.scripts = vec!["-".to_string()];
+        assert!(super::should_read_startup_stdin(&args));
     }
 
     #[test]
@@ -335,6 +337,17 @@ mod tests {
             collected.warnings,
             vec!["--script - reached EOF without any commands"]
         );
+    }
+
+    #[test]
+    fn explicit_stdin_commands_are_collected() {
+        let mut args = test_args();
+        args.scripts = vec!["-".to_string()];
+        let collected = collect_startup_commands_from_inputs(&args, Some("seek 1; down 2\n"))
+            .expect("stdin commands");
+        assert_eq!(collected.commands.len(), 2);
+        assert_eq!(collected.commands[0].origin, "stdin:1");
+        assert_eq!(collected.commands[1].origin, "stdin:1[2]");
     }
 
     #[test]

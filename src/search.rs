@@ -90,9 +90,25 @@ pub(crate) fn indices_to_spans(highlight_idx: &[usize]) -> Vec<Range<usize>> {
     spans
 }
 
+fn char_spans_to_byte_spans(candidate: &str, spans: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let char_starts = candidate
+        .char_indices()
+        .map(|(idx, _)| idx)
+        .chain(std::iter::once(candidate.len()))
+        .collect::<Vec<_>>();
+    spans
+        .into_iter()
+        .filter_map(|span| {
+            let start = *char_starts.get(span.start)?;
+            let end = *char_starts.get(span.end)?;
+            Some(start..end)
+        })
+        .collect()
+}
+
 pub(crate) fn fuzzy_highlight_spans(candidate: &str, query: &str) -> Vec<Range<usize>> {
     let highlight_idx = fuzzy_highlight(candidate, query);
-    indices_to_spans(&highlight_idx)
+    char_spans_to_byte_spans(candidate, indices_to_spans(&highlight_idx))
 }
 
 fn render_line_with_highlight<'a>(path: &'a str, query: &str) -> Line<'a> {
@@ -155,7 +171,7 @@ impl Searcher {
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::Searcher;
+    use super::{fuzzy_highlight_spans, Searcher};
 
     #[test]
     fn returns_raw_result_paths() {
@@ -167,5 +183,17 @@ mod tests {
 
         assert_eq!(searcher.result_paths("alph"), vec!["/alpha"]);
         assert_eq!(searcher.search("alph")[0].to_string(), "/alpha");
+    }
+
+    #[test]
+    fn unicode_highlight_spans_use_byte_boundaries() {
+        let spans = fuzzy_highlight_spans("/måling", "ml");
+        assert_eq!(spans, vec![1..2, 4..5]);
+    }
+
+    #[test]
+    fn search_render_handles_unicode_matches() {
+        let searcher = Searcher::new(vec!["/måling".to_string()]);
+        assert_eq!(searcher.search("ml")[0].to_string(), "/måling");
     }
 }

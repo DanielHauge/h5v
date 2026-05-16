@@ -530,6 +530,19 @@ impl MultiChartState {
         ))
     }
 
+    fn comparison_scatter_points_are_aligned(&self) -> Option<bool> {
+        let (left, right) = self.comparison_scatter_pair()?;
+        let left_points = self.windowed_visible_points(left);
+        let right_points = self.windowed_visible_points(right);
+        Some(
+            left_points.len() == right_points.len()
+                && left_points
+                    .iter()
+                    .zip(&right_points)
+                    .all(|((left_x, _), (right_x, _))| left_x == right_x),
+        )
+    }
+
     fn mode_window_summary(&self) -> String {
         match (self.view_mode(), self.viewport) {
             (mode, _) if matches!(mode, super::MultiChartViewMode::Line) => {
@@ -603,7 +616,7 @@ impl MultiChartState {
         }
     }
 
-    fn unavailable_chart_message(&self) -> String {
+    pub(super) fn unavailable_chart_message(&self) -> String {
         match self.view_mode() {
             super::MultiChartViewMode::Line => format!(
                 "No plottable series in the current viewport. {}.",
@@ -613,8 +626,13 @@ impl MultiChartState {
                 "No histogram samples in the current visible window.".to_string()
             }
             super::MultiChartViewMode::ComparisonScatter => {
-                "Comparison scatter needs two visible loaded series; it uses the selected series and the next visible series."
-                    .to_string()
+                if matches!(self.comparison_scatter_points_are_aligned(), Some(false)) {
+                    "Comparison scatter requires matching visible sample positions in both series."
+                        .to_string()
+                } else {
+                    "Comparison scatter needs two visible loaded series; it uses the selected series and the next visible series."
+                        .to_string()
+                }
             }
         }
     }
@@ -774,20 +792,26 @@ impl MultiChartState {
 
     fn prepared_comparison_scatter_data(&self) -> Option<super::PreparedComparisonScatterData> {
         let (left, right) = self.comparison_scatter_pair()?;
-        let left_values = self
+        let left_points = self
             .windowed_visible_points(left)
             .into_iter()
-            .map(|(_, y)| y)
             .collect::<Vec<_>>();
-        let right_values = self
+        let right_points = self
             .windowed_visible_points(right)
             .into_iter()
-            .map(|(_, y)| y)
             .collect::<Vec<_>>();
-        let points = left_values
+        if left_points.len() != right_points.len()
+            || left_points
+                .iter()
+                .zip(&right_points)
+                .any(|((left_x, _), (right_x, _))| left_x != right_x)
+        {
+            return None;
+        }
+        let points = left_points
             .into_iter()
-            .zip(right_values)
-            .map(|(x, y)| (x, y))
+            .zip(right_points)
+            .map(|((_, x), (_, y))| (x, y))
             .collect::<Vec<_>>();
         let bounds = Self::bounds_from_points(points.iter())?;
 
@@ -1896,13 +1920,19 @@ impl MultiChartState {
             let cursor = ratatui::layout::Position::new(
                 if prompt.focus == ExpressionPromptFocus::Name {
                     let name_offset = usize::from(!prompt.name_buffer.is_empty());
+                    let name_cursor = MultiChartState::prompt_cursor_char_offset(
+                        &prompt.name_buffer,
+                        prompt.name_cursor,
+                    );
                     input_inner
                         .x
-                        .saturating_add((id_prefix_width + name_offset + prompt.name_cursor) as u16)
+                        .saturating_add((id_prefix_width + name_offset + name_cursor) as u16)
                 } else {
+                    let expression_cursor =
+                        MultiChartState::prompt_cursor_char_offset(&prompt.buffer, prompt.cursor);
                     input_inner
                         .x
-                        .saturating_add((prefix_width + prompt.cursor) as u16)
+                        .saturating_add((prefix_width + expression_cursor) as u16)
                 },
                 input_inner.y,
             );

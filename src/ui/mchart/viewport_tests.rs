@@ -521,6 +521,33 @@ fn comparison_scatter_mode_uses_selected_series_and_next_visible_series() {
 }
 
 #[test]
+fn comparison_scatter_mode_rejects_misaligned_visible_windows() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+    );
+    state.add_chart_item(source("/group/b", selection), vec![(0.0, 1.0), (2.0, 3.0)]);
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    assert!(state.prepared_chart_data().is_none());
+    assert_eq!(
+        state.chart_mode_subheader(),
+        "[sample aligned] - b[..,0] vs a[..,0]"
+    );
+    assert_eq!(
+        state.unavailable_chart_message(),
+        "Comparison scatter requires matching visible sample positions in both series."
+    );
+}
+
+#[test]
 fn histogram_render_request_succeeds() {
     let request = MultiChartRenderRequest {
         generation: 1,

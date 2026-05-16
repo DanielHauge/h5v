@@ -491,7 +491,7 @@ impl MultiChartState {
             return 0;
         }
         let local = column.saturating_sub(hitbox.name_area.x) as usize;
-        local.saturating_sub(1).min(prompt.name_buffer.len())
+        Self::prompt_cursor_from_char_offset(&prompt.name_buffer, local.saturating_sub(1))
     }
 
     pub(super) fn expression_cursor_from_click(
@@ -506,7 +506,7 @@ impl MultiChartState {
             return 0;
         }
         let local = column.saturating_sub(hitbox.expression_area.x) as usize;
-        local.min(prompt.buffer.len())
+        Self::prompt_cursor_from_char_offset(&prompt.buffer, local)
     }
 
     pub fn click_expression_editor(&mut self, column: u16, row: u16) -> Result<bool, String> {

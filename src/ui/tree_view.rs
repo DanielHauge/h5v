@@ -392,8 +392,9 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             f.set_cursor_position(area_pos);
 
             let mut offset = 1;
+            let visible_rows = area.height.saturating_sub(1) as usize;
             for (i, result) in search_results.iter().skip(view_offset as usize).enumerate() {
-                if i >= (area.height - 1) as usize {
+                if i >= visible_rows {
                     break;
                 }
                 if i == highlight_index {

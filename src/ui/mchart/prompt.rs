@@ -144,6 +144,7 @@ impl ExpressionPromptState {
         cursor: usize,
         mode: ExpressionPromptMode,
     ) -> Self {
+        let cursor = MultiChartState::snap_prompt_cursor(&buffer, cursor);
         let name_cursor = name_buffer.len();
         Self {
             item_id,
@@ -163,26 +164,91 @@ impl ExpressionPromptState {
 }
 
 impl MultiChartState {
-    fn prompt_word_boundary_left(buffer: &str, cursor: usize) -> usize {
-        let bytes = buffer.as_bytes();
-        let mut cursor = cursor.min(bytes.len());
-        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
-            cursor -= 1;
-        }
-        while cursor > 0 && !bytes[cursor - 1].is_ascii_whitespace() {
+    pub(super) fn snap_prompt_cursor(buffer: &str, cursor: usize) -> usize {
+        let mut cursor = cursor.min(buffer.len());
+        while cursor > 0 && !buffer.is_char_boundary(cursor) {
             cursor -= 1;
         }
         cursor
     }
 
-    fn prompt_word_boundary_right(buffer: &str, cursor: usize) -> usize {
-        let bytes = buffer.as_bytes();
-        let mut cursor = cursor.min(bytes.len());
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-            cursor += 1;
+    pub(super) fn prompt_cursor_from_char_offset(buffer: &str, char_offset: usize) -> usize {
+        buffer
+            .char_indices()
+            .nth(char_offset)
+            .map(|(idx, _)| idx)
+            .unwrap_or(buffer.len())
+    }
+
+    pub(super) fn prompt_cursor_char_offset(buffer: &str, cursor: usize) -> usize {
+        let cursor = Self::snap_prompt_cursor(buffer, cursor);
+        buffer[..cursor].chars().count()
+    }
+
+    fn prompt_previous_boundary(buffer: &str, cursor: usize) -> usize {
+        let cursor = Self::snap_prompt_cursor(buffer, cursor);
+        buffer[..cursor]
+            .char_indices()
+            .last()
+            .map(|(idx, _)| idx)
+            .unwrap_or(0)
+    }
+
+    fn prompt_next_boundary(buffer: &str, cursor: usize) -> usize {
+        let cursor = Self::snap_prompt_cursor(buffer, cursor);
+        buffer[cursor..]
+            .chars()
+            .next()
+            .map(|ch| cursor + ch.len_utf8())
+            .unwrap_or(buffer.len())
+    }
+
+    fn prompt_word_boundary_left(buffer: &str, cursor: usize) -> usize {
+        let mut cursor = Self::snap_prompt_cursor(buffer, cursor);
+        while cursor > 0 {
+            let previous = Self::prompt_previous_boundary(buffer, cursor);
+            let Some(ch) = buffer[previous..cursor].chars().next() else {
+                break;
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            cursor = previous;
         }
-        while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
-            cursor += 1;
+        while cursor > 0 {
+            let previous = Self::prompt_previous_boundary(buffer, cursor);
+            let Some(ch) = buffer[previous..cursor].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() {
+                break;
+            }
+            cursor = previous;
+        }
+        cursor
+    }
+
+    fn prompt_word_boundary_right(buffer: &str, cursor: usize) -> usize {
+        let mut cursor = Self::snap_prompt_cursor(buffer, cursor);
+        while cursor < buffer.len() {
+            let next = Self::prompt_next_boundary(buffer, cursor);
+            let Some(ch) = buffer[cursor..next].chars().next() else {
+                break;
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            cursor = next;
+        }
+        while cursor < buffer.len() {
+            let next = Self::prompt_next_boundary(buffer, cursor);
+            let Some(ch) = buffer[cursor..next].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() {
+                break;
+            }
+            cursor = next;
         }
         cursor
     }
@@ -231,12 +297,14 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             match prompt.focus {
                 ExpressionPromptFocus::Name => {
-                    prompt.name_buffer.insert(prompt.name_cursor, ch);
-                    prompt.name_cursor += 1;
+                    let cursor = Self::snap_prompt_cursor(&prompt.name_buffer, prompt.name_cursor);
+                    prompt.name_buffer.insert(cursor, ch);
+                    prompt.name_cursor = cursor + ch.len_utf8();
                 }
                 ExpressionPromptFocus::Expression => {
-                    prompt.buffer.insert(prompt.cursor, ch);
-                    prompt.cursor += 1;
+                    let cursor = Self::snap_prompt_cursor(&prompt.buffer, prompt.cursor);
+                    prompt.buffer.insert(cursor, ch);
+                    prompt.cursor = cursor + ch.len_utf8();
                     prompt.selected_suggestion = None;
                 }
             }
@@ -248,14 +316,17 @@ impl MultiChartState {
             match prompt.focus {
                 ExpressionPromptFocus::Name => {
                     if prompt.name_cursor > 0 {
-                        prompt.name_cursor -= 1;
-                        prompt.name_buffer.remove(prompt.name_cursor);
+                        let cursor =
+                            Self::prompt_previous_boundary(&prompt.name_buffer, prompt.name_cursor);
+                        prompt.name_buffer.remove(cursor);
+                        prompt.name_cursor = cursor;
                     }
                 }
                 ExpressionPromptFocus::Expression => {
                     if prompt.cursor > 0 {
-                        prompt.cursor -= 1;
-                        prompt.buffer.remove(prompt.cursor);
+                        let cursor = Self::prompt_previous_boundary(&prompt.buffer, prompt.cursor);
+                        prompt.buffer.remove(cursor);
+                        prompt.cursor = cursor;
                         prompt.selected_suggestion = None;
                     }
                 }
@@ -267,13 +338,17 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             match prompt.focus {
                 ExpressionPromptFocus::Name => {
-                    if prompt.name_cursor < prompt.name_buffer.len() {
-                        prompt.name_buffer.remove(prompt.name_cursor);
+                    let cursor = Self::snap_prompt_cursor(&prompt.name_buffer, prompt.name_cursor);
+                    if cursor < prompt.name_buffer.len() {
+                        prompt.name_buffer.remove(cursor);
+                        prompt.name_cursor = cursor;
                     }
                 }
                 ExpressionPromptFocus::Expression => {
-                    if prompt.cursor < prompt.buffer.len() {
-                        prompt.buffer.remove(prompt.cursor);
+                    let cursor = Self::snap_prompt_cursor(&prompt.buffer, prompt.cursor);
+                    if cursor < prompt.buffer.len() {
+                        prompt.buffer.remove(cursor);
+                        prompt.cursor = cursor;
                         prompt.selected_suggestion = None;
                     }
                 }
@@ -285,10 +360,11 @@ impl MultiChartState {
         if let Some(prompt) = self.expression_prompt.as_mut() {
             match prompt.focus {
                 ExpressionPromptFocus::Name => {
-                    prompt.name_cursor = prompt.name_cursor.saturating_sub(1);
+                    prompt.name_cursor =
+                        Self::prompt_previous_boundary(&prompt.name_buffer, prompt.name_cursor);
                 }
                 ExpressionPromptFocus::Expression => {
-                    prompt.cursor = prompt.cursor.saturating_sub(1);
+                    prompt.cursor = Self::prompt_previous_boundary(&prompt.buffer, prompt.cursor);
                     prompt.selected_suggestion = None;
                 }
             }
@@ -300,12 +376,13 @@ impl MultiChartState {
             match prompt.focus {
                 ExpressionPromptFocus::Name => {
                     if prompt.name_cursor < prompt.name_buffer.len() {
-                        prompt.name_cursor += 1;
+                        prompt.name_cursor =
+                            Self::prompt_next_boundary(&prompt.name_buffer, prompt.name_cursor);
                     }
                 }
                 ExpressionPromptFocus::Expression => {
                     if prompt.cursor < prompt.buffer.len() {
-                        prompt.cursor += 1;
+                        prompt.cursor = Self::prompt_next_boundary(&prompt.buffer, prompt.cursor);
                     }
                     prompt.selected_suggestion = None;
                 }
@@ -402,10 +479,10 @@ impl MultiChartState {
             prompt.focus = focus;
             match focus {
                 ExpressionPromptFocus::Name => {
-                    prompt.name_cursor = cursor.min(prompt.name_buffer.len());
+                    prompt.name_cursor = Self::snap_prompt_cursor(&prompt.name_buffer, cursor);
                 }
                 ExpressionPromptFocus::Expression => {
-                    prompt.cursor = cursor.min(prompt.buffer.len());
+                    prompt.cursor = Self::snap_prompt_cursor(&prompt.buffer, cursor);
                     prompt.selected_suggestion = None;
                 }
             }
