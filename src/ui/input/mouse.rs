@@ -1,5 +1,5 @@
 use ratatui::{
-    crossterm::event::{MouseButton, MouseEvent, MouseEventKind},
+    crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
     layout::Rect,
 };
 
@@ -61,19 +61,57 @@ pub(super) fn handle_normal_mouse_event(
             handle_left_click(state, mouse_event.column, mouse_event.row, false)
         }
         MouseEventKind::Down(MouseButton::Right) => {
-            handle_right_mouse_down(state, mouse_event.column, mouse_event.row)
+            if let EventResult::Redraw =
+                handle_preview_chart_right_mouse_down(state, mouse_event.column, mouse_event.row)?
+            {
+                Ok(EventResult::Redraw)
+            } else {
+                handle_right_mouse_down(state, mouse_event.column, mouse_event.row)
+            }
         }
         MouseEventKind::Drag(MouseButton::Right) => {
-            handle_right_mouse_drag(state, mouse_event.column, mouse_event.row)
+            if let EventResult::Redraw =
+                handle_preview_chart_right_mouse_drag(state, mouse_event.column, mouse_event.row)?
+            {
+                Ok(EventResult::Redraw)
+            } else {
+                handle_right_mouse_drag(state, mouse_event.column, mouse_event.row)
+            }
         }
         MouseEventKind::Up(MouseButton::Right) => {
-            handle_right_mouse_up(state, mouse_event.column, mouse_event.row)
+            if let EventResult::Redraw =
+                handle_preview_chart_right_mouse_up(state, mouse_event.column, mouse_event.row)?
+            {
+                Ok(EventResult::Redraw)
+            } else {
+                handle_right_mouse_up(state, mouse_event.column, mouse_event.row)
+            }
         }
         MouseEventKind::ScrollUp => {
-            handle_heatmap_scroll(state, mouse_event.column, mouse_event.row, true)
+            if let EventResult::Redraw = handle_preview_chart_scroll(
+                state,
+                mouse_event.column,
+                mouse_event.row,
+                mouse_event.modifiers,
+                true,
+            )? {
+                Ok(EventResult::Redraw)
+            } else {
+                handle_heatmap_scroll(state, mouse_event.column, mouse_event.row, true)
+            }
         }
         MouseEventKind::ScrollDown => {
-            handle_heatmap_scroll(state, mouse_event.column, mouse_event.row, false)
+            if let EventResult::Redraw = handle_preview_chart_scroll(
+                state,
+                mouse_event.column,
+                mouse_event.row,
+                mouse_event.modifiers,
+                false,
+            )? {
+                Ok(EventResult::Redraw)
+            } else {
+                handle_heatmap_scroll(state, mouse_event.column, mouse_event.row, false)
+            }
         }
         _ => Ok(EventResult::Continue),
     }
@@ -332,6 +370,105 @@ fn handle_heatmap_scroll(
         Ok(EventResult::Redraw)
     } else {
         Ok(EventResult::Continue)
+    }
+}
+
+fn handle_preview_chart_scroll(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+    modifiers: KeyModifiers,
+    zoom_in: bool,
+) -> Result<EventResult, AppError> {
+    if state.active_content_mode() != ContentShowMode::Preview {
+        return Ok(EventResult::Continue);
+    }
+    let zoom_mode = preview_chart_zoom_mode(modifiers);
+    let changed = if zoom_in {
+        state
+            .chart_preview_state
+            .zoom_in_at_position(column, row, 10.0, zoom_mode)
+    } else {
+        state
+            .chart_preview_state
+            .zoom_out_at_position(column, row, 10.0, zoom_mode)
+    };
+    if changed {
+        state.focus = Focus::Content;
+        Ok(EventResult::Redraw)
+    } else {
+        Ok(EventResult::Continue)
+    }
+}
+
+fn handle_preview_chart_right_mouse_down(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+) -> Result<EventResult, AppError> {
+    if state.active_content_mode() != ContentShowMode::Preview {
+        return Ok(EventResult::Continue);
+    }
+    state.focus = Focus::Content;
+    if state
+        .chart_preview_state
+        .start_drag_at_position(column, row)
+    {
+        Ok(EventResult::Redraw)
+    } else {
+        Ok(EventResult::Continue)
+    }
+}
+
+fn handle_preview_chart_right_mouse_drag(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+) -> Result<EventResult, AppError> {
+    if state.active_content_mode() != ContentShowMode::Preview {
+        return Ok(EventResult::Continue);
+    }
+    if state.chart_preview_state.drag_state.is_none() {
+        return Ok(EventResult::Continue);
+    }
+    state.focus = Focus::Content;
+    if state.chart_preview_state.drag_to_position(column, row) {
+        Ok(EventResult::Redraw)
+    } else {
+        Ok(EventResult::Continue)
+    }
+}
+
+fn handle_preview_chart_right_mouse_up(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+) -> Result<EventResult, AppError> {
+    if state.active_content_mode() != ContentShowMode::Preview {
+        return Ok(EventResult::Continue);
+    }
+    if state.chart_preview_state.drag_state.is_none() {
+        return Ok(EventResult::Continue);
+    }
+    state.focus = Focus::Content;
+    if state
+        .chart_preview_state
+        .finish_drag_at_position(column, row)
+    {
+        Ok(EventResult::Redraw)
+    } else {
+        state.chart_preview_state.end_drag();
+        Ok(EventResult::Continue)
+    }
+}
+
+fn preview_chart_zoom_mode(modifiers: KeyModifiers) -> crate::ui::state::PreviewChartZoomMode {
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        crate::ui::state::PreviewChartZoomMode::XOnly
+    } else if modifiers.contains(KeyModifiers::SHIFT) {
+        crate::ui::state::PreviewChartZoomMode::YOnly
+    } else {
+        crate::ui::state::PreviewChartZoomMode::Uniform
     }
 }
 

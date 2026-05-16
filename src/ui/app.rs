@@ -482,21 +482,27 @@ fn main_recover_loop(
                     key,
                     protocol,
                     clipboard_image,
+                    data_bounds,
                 } => {
                     state.chart_preview_state.cache_preview(
                         key.clone(),
                         clipboard_image.clone(),
+                        data_bounds,
                         CHART_PREVIEW_CACHE_CAPACITY,
                     );
                     if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
                         state.chart_preview_state.pending_key = None;
                     }
-                    if state.chart_preview_state.current_request_key() != Some(key) {
+                    if state.chart_preview_state.current_request_key() != Some(key.clone()) {
                         continue;
                     }
                     state.chart_preview_state.protocol = Some(protocol);
                     state.chart_preview_state.clipboard_image = Some(clipboard_image);
                     state.chart_preview_state.error = None;
+                    state.chart_preview_state.rendered_viewport = key.viewport;
+                    state
+                        .chart_preview_state
+                        .sync_data_bounds(Some(data_bounds));
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
@@ -753,6 +759,7 @@ pub enum ChartPreviewLoadedResult {
         key: ChartPreviewKey,
         protocol: ratatui_image::thread::ThreadProtocol,
         clipboard_image: state::ClipboardImageData,
+        data_bounds: state::PreviewChartViewport,
     },
     Failure {
         key: ChartPreviewKey,

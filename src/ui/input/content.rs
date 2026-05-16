@@ -376,6 +376,7 @@ fn copy_chart_preview(
         == Some(crate::ui::state::ChartPreviewKey {
             ds_path: ds_path.to_string(),
             selection: selection.clone(),
+            viewport: state.chart_preview_state.rendered_viewport,
         })
     {
         if let Some(image) = &state.chart_preview_state.clipboard_image {
@@ -404,7 +405,14 @@ fn copy_chart_preview(
         SliceSelection::All => 0.0,
         SliceSelection::FromTo(start, _) => start as f64,
     };
-    render_image_chart(&mut buffer, width, height, x_min, data_preview)?;
+    render_image_chart(
+        &mut buffer,
+        width,
+        height,
+        x_min,
+        data_preview,
+        state.chart_preview_state.effective_viewport(),
+    )?;
     let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer).ok_or_else(|| {
         AppError::DrawingError("Failed to build chart preview image for clipboard".to_string())
     })?;
@@ -660,8 +668,10 @@ fn apply_content_edit_request(
     state.chart_preview_state.protocol = None;
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
+    state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.pending_key = None;
     state.chart_preview_state.cached_previews.clear();
+    state.chart_preview_state.reset_viewport();
     state.img_state.ds = None;
     state.img_state.current_key = None;
     state.img_state.protocol = None;
@@ -873,13 +883,37 @@ pub fn handle_normal_content_event(
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.zoom_heatmap(None, true))),
                     (
+                        Some(BoundAction::Action(ContentAction::HeatmapZoomIn)),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.zoom_with_anchor(
+                        10.0,
+                        0.5,
+                        0.5,
+                        true,
+                        crate::ui::state::PreviewChartZoomMode::Uniform,
+                    ))),
+                    (
                         Some(BoundAction::Action(ContentAction::HeatmapZoomOut)),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.zoom_heatmap(None, false))),
                     (
+                        Some(BoundAction::Action(ContentAction::HeatmapZoomOut)),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.zoom_with_anchor(
+                        10.0,
+                        0.5,
+                        0.5,
+                        false,
+                        crate::ui::state::PreviewChartZoomMode::Uniform,
+                    ))),
+                    (
                         Some(BoundAction::Action(ContentAction::HeatmapResetView)),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.reset_heatmap_view())),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapResetView)),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.clear_zoom())),
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapClearSelection)),
                         ContentShowMode::Heatmap,
@@ -889,17 +923,33 @@ pub fn handle_normal_content_event(
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(-1, 0))),
                     (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Left))),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.pan_by(-10.0, 0.0))),
+                    (
                         Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Right))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(1, 0))),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Right))),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.pan_by(10.0, 0.0))),
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Up))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(0, -1))),
                     (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Up))),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.pan_by(0.0, -10.0))),
+                    (
                         Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Down))),
                         ContentShowMode::Heatmap,
                     ) => Ok(redraw_if(state.pan_heatmap_by(0, 1))),
+                    (
+                        Some(BoundAction::Action(ContentAction::HeatmapPan(Direction::Down))),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.pan_by(0.0, 10.0))),
                     (Some(BoundAction::Command(command)), _) => {
                         execute_bound_command(state, &command)
                     }

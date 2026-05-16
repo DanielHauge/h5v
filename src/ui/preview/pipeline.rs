@@ -10,8 +10,8 @@ use crate::ui::{
     app::{AppEvent, ChartPreviewLoadedResult, ImageLoadedResult},
     mchart::background::evaluate_preview_expression,
     state::{
-        ChartPreviewKey, ClipboardImageData, ImageLoadKey, PreviewExpressionRequest,
-        PreviewExpressionResult,
+        ChartPreviewKey, ClipboardImageData, ImageLoadKey, PreviewChartViewport,
+        PreviewExpressionRequest, PreviewExpressionResult,
     },
 };
 
@@ -77,6 +77,7 @@ pub(super) fn send_chart_success(
     key: ChartPreviewKey,
     protocol: ThreadProtocol,
     clipboard_image: ClipboardImageData,
+    data_bounds: PreviewChartViewport,
 ) {
     send_event(
         tx_events,
@@ -84,6 +85,7 @@ pub(super) fn send_chart_success(
             key,
             protocol,
             clipboard_image,
+            data_bounds,
         }),
     );
 }

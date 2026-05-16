@@ -32,7 +32,7 @@ use crate::{
         render::MatrixRenderType,
         state::{
             AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, Focus, Mode,
-            PageType,
+            PageType, PreviewChartViewport,
         },
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
@@ -56,7 +56,82 @@ fn clear_active_chart_preview(state: &mut AppState<'_>) {
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
+    state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.pending_key = None;
+    state.chart_preview_state.reset_viewport();
+}
+
+fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
+    if !min.is_finite() || !max.is_finite() || max < min {
+        return None;
+    }
+    if (max - min).abs() < f64::EPSILON {
+        let pad = if min == 0.0 {
+            1.0
+        } else {
+            min.abs().max(1.0) * 0.05
+        };
+        return Some((min - pad, max + pad));
+    }
+    Some((min, max))
+}
+
+fn preview_x_min(page_state: &crate::ui::state::PageState) -> f64 {
+    if req_matches_paged_chart(page_state) {
+        MAX_PAGE_SIZE as f64 * page_state.idx.max(0) as f64
+    } else {
+        0.0
+    }
+}
+
+fn req_matches_paged_chart(page_state: &crate::ui::state::PageState) -> bool {
+    matches!(page_state.paged, PageType::Chart) && page_state.idx > 0
+}
+
+pub(crate) fn preview_chart_data_bounds(
+    data_preview: &DatasetPlotingData,
+    x_min: f64,
+) -> Option<PreviewChartViewport> {
+    let (x_min, x_max) = normalized_axis_bounds(x_min, x_min + preview_x_axis_max(data_preview))?;
+    let (y_min, y_max) = normalized_axis_bounds(data_preview.min, data_preview.max)?;
+    Some(PreviewChartViewport {
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+    })
+}
+
+fn preview_view_info(state: &AppState, total_items: usize) -> Option<PageDisplayInfo<'static>> {
+    if !state.chart_preview_state.has_explicit_viewport() {
+        return None;
+    }
+    let viewport = state.chart_preview_state.viewport?;
+    let range_start = viewport.x_min.floor().max(0.0) as usize;
+    let range_end = (viewport.x_max.ceil().max(viewport.x_min) as usize)
+        .saturating_add(1)
+        .min(total_items.max(1));
+    Some(PageDisplayInfo {
+        title: "View",
+        current: 0,
+        total: 1,
+        range_start,
+        range_end: range_end.max(range_start.saturating_add(1).min(total_items.max(1))),
+        total_items: total_items.max(1),
+        unit: "pts",
+    })
+}
+
+fn copy_page_display_info(info: &PageDisplayInfo<'static>) -> PageDisplayInfo<'static> {
+    PageDisplayInfo {
+        title: info.title,
+        current: info.current,
+        total: info.total,
+        range_start: info.range_start,
+        range_end: info.range_end,
+        total_items: info.total_items,
+        unit: info.unit,
+    }
 }
 
 fn render_chart_protocol_state(
@@ -85,7 +160,8 @@ fn render_chart_protocol_state(
 }
 
 fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey) -> bool {
-    let Some(clipboard_image) = state.chart_preview_state.touch_cached_preview(key) else {
+    let Some((clipboard_image, data_bounds)) = state.chart_preview_state.touch_cached_preview(key)
+    else {
         return false;
     };
     let Some(protocol) = thread_protocol_from_clipboard_image(
@@ -101,9 +177,13 @@ fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey)
     };
     state.chart_preview_state.ds_loaded = Some(key.ds_path.clone());
     state.chart_preview_state.ds_selection = Some(key.selection.clone());
+    state.chart_preview_state.rendered_viewport = key.viewport;
     state.chart_preview_state.protocol = Some(protocol);
     state.chart_preview_state.clipboard_image = Some(clipboard_image);
     state.chart_preview_state.error = None;
+    state
+        .chart_preview_state
+        .sync_data_bounds(Some(data_bounds));
     true
 }
 
@@ -142,9 +222,8 @@ fn queue_chart_preview_load(
         .chart_preview_state
         .tx_load_chartpreview
         .send(ChartPreviewLoadRequest {
-            ds_path: current_key.ds_path,
+            key: current_key,
             source,
-            selection: current_key.selection,
             width: chart_area.width,
             height: chart_area.height,
             page_state: state.page_state.clone(),
@@ -162,6 +241,7 @@ pub fn render_precomputed_chart_preview(
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
     let _chart_render_timer = perf::metrics().preview.chart_render.start();
+    state.chart_preview_state.set_chart_area(None);
     let chart_area = area.inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -171,16 +251,25 @@ pub fn render_precomputed_chart_preview(
         index: vec![],
         slice: SliceSelection::All,
     };
+    state
+        .chart_preview_state
+        .sync_selection_identity(&node.node.path(), &preview_selection);
+    state.chart_preview_state.set_chart_area(Some(chart_area));
+    let x_min = preview_x_min(&state.page_state);
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);
+        state
+            .chart_preview_state
+            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
         perf::metrics().preview.direct_widget_renders.increment();
-        render_chart_widget(f, &chart_area, state, data_preview);
+        render_chart_widget(f, &chart_area, state, data_preview, x_min);
         return Ok(());
     }
 
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: preview_selection.clone(),
+        viewport: state.chart_preview_state.viewport,
     };
     queue_chart_preview_load(
         f,
@@ -199,6 +288,7 @@ pub fn render_chart_preview(
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let _chart_render_timer = perf::metrics().preview.chart_render.start();
+    state.chart_preview_state.set_chart_area(None);
     let (ds, ds_meta) = match &node.node {
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
@@ -390,20 +480,22 @@ pub fn render_chart_preview(
         None
     };
 
-    let chart_area = if x_selectable_dims.len() > 1 || page_info.is_some() {
-        let areas_split =
-            Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], node, &shape, false, page_info.as_ref())?;
-        areas_split[1].inner(ratatui::layout::Margin {
-            horizontal: 0,
-            vertical: 1,
-        })
-    } else {
-        area.inner(ratatui::layout::Margin {
-            horizontal: 0,
-            vertical: 1,
-        })
-    };
+    let selector_info = preview_view_info(state, shape[node.selected_x])
+        .or_else(|| page_info.as_ref().map(copy_page_display_info));
+    let areas_split =
+        Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
+    render_dim_selector(
+        f,
+        &areas_split[0],
+        node,
+        &shape,
+        false,
+        selector_info.as_ref(),
+    )?;
+    let chart_area = areas_split[1].inner(ratatui::layout::Margin {
+        horizontal: 0,
+        vertical: 1,
+    });
 
     let Some(selection_indexes) = node
         .selected_indexes
@@ -434,9 +526,15 @@ pub fn render_chart_preview(
         (chart_area, data_preview_selection)
     };
 
+    state
+        .chart_preview_state
+        .sync_selection_identity(&node.node.path(), &data_preview_selection);
+    state.chart_preview_state.set_chart_area(Some(chart_area));
+    let x_min = preview_x_min(&state.page_state);
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
+        viewport: state.chart_preview_state.viewport,
     };
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);
@@ -447,8 +545,11 @@ pub fn render_chart_preview(
                 return Ok(());
             }
         };
+        state
+            .chart_preview_state
+            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
         perf::metrics().preview.direct_widget_renders.increment();
-        render_chart_widget(f, &chart_area, state, data_preview);
+        render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
         queue_chart_preview_load(
             f,
@@ -619,20 +720,22 @@ fn render_projected_chart_preview(
         None
     };
 
-    let chart_area = if x_selectable_dims.len() > 1 || page_info.is_some() {
-        let areas_split =
-            Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-        render_dim_selector(f, &areas_split[0], node, &shape, false, page_info.as_ref())?;
-        areas_split[1].inner(ratatui::layout::Margin {
-            horizontal: 0,
-            vertical: 1,
-        })
-    } else {
-        area.inner(ratatui::layout::Margin {
-            horizontal: 0,
-            vertical: 1,
-        })
-    };
+    let selector_info = preview_view_info(state, shape[node.selected_x])
+        .or_else(|| page_info.as_ref().map(copy_page_display_info));
+    let areas_split =
+        Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
+    render_dim_selector(
+        f,
+        &areas_split[0],
+        node,
+        &shape,
+        false,
+        selector_info.as_ref(),
+    )?;
+    let chart_area = areas_split[1].inner(ratatui::layout::Margin {
+        horizontal: 0,
+        vertical: 1,
+    });
 
     let Some(selection_indexes) = node
         .selected_indexes
@@ -661,9 +764,15 @@ fn render_projected_chart_preview(
         };
         (chart_area, data_preview_selection)
     };
+    state
+        .chart_preview_state
+        .sync_selection_identity(&node.node.path(), &data_preview_selection);
+    state.chart_preview_state.set_chart_area(Some(chart_area));
+    let x_min = preview_x_min(&state.page_state);
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
+        viewport: state.chart_preview_state.viewport,
     };
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);
@@ -678,8 +787,11 @@ fn render_projected_chart_preview(
                 return Ok(());
             }
         };
+        state
+            .chart_preview_state
+            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
         perf::metrics().preview.direct_widget_renders.increment();
-        render_chart_widget(f, &chart_area, state, data_preview);
+        render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
         queue_chart_preview_load(
             f,
@@ -702,16 +814,28 @@ fn render_chart_widget(
     chart_area: &Rect,
     state: &AppState,
     data_preview: DatasetPlotingData,
+    x_min: f64,
 ) {
     let _widget_render_timer = perf::metrics().preview.chart_widget_render.start();
-    let x_axis_max = preview_x_axis_max(&data_preview);
+    let bounds = preview_chart_data_bounds(&data_preview, x_min);
+    let viewport = state
+        .chart_preview_state
+        .effective_viewport()
+        .or(bounds)
+        .unwrap_or(PreviewChartViewport {
+            x_min,
+            x_max: x_min + preview_x_axis_max(&data_preview),
+            y_min: data_preview.min,
+            y_max: data_preview.max,
+        });
     let x_label_count = match chart_area.width {
         0..=7 => 1,
         _ => chart_area.width / 8,
     };
     let x_labels = (0..=x_label_count)
         .map(|i| {
-            let x = x_axis_max * (i as f64) / (x_label_count as f64);
+            let x = viewport.x_min
+                + (viewport.x_max - viewport.x_min) * (i as f64) / (x_label_count as f64);
             Span::styled(
                 format!("{:.1}", x),
                 configure::themed_color(|colors| colors.chart.label),
@@ -726,8 +850,8 @@ fn render_chart_widget(
 
     let y_labels = (0..=y_label_count)
         .map(|i| {
-            let y = data_preview.min
-                + (data_preview.max - data_preview.min) * (i as f64) / (y_label_count as f64);
+            let y = viewport.y_min
+                + (viewport.y_max - viewport.y_min) * (i as f64) / (y_label_count as f64);
             Span::styled(
                 format!("{:.1}", y),
                 configure::themed_color(|colors| colors.chart.label),
@@ -735,7 +859,11 @@ fn render_chart_widget(
         })
         .collect::<Vec<_>>();
 
-    let data: &[(f64, f64)] = &data_preview.data;
+    let data = data_preview
+        .data
+        .iter()
+        .map(|(x, y)| (x_min + *x, *y))
+        .collect::<Vec<_>>();
     let ds = Dataset::default()
         .marker(Marker::Braille)
         .graph_type(GraphType::Line)
@@ -744,7 +872,7 @@ fn render_chart_widget(
                 .fg(configure::themed_color(|colors| colors.chart.preview_line))
                 .bold(),
         )
-        .data(data);
+        .data(&data);
     let bg = match (&state.focus, &state.mode) {
         (
             Focus::Content,
@@ -763,14 +891,14 @@ fn render_chart_widget(
                 .title("X axis")
                 .style(Style::default().fg(configure::themed_color(|colors| colors.chart.axis)))
                 .labels(x_labels)
-                .bounds((0.0, x_axis_max).into()),
+                .bounds((viewport.x_min, viewport.x_max).into()),
         )
         .y_axis(
             Axis::default()
                 .title("Y axis")
                 .style(Style::default().fg(configure::themed_color(|colors| colors.chart.axis)))
                 .labels(y_labels)
-                .bounds((data_preview.min, data_preview.max).into()),
+                .bounds((viewport.y_min, viewport.y_max).into()),
         );
     f.render_widget(chart, *chart_area);
 }
@@ -781,6 +909,7 @@ pub fn render_image_chart(
     height: u32,
     x_min: f64,
     data_preview: DatasetPlotingData,
+    viewport: Option<PreviewChartViewport>,
 ) -> Result<(), AppError> {
     let _image_render_timer = perf::metrics().preview.chart_image_render.start();
     let (bg_r, bg_g, bg_b) =
@@ -796,7 +925,13 @@ pub fn render_image_chart(
     let axis = RGBColor(axis_r, axis_g, axis_b);
     let line = RGBColor(line_r, line_g, line_b);
 
-    let x_axis_max = preview_x_axis_max(&data_preview);
+    let bounds = preview_chart_data_bounds(&data_preview, x_min);
+    let viewport = viewport.or(bounds).unwrap_or(PreviewChartViewport {
+        x_min,
+        x_max: x_min + preview_x_axis_max(&data_preview),
+        y_min: data_preview.min,
+        y_max: data_preview.max,
+    });
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     root.margin(10, 10, 10, 10);
     root.fill(&plot_bg)
@@ -809,8 +944,8 @@ pub fn render_image_chart(
         .x_label_area_size(30)
         .y_label_area_size(y_label_area_size)
         .build_cartesian_2d(
-            x_min..(x_min + x_axis_max),
-            data_preview.min..data_preview.max,
+            viewport.x_min..viewport.x_max,
+            viewport.y_min..viewport.y_max,
         )
         .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
 

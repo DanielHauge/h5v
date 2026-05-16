@@ -327,13 +327,20 @@ fn describe_content_target(target: &BoundAction<ContentAction>) -> String {
             ContentAction::Edit => "Edit the selected value".to_string(),
             ContentAction::Copy => "Copy the selected value".to_string(),
             ContentAction::HeatmapZoomIn => {
-                "Zoom in to the selected or hovered heatmap region".to_string()
+                "Zoom in the active heatmap or preview chart".to_string()
             }
-            ContentAction::HeatmapZoomOut => "Zoom out the heatmap viewport".to_string(),
-            ContentAction::HeatmapResetView => "Reset the heatmap viewport".to_string(),
+            ContentAction::HeatmapZoomOut => {
+                "Zoom out the active heatmap or preview chart".to_string()
+            }
+            ContentAction::HeatmapResetView => {
+                "Reset the heatmap or preview-chart viewport".to_string()
+            }
             ContentAction::HeatmapClearSelection => "Clear the heatmap selection".to_string(),
             ContentAction::HeatmapPan(direction) => {
-                format!("Pan the heatmap {}", direction_label(*direction))
+                format!(
+                    "Pan the active heatmap or preview chart {}",
+                    direction_label(*direction)
+                )
             }
         }
     })

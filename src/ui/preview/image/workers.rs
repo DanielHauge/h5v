@@ -87,7 +87,8 @@ pub(crate) fn handle_chartpreview_load(
             let width = req.width as u32 * x as u32;
 
             let mut buffer = vec![0; (height * width * 3) as usize];
-            let x_min = if req.page_state.idx > 0 {
+            let x_min = if matches!(req.page_state.paged, PageType::Chart) && req.page_state.idx > 0
+            {
                 MAX_PAGE_SIZE as f64 * req.page_state.idx as f64
             } else {
                 0.0
@@ -101,10 +102,7 @@ pub(crate) fn handle_chartpreview_load(
                         Err(e) => {
                             send_chart_failure(
                                 &tx_events,
-                                ChartPreviewKey {
-                                    ds_path: req.ds_path.clone(),
-                                    selection: req.selection.clone(),
-                                },
+                                req.key.clone(),
                                 format!("Failed to plot data for chart preview: {}", e),
                             );
                             continue;
@@ -122,10 +120,7 @@ pub(crate) fn handle_chartpreview_load(
                         Err(e) => {
                             send_chart_failure(
                                 &tx_events,
-                                ChartPreviewKey {
-                                    ds_path: req.ds_path.clone(),
-                                    selection: req.selection.clone(),
-                                },
+                                req.key.clone(),
                                 format!("Failed to plot projected data for chart preview: {}", e),
                             );
                             continue;
@@ -141,22 +136,32 @@ pub(crate) fn handle_chartpreview_load(
             {
                 send_chart_failure(
                     &tx_events,
-                    ChartPreviewKey {
-                        ds_path: req.ds_path.clone(),
-                        selection: req.selection.clone(),
-                    },
+                    req.key.clone(),
                     "Data not valid, could not establish min and max bounds for chart\nIt seems the data only contains NaN or infinite values.",
                 );
                 continue;
             }
 
-            if let Err(e) = render_image_chart(&mut buffer, width, height, x_min, data_preview) {
+            let Some(data_bounds) = preview_chart_data_bounds(&data_preview, x_min) else {
                 send_chart_failure(
                     &tx_events,
-                    ChartPreviewKey {
-                        ds_path: req.ds_path.clone(),
-                        selection: req.selection.clone(),
-                    },
+                    req.key.clone(),
+                    "Data not valid, could not establish chart bounds for preview",
+                );
+                continue;
+            };
+
+            if let Err(e) = render_image_chart(
+                &mut buffer,
+                width,
+                height,
+                x_min,
+                data_preview,
+                req.key.viewport,
+            ) {
+                send_chart_failure(
+                    &tx_events,
+                    req.key.clone(),
                     format!("Failed to render chart preview: {}", e),
                 );
                 continue;
@@ -167,10 +172,7 @@ pub(crate) fn handle_chartpreview_load(
             let Some(image) = image else {
                 send_chart_failure(
                     &tx_events,
-                    ChartPreviewKey {
-                        ds_path: req.ds_path.clone(),
-                        selection: req.selection.clone(),
-                    },
+                    req.key.clone(),
                     "Failed to create image buffer for chart preview",
                 );
                 continue;
@@ -182,12 +184,10 @@ pub(crate) fn handle_chartpreview_load(
             let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
             send_chart_success(
                 &tx_events,
-                ChartPreviewKey {
-                    ds_path: req.ds_path,
-                    selection: req.selection,
-                },
+                req.key,
                 thread_protocol,
                 clipboard_image,
+                data_bounds,
             );
         }
     });

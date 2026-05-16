@@ -27,11 +27,11 @@ use crate::{
     ui::{
         app::AppEvent,
         page_scroll::render_position_scroll,
-        preview::chart::{render_image_chart, MAX_PAGE_SIZE},
+        preview::chart::{preview_chart_data_bounds, render_image_chart, MAX_PAGE_SIZE},
         state::{
-            AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource,
-            ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis,
-            ImageWindowState, PageType, RawImageLoadRequest, VarLenImageLoadRequest,
+            AppState, ChartPreviewLoadRequest, ChartPreviewSource, ClipboardImageData,
+            DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState, PageType,
+            RawImageLoadRequest, VarLenImageLoadRequest,
         },
     },
 };

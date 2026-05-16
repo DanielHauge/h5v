@@ -6,6 +6,7 @@ use std::{
 
 use hdf5_metno::{ByteReader, Dataset};
 use image::ImageFormat;
+use ratatui::layout::Rect;
 use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 
 use crate::{
@@ -15,10 +16,9 @@ use crate::{
 };
 
 pub struct ChartPreviewLoadRequest {
-    pub ds_path: String,
+    pub key: ChartPreviewKey,
     pub source: ChartPreviewSource,
     pub page_state: PageState,
-    pub selection: PreviewSelection,
     pub width: u16,
     pub height: u16,
 }
@@ -51,10 +51,48 @@ pub struct ChartPreviwState {
     pub clipboard_image: Option<ClipboardImageData>,
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
+    pub rendered_viewport: Option<PreviewChartViewport>,
     pub pending_key: Option<ChartPreviewKey>,
     pub tx_resize_chartpreview: Sender<ResizeRequest>,
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
     pub cached_previews: VecDeque<CachedChartPreview>,
+    pub viewport: Option<PreviewChartViewport>,
+    pub data_bounds: Option<PreviewChartViewport>,
+    pub last_chart_area: Option<Rect>,
+    pub drag_state: Option<PreviewChartDragState>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreviewChartViewport {
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+}
+
+impl PartialEq for PreviewChartViewport {
+    fn eq(&self, other: &Self) -> bool {
+        self.x_min.to_bits() == other.x_min.to_bits()
+            && self.x_max.to_bits() == other.x_max.to_bits()
+            && self.y_min.to_bits() == other.y_min.to_bits()
+            && self.y_max.to_bits() == other.y_max.to_bits()
+    }
+}
+
+impl Eq for PreviewChartViewport {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewChartZoomMode {
+    Uniform,
+    XOnly,
+    YOnly,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreviewChartDragState {
+    pub anchor_column: u16,
+    pub anchor_row: u16,
+    pub viewport: PreviewChartViewport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +186,7 @@ impl ImageWindowState {
 pub struct ChartPreviewKey {
     pub ds_path: String,
     pub selection: PreviewSelection,
+    pub viewport: Option<PreviewChartViewport>,
 }
 
 pub struct RawImageLoadRequest {
@@ -198,6 +237,7 @@ pub const CHART_PREVIEW_CACHE_CAPACITY: usize = 6;
 pub struct CachedChartPreview {
     pub key: ChartPreviewKey,
     pub clipboard_image: ClipboardImageData,
+    pub data_bounds: PreviewChartViewport,
 }
 
 impl ImgState {
@@ -252,30 +292,37 @@ impl ChartPreviwState {
         Some(ChartPreviewKey {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
+            viewport: self.rendered_viewport,
         })
     }
 
-    pub fn touch_cached_preview(&mut self, key: &ChartPreviewKey) -> Option<ClipboardImageData> {
+    pub fn touch_cached_preview(
+        &mut self,
+        key: &ChartPreviewKey,
+    ) -> Option<(ClipboardImageData, PreviewChartViewport)> {
         let index = self
             .cached_previews
             .iter()
             .position(|entry| &entry.key == key)?;
         let entry = self.cached_previews.remove(index)?;
         let clipboard_image = entry.clipboard_image.clone();
+        let data_bounds = entry.data_bounds;
         self.cached_previews.push_back(entry);
-        Some(clipboard_image)
+        Some((clipboard_image, data_bounds))
     }
 
     pub fn cache_preview(
         &mut self,
         key: ChartPreviewKey,
         clipboard_image: ClipboardImageData,
+        data_bounds: PreviewChartViewport,
         capacity: usize,
     ) {
         self.cached_previews.retain(|entry| entry.key != key);
         self.cached_previews.push_back(CachedChartPreview {
             key,
             clipboard_image,
+            data_bounds,
         });
         while self.cached_previews.len() > capacity {
             self.cached_previews.pop_front();
@@ -285,11 +332,341 @@ impl ChartPreviwState {
     pub fn begin_loading(&mut self, key: ChartPreviewKey) {
         self.ds_loaded = Some(key.ds_path.clone());
         self.ds_selection = Some(key.selection.clone());
+        self.rendered_viewport = key.viewport;
         self.protocol = None;
         self.clipboard_image = None;
         self.error = None;
         self.pending_key = Some(key);
     }
+
+    pub fn reset_viewport(&mut self) {
+        self.viewport = None;
+        self.data_bounds = None;
+        self.last_chart_area = None;
+        self.drag_state = None;
+    }
+
+    pub fn sync_selection_identity(&mut self, ds_path: &str, selection: &PreviewSelection) {
+        if self.ds_loaded.as_deref() != Some(ds_path)
+            || self.ds_selection.as_ref() != Some(selection)
+        {
+            self.reset_viewport();
+        }
+    }
+
+    pub fn sync_data_bounds(&mut self, bounds: Option<PreviewChartViewport>) {
+        self.data_bounds = bounds;
+        let Some(full_bounds) = self.data_bounds else {
+            self.viewport = None;
+            self.drag_state = None;
+            return;
+        };
+        self.viewport = match self.viewport {
+            Some(viewport) => {
+                let next = self.clamp_viewport(viewport, full_bounds);
+                (!viewport_eq(next, full_bounds)).then_some(next)
+            }
+            None => None,
+        };
+    }
+
+    pub fn effective_viewport(&self) -> Option<PreviewChartViewport> {
+        self.viewport.or(self.data_bounds)
+    }
+
+    pub fn has_explicit_viewport(&self) -> bool {
+        self.viewport.is_some()
+    }
+
+    pub fn set_chart_area(&mut self, area: Option<Rect>) {
+        self.last_chart_area = area;
+        if area.is_none() {
+            self.drag_state = None;
+        }
+    }
+
+    fn clamp_viewport(
+        &self,
+        viewport: PreviewChartViewport,
+        bounds: PreviewChartViewport,
+    ) -> PreviewChartViewport {
+        let (x_min, x_max) =
+            clamp_axis_range(viewport.x_min, viewport.x_max, bounds.x_min, bounds.x_max);
+        let (y_min, y_max) =
+            clamp_axis_range(viewport.y_min, viewport.y_max, bounds.y_min, bounds.y_max);
+        PreviewChartViewport {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        }
+    }
+
+    fn set_explicit_viewport(&mut self, viewport: Option<PreviewChartViewport>) -> bool {
+        let Some(full_bounds) = self.data_bounds else {
+            return false;
+        };
+        let next = viewport
+            .map(|value| self.clamp_viewport(value, full_bounds))
+            .filter(|value| !viewport_eq(*value, full_bounds));
+        if self.viewport == next {
+            return false;
+        }
+        self.viewport = next;
+        true
+    }
+
+    pub fn clear_zoom(&mut self) -> bool {
+        self.set_explicit_viewport(None)
+    }
+
+    pub fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
+        let Some(current) = self.effective_viewport() else {
+            return false;
+        };
+        let x_shift = (current.x_max - current.x_min) * dx_percent / 100.0;
+        let y_shift = (current.y_max - current.y_min) * dy_percent / 100.0;
+        self.set_explicit_viewport(Some(PreviewChartViewport {
+            x_min: current.x_min + x_shift,
+            x_max: current.x_max + x_shift,
+            y_min: current.y_min + y_shift,
+            y_max: current.y_max + y_shift,
+        }))
+    }
+
+    pub fn zoom_with_anchor(
+        &mut self,
+        percent: f64,
+        anchor_x_ratio: f64,
+        anchor_y_ratio: f64,
+        zoom_in: bool,
+        mode: PreviewChartZoomMode,
+    ) -> bool {
+        let Some(bounds) = self.data_bounds else {
+            return false;
+        };
+        let Some(current) = self.effective_viewport() else {
+            return false;
+        };
+
+        let (x_min, x_max) = match mode {
+            PreviewChartZoomMode::Uniform | PreviewChartZoomMode::XOnly => zoom_axis_range(
+                current.x_min,
+                current.x_max,
+                bounds.x_min,
+                bounds.x_max,
+                anchor_x_ratio,
+                percent,
+                zoom_in,
+            ),
+            PreviewChartZoomMode::YOnly => (current.x_min, current.x_max),
+        };
+        let (y_min, y_max) = match mode {
+            PreviewChartZoomMode::Uniform | PreviewChartZoomMode::YOnly => zoom_axis_range(
+                current.y_min,
+                current.y_max,
+                bounds.y_min,
+                bounds.y_max,
+                anchor_y_ratio,
+                percent,
+                zoom_in,
+            ),
+            PreviewChartZoomMode::XOnly => (current.y_min, current.y_max),
+        };
+        self.set_explicit_viewport(Some(PreviewChartViewport {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        }))
+    }
+
+    pub fn zoom_in_at_position(
+        &mut self,
+        column: u16,
+        row: u16,
+        percent: f64,
+        mode: PreviewChartZoomMode,
+    ) -> bool {
+        let Some(chart_area) = self.last_chart_area else {
+            return false;
+        };
+        if !point_in_rect(chart_area, column, row) {
+            return false;
+        }
+        let relative_x = column.saturating_sub(chart_area.x) as f64;
+        let relative_y = row.saturating_sub(chart_area.y) as f64;
+        let x_denom = chart_area.width.saturating_sub(1).max(1) as f64;
+        let y_denom = chart_area.height.saturating_sub(1).max(1) as f64;
+        self.zoom_with_anchor(
+            percent,
+            relative_x / x_denom,
+            1.0 - (relative_y / y_denom),
+            true,
+            mode,
+        )
+    }
+
+    pub fn zoom_out_at_position(
+        &mut self,
+        column: u16,
+        row: u16,
+        percent: f64,
+        mode: PreviewChartZoomMode,
+    ) -> bool {
+        let Some(chart_area) = self.last_chart_area else {
+            return false;
+        };
+        if !point_in_rect(chart_area, column, row) {
+            return false;
+        }
+        let relative_x = column.saturating_sub(chart_area.x) as f64;
+        let relative_y = row.saturating_sub(chart_area.y) as f64;
+        let x_denom = chart_area.width.saturating_sub(1).max(1) as f64;
+        let y_denom = chart_area.height.saturating_sub(1).max(1) as f64;
+        self.zoom_with_anchor(
+            percent,
+            relative_x / x_denom,
+            1.0 - (relative_y / y_denom),
+            false,
+            mode,
+        )
+    }
+
+    pub fn start_drag_at_position(&mut self, column: u16, row: u16) -> bool {
+        let Some(chart_area) = self.last_chart_area else {
+            return false;
+        };
+        if !point_in_rect(chart_area, column, row) {
+            return false;
+        }
+        let Some(viewport) = self.effective_viewport() else {
+            return false;
+        };
+        self.drag_state = Some(PreviewChartDragState {
+            anchor_column: column,
+            anchor_row: row,
+            viewport,
+        });
+        true
+    }
+
+    fn apply_drag_position(&mut self, column: u16, row: u16) -> bool {
+        let Some(chart_area) = self.last_chart_area else {
+            return false;
+        };
+        let Some(drag_state) = self.drag_state else {
+            return false;
+        };
+        if chart_area.width <= 1 || chart_area.height <= 1 {
+            return false;
+        }
+        let delta_columns = column as f64 - drag_state.anchor_column as f64;
+        let delta_rows = row as f64 - drag_state.anchor_row as f64;
+        let x_span = drag_state.viewport.x_max - drag_state.viewport.x_min;
+        let y_span = drag_state.viewport.y_max - drag_state.viewport.y_min;
+        let x_shift = (delta_columns / chart_area.width.saturating_sub(1) as f64) * x_span;
+        let y_shift = (delta_rows / chart_area.height.saturating_sub(1) as f64) * y_span;
+        self.set_explicit_viewport(Some(PreviewChartViewport {
+            x_min: drag_state.viewport.x_min - x_shift,
+            x_max: drag_state.viewport.x_max - x_shift,
+            y_min: drag_state.viewport.y_min + y_shift,
+            y_max: drag_state.viewport.y_max + y_shift,
+        }))
+    }
+
+    pub fn drag_to_position(&mut self, column: u16, row: u16) -> bool {
+        self.apply_drag_position(column, row)
+    }
+
+    pub fn finish_drag_at_position(&mut self, column: u16, row: u16) -> bool {
+        let changed = self.apply_drag_position(column, row);
+        self.drag_state = None;
+        changed
+    }
+
+    pub fn end_drag(&mut self) {
+        self.drag_state = None;
+    }
+}
+
+fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
+fn viewport_eq(left: PreviewChartViewport, right: PreviewChartViewport) -> bool {
+    (left.x_min - right.x_min).abs() < 1e-9
+        && (left.x_max - right.x_max).abs() < 1e-9
+        && (left.y_min - right.y_min).abs() < 1e-9
+        && (left.y_max - right.y_max).abs() < 1e-9
+}
+
+fn minimum_zoom_span(bounds_min: f64, bounds_max: f64) -> f64 {
+    let span = (bounds_max - bounds_min).abs();
+    span.mul_add(1e-6, f64::EPSILON).max(1e-9)
+}
+
+fn clamp_axis_range(mut start: f64, mut end: f64, bounds_min: f64, bounds_max: f64) -> (f64, f64) {
+    if bounds_max <= bounds_min {
+        return (bounds_min, bounds_max);
+    }
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+    let bounds_span = bounds_max - bounds_min;
+    let span = (end - start)
+        .max(minimum_zoom_span(bounds_min, bounds_max))
+        .min(bounds_span);
+    if span >= bounds_span {
+        return (bounds_min, bounds_max);
+    }
+
+    let mut clamped_start = start;
+    let mut clamped_end = clamped_start + span;
+    if clamped_start < bounds_min {
+        clamped_end += bounds_min - clamped_start;
+        clamped_start = bounds_min;
+    }
+    if clamped_end > bounds_max {
+        let overflow = clamped_end - bounds_max;
+        clamped_start -= overflow;
+        clamped_end = bounds_max;
+    }
+    clamped_start = clamped_start.max(bounds_min);
+    clamped_end = clamped_end.min(bounds_max);
+    (clamped_start, clamped_end)
+}
+
+fn zoom_axis_range(
+    current_min: f64,
+    current_max: f64,
+    bounds_min: f64,
+    bounds_max: f64,
+    anchor_ratio: f64,
+    percent: f64,
+    zoom_in: bool,
+) -> (f64, f64) {
+    let current_span = (current_max - current_min).abs();
+    let bounds_span = (bounds_max - bounds_min).abs();
+    if bounds_span <= f64::EPSILON {
+        return (bounds_min, bounds_max);
+    }
+
+    let anchor_ratio = anchor_ratio.clamp(0.0, 1.0);
+    let delta = current_span * percent / 100.0;
+    let min_span = minimum_zoom_span(bounds_min, bounds_max);
+    let next_span = if zoom_in {
+        (current_span - 2.0 * delta).max(min_span)
+    } else {
+        (current_span + 2.0 * delta).min(bounds_span)
+    };
+    let anchor = current_min + current_span * anchor_ratio;
+    let next_min = anchor - next_span * anchor_ratio;
+    let next_max = next_min + next_span;
+    clamp_axis_range(next_min, next_max, bounds_min, bounds_max)
 }
 
 #[derive(Clone)]
@@ -325,6 +702,16 @@ mod tests {
                 x: 0,
                 slice: crate::data::SliceSelection::All,
             },
+            viewport: None,
+        }
+    }
+
+    fn bounds() -> PreviewChartViewport {
+        PreviewChartViewport {
+            x_min: 0.0,
+            x_max: 1.0,
+            y_min: 0.0,
+            y_max: 1.0,
         }
     }
 
@@ -346,19 +733,25 @@ mod tests {
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_viewport: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: None,
+            last_chart_area: None,
+            drag_state: None,
         };
         let first = preview_key("first");
         let second = preview_key("second");
-        state.cache_preview(first.clone(), clipboard_image(1), 2);
-        state.cache_preview(second.clone(), clipboard_image(2), 2);
+        state.cache_preview(first.clone(), clipboard_image(1), bounds(), 2);
+        state.cache_preview(second.clone(), clipboard_image(2), bounds(), 2);
 
-        let touched = state.touch_cached_preview(&first).unwrap();
+        let (touched, cached_bounds) = state.touch_cached_preview(&first).unwrap();
 
         assert_eq!(touched.bytes, clipboard_image(1).bytes);
+        assert_eq!(cached_bounds, bounds());
         assert_eq!(state.cached_previews.back().unwrap().key, first);
         assert_eq!(state.cached_previews.front().unwrap().key, second);
     }
@@ -373,15 +766,20 @@ mod tests {
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_viewport: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: None,
+            last_chart_area: None,
+            drag_state: None,
         };
 
-        state.cache_preview(preview_key("first"), clipboard_image(1), 2);
-        state.cache_preview(preview_key("second"), clipboard_image(2), 2);
-        state.cache_preview(preview_key("third"), clipboard_image(3), 2);
+        state.cache_preview(preview_key("first"), clipboard_image(1), bounds(), 2);
+        state.cache_preview(preview_key("second"), clipboard_image(2), bounds(), 2);
+        state.cache_preview(preview_key("third"), clipboard_image(3), bounds(), 2);
 
         assert!(state
             .cached_previews
@@ -407,10 +805,15 @@ mod tests {
             clipboard_image: Some(clipboard_image(9)),
             error: Some("old".to_string()),
             ds_selection: None,
+            rendered_viewport: Some(bounds()),
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: None,
+            last_chart_area: None,
+            drag_state: None,
         };
 
         let key = preview_key("fresh");
@@ -418,9 +821,148 @@ mod tests {
 
         assert_eq!(state.ds_loaded, Some("fresh".to_string()));
         assert_eq!(state.ds_selection, Some(key.selection.clone()));
+        assert_eq!(state.rendered_viewport, None);
         assert!(state.clipboard_image.is_none());
         assert!(state.error.is_none());
         assert_eq!(state.pending_key, Some(key));
+    }
+
+    #[test]
+    fn chart_preview_current_request_key_tracks_rendered_viewport() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let viewport = PreviewChartViewport {
+            x_min: 1.0,
+            x_max: 5.0,
+            y_min: -2.0,
+            y_max: 3.0,
+        };
+        let key = ChartPreviewKey {
+            viewport: Some(viewport),
+            ..preview_key("viewported")
+        };
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_viewport: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: None,
+            last_chart_area: None,
+            drag_state: None,
+        };
+
+        state.begin_loading(key.clone());
+
+        assert_eq!(state.current_request_key(), Some(key));
+    }
+
+    #[test]
+    fn chart_preview_sync_selection_identity_clears_existing_viewport() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let key = preview_key("same");
+        let mut state = ChartPreviwState {
+            ds_loaded: Some(key.ds_path.clone()),
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(key.selection.clone()),
+            rendered_viewport: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(bounds()),
+            data_bounds: Some(bounds()),
+            last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            drag_state: None,
+        };
+        let changed_selection = PreviewSelection {
+            x: 0,
+            index: vec![1],
+            slice: crate::data::SliceSelection::All,
+        };
+
+        state.sync_selection_identity("same", &changed_selection);
+
+        assert!(state.viewport.is_none());
+        assert!(state.data_bounds.is_none());
+        assert!(state.last_chart_area.is_none());
+    }
+
+    #[test]
+    fn chart_preview_zoom_with_anchor_creates_explicit_viewport() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_viewport: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 10.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            last_chart_area: None,
+            drag_state: None,
+        };
+
+        assert!(state.zoom_with_anchor(10.0, 0.5, 0.5, true, PreviewChartZoomMode::Uniform));
+        assert!(state.viewport.is_some());
+        assert_ne!(state.viewport, state.data_bounds);
+    }
+
+    #[test]
+    fn chart_preview_drag_updates_viewport_before_mouse_up() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let initial_viewport = PreviewChartViewport {
+            x_min: 2.0,
+            x_max: 8.0,
+            y_min: 1.0,
+            y_max: 9.0,
+        };
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_viewport: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(initial_viewport),
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 10.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(state.start_drag_at_position(5, 5));
+        assert!(state.drag_to_position(6, 5));
+        assert_ne!(state.viewport, Some(initial_viewport));
     }
 
     #[test]

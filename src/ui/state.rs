@@ -59,8 +59,9 @@ pub use help_state::{
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
     ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, PageState, PageType, PreviewExpressionKey, PreviewExpressionRequest,
-    PreviewExpressionResult, PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
+    ImgState, PageState, PageType, PreviewChartViewport, PreviewChartZoomMode,
+    PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
+    PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
     CHART_PREVIEW_CACHE_CAPACITY,
 };
 pub use ui_layout::{
