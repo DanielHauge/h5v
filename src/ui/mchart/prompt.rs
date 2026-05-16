@@ -948,7 +948,6 @@ fn validate_expression_reference_fragment(
             }
             let file = file.ok_or_else(|| "No file loaded for load(...) references".to_string())?;
             super::validate_expression_load_ref(
-                state,
                 file,
                 &load_ref,
                 super::ExpressionSeriesResolution::Overview,

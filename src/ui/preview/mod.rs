@@ -1,6 +1,6 @@
 pub mod chart;
 pub mod image;
-mod pipeline;
+pub(crate) mod pipeline;
 
 use std::{fs, path::Path, time::SystemTime};
 
@@ -23,6 +23,7 @@ use std::{
 
 use super::{
     state::AppState,
+    state::PreviewExpressionKey,
     std_comp_render::{
         render_empty_dataset, render_error, render_string, render_unsupported_rendering,
     },
@@ -30,8 +31,13 @@ use super::{
 use crate::{
     configure,
     error::AppError,
-    h5f::{read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, Node},
-    ui::render::{sprint_type_schema, MatrixRenderType},
+    h5f::{
+        read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, HasPath, Node,
+    },
+    ui::{
+        perf,
+        render::{sprint_type_schema, MatrixRenderType},
+    },
 };
 
 use self::{
@@ -268,6 +274,28 @@ fn render_empty_group_preview(f: &mut Frame, area: &Rect) {
     f.render_widget(paragraph, *area);
 }
 
+fn render_group_preview_loading(f: &mut Frame, area: &Rect) {
+    let text = Text::from(vec![
+        Line::from("Evaluating H5V_PREVIEW_EXPR..."),
+        Line::from(""),
+        Line::from("The preview will update when the background worker finishes."),
+    ]);
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.surface.break_line)),
+                )
+                .title(" preview ")
+                .title_alignment(Alignment::Center),
+        );
+    f.render_widget(paragraph, *area);
+}
+
 fn render_file_preview(
     f: &mut Frame,
     area: &Rect,
@@ -473,6 +501,7 @@ pub fn render_preview(
     selected_node: &mut H5FNode,
     state: &mut AppState,
 ) {
+    let _render_timer = perf::metrics().preview.render.start();
     let area_inner = area.inner(ratatui::layout::Margin {
         horizontal: 2,
         vertical: 1,
@@ -487,11 +516,40 @@ pub fn render_preview(
     if let Node::Group(_, meta) = node {
         match meta.preview_expr.as_deref() {
             Some(expression) => {
-                match state
-                    .multi_chart
-                    .evaluate_expression_preview(expression, state.file.as_ref())
+                let current_key = PreviewExpressionKey {
+                    group_path: selected_node.node.path(),
+                    expression: expression.to_string(),
+                    expression_revision: state.multi_chart.expression_revision(),
+                };
+                if state.should_debounce_preview(&selected_node.node) {
+                    render_group_preview_loading(f, &area_inner);
+                    return;
+                }
+                if state.preview_expression_state.current_key.as_ref() != Some(&current_key)
+                    && state.preview_expression_state.pending_key.as_ref() != Some(&current_key)
                 {
-                    Ok(data_preview) => {
+                    state.chart_preview_state.ds_loaded = None;
+                    state.chart_preview_state.protocol = None;
+                    state.chart_preview_state.clipboard_image = None;
+                    state.chart_preview_state.error = None;
+                    state.chart_preview_state.ds_selection = None;
+                    state.chart_preview_state.pending_key = None;
+                    state.chart_preview_state.cached_previews.clear();
+                    state.preview_expression_state.current_key = None;
+                    state.preview_expression_state.data_preview = None;
+                    state.preview_expression_state.error = None;
+                    state.preview_expression_state.pending_key = Some(current_key.clone());
+                    let _ = state.preview_expression_state.tx_load.send(
+                        crate::ui::state::PreviewExpressionRequest {
+                            key: current_key.clone(),
+                            items: state.multi_chart.chart_items().to_vec(),
+                            file_path: state.file.as_ref().map(|file| file.filename()),
+                        },
+                    );
+                }
+                if state.preview_expression_state.current_key.as_ref() == Some(&current_key) {
+                    if let Some(data_preview) = state.preview_expression_state.data_preview.clone()
+                    {
                         if let Err(e) = render_precomputed_chart_preview(
                             f,
                             &area_inner,
@@ -501,14 +559,17 @@ pub fn render_preview(
                         ) {
                             render_error(f, &area_inner, format!("Render chart error: {}", e));
                         }
-                    }
-                    Err(e) => {
+                    } else if let Some(error) = state.preview_expression_state.error.clone() {
                         render_error(
                             f,
                             &area_inner,
-                            format!("Error evaluating H5V_PREVIEW_EXPR: {}", e),
+                            format!("Error evaluating H5V_PREVIEW_EXPR: {}", error),
                         );
+                    } else {
+                        render_group_preview_loading(f, &area_inner);
                     }
+                } else {
+                    render_group_preview_loading(f, &area_inner);
                 }
             }
             None => render_empty_group_preview(f, &area_inner),

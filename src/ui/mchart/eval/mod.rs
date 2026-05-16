@@ -59,6 +59,22 @@ pub(super) use loads::{
     normalize_absolute_object_path, resolve_expression_load_value, validate_expression_load_ref,
 };
 pub(super) use math::{eval_expression_at, eval_scalar_expression};
+
+pub(super) trait ExpressionItemLookup {
+    fn item_by_id(&self, id: ChartItemId) -> Option<&super::ChartItem>;
+    fn item_by_name(&self, name: &str) -> Option<&super::ChartItem>;
+}
+
+impl ExpressionItemLookup for MultiChartState {
+    fn item_by_id(&self, id: ChartItemId) -> Option<&super::ChartItem> {
+        self.item_by_id(id)
+    }
+
+    fn item_by_name(&self, name: &str) -> Option<&super::ChartItem> {
+        self.item_by_name(name)
+    }
+}
+
 enum ExpressionArraySelection {
     Scalar(Vec<usize>),
     Series(PreviewSelection),
@@ -184,7 +200,7 @@ fn infer_expression_array_selection(
 }
 
 pub(super) fn resolve_expression_item_value(
-    state: &MultiChartState,
+    state: &impl ExpressionItemLookup,
     item_ref: &ExpressionItemRef,
     resolution: ExpressionSeriesResolution,
 ) -> Result<ResolvedExpressionItemValue, String> {

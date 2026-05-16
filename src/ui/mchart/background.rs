@@ -1,11 +1,31 @@
-use super::*;
-use crate::ui::perf;
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    sync::mpsc::{channel, Sender},
+    thread,
+};
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ValidatedExpression {
-    pub(super) kind: DerivedExpressionKind,
-    pub(super) sample_count: usize,
-}
+use hdf5_metno::File;
+
+use crate::{
+    data::DatasetPlotingData,
+    ui::{app::AppEvent, perf},
+};
+
+use super::{
+    eval::{
+        dataset_ploting_data_from_points, eval_expression_at, eval_scalar_expression,
+        resolve_expression_item_value, resolve_expression_load_value,
+        validate_expression_series_compatibility, EvaluatedExpression, ExpressionItemLookup,
+        ExpressionSeriesInput, ExpressionSeriesResolution, ResolvedExpressionItemValue,
+    },
+    expression::{
+        self, collect_parsed_expression_refs, parse_derived_expression, tokenize_expression,
+        ExpressionAst, ExpressionRefs, ParsedExpression,
+    },
+    ChartItem, ChartItemId, ChartLodWindow, ChartSeries, ChartSource, DerivedExpressionKind,
+    MultiChartDerivedDetailUpdate, MultiChartExpressionRefreshRequest,
+    MultiChartExpressionRefreshResult, MultiChartLoadState, Point,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpressionValueKind {
@@ -225,413 +245,59 @@ fn ensure_top_level_transform_usage_is_supported(
     }
 }
 
-impl MultiChartState {
-    pub(super) fn raw_dataset_reference(
-        expression: &str,
-    ) -> Result<Option<expression::ExpressionSeriesRef>, String> {
-        let tokens = tokenize_expression(expression)?;
-        let Some(ExpressionToken::LoadRef(series_ref)) = tokens.first() else {
-            return Ok(None);
-        };
-        if tokens.len() != 1 {
-            return Ok(None);
-        }
-        if !matches!(series_ref.target, ExpressionObjectTarget::AbsolutePath(_))
-            || series_ref.attr_name.is_some()
-        {
-            return Ok(None);
-        }
-        Ok(Some(series_ref.clone()))
+#[derive(Debug, Clone)]
+struct ExpressionEvalSnapshot {
+    items: Vec<ChartItem>,
+}
+
+impl ExpressionItemLookup for ExpressionEvalSnapshot {
+    fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
+        self.item_by_id(id)
     }
 
-    #[cfg(test)]
-    pub(super) fn create_expression_derived(
-        &mut self,
-        expression: String,
-    ) -> Result<ChartItemId, String> {
-        self.create_expression_derived_with_file(expression, None)
+    fn item_by_name(&self, name: &str) -> Option<&ChartItem> {
+        self.item_by_name(name)
     }
+}
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn evaluate_expression_preview(
-        &self,
-        expression: &str,
-        file: Option<&File>,
-    ) -> Result<DatasetPlotingData, String> {
-        let evaluated = self.evaluate_expression_with_file(expression, file)?;
-        dataset_ploting_data_from_points(evaluated.points)
-    }
-
-    pub fn capture_expression_chart_item(
-        &self,
-        expression: &str,
-        file: Option<&File>,
-    ) -> Result<(ChartSource, Vec<Point>), String> {
-        let evaluated = self.evaluate_expression_with_file(expression, file)?;
-        let points = sanitize_chart_points(evaluated.points);
-        if points.is_empty() {
-            return Err("Expression resolved to no finite points".to_string());
-        }
-        let len = points.len();
-        let source = ChartSource::DerivedExpression {
-            expression: expression.to_string(),
-            input_ids: evaluated.input_ids,
-            len,
-            kind: evaluated.kind,
-        };
-        Ok((source, points))
-    }
-
-    pub(super) fn create_expression_derived_with_file(
-        &mut self,
-        expression: String,
-        file: Option<&File>,
-    ) -> Result<ChartItemId, String> {
-        let use_raw_dataset_reference =
-            matches!(
-                self.validate_expression_with_file(&expression, file),
-                Ok(ValidatedExpression {
-                    kind: DerivedExpressionKind::YSeries,
-                    ..
-                })
-            ) && matches!(Self::raw_dataset_reference(&expression), Ok(Some(_)));
-        if use_raw_dataset_reference {
-            return self.add_dataset_reference_command(&expression, file);
-        }
-        match self.build_expression_chart_item(&expression, file) {
-            Ok((source, series, scalar_value)) => {
-                let points = series.points.clone();
-                let id = self
-                    .add_chart_item_with_scalar(source, points, scalar_value)
-                    .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
-                self.refresh_expression_detail_series(file)?;
-                Ok(id)
-            }
-            Err(error) => self.apply_expression_error_state(None, expression, error),
+impl ExpressionEvalSnapshot {
+    fn new(items: &[ChartItem]) -> Self {
+        Self {
+            items: items.to_vec(),
         }
     }
 
-    pub(super) fn build_expression_chart_item(
-        &self,
-        expression: &str,
-        file: Option<&File>,
-    ) -> Result<(ChartSource, ChartSeries, Option<f64>), String> {
-        let evaluated = self.evaluate_expression_with_file(expression, file)?;
-        let points = sanitize_chart_points(evaluated.points);
-        if points.is_empty() {
-            return Err("Expression resolved to no finite points".to_string());
-        }
-        let len = points.len();
-        let source = ChartSource::DerivedExpression {
-            expression: expression.to_string(),
-            input_ids: evaluated.input_ids,
-            len,
-            kind: evaluated.kind,
-        };
-        let series = ChartSeries::from_points(points)
-            .ok_or_else(|| "Expression resolved to no finite points".to_string())?;
-        Ok((source, series, evaluated.scalar_value))
+    fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
+        self.items.iter().find(|item| item.id == id)
     }
 
-    pub(super) fn apply_resolved_expression_item(
-        &mut self,
-        index: usize,
-        source: ChartSource,
-        series: ChartSeries,
-        scalar_value: Option<f64>,
-    ) {
-        let item = &mut self.items[index];
-        item.label = source.label();
-        item.source = source;
-        item.source_len = series.len();
-        item.sampled = false;
-        item.series = series;
-        item.scalar_value = scalar_value;
-        item.visible = true;
-        item.clear_detail_state(true);
-        item.load_state = MultiChartLoadState::Ready;
-        self.bump_expression_revision();
-    }
-
-    pub(super) fn invalid_expression_source(
-        expression: String,
-        previous_source: Option<&ChartSource>,
-    ) -> ChartSource {
-        match previous_source {
-            Some(ChartSource::DerivedExpression {
-                input_ids,
-                len,
-                kind,
-                ..
-            }) => ChartSource::DerivedExpression {
-                expression,
-                input_ids: input_ids.clone(),
-                len: *len,
-                kind: *kind,
-            },
-            _ => ChartSource::DerivedExpression {
-                expression,
-                input_ids: Vec::new(),
-                len: 0,
-                kind: DerivedExpressionKind::YSeries,
-            },
-        }
-    }
-
-    pub(super) fn apply_expression_error_state(
-        &mut self,
-        id: Option<ChartItemId>,
-        expression: String,
-        message: String,
-    ) -> Result<ChartItemId, String> {
-        match id {
-            Some(id) => {
-                let index = self
-                    .items
-                    .iter()
-                    .position(|item| item.id == id)
-                    .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-                let source =
-                    Self::invalid_expression_source(expression, Some(&self.items[index].source));
-                let item = &mut self.items[index];
-                item.label = source.label();
-                item.source = source;
-                item.series = ChartSeries::from_points(vec![(0.0, 0.0)])
-                    .ok_or_else(|| "Failed to create placeholder series".to_string())?;
-                item.scalar_value = None;
-                item.clear_detail_state(true);
-                item.load_state = MultiChartLoadState::Error(message);
-                item.visible = false;
-                self.idx = index;
-                self.bump_expression_revision();
-                self.modified = true;
-                Ok(id)
-            }
-            None => {
-                let source = Self::invalid_expression_source(expression, None);
-                let id = self
-                    .add_chart_item_with_status(
-                        source,
-                        Some(vec![(0.0, 0.0)]),
-                        None,
-                        0,
-                        MultiChartLoadState::Error(message),
-                        false,
-                    )
-                    .ok_or_else(|| "Failed to create expression-derived chart".to_string())?;
-                if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
-                    item.visible = false;
-                }
-                self.bump_expression_revision();
-                self.modified = true;
-                Ok(id)
-            }
-        }
-    }
-
-    pub(super) fn direct_expression_dependents_of(&self, id: ChartItemId) -> Vec<ChartItemId> {
-        let mut dependents = self
-            .items
+    fn item_by_name(&self, name: &str) -> Option<&ChartItem> {
+        self.items
             .iter()
-            .filter_map(|item| item.source.input_ids().contains(&id).then_some(item.id))
+            .find(|item| item.name.as_deref() == Some(name))
+    }
+
+    fn item_by_id_mut(&mut self, id: ChartItemId) -> Option<&mut ChartItem> {
+        self.items.iter_mut().find(|item| item.id == id)
+    }
+
+    fn collect_expression_input_ids(&self, refs: &ExpressionRefs) -> Vec<ChartItemId> {
+        let mut input_ids = refs
+            .item_refs
+            .iter()
+            .filter_map(|item_ref| match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => Some(*id),
+                expression::ExpressionItemTarget::Name(name) => {
+                    self.item_by_name(name).map(|item| item.id)
+                }
+            })
             .collect::<Vec<_>>();
-        dependents.sort_by_key(|id| id.0);
-        dependents
+        input_ids.sort_by_key(|id| id.0);
+        input_ids.dedup();
+        input_ids
     }
 
-    pub(super) fn transitive_expression_dependents_of(&self, id: ChartItemId) -> Vec<ChartItemId> {
-        let mut pending = self.direct_expression_dependents_of(id);
-        let mut seen = HashSet::new();
-        let mut ordered = Vec::new();
-        while let Some(next) = pending.pop() {
-            if seen.insert(next) {
-                ordered.push(next);
-                pending.extend(self.direct_expression_dependents_of(next));
-            }
-        }
-        ordered.sort_by_key(|dep_id| dep_id.0);
-        ordered
-    }
-
-    pub(super) fn validate_expression_rewire(
-        &self,
-        id: ChartItemId,
-        previous_dependents: &[ChartItemId],
-        new_input_ids: &[ChartItemId],
-    ) -> Result<(), String> {
-        if new_input_ids.contains(&id) {
-            return Err(format!("Series ${} cannot depend on itself", id.0));
-        }
-        let blocked = previous_dependents
-            .iter()
-            .copied()
-            .find(|dependent_id| new_input_ids.contains(dependent_id));
-        if let Some(blocked) = blocked {
-            return Err(format!(
-                "Updating ${} would create a dependency cycle through ${}",
-                id.0, blocked.0
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn expression_recompute_order(
-        &self,
-        affected_ids: &[ChartItemId],
-    ) -> Result<Vec<ChartItemId>, String> {
-        if affected_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let affected = affected_ids.iter().copied().collect::<HashSet<_>>();
-        let mut indegree = HashMap::<ChartItemId, usize>::new();
-        let mut edges = HashMap::<ChartItemId, Vec<ChartItemId>>::new();
-        for id in affected_ids {
-            let item = self
-                .item_by_id(*id)
-                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-            let mut local_indegree = 0usize;
-            for dependency in item.source.input_ids() {
-                if affected.contains(dependency) {
-                    local_indegree += 1;
-                    edges.entry(*dependency).or_default().push(*id);
-                }
-            }
-            indegree.insert(*id, local_indegree);
-        }
-
-        let mut ready = indegree
-            .iter()
-            .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
-            .collect::<BTreeSet<_>>();
-        let mut ordered = Vec::with_capacity(affected_ids.len());
-
-        while let Some(id) = ready.iter().next().copied() {
-            ready.remove(&id);
-            ordered.push(id);
-
-            if let Some(dependents) = edges.get(&id) {
-                for dependent in dependents {
-                    if let Some(entry) = indegree.get_mut(dependent) {
-                        *entry = entry.saturating_sub(1);
-                        if *entry == 0 {
-                            ready.insert(*dependent);
-                        }
-                    }
-                }
-            }
-        }
-
-        if ordered.len() != affected_ids.len() {
-            return Err(
-                "Expression dependency cycle blocked recomputing dependent series".to_string(),
-            );
-        }
-        Ok(ordered)
-    }
-
-    pub(super) fn recompute_expression_dependents(
-        &mut self,
-        affected_ids: Vec<ChartItemId>,
-        file: Option<&File>,
-    ) -> Result<(), String> {
-        let _recompute_timer = perf::metrics().mchart.dependent_recompute.start();
-        for id in self.expression_recompute_order(&affected_ids)? {
-            let expression = match self.item_by_id(id).map(|item| item.source.clone()) {
-                Some(ChartSource::DerivedExpression { expression, .. }) => expression,
-                Some(_) => continue,
-                None => return Err(format!("Chart item ${} no longer exists", id.0)),
-            };
-            let (source, series, scalar_value) = self
-                .build_expression_chart_item(&expression, file)
-                .map_err(|error| format!("Failed to recompute ${}: {}", id.0, error))?;
-            let index = self
-                .items
-                .iter()
-                .position(|item| item.id == id)
-                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-            self.apply_resolved_expression_item(index, source, series, scalar_value);
-        }
-        Ok(())
-    }
-
-    pub(super) fn update_expression_item_with_file(
-        &mut self,
-        id: ChartItemId,
-        expression: String,
-        file: Option<&File>,
-    ) -> Result<(), String> {
-        let use_raw_dataset_reference =
-            matches!(
-                self.validate_expression_with_file(&expression, file),
-                Ok(ValidatedExpression {
-                    kind: DerivedExpressionKind::YSeries,
-                    ..
-                })
-            ) && matches!(Self::raw_dataset_reference(&expression), Ok(Some(_)));
-        if use_raw_dataset_reference {
-            let item_id = self.add_dataset_reference_command(&expression, file)?;
-            if item_id != id {
-                let index = self
-                    .items
-                    .iter()
-                    .position(|item| item.id == id)
-                    .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-                self.items.remove(index);
-                self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
-            }
-            return Ok(());
-        }
-        let original_items = self.items.clone();
-        let original_idx = self.idx;
-        let original_modified = self.modified;
-        let previous_dependents = self.transitive_expression_dependents_of(id);
-        let (source, series, scalar_value) =
-            match self.build_expression_chart_item(&expression, file) {
-                Ok(item) => item,
-                Err(error) => {
-                    self.apply_expression_error_state(Some(id), expression, error)?;
-                    return Ok(());
-                }
-            };
-        self.validate_expression_rewire(id, &previous_dependents, source.input_ids())?;
-        let index = self
-            .items
-            .iter()
-            .position(|item| item.id == id)
-            .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-        self.apply_resolved_expression_item(index, source, series, scalar_value);
-        self.idx = index;
-        let result = self.recompute_expression_dependents(previous_dependents, file);
-        match result {
-            Ok(()) => {
-                self.refresh_expression_detail_series(file)?;
-                self.modified = true;
-                Ok(())
-            }
-            Err(error) => {
-                self.items = original_items;
-                self.idx = original_idx;
-                self.modified = original_modified;
-                Err(error)
-            }
-        }
-    }
-
-    pub(super) fn evaluate_expression_with_file(
-        &self,
-        expression: &str,
-        file: Option<&File>,
-    ) -> Result<EvaluatedExpression, String> {
-        self.evaluate_expression_with_resolution(
-            expression,
-            file,
-            ExpressionSeriesResolution::Overview,
-            true,
-        )
-    }
-
-    pub(super) fn series_transform_input(
+    fn series_transform_input(
         &self,
         item_ref: &expression::ExpressionItemRef,
         resolution: ExpressionSeriesResolution,
@@ -687,7 +353,119 @@ impl MultiChartState {
         Ok((points, kind))
     }
 
-    pub(super) fn evaluate_interp_expression_with_resolution(
+    fn expression_detail_window(&self, expression: &str) -> Result<Option<ChartLodWindow>, String> {
+        let tokens = tokenize_expression(expression)?;
+        let parsed = parse_derived_expression(&tokens)?;
+        let mut refs = ExpressionRefs::default();
+        collect_parsed_expression_refs(&parsed, &mut refs);
+        let mut expected = None::<ChartLodWindow>;
+        for item_ref in &refs.item_refs {
+            let item = match &item_ref.target {
+                expression::ExpressionItemTarget::Id(id) => self
+                    .item_by_id(*id)
+                    .ok_or_else(|| format!("Unknown chart item reference ${}", id.0))?,
+                expression::ExpressionItemTarget::Name(name) => self
+                    .item_by_name(name)
+                    .ok_or_else(|| format!("Unknown chart item reference ${name}"))?,
+            };
+            let Some(window) = item.detail_window else {
+                return Ok(None);
+            };
+            if expected.is_some_and(|existing| existing != window) {
+                return Ok(None);
+            }
+            expected = Some(window);
+        }
+        if !refs.load_refs.is_empty() {
+            return Ok(None);
+        }
+        Ok(expected)
+    }
+
+    fn expression_recompute_order(
+        &self,
+        affected_ids: &[ChartItemId],
+    ) -> Result<Vec<ChartItemId>, String> {
+        if affected_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let affected = affected_ids.iter().copied().collect::<HashSet<_>>();
+        let mut indegree = HashMap::<ChartItemId, usize>::new();
+        let mut edges = HashMap::<ChartItemId, Vec<ChartItemId>>::new();
+        for id in affected_ids {
+            let item = self
+                .item_by_id(*id)
+                .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
+            let mut local_indegree = 0usize;
+            for dependency in item.source.input_ids() {
+                if affected.contains(dependency) {
+                    local_indegree += 1;
+                    edges.entry(*dependency).or_default().push(*id);
+                }
+            }
+            indegree.insert(*id, local_indegree);
+        }
+
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+            .collect::<BTreeSet<_>>();
+        let mut ordered = Vec::with_capacity(affected_ids.len());
+
+        while let Some(id) = ready.iter().next().copied() {
+            ready.remove(&id);
+            ordered.push(id);
+
+            if let Some(dependents) = edges.get(&id) {
+                for dependent in dependents {
+                    if let Some(entry) = indegree.get_mut(dependent) {
+                        *entry = entry.saturating_sub(1);
+                        if *entry == 0 {
+                            ready.insert(*dependent);
+                        }
+                    }
+                }
+            }
+        }
+
+        if ordered.len() != affected_ids.len() {
+            return Err(
+                "Expression dependency cycle blocked recomputing dependent series".to_string(),
+            );
+        }
+        Ok(ordered)
+    }
+
+    fn set_detail_state(
+        &mut self,
+        item_id: ChartItemId,
+        detail_series: Option<ChartSeries>,
+        detail_window: Option<ChartLodWindow>,
+    ) {
+        let Some(item) = self.item_by_id_mut(item_id) else {
+            return;
+        };
+        item.detail_series = detail_series;
+        item.detail_window = detail_window;
+        item.pending_detail_window = None;
+        item.load_state = MultiChartLoadState::Ready;
+    }
+
+    fn evaluate_expression_with_file(
+        &self,
+        expression: &str,
+        file: Option<&File>,
+    ) -> Result<EvaluatedExpression, String> {
+        self.evaluate_expression_with_resolution(
+            expression,
+            file,
+            ExpressionSeriesResolution::Overview,
+            true,
+        )
+    }
+
+    fn evaluate_interp_expression_with_resolution(
         &self,
         expr: &ExpressionAst,
         refs: &ExpressionRefs,
@@ -753,7 +531,7 @@ impl MultiChartState {
         })
     }
 
-    pub(super) fn evaluate_slice_expression_with_resolution(
+    fn evaluate_slice_expression_with_resolution(
         &self,
         expr: &ExpressionAst,
         refs: &ExpressionRefs,
@@ -804,148 +582,7 @@ impl MultiChartState {
         })
     }
 
-    pub(super) fn validate_expression_with_file(
-        &self,
-        expression: &str,
-        file: Option<&File>,
-    ) -> Result<ValidatedExpression, String> {
-        let tokens = tokenize_expression(expression)?;
-        let parsed = parse_derived_expression(&tokens)?;
-        match &parsed {
-            ParsedExpression::YSeries(ast) => {
-                ensure_top_level_transform_usage_is_supported(ast, true)?
-            }
-            ParsedExpression::XySeries(x_ast, y_ast) => {
-                ensure_top_level_transform_usage_is_supported(x_ast, false)?;
-                ensure_top_level_transform_usage_is_supported(y_ast, false)?;
-            }
-        }
-        if matches!(
-            &parsed,
-            ParsedExpression::YSeries(ast)
-                if interp_call_args(ast).is_some() || slice_call_args(ast).is_some()
-        ) {
-            let evaluated = self.evaluate_expression_with_resolution(
-                expression,
-                file,
-                ExpressionSeriesResolution::Overview,
-                true,
-            )?;
-            return Ok(ValidatedExpression {
-                kind: evaluated.kind,
-                sample_count: evaluated.points.len(),
-            });
-        }
-        let mut refs = ExpressionRefs::default();
-        collect_parsed_expression_refs(&parsed, &mut refs);
-        refs.item_refs.sort_by_key(|item_ref| item_ref.render());
-        refs.item_refs.dedup();
-        refs.load_refs.sort_by_key(|load_ref| load_ref.render());
-        refs.load_refs.dedup();
-        let mut item_kinds = HashMap::new();
-        let mut series_inputs = Vec::new();
-        for item_ref in &refs.item_refs {
-            match resolve_expression_item_value(
-                self,
-                item_ref,
-                ExpressionSeriesResolution::Overview,
-            )? {
-                ResolvedExpressionItemValue::Scalar(_) => {
-                    item_kinds.insert(item_ref.clone(), ExpressionValueKind::Scalar);
-                }
-                ResolvedExpressionItemValue::Series(points) => {
-                    item_kinds.insert(item_ref.clone(), ExpressionValueKind::Series);
-                    series_inputs.push(ExpressionSeriesInput {
-                        label: item_ref.render(),
-                        points,
-                    });
-                }
-            }
-        }
-
-        let file = if refs.load_refs.is_empty() {
-            None
-        } else {
-            Some(file.ok_or_else(|| {
-                "load(...) references require an open file handle, but no file is loaded"
-                    .to_string()
-            })?)
-        };
-
-        let mut load_kinds = HashMap::new();
-        if let Some(file) = file {
-            for load_ref in &refs.load_refs {
-                match validate_expression_load_ref(
-                    file,
-                    load_ref,
-                    ExpressionSeriesResolution::Overview,
-                    true,
-                )? {
-                    ValidatedExpressionLoad::Series { len } => {
-                        load_kinds.insert(load_ref.clone(), ExpressionValueKind::Series);
-                        series_inputs.push(ExpressionSeriesInput {
-                            label: load_ref.render(),
-                            points: (0..len).map(|idx| (idx as f64, idx as f64)).collect(),
-                        });
-                    }
-                    ValidatedExpressionLoad::Scalar => {
-                        load_kinds.insert(load_ref.clone(), ExpressionValueKind::Scalar);
-                    }
-                }
-            }
-        }
-
-        let (kind, expected_len) = match &parsed {
-            ParsedExpression::YSeries(ast) => {
-                let value_kind = classify_expression_value_kind(ast, &item_kinds, &load_kinds)?;
-                match value_kind {
-                    ExpressionValueKind::Scalar => (DerivedExpressionKind::Scalar, 1),
-                    ExpressionValueKind::Series => {
-                        let first = series_inputs.first().ok_or_else(|| {
-                            "Expression must reference at least one series such as $3 or load(/group/ds)[..,0]"
-                                .to_string()
-                        })?;
-                        let expected_len = first.points.len();
-                        if expected_len == 0 {
-                            return Err("Cannot build an expression from empty series".to_string());
-                        }
-                        validate_expression_series_compatibility(
-                            &series_inputs,
-                            expected_len,
-                            true,
-                        )?;
-                        (DerivedExpressionKind::YSeries, expected_len)
-                    }
-                }
-            }
-            ParsedExpression::XySeries(x_ast, y_ast) => {
-                if classify_expression_value_kind(x_ast, &item_kinds, &load_kinds)?
-                    != ExpressionValueKind::Series
-                    || classify_expression_value_kind(y_ast, &item_kinds, &load_kinds)?
-                        != ExpressionValueKind::Series
-                {
-                    return Err("x/y expressions must resolve to series values".to_string());
-                }
-                let first = series_inputs.first().ok_or_else(|| {
-                    "Expression must reference at least one series such as $3 or load(/group/ds)[..,0]"
-                        .to_string()
-                })?;
-                let expected_len = first.points.len();
-                if expected_len == 0 {
-                    return Err("Cannot build an expression from empty series".to_string());
-                }
-                validate_expression_series_compatibility(&series_inputs, expected_len, false)?;
-                (DerivedExpressionKind::XySeries, expected_len)
-            }
-        };
-
-        Ok(ValidatedExpression {
-            kind,
-            sample_count: expected_len,
-        })
-    }
-
-    pub(super) fn evaluate_expression_with_resolution(
+    fn evaluate_expression_with_resolution(
         &self,
         expression: &str,
         file: Option<&File>,
@@ -994,8 +631,8 @@ impl MultiChartState {
                     .to_string()
             })?)
         };
-        let mut external_series = std::collections::HashMap::new();
-        let mut scalar_values = std::collections::HashMap::new();
+        let mut external_series = HashMap::new();
+        let mut scalar_values = HashMap::new();
         let mut load_kinds = HashMap::new();
         if let Some(file) = file {
             for load_ref in &refs.load_refs {
@@ -1005,11 +642,11 @@ impl MultiChartState {
                     resolution,
                     allow_external_series,
                 )? {
-                    ResolvedExpressionLoad::Series(points) => {
+                    super::eval::ResolvedExpressionLoad::Series(points) => {
                         load_kinds.insert(load_ref.clone(), ExpressionValueKind::Series);
                         external_series.insert(load_ref.clone(), points);
                     }
-                    ResolvedExpressionLoad::Scalar(value) => {
+                    super::eval::ResolvedExpressionLoad::Scalar(value) => {
                         load_kinds.insert(load_ref.clone(), ExpressionValueKind::Scalar);
                         scalar_values.insert(load_ref.clone(), value);
                     }
@@ -1161,4 +798,133 @@ impl MultiChartState {
             input_ids,
         })
     }
+}
+
+fn open_worker_file(file_path: Option<&str>) -> Result<Option<File>, String> {
+    match file_path {
+        Some(file_path) => File::open(file_path)
+            .map(Some)
+            .map_err(|error| format!("Failed to open HDF5 file '{file_path}': {error}")),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn evaluate_preview_expression(
+    items: &[ChartItem],
+    expression: &str,
+    file_path: Option<&str>,
+) -> Result<DatasetPlotingData, String> {
+    let file = open_worker_file(file_path)?;
+    let snapshot = ExpressionEvalSnapshot::new(items);
+    let evaluated = snapshot.evaluate_expression_with_file(expression, file.as_ref())?;
+    dataset_ploting_data_from_points(evaluated.points)
+}
+
+fn compute_expression_refresh(
+    request: MultiChartExpressionRefreshRequest,
+) -> MultiChartExpressionRefreshResult {
+    let _refresh_timer = perf::metrics().mchart.detail_refresh.start();
+    let mut snapshot = ExpressionEvalSnapshot::new(&request.items);
+    let file = match open_worker_file(request.file_path.as_deref()) {
+        Ok(file) => file,
+        Err(message) => {
+            return MultiChartExpressionRefreshResult::Failure {
+                revision: request.revision,
+                message,
+            };
+        }
+    };
+    let derived_ids = snapshot
+        .items
+        .iter()
+        .filter_map(|item| {
+            matches!(item.source, ChartSource::DerivedExpression { .. }).then_some(item.id)
+        })
+        .collect::<Vec<_>>();
+    perf::metrics()
+        .mchart
+        .detail_items_seen
+        .add(derived_ids.len() as u64);
+    let ordered_ids = match snapshot.expression_recompute_order(&derived_ids) {
+        Ok(ordered_ids) => ordered_ids,
+        Err(message) => {
+            return MultiChartExpressionRefreshResult::Failure {
+                revision: request.revision,
+                message,
+            };
+        }
+    };
+    let mut updates = Vec::with_capacity(ordered_ids.len());
+    for id in ordered_ids {
+        let expression = match snapshot.item_by_id(id).map(|item| item.source.clone()) {
+            Some(ChartSource::DerivedExpression { expression, .. }) => expression,
+            _ => continue,
+        };
+        let Some(window) = (match snapshot.expression_detail_window(&expression) {
+            Ok(window) => window,
+            Err(_) => {
+                snapshot.set_detail_state(id, None, None);
+                updates.push(MultiChartDerivedDetailUpdate {
+                    item_id: id,
+                    detail_series: None,
+                    detail_window: None,
+                });
+                continue;
+            }
+        }) else {
+            snapshot.set_detail_state(id, None, None);
+            updates.push(MultiChartDerivedDetailUpdate {
+                item_id: id,
+                detail_series: None,
+                detail_window: None,
+            });
+            continue;
+        };
+        match snapshot.evaluate_expression_with_resolution(
+            &expression,
+            file.as_ref(),
+            ExpressionSeriesResolution::Active,
+            false,
+        ) {
+            Ok(evaluated) => {
+                let detail_series = ChartSeries::from_points(evaluated.points);
+                snapshot.set_detail_state(id, detail_series.clone(), Some(window));
+                updates.push(MultiChartDerivedDetailUpdate {
+                    item_id: id,
+                    detail_series,
+                    detail_window: Some(window),
+                });
+            }
+            Err(_) => {
+                snapshot.set_detail_state(id, None, None);
+                updates.push(MultiChartDerivedDetailUpdate {
+                    item_id: id,
+                    detail_series: None,
+                    detail_window: None,
+                });
+            }
+        }
+    }
+    MultiChartExpressionRefreshResult::Success {
+        revision: request.revision,
+        updates,
+    }
+}
+
+pub fn handle_mchart_expression_refresh(
+    tx_events: Sender<AppEvent>,
+) -> Sender<MultiChartExpressionRefreshRequest> {
+    let (tx_refresh, rx_refresh) = channel::<MultiChartExpressionRefreshRequest>();
+    thread::spawn(move || loop {
+        let Ok(mut request) = rx_refresh.recv() else {
+            return;
+        };
+        while let Ok(next_request) = rx_refresh.try_recv() {
+            request = next_request;
+        }
+        let _ = tx_events.send(AppEvent::MultiChartExpressionRefresh(
+            compute_expression_refresh(request),
+        ));
+    });
+    tx_refresh
 }

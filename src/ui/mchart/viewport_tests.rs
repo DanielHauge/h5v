@@ -171,6 +171,75 @@ fn coalesce_load_requests_keeps_latest_request_per_item_and_kind() {
 }
 
 #[test]
+fn coalesce_load_requests_prioritizes_latest_detail_work() {
+    let (file, path) = make_dataset_ref_test_file();
+    let dataset = file.dataset("/series").expect("series dataset");
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+
+    let requests = coalesce_load_requests(vec![
+        MultiChartLoadRequest {
+            item_id: ChartItemId(1),
+            kind: MultiChartLoadKind::Overview { generation: 0 },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(2),
+            kind: MultiChartLoadKind::Detail {
+                generation: 1,
+                window: ChartLodWindow {
+                    start: 0,
+                    end: 10,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset {
+                dataset: dataset.clone(),
+                selection: selection.clone(),
+            },
+        },
+        MultiChartLoadRequest {
+            item_id: ChartItemId(3),
+            kind: MultiChartLoadKind::Detail {
+                generation: 2,
+                window: ChartLodWindow {
+                    start: 5,
+                    end: 15,
+                    sample_cap: 10,
+                },
+            },
+            source: MultiChartLoadSource::Dataset { dataset, selection },
+        },
+    ]);
+
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0].item_id, ChartItemId(3));
+    assert_eq!(requests[1].item_id, ChartItemId(2));
+    assert_eq!(requests[2].item_id, ChartItemId(1));
+    assert!(matches!(
+        requests[0].kind,
+        MultiChartLoadKind::Detail { .. }
+    ));
+    assert!(matches!(
+        requests[1].kind,
+        MultiChartLoadKind::Detail { .. }
+    ));
+    assert!(matches!(
+        requests[2].kind,
+        MultiChartLoadKind::Overview { generation: 0 }
+    ));
+
+    drop(file);
+    fs::remove_file(path).expect("failed removing temp hdf5 file");
+}
+
+#[test]
 fn zoom_at_position_only_applies_inside_chart_area() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -665,6 +734,51 @@ fn detail_load_replaces_active_series_without_losing_overview() {
 }
 
 #[test]
+fn stale_detail_started_event_is_ignored() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let item_id = state
+        .add_chart_item(
+            source("/group/a", selection),
+            (0..8).map(|i| (i as f64, i as f64)).collect(),
+        )
+        .expect("item");
+    state.items[0].load_state = MultiChartLoadState::Ready;
+    state.items[0].detail_generation = 3;
+    state.items[0].pending_detail_window = Some(ChartLodWindow {
+        start: 20,
+        end: 40,
+        sample_cap: 256,
+    });
+
+    state.apply_load_started(
+        item_id,
+        MultiChartLoadKind::Detail {
+            generation: 2,
+            window: ChartLodWindow {
+                start: 10,
+                end: 20,
+                sample_cap: 256,
+            },
+        },
+    );
+
+    assert_eq!(state.items[0].load_state, MultiChartLoadState::Ready);
+    assert_eq!(
+        state.items[0].pending_detail_window,
+        Some(ChartLodWindow {
+            start: 20,
+            end: 40,
+            sample_cap: 256,
+        })
+    );
+}
+
+#[test]
 fn clearing_zoom_discards_detail_series() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -674,7 +788,13 @@ fn clearing_zoom_discards_detail_series() {
     };
     state
         .add_chart_item(
-            source("/group/a", selection),
+            ChartSource::DatasetSelection(DatasetChartSource {
+                dataset_path: "/missing".to_string(),
+                display_path: "/group/a".to_string(),
+                selection,
+                shape: vec![10_000],
+                kind: DatasetChartKind::Dataset,
+            }),
             (0..8).map(|i| (i as f64, i as f64)).collect(),
         )
         .expect("item");
@@ -838,4 +958,60 @@ fn derived_series_detail_clears_when_inputs_do_not_share_window() {
     let derived = state.item_by_id(ChartItemId(3)).expect("derived");
     assert!(derived.detail_series.is_none());
     assert!(derived.detail_window.is_none());
+}
+
+#[test]
+fn stale_background_detail_refresh_results_are_ignored() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state
+        .add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)])
+        .expect("source");
+    let derived_id = state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("derived");
+    let current_revision = state.expression_revision();
+    let detail_series = ChartSeries::from_points(vec![(10.0, 11.0), (11.0, 12.0)]).expect("detail");
+    let detail_window = ChartLodWindow {
+        start: 10,
+        end: 12,
+        sample_cap: 128,
+    };
+
+    state
+        .apply_expression_refresh_result(MultiChartExpressionRefreshResult::Success {
+            revision: current_revision.wrapping_add(1),
+            updates: vec![MultiChartDerivedDetailUpdate {
+                item_id: derived_id,
+                detail_series: Some(detail_series.clone()),
+                detail_window: Some(detail_window),
+            }],
+        })
+        .expect("stale result ignored");
+
+    let derived = state.item_by_id(derived_id).expect("derived item");
+    assert!(derived.detail_series.is_none());
+    assert!(derived.detail_window.is_none());
+
+    state
+        .apply_expression_refresh_result(MultiChartExpressionRefreshResult::Success {
+            revision: current_revision,
+            updates: vec![MultiChartDerivedDetailUpdate {
+                item_id: derived_id,
+                detail_series: Some(detail_series),
+                detail_window: Some(detail_window),
+            }],
+        })
+        .expect("fresh result applied");
+
+    let derived = state.item_by_id(derived_id).expect("derived item");
+    assert_eq!(derived.detail_window, Some(detail_window));
+    assert_eq!(
+        derived.active_series().points,
+        vec![(10.0, 11.0), (11.0, 12.0)]
+    );
 }

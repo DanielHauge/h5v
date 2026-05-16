@@ -1,9 +1,11 @@
 use super::tests::{make_dataset_ref_test_file, make_state, source};
 use super::*;
+use crate::ui::perf;
 use std::fs;
 
 #[test]
 fn scalar_functions_support_series_and_scalar_references() {
+    perf::reset_for_tests();
     let (file, path) = make_dataset_ref_test_file();
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -70,6 +72,43 @@ fn scalar_functions_support_series_and_scalar_references() {
         ]
     );
     assert_eq!(unary_scalar_item.scalar_value, Some(2.0));
+
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn expression_preview_updates_preview_and_mchart_perf_snapshots() {
+    perf::reset_for_tests();
+
+    let (file, path) = make_dataset_ref_test_file();
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    let expression = "$1 + load(/scalar)".to_string();
+
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)],
+    );
+
+    let preview = {
+        let _expression_eval_timer = perf::metrics().preview.expression_eval.start();
+        state
+            .evaluate_expression_preview(&expression, Some(&file))
+            .expect("evaluate expression preview")
+    };
+
+    assert_eq!(preview.data, vec![(0.0, 2.5), (1.0, 4.5), (2.0, 6.5)]);
+
+    let snapshot = perf::snapshot();
+    assert_eq!(snapshot.preview.expression_eval.count, 1);
+    assert_eq!(snapshot.mchart.expression_eval.count, 1);
+    assert!(snapshot.preview.expression_eval.total_ns > 0);
+    assert!(snapshot.mchart.expression_eval.total_ns > 0);
 
     drop(file);
     let _ = fs::remove_file(path);

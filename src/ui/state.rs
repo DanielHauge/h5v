@@ -59,7 +59,9 @@ pub use help_state::{
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
     ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, IsFromDs, RawImageLoadRequest, SegmentState, SegmentType, VarLenImageLoadRequest,
+    ImgState, PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
+    PreviewExpressionState, RawImageLoadRequest, SegmentState, SegmentType, VarLenImageLoadRequest,
+    CHART_PREVIEW_CACHE_CAPACITY,
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpSidebarHitbox, HelpSidebarTarget,
@@ -105,6 +107,7 @@ pub struct AppState<'a> {
     pub heatmap_region: Option<HeatmapRegionSelection>,
     pub heatmap_render: HeatmapRenderState,
     pub chart_preview_state: ChartPreviwState,
+    pub preview_expression_state: PreviewExpressionState,
     pub segment_state: SegmentState,
     pub command_state: CommandState,
     pub attribute_create_dialog: Option<AttributeCreateDialogState>,

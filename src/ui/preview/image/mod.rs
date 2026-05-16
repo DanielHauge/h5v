@@ -90,7 +90,7 @@ fn render_image_loading_indicator(f: &mut Frame, area: Rect) {
     f.render_widget(indicator, area);
 }
 
-fn thread_protocol_from_clipboard_image(
+pub(crate) fn thread_protocol_from_clipboard_image(
     picker: &Picker,
     tx_resize_img: &Sender<ResizeRequest>,
     clipboard_image: &ClipboardImageData,

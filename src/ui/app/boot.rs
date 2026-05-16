@@ -16,14 +16,18 @@ use crate::{
     ui::command::CommandState,
     ui::{
         heatmap::handle_heatmap_load,
-        mchart::{handle_mchart_load, handle_mchart_render, MultiChartState},
+        mchart::{
+            handle_mchart_expression_refresh, handle_mchart_load, handle_mchart_render,
+            MultiChartState,
+        },
         preview::image::{
             handle_chartpreview_load, handle_chartpreview_resize, handle_image_load,
             handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
         },
+        preview::pipeline::handle_preview_expression_eval,
         state::{
             self, AppState, AppToast, ChartPreviwState, ContentShowMode, FileWatchState, Focus,
-            ImgState, LastFocused, MatrixViewState, Mode,
+            ImgState, LastFocused, MatrixViewState, Mode, PreviewExpressionState,
         },
     },
 };
@@ -80,11 +84,16 @@ pub(super) fn prepare_app<'a>(
         handle_imagefsvlen_load(tx_events.clone(), tx_resize_img.clone(), picker.clone());
     let tx_load_img = handle_image_load(tx_events.clone(), tx_resize_img.clone(), picker.clone());
     let tx_chart_preview_resize = handle_chartpreview_resize(tx_events.clone());
-    let tx_load_chartpreview =
-        handle_chartpreview_load(tx_events.clone(), tx_chart_preview_resize, picker.clone());
+    let tx_load_chartpreview = handle_chartpreview_load(
+        tx_events.clone(),
+        tx_chart_preview_resize.clone(),
+        picker.clone(),
+    );
+    let tx_preview_expression = handle_preview_expression_eval(tx_events.clone());
     let tx_load_heatmap = handle_heatmap_load(tx_events.clone());
     let tx_load_mchart = handle_mchart_load(tx_events.clone());
     let tx_render_mchart = handle_mchart_render(tx_events.clone());
+    let tx_expression_refresh = handle_mchart_expression_refresh(tx_events.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -110,7 +119,16 @@ pub(super) fn prepare_app<'a>(
         error: None,
         ds_selection: None,
         pending_key: None,
+        tx_resize_chartpreview: tx_chart_preview_resize,
         tx_load_chartpreview,
+        cached_previews: Default::default(),
+    };
+    let preview_expression_state = PreviewExpressionState {
+        current_key: None,
+        pending_key: None,
+        data_preview: None,
+        error: None,
+        tx_load: tx_preview_expression,
     };
 
     let matrix_view_state = MatrixViewState {
@@ -158,7 +176,12 @@ pub(super) fn prepare_app<'a>(
             pending_external_change: false,
         },
         compatibility_mode: runtime_config.compatibility_mode,
-        multi_chart: MultiChartState::new(picker.clone(), tx_load_mchart, tx_render_mchart),
+        multi_chart: MultiChartState::new(
+            picker.clone(),
+            tx_load_mchart,
+            tx_render_mchart,
+            tx_expression_refresh,
+        ),
         segment_state,
         edit_pause: edit_pause.clone(),
         command_state,
@@ -212,6 +235,7 @@ pub(super) fn prepare_app<'a>(
             session_range_modes: Vec::new(),
         },
         chart_preview_state,
+        preview_expression_state,
         ui_layout: state::UiLayoutState::default(),
     };
     if let Some(message) = startup_config_error {

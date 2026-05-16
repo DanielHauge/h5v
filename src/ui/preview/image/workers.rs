@@ -1,10 +1,15 @@
 use super::*;
+use crate::ui::perf;
 
 pub(crate) fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
 
     thread::spawn(move || loop {
-        if let Ok(request) = rx_worker.recv() {
+        if let Ok(mut request) = rx_worker.recv() {
+            let _resize_timer = perf::metrics().preview.chart_resize.start();
+            while let Ok(queued) = rx_worker.try_recv() {
+                request = queued;
+            }
             match request.resize_encode() {
                 Ok(r) => {
                     if let Err(e) =
@@ -30,7 +35,10 @@ pub(crate) fn handle_chartpreview_resize(tx_events: Sender<AppEvent>) -> Sender<
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
 
     thread::spawn(move || loop {
-        if let Ok(request) = rx_worker.recv() {
+        if let Ok(mut request) = rx_worker.recv() {
+            while let Ok(queued) = rx_worker.try_recv() {
+                request = queued;
+            }
             match request.resize_encode() {
                 Ok(r) => {
                     if let Err(e) =
@@ -63,8 +71,17 @@ pub(crate) fn handle_chartpreview_load(
 
     thread::spawn(move || loop {
         if let Ok(mut req) = rx_load.recv() {
+            let _worker_timer = perf::metrics().preview.chart_worker_total.start();
+            let mut drained_requests = 0_u64;
             while let Ok(queued) = rx_load.try_recv() {
                 req = queued;
+                drained_requests += 1;
+            }
+            if drained_requests > 0 {
+                perf::metrics()
+                    .preview
+                    .requests_drained
+                    .add(drained_requests);
             }
             let height = req.height as u32 * y as u32;
             let width = req.width as u32 * x as u32;
@@ -77,38 +94,44 @@ pub(crate) fn handle_chartpreview_load(
             };
 
             let data_preview = match req.source {
-                ChartPreviewSource::Dataset { ds, selection } => match ds.plot(&selection) {
-                    Ok(data_preview) => data_preview,
-                    Err(e) => {
-                        send_chart_failure(
-                            &tx_events,
-                            ChartPreviewKey {
-                                ds_path: req.ds_path.clone(),
-                                selection: req.selection.clone(),
-                            },
-                            format!("Failed to plot data for chart preview: {}", e),
-                        );
-                        continue;
+                ChartPreviewSource::Dataset { ds, selection } => {
+                    let _plot_timer = perf::metrics().preview.chart_worker_plot.start();
+                    match ds.plot(&selection) {
+                        Ok(data_preview) => data_preview,
+                        Err(e) => {
+                            send_chart_failure(
+                                &tx_events,
+                                ChartPreviewKey {
+                                    ds_path: req.ds_path.clone(),
+                                    selection: req.selection.clone(),
+                                },
+                                format!("Failed to plot data for chart preview: {}", e),
+                            );
+                            continue;
+                        }
                     }
-                },
+                }
                 ChartPreviewSource::ProjectedDataset {
                     ds,
                     meta,
                     selection,
-                } => match plot_projected(&ds, meta.as_ref(), &selection) {
-                    Ok(data_preview) => data_preview,
-                    Err(e) => {
-                        send_chart_failure(
-                            &tx_events,
-                            ChartPreviewKey {
-                                ds_path: req.ds_path.clone(),
-                                selection: req.selection.clone(),
-                            },
-                            format!("Failed to plot projected data for chart preview: {}", e),
-                        );
-                        continue;
+                } => {
+                    let _plot_timer = perf::metrics().preview.chart_worker_plot.start();
+                    match plot_projected(&ds, meta.as_ref(), &selection) {
+                        Ok(data_preview) => data_preview,
+                        Err(e) => {
+                            send_chart_failure(
+                                &tx_events,
+                                ChartPreviewKey {
+                                    ds_path: req.ds_path.clone(),
+                                    selection: req.selection.clone(),
+                                },
+                                format!("Failed to plot projected data for chart preview: {}", e),
+                            );
+                            continue;
+                        }
                     }
-                },
+                }
                 ChartPreviewSource::Precomputed { data_preview } => data_preview,
             };
 

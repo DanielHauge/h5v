@@ -1,11 +1,18 @@
-use std::sync::mpsc::Sender;
+use std::{
+    sync::mpsc::{channel, Sender},
+    thread,
+};
 
 use image::DynamicImage;
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::ui::{
     app::{AppEvent, ChartPreviewLoadedResult, ImageLoadedResult},
-    state::{ChartPreviewKey, ClipboardImageData, ImageLoadKey},
+    mchart::background::evaluate_preview_expression,
+    state::{
+        ChartPreviewKey, ClipboardImageData, ImageLoadKey, PreviewExpressionRequest,
+        PreviewExpressionResult,
+    },
 };
 
 fn send_event(tx_events: &Sender<AppEvent>, event: AppEvent) {
@@ -79,4 +86,41 @@ pub(super) fn send_chart_success(
             clipboard_image,
         }),
     );
+}
+
+pub(super) fn send_preview_expression_result(
+    tx_events: &Sender<AppEvent>,
+    result: PreviewExpressionResult,
+) {
+    send_event(tx_events, AppEvent::PreviewExpression(result));
+}
+
+pub(crate) fn handle_preview_expression_eval(
+    tx_events: Sender<AppEvent>,
+) -> Sender<PreviewExpressionRequest> {
+    let (tx_eval, rx_eval) = channel::<PreviewExpressionRequest>();
+    thread::spawn(move || loop {
+        let Ok(mut request) = rx_eval.recv() else {
+            return;
+        };
+        while let Ok(next_request) = rx_eval.try_recv() {
+            request = next_request;
+        }
+        let result = match evaluate_preview_expression(
+            &request.items,
+            &request.key.expression,
+            request.file_path.as_deref(),
+        ) {
+            Ok(data_preview) => PreviewExpressionResult::Success {
+                key: request.key,
+                data_preview,
+            },
+            Err(message) => PreviewExpressionResult::Failure {
+                key: request.key,
+                message,
+            },
+        };
+        send_preview_expression_result(&tx_events, result);
+    });
+    tx_eval
 }

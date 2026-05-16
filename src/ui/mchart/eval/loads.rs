@@ -1,7 +1,6 @@
 use super::*;
 
 pub(crate) fn validate_expression_load_ref(
-    _state: &MultiChartState,
     file: &File,
     load_ref: &ExpressionLoadRef,
     _resolution: ExpressionSeriesResolution,
@@ -35,7 +34,6 @@ pub(crate) fn validate_expression_load_ref(
 }
 
 pub(crate) fn resolve_expression_load_value(
-    _state: &MultiChartState,
     file: &File,
     load_ref: &ExpressionLoadRef,
     _resolution: ExpressionSeriesResolution,

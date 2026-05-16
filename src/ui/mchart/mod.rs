@@ -12,9 +12,10 @@ use crate::{
     configure,
     data::{plot_dataset_with_cap, DatasetPlotingData, PreviewSelection, SliceSelection},
     h5f::{plot_projected_with_cap, DatasetMeta},
-    ui::app::AppEvent,
+    ui::{app::AppEvent, perf},
 };
 
+pub(crate) mod background;
 mod derived;
 mod eval;
 mod expression;
@@ -23,6 +24,7 @@ mod load;
 mod model;
 mod prompt;
 mod render;
+pub use background::handle_mchart_expression_refresh;
 use eval::{
     dataset_ploting_data_from_points, eval_expression_at, eval_scalar_expression,
     resolve_expression_item_value, resolve_expression_load_value, validate_expression_load_ref,
@@ -235,6 +237,33 @@ pub enum MultiChartLoadResult {
         message: String,
     },
 }
+
+#[derive(Debug, Clone)]
+pub struct MultiChartExpressionRefreshRequest {
+    pub revision: u64,
+    pub items: Vec<ChartItem>,
+    pub file_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MultiChartDerivedDetailUpdate {
+    pub item_id: ChartItemId,
+    pub detail_series: Option<ChartSeries>,
+    pub detail_window: Option<ChartLodWindow>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MultiChartExpressionRefreshResult {
+    Success {
+        revision: u64,
+        updates: Vec<MultiChartDerivedDetailUpdate>,
+    },
+    Failure {
+        revision: u64,
+        message: String,
+    },
+}
+
 pub struct MultiChartState {
     items: Vec<ChartItem>,
     pub modified: bool,
@@ -245,6 +274,7 @@ pub struct MultiChartState {
     viewport: Option<ChartViewport>,
     tx_load: Sender<MultiChartLoadRequest>,
     tx_render: Sender<MultiChartRenderRequest>,
+    tx_expression_refresh: Sender<MultiChartExpressionRefreshRequest>,
     stateful_protocol: Option<StatefulProtocol>,
     render_generation: u64,
     pending_render_generation: Option<u64>,
@@ -260,6 +290,8 @@ pub struct MultiChartState {
     pub(super) item_hitboxes: Vec<MultiChartItemHitbox>,
     pub(super) editor_hitbox: Option<MultiChartEditorHitbox>,
     pub(super) view_mode_hitboxes: Vec<MultiChartViewModeHitbox>,
+    expression_revision: u64,
+    pending_expression_refresh_revision: Option<u64>,
 }
 
 impl MultiChartState {
@@ -267,6 +299,7 @@ impl MultiChartState {
         picker: Picker,
         tx_load: Sender<MultiChartLoadRequest>,
         tx_render: Sender<MultiChartRenderRequest>,
+        tx_expression_refresh: Sender<MultiChartExpressionRefreshRequest>,
     ) -> Self {
         Self {
             items: Vec::new(),
@@ -278,6 +311,7 @@ impl MultiChartState {
             viewport: None,
             tx_load,
             tx_render,
+            tx_expression_refresh,
             stateful_protocol: None,
             render_generation: 0,
             pending_render_generation: None,
@@ -293,11 +327,21 @@ impl MultiChartState {
             item_hitboxes: Vec::new(),
             editor_hitbox: None,
             view_mode_hitboxes: Vec::new(),
+            expression_revision: 0,
+            pending_expression_refresh_revision: None,
         }
     }
 
     pub fn chart_items(&self) -> &[ChartItem] {
         &self.items
+    }
+
+    pub(crate) fn expression_revision(&self) -> u64 {
+        self.expression_revision
+    }
+
+    fn bump_expression_revision(&mut self) {
+        self.expression_revision = self.expression_revision.wrapping_add(1);
     }
 
     pub(crate) fn queue_chart_render(&mut self, chart_area: Rect) -> bool {
@@ -311,6 +355,7 @@ impl MultiChartState {
         };
         self.render_generation = self.render_generation.saturating_add(1);
         let generation = self.render_generation;
+        perf::metrics().mchart.render_requests_queued.increment();
         let request = MultiChartRenderRequest {
             generation,
             chart_area,
@@ -341,6 +386,7 @@ impl MultiChartState {
                 plot_y_range,
             } => {
                 if generation != self.render_generation {
+                    perf::metrics().mchart.stale_render_results.increment();
                     return;
                 }
                 self.pending_render_generation = None;
@@ -370,6 +416,7 @@ impl MultiChartState {
                 message,
             } => {
                 if generation != self.render_generation {
+                    perf::metrics().mchart.stale_render_results.increment();
                     return;
                 }
                 self.pending_render_generation = None;
@@ -412,6 +459,7 @@ impl MultiChartState {
         &mut self,
         file: Option<&File>,
     ) -> Result<(), String> {
+        let _refresh_timer = perf::metrics().mchart.detail_refresh.start();
         if !configure::current_multichart_settings().derived_detail_enabled {
             for item in self
                 .items
@@ -430,6 +478,10 @@ impl MultiChartState {
                 matches!(item.source, ChartSource::DerivedExpression { .. }).then_some(item.id)
             })
             .collect::<Vec<_>>();
+        perf::metrics()
+            .mchart
+            .detail_items_seen
+            .add(derived_ids.len() as u64);
         for id in self.expression_recompute_order(&derived_ids)? {
             let expression = match self.item_by_id(id).map(|item| item.source.clone()) {
                 Some(ChartSource::DerivedExpression { expression, .. }) => expression,
@@ -468,6 +520,90 @@ impl MultiChartState {
         }
         self.modified = true;
         Ok(())
+    }
+
+    pub(crate) fn queue_expression_detail_refresh(
+        &mut self,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        if !configure::current_multichart_settings().derived_detail_enabled {
+            self.pending_expression_refresh_revision = None;
+            let mut cleared_any = false;
+            for item in self
+                .items
+                .iter_mut()
+                .filter(|item| matches!(item.source, ChartSource::DerivedExpression { .. }))
+            {
+                if item.detail_series.is_some() || item.detail_window.is_some() {
+                    item.clear_detail_state(true);
+                    cleared_any = true;
+                }
+            }
+            if cleared_any {
+                self.bump_expression_revision();
+                self.modified = true;
+            }
+            return Ok(());
+        }
+        if !self
+            .items
+            .iter()
+            .any(|item| matches!(item.source, ChartSource::DerivedExpression { .. }))
+        {
+            self.pending_expression_refresh_revision = None;
+            return Ok(());
+        }
+        if self.pending_expression_refresh_revision == Some(self.expression_revision) {
+            return Ok(());
+        }
+        self.pending_expression_refresh_revision = Some(self.expression_revision);
+        self.tx_expression_refresh
+            .send(MultiChartExpressionRefreshRequest {
+                revision: self.expression_revision,
+                items: self.items.clone(),
+                file_path: file.map(|file| file.filename()),
+            })
+            .map_err(|_| {
+                self.pending_expression_refresh_revision = None;
+                "multichart expression refresher unavailable".to_string()
+            })
+    }
+
+    pub(crate) fn apply_expression_refresh_result(
+        &mut self,
+        result: MultiChartExpressionRefreshResult,
+    ) -> Result<(), String> {
+        match result {
+            MultiChartExpressionRefreshResult::Success { revision, updates } => {
+                if self.pending_expression_refresh_revision == Some(revision) {
+                    self.pending_expression_refresh_revision = None;
+                }
+                if revision != self.expression_revision {
+                    return Ok(());
+                }
+                for update in updates {
+                    let Some(item) = self.items.iter_mut().find(|item| item.id == update.item_id)
+                    else {
+                        continue;
+                    };
+                    item.detail_series = update.detail_series;
+                    item.detail_window = update.detail_window;
+                    item.pending_detail_window = None;
+                    item.load_state = MultiChartLoadState::Ready;
+                }
+                self.modified = true;
+                Ok(())
+            }
+            MultiChartExpressionRefreshResult::Failure { revision, message } => {
+                if self.pending_expression_refresh_revision == Some(revision) {
+                    self.pending_expression_refresh_revision = None;
+                }
+                if revision != self.expression_revision {
+                    return Ok(());
+                }
+                Err(message)
+            }
+        }
     }
 
     #[cfg(test)]
@@ -533,8 +669,10 @@ impl MultiChartState {
             item.visible = true;
             item.name = None;
             self.idx = idx;
+            let item_id = item.id;
+            self.bump_expression_revision();
             self.modified = true;
-            return Some(item.id);
+            return Some(item_id);
         }
 
         let id = ChartItemId(self.next_id);
@@ -563,6 +701,7 @@ impl MultiChartState {
             visible: true,
         });
         self.idx = self.items.len().saturating_sub(1);
+        self.bump_expression_revision();
         self.modified = true;
         Some(id)
     }
@@ -600,6 +739,7 @@ impl MultiChartState {
                 item.detail_generation = generation;
             }
         }
+        self.bump_expression_revision();
         if self.tx_load.send(request).is_err() {
             self.apply_load_failure(item_id, kind, "multichart loader unavailable".to_string());
         }
@@ -610,8 +750,16 @@ impl MultiChartState {
         if let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) {
             item.load_state = match kind {
                 MultiChartLoadKind::Overview { .. } => MultiChartLoadState::Sampling,
-                MultiChartLoadKind::Detail { .. } => MultiChartLoadState::Refining,
+                MultiChartLoadKind::Detail { generation, window } => {
+                    if item.detail_generation != generation
+                        || item.pending_detail_window != Some(window)
+                    {
+                        return;
+                    }
+                    MultiChartLoadState::Refining
+                }
             };
+            self.bump_expression_revision();
             self.modified = true;
         }
     }
@@ -651,6 +799,7 @@ impl MultiChartState {
                 item.load_state = MultiChartLoadState::Ready;
             }
         }
+        self.bump_expression_revision();
         self.modified = true;
         Ok(())
     }
@@ -674,6 +823,7 @@ impl MultiChartState {
                     item.load_state = MultiChartLoadState::Ready;
                 }
             }
+            self.bump_expression_revision();
             self.modified = true;
         }
     }
@@ -741,6 +891,7 @@ impl MultiChartState {
             return;
         };
         let mut requests = Vec::new();
+        let mut changed = false;
         for item in self.items.iter_mut().filter(|item| item.visible) {
             let Some(source) = item.source.dataset_source().cloned() else {
                 continue;
@@ -748,12 +899,12 @@ impl MultiChartState {
             let Some(window) = Self::detail_window_for_viewport(&source, viewport, sample_cap)
             else {
                 item.clear_detail_state(true);
+                changed = true;
                 continue;
             };
             if item.detail_window == Some(window) || item.pending_detail_window == Some(window) {
                 continue;
             }
-            item.clear_detail_state(true);
             let Ok(dataset) = file.dataset(&source.dataset_path) else {
                 continue;
             };
@@ -764,15 +915,15 @@ impl MultiChartState {
                 },
                 DatasetChartKind::CompoundLeaf => continue,
             };
-            requests.push((item.id, window, request_source));
+            item.clear_detail_state(true);
+            changed = true;
+            requests.push((item.id, item.detail_generation, window, request_source));
         }
-        for (item_id, window, source) in requests {
-            let generation = self
-                .items
-                .iter()
-                .find(|item| item.id == item_id)
-                .map(|item| item.detail_generation.saturating_add(1))
-                .unwrap_or(1);
+        if changed {
+            self.bump_expression_revision();
+            self.modified = true;
+        }
+        for (item_id, generation, window, source) in requests {
             self.queue_load(
                 MultiChartLoadRequest {
                     item_id,
@@ -835,6 +986,7 @@ impl MultiChartState {
                 self.stateful_protocol = None;
                 self.last_chart_panel_area = None;
             }
+            self.bump_expression_revision();
             self.modified = true;
         }
         Ok(())
@@ -846,6 +998,7 @@ impl MultiChartState {
         self.clear_zoom();
         self.stateful_protocol = None;
         self.last_chart_panel_area = None;
+        self.bump_expression_revision();
         self.modified = true;
     }
 

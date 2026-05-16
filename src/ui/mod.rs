@@ -9,6 +9,7 @@ pub mod input;
 pub mod main_display;
 pub mod matrix;
 pub mod mchart;
+pub mod perf;
 pub mod preview;
 pub mod render;
 pub mod segment_scroll;

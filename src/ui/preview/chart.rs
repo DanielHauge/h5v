@@ -25,11 +25,13 @@ use crate::{
     ui::{
         dims::render_dim_selector,
         matrix::{EnumRenderer, RenderIntercept},
+        perf,
+        preview::image::thread_protocol_from_clipboard_image,
         preview::render_string_preview,
         render::MatrixRenderType,
         segment_scroll::SegmentDisplayInfo,
         state::{
-            AppState, ChartPreviewLoadRequest, ChartPreviewSource, Focus, IsFromDs, Mode,
+            AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, Focus, Mode,
             SegmentType,
         },
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
@@ -48,6 +50,108 @@ fn render_chart_loading_indicator(f: &mut Frame, area: Rect) {
     f.render_widget(indicator, area);
 }
 
+fn clear_active_chart_preview(state: &mut AppState<'_>) {
+    state.chart_preview_state.ds_loaded = None;
+    state.chart_preview_state.protocol = None;
+    state.chart_preview_state.clipboard_image = None;
+    state.chart_preview_state.error = None;
+    state.chart_preview_state.ds_selection = None;
+    state.chart_preview_state.pending_key = None;
+}
+
+fn render_chart_protocol_state(
+    f: &mut Frame,
+    chart_area: Rect,
+    state: &mut AppState<'_>,
+    is_pending: bool,
+) -> Result<(), AppError> {
+    if let Some(ref error) = state.chart_preview_state.error {
+        render_error(
+            f,
+            &chart_area,
+            format!("Error loading chart preview: {}", error),
+        );
+        return Ok(());
+    }
+    if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+        f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
+        if is_pending {
+            render_chart_loading_indicator(f, chart_area);
+        }
+    } else if is_pending {
+        render_chart_loading_indicator(f, chart_area);
+    }
+    Ok(())
+}
+
+fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey) -> bool {
+    let Some(clipboard_image) = state.chart_preview_state.touch_cached_preview(key) else {
+        return false;
+    };
+    let Some(protocol) = thread_protocol_from_clipboard_image(
+        &state.multi_chart.picker,
+        &state.chart_preview_state.tx_resize_chartpreview,
+        &clipboard_image,
+    ) else {
+        state
+            .chart_preview_state
+            .cached_previews
+            .retain(|entry| entry.key != *key);
+        return false;
+    };
+    state.chart_preview_state.ds_loaded = Some(key.ds_path.clone());
+    state.chart_preview_state.ds_selection = Some(key.selection.clone());
+    state.chart_preview_state.protocol = Some(protocol);
+    state.chart_preview_state.clipboard_image = Some(clipboard_image);
+    state.chart_preview_state.error = None;
+    true
+}
+
+fn queue_chart_preview_load(
+    f: &mut Frame,
+    chart_area: Rect,
+    state: &mut AppState<'_>,
+    node: &Node,
+    current_key: ChartPreviewKey,
+    source: ChartPreviewSource,
+) -> Result<(), AppError> {
+    let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
+
+    if state.should_debounce_preview(node) {
+        perf::metrics().preview.debounce_skips.increment();
+        return render_chart_protocol_state(f, chart_area, state, true);
+    }
+
+    if state.chart_preview_state.current_request_key().as_ref() == Some(&current_key) {
+        perf::metrics().preview.cache_hits.increment();
+        return render_chart_protocol_state(f, chart_area, state, is_pending);
+    }
+
+    if restore_cached_chart_preview(state, &current_key) {
+        perf::metrics().preview.cache_hits.increment();
+        return render_chart_protocol_state(f, chart_area, state, false);
+    }
+
+    state.chart_preview_state.ds_loaded = Some(current_key.ds_path.clone());
+    state.chart_preview_state.ds_selection = Some(current_key.selection.clone());
+    state.chart_preview_state.error = None;
+    state.chart_preview_state.pending_key = Some(current_key.clone());
+    state
+        .chart_preview_state
+        .tx_load_chartpreview
+        .send(ChartPreviewLoadRequest {
+            ds_path: current_key.ds_path,
+            source,
+            selection: current_key.selection,
+            width: chart_area.width,
+            height: chart_area.height,
+            segment_state: state.segment_state.clone(),
+        })
+        .ok();
+    perf::metrics().preview.requests_queued.increment();
+    render_chart_protocol_state(f, chart_area, state, true)
+}
+
 pub fn render_precomputed_chart_preview(
     f: &mut Frame,
     area: &Rect,
@@ -55,6 +159,7 @@ pub fn render_precomputed_chart_preview(
     state: &mut AppState,
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
+    let _chart_render_timer = perf::metrics().preview.chart_render.start();
     let chart_area = area.inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -64,71 +169,25 @@ pub fn render_precomputed_chart_preview(
         index: vec![],
         slice: SliceSelection::All,
     };
-    let image_capable = state.image_protocol_enabled;
-    let current_key = crate::ui::state::ChartPreviewKey {
+    if !state.image_protocol_enabled {
+        clear_active_chart_preview(state);
+        perf::metrics().preview.direct_widget_renders.increment();
+        render_chart_widget(f, &chart_area, state, data_preview);
+        return Ok(());
+    }
+
+    let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: preview_selection.clone(),
     };
-    let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
-
-    if image_capable && state.should_debounce_preview(&node.node) {
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-
-    if image_capable
-        && state.chart_preview_state.is_from_ds(&node.node)
-        && state.chart_preview_state.ds_selection.as_ref() == Some(&preview_selection)
-    {
-        if let Some(ref error) = state.chart_preview_state.error {
-            render_error(
-                f,
-                &chart_area,
-                format!("Error loading chart preview: {}", error),
-            );
-            return Ok(());
-        }
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            if is_pending {
-                render_chart_loading_indicator(f, chart_area);
-            }
-        } else if is_pending {
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-
-    if image_capable {
-        state.chart_preview_state.ds_loaded = Some(node.node.path());
-        state.chart_preview_state.ds_selection = Some(preview_selection.clone());
-        state.chart_preview_state.error = None;
-        state.chart_preview_state.pending_key = Some(current_key);
-        let chart_preview_load_request = ChartPreviewLoadRequest {
-            ds_path: node.node.path(),
-            source: ChartPreviewSource::Precomputed { data_preview },
-            selection: preview_selection,
-            width: chart_area.width,
-            height: chart_area.height,
-            segment_state: state.segment_state.clone(),
-        };
-        state
-            .chart_preview_state
-            .tx_load_chartpreview
-            .send(chart_preview_load_request)
-            .ok();
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-        }
-        render_chart_loading_indicator(f, chart_area);
-    } else {
-        render_chart_widget(f, &chart_area, state, data_preview);
-    }
-
-    Ok(())
+    queue_chart_preview_load(
+        f,
+        chart_area,
+        state,
+        &node.node,
+        current_key,
+        ChartPreviewSource::Precomputed { data_preview },
+    )
 }
 
 pub fn render_chart_preview(
@@ -137,6 +196,7 @@ pub fn render_chart_preview(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    let _chart_render_timer = perf::metrics().preview.chart_render.start();
     let (ds, ds_meta) = match &node.node {
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
@@ -379,70 +439,12 @@ pub fn render_chart_preview(
         (chart_area, data_preview_selection)
     };
 
-    let image_capable = state.image_protocol_enabled;
-    let current_key = crate::ui::state::ChartPreviewKey {
+    let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
     };
-    let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
-
-    if image_capable && state.should_debounce_preview(&node.node) {
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-
-    if image_capable
-        && state.chart_preview_state.is_from_ds(&node.node)
-        && state.chart_preview_state.ds_selection.as_ref() == Some(&data_preview_selection)
-    {
-        if let Some(ref error) = state.chart_preview_state.error {
-            render_error(
-                f,
-                &chart_area,
-                format!("Error loading chart preview: {}", error),
-            );
-            return Ok(());
-        }
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            if is_pending {
-                render_chart_loading_indicator(f, chart_area);
-            }
-        } else if is_pending {
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-
-    if image_capable {
-        state.chart_preview_state.ds_loaded = Some(node.node.path());
-        state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
-        state.chart_preview_state.error = None;
-        state.chart_preview_state.pending_key = Some(current_key);
-        let chart_preview_load_request = ChartPreviewLoadRequest {
-            ds_path: node.node.path(),
-            source: ChartPreviewSource::Dataset {
-                ds,
-                selection: data_preview_selection.clone(),
-            },
-            selection: data_preview_selection.clone(),
-            width: chart_area.width,
-            height: chart_area.height,
-            segment_state: state.segment_state.clone(),
-        };
-        state
-            .chart_preview_state
-            .tx_load_chartpreview
-            .send(chart_preview_load_request)
-            .ok();
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-        }
-        render_chart_loading_indicator(f, chart_area);
-    } else {
+    if !state.image_protocol_enabled {
+        clear_active_chart_preview(state);
         let data_preview = match ds.plot(&data_preview_selection) {
             Ok(dp) => dp,
             Err(e) => {
@@ -450,7 +452,20 @@ pub fn render_chart_preview(
                 return Ok(());
             }
         };
+        perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview);
+    } else {
+        queue_chart_preview_load(
+            f,
+            chart_area,
+            state,
+            &node.node,
+            current_key,
+            ChartPreviewSource::Dataset {
+                ds,
+                selection: data_preview_selection,
+            },
+        )?;
     }
 
     Ok(())
@@ -464,6 +479,7 @@ fn render_projected_chart_preview(
     ds: hdf5_metno::Dataset,
     ds_meta: crate::h5f::DatasetMeta,
 ) -> Result<(), AppError> {
+    let _chart_render_timer = perf::metrics().preview.chart_render.start();
     let shape = ds.shape();
     let total_dims = shape.len();
     node.sync_selection_rank(total_dims);
@@ -657,69 +673,12 @@ fn render_projected_chart_preview(
         };
         (chart_area, data_preview_selection)
     };
-    let image_capable = state.image_protocol_enabled;
-    let current_key = crate::ui::state::ChartPreviewKey {
+    let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
     };
-    let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
-    if image_capable && state.should_debounce_preview(&node.node) {
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-    if image_capable
-        && state.chart_preview_state.is_from_ds(&node.node)
-        && state.chart_preview_state.ds_selection.as_ref() == Some(&data_preview_selection)
-    {
-        if let Some(ref error) = state.chart_preview_state.error {
-            render_error(
-                f,
-                &chart_area,
-                format!("Error loading chart preview: {}", error),
-            );
-            return Ok(());
-        }
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-            if is_pending {
-                render_chart_loading_indicator(f, chart_area);
-            }
-        } else if is_pending {
-            render_chart_loading_indicator(f, chart_area);
-        }
-        return Ok(());
-    }
-
-    if image_capable {
-        state.chart_preview_state.ds_loaded = Some(node.node.path());
-        state.chart_preview_state.ds_selection = Some(data_preview_selection.clone());
-        state.chart_preview_state.error = None;
-        state.chart_preview_state.pending_key = Some(current_key);
-        let chart_preview_load_request = ChartPreviewLoadRequest {
-            ds_path: node.node.path(),
-            source: ChartPreviewSource::ProjectedDataset {
-                ds,
-                meta: Box::new(ds_meta),
-                selection: data_preview_selection.clone(),
-            },
-            selection: data_preview_selection.clone(),
-            width: chart_area.width,
-            height: chart_area.height,
-            segment_state: state.segment_state.clone(),
-        };
-        state
-            .chart_preview_state
-            .tx_load_chartpreview
-            .send(chart_preview_load_request)
-            .ok();
-        if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-            f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-        }
-        render_chart_loading_indicator(f, chart_area);
-    } else {
+    if !state.image_protocol_enabled {
+        clear_active_chart_preview(state);
         let data_preview = match plot_projected(&ds, &ds_meta, &data_preview_selection) {
             Ok(data_preview) => data_preview,
             Err(e) => {
@@ -731,7 +690,21 @@ fn render_projected_chart_preview(
                 return Ok(());
             }
         };
+        perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview);
+    } else {
+        queue_chart_preview_load(
+            f,
+            chart_area,
+            state,
+            &node.node,
+            current_key,
+            ChartPreviewSource::ProjectedDataset {
+                ds,
+                meta: Box::new(ds_meta),
+                selection: data_preview_selection,
+            },
+        )?;
     }
     Ok(())
 }
@@ -742,6 +715,7 @@ fn render_chart_widget(
     state: &AppState,
     data_preview: DatasetPlotingData,
 ) {
+    let _widget_render_timer = perf::metrics().preview.chart_widget_render.start();
     let x_axis_max = preview_x_axis_max(&data_preview);
     let x_label_count = match chart_area.width {
         0..=7 => 1,
@@ -820,6 +794,7 @@ pub fn render_image_chart(
     x_min: f64,
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
+    let _image_render_timer = perf::metrics().preview.chart_image_render.start();
     let (bg_r, bg_g, bg_b) =
         configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
     let (grid_r, grid_g, grid_b) =

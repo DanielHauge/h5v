@@ -18,7 +18,13 @@ use ndarray::Array;
 pub(super) fn make_state() -> MultiChartState {
     let (tx_load, _rx_load) = channel();
     let (tx_render, _rx_render) = channel();
-    MultiChartState::new(Picker::from_fontsize((7, 14)), tx_load, tx_render)
+    let (tx_expression_refresh, _rx_expression_refresh) = channel();
+    MultiChartState::new(
+        Picker::from_fontsize((7, 14)),
+        tx_load,
+        tx_render,
+        tx_expression_refresh,
+    )
 }
 
 pub(super) fn source(path: &str, selection: PreviewSelection) -> ChartSource {

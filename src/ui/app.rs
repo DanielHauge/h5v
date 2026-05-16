@@ -36,9 +36,12 @@ use super::{
     help::render_help,
     input::handle_input_event,
     main_display::render_main_display,
-    mchart::MultiChartLoadResult,
+    mchart::{MultiChartExpressionRefreshResult, MultiChartLoadResult},
     preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
-    state::{self, AppState, Focus, LastFocused, Mode},
+    state::{
+        self, AppState, Focus, LastFocused, Mode, PreviewExpressionResult,
+        CHART_PREVIEW_CACHE_CAPACITY,
+    },
     tree_view::render_tree,
 };
 
@@ -315,7 +318,7 @@ fn main_recover_loop(
                     .schedule_viewport_detail_loads(state.file.as_ref());
                 if let Err(error) = state
                     .multi_chart
-                    .refresh_expression_detail_series(state.file.as_ref())
+                    .queue_expression_detail_refresh(state.file.as_ref())
                 {
                     state.toast = AppToast::Error(error);
                 }
@@ -451,12 +454,40 @@ fn main_recover_loop(
                     }
                 }
             },
+            AppEvent::PreviewExpression(result) => {
+                match result {
+                    PreviewExpressionResult::Success { key, data_preview } => {
+                        if state.preview_expression_state.pending_key.as_ref() == Some(&key) {
+                            state.preview_expression_state.pending_key = None;
+                            state.preview_expression_state.current_key = Some(key);
+                            state.preview_expression_state.data_preview = Some(data_preview);
+                            state.preview_expression_state.error = None;
+                        }
+                    }
+                    PreviewExpressionResult::Failure { key, message } => {
+                        if state.preview_expression_state.pending_key.as_ref() == Some(&key) {
+                            state.preview_expression_state.pending_key = None;
+                            state.preview_expression_state.current_key = Some(key);
+                            state.preview_expression_state.data_preview = None;
+                            state.preview_expression_state.error = Some(message);
+                        }
+                    }
+                }
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
+            }
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
                 ChartPreviewLoadedResult::Success {
                     key,
                     protocol,
                     clipboard_image,
                 } => {
+                    state.chart_preview_state.cache_preview(
+                        key.clone(),
+                        clipboard_image.clone(),
+                        CHART_PREVIEW_CACHE_CAPACITY,
+                    );
                     if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
                         state.chart_preview_state.pending_key = None;
                     }
@@ -580,8 +611,16 @@ fn main_recover_loop(
                 }
                 if let Err(error) = state
                     .multi_chart
-                    .refresh_expression_detail_series(state.file.as_ref())
+                    .queue_expression_detail_refresh(state.file.as_ref())
                 {
+                    state.toast = AppToast::Error(error);
+                }
+                terminal.draw(|f| {
+                    draw_closure(f, &mut state);
+                })?;
+            }
+            AppEvent::MultiChartExpressionRefresh(result) => {
+                if let Err(error) = state.multi_chart.apply_expression_refresh_result(result) {
                     state.toast = AppToast::Error(error);
                 }
                 terminal.draw(|f| {
@@ -672,10 +711,12 @@ pub enum AppEvent {
     TermEvent(event::Event),
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
+    PreviewExpression(PreviewExpressionResult),
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
     HeatmapLoad(HeatmapLoadedResult),
     MultiChartLoad(MultiChartLoadResult),
+    MultiChartExpressionRefresh(MultiChartExpressionRefreshResult),
     MultiChartRender(crate::ui::mchart::MultiChartRenderResult),
     PreviewDebounceExpired(u64),
     Toast(AppToast),

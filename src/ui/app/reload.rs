@@ -194,6 +194,11 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
     state.chart_preview_state.pending_key = None;
+    state.chart_preview_state.cached_previews.clear();
+    state.preview_expression_state.current_key = None;
+    state.preview_expression_state.pending_key = None;
+    state.preview_expression_state.data_preview = None;
+    state.preview_expression_state.error = None;
     state.heatmap_viewport_region = None;
     state.heatmap_region = None;
     state.heatmap_render.current_key = None;

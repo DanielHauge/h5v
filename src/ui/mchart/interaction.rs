@@ -613,6 +613,7 @@ impl MultiChartState {
         };
         item.name = normalized;
         item.label = item.list_label();
+        self.bump_expression_revision();
         self.modified = true;
         Ok(())
     }

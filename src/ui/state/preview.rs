@@ -10,7 +10,8 @@ use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
-    h5f::{DatasetMeta, HasPath, ImageType, Node},
+    h5f::{DatasetMeta, ImageType},
+    ui::mchart::ChartItem,
 };
 
 pub struct ChartPreviewLoadRequest {
@@ -51,7 +52,43 @@ pub struct ChartPreviwState {
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
     pub pending_key: Option<ChartPreviewKey>,
+    pub tx_resize_chartpreview: Sender<ResizeRequest>,
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
+    pub cached_previews: VecDeque<CachedChartPreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewExpressionKey {
+    pub group_path: String,
+    pub expression: String,
+    pub expression_revision: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreviewExpressionRequest {
+    pub key: PreviewExpressionKey,
+    pub items: Vec<ChartItem>,
+    pub file_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PreviewExpressionResult {
+    Success {
+        key: PreviewExpressionKey,
+        data_preview: DatasetPlotingData,
+    },
+    Failure {
+        key: PreviewExpressionKey,
+        message: String,
+    },
+}
+
+pub struct PreviewExpressionState {
+    pub current_key: Option<PreviewExpressionKey>,
+    pub pending_key: Option<PreviewExpressionKey>,
+    pub data_preview: Option<DatasetPlotingData>,
+    pub error: Option<String>,
+    pub tx_load: Sender<PreviewExpressionRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -155,34 +192,12 @@ pub struct CachedImage {
     pub clipboard_image: ClipboardImageData,
 }
 
-pub trait IsFromDsReq {
-    fn get_ds_name(&self) -> Option<String>;
-}
+pub const CHART_PREVIEW_CACHE_CAPACITY: usize = 6;
 
-pub trait IsFromDs {
-    fn is_from_ds(&self, node: &Node) -> bool;
-}
-
-impl<T: IsFromDsReq> IsFromDs for T {
-    fn is_from_ds(&self, node: &Node) -> bool {
-        let ds_name = match self.get_ds_name() {
-            Some(name) => name,
-            None => return false,
-        };
-        node.path() == ds_name
-    }
-}
-
-impl IsFromDsReq for ChartPreviwState {
-    fn get_ds_name(&self) -> Option<String> {
-        self.ds_loaded.clone()
-    }
-}
-
-impl IsFromDsReq for ImgState {
-    fn get_ds_name(&self) -> Option<String> {
-        self.ds.clone()
-    }
+#[derive(Debug, Clone)]
+pub struct CachedChartPreview {
+    pub key: ChartPreviewKey,
+    pub clipboard_image: ClipboardImageData,
 }
 
 impl ImgState {
@@ -229,6 +244,33 @@ impl ChartPreviwState {
             selection: self.ds_selection.clone()?,
         })
     }
+
+    pub fn touch_cached_preview(&mut self, key: &ChartPreviewKey) -> Option<ClipboardImageData> {
+        let index = self
+            .cached_previews
+            .iter()
+            .position(|entry| &entry.key == key)?;
+        let entry = self.cached_previews.remove(index)?;
+        let clipboard_image = entry.clipboard_image.clone();
+        self.cached_previews.push_back(entry);
+        Some(clipboard_image)
+    }
+
+    pub fn cache_preview(
+        &mut self,
+        key: ChartPreviewKey,
+        clipboard_image: ClipboardImageData,
+        capacity: usize,
+    ) {
+        self.cached_previews.retain(|entry| entry.key != key);
+        self.cached_previews.push_back(CachedChartPreview {
+            key,
+            clipboard_image,
+        });
+        while self.cached_previews.len() > capacity {
+            self.cached_previews.pop_front();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -248,5 +290,91 @@ pub struct SegmentState {
 impl SegmentState {
     pub fn max_index(&self) -> Option<i32> {
         (self.segment_count > 0).then_some(self.segment_count.saturating_sub(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::channel;
+
+    fn preview_key(name: &str) -> ChartPreviewKey {
+        ChartPreviewKey {
+            ds_path: name.to_string(),
+            selection: PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: crate::data::SliceSelection::All,
+            },
+        }
+    }
+
+    fn clipboard_image(id: u8) -> ClipboardImageData {
+        ClipboardImageData {
+            width: 1,
+            height: 1,
+            bytes: vec![id, 0, 0, 255],
+        }
+    }
+
+    #[test]
+    fn chart_preview_cache_touches_existing_entries() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+        };
+        let first = preview_key("first");
+        let second = preview_key("second");
+        state.cache_preview(first.clone(), clipboard_image(1), 2);
+        state.cache_preview(second.clone(), clipboard_image(2), 2);
+
+        let touched = state.touch_cached_preview(&first).unwrap();
+
+        assert_eq!(touched.bytes, clipboard_image(1).bytes);
+        assert_eq!(state.cached_previews.back().unwrap().key, first);
+        assert_eq!(state.cached_previews.front().unwrap().key, second);
+    }
+
+    #[test]
+    fn chart_preview_cache_respects_capacity() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+        };
+
+        state.cache_preview(preview_key("first"), clipboard_image(1), 2);
+        state.cache_preview(preview_key("second"), clipboard_image(2), 2);
+        state.cache_preview(preview_key("third"), clipboard_image(3), 2);
+
+        assert!(state
+            .cached_previews
+            .iter()
+            .all(|entry| entry.key != preview_key("first")));
+        assert!(state
+            .cached_previews
+            .iter()
+            .any(|entry| entry.key == preview_key("second")));
+        assert!(state
+            .cached_previews
+            .iter()
+            .any(|entry| entry.key == preview_key("third")));
     }
 }

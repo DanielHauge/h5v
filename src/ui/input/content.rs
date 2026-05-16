@@ -662,6 +662,7 @@ fn apply_content_edit_request(
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.pending_key = None;
+    state.chart_preview_state.cached_previews.clear();
     state.img_state.ds = None;
     state.img_state.current_key = None;
     state.img_state.protocol = None;
