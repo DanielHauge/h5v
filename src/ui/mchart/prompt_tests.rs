@@ -286,6 +286,108 @@ fn updating_xy_series_recomputes_downstream_y_dependents() {
 }
 
 #[test]
+fn updating_expression_to_dataset_reference_preserves_id_and_recomputes_dependents() {
+    let (file, path) = make_dataset_ref_test_file();
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create $2");
+    state
+        .create_expression_derived("$2 + 1".to_string())
+        .expect("create $3");
+
+    state
+        .update_expression_item_with_file(ChartItemId(2), "load(/series)".to_string(), Some(&file))
+        .expect("update $2 to dataset reference");
+
+    let edited = state
+        .item_by_id(ChartItemId(2))
+        .expect("$2 should still exist");
+    assert!(matches!(edited.source, ChartSource::DatasetSelection(_)));
+
+    state
+        .apply_loaded_item(
+            ChartItemId(2),
+            MultiChartLoadKind::Overview { generation: 0 },
+            vec![(0.0, 2.0), (1.0, 4.0), (2.0, 6.0)],
+            3,
+        )
+        .expect("apply loaded dataset");
+    state
+        .refresh_expression_dependents_for_item(ChartItemId(2), Some(&file))
+        .expect("refresh dependents");
+
+    assert_eq!(
+        state.item_by_id(ChartItemId(2)).unwrap().series.points,
+        vec![(0.0, 2.0), (1.0, 4.0), (2.0, 6.0)]
+    );
+    assert_eq!(
+        state.item_by_id(ChartItemId(3)).unwrap().series.points,
+        vec![(0.0, 3.0), (1.0, 5.0), (2.0, 7.0)]
+    );
+
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn updating_base_item_to_dataset_reference_recomputes_transitive_dependents() {
+    let (file, path) = make_dataset_ref_test_file();
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state
+        .create_expression_derived("$1 + 1".to_string())
+        .expect("create $2");
+    state
+        .create_expression_derived("$2 + 1".to_string())
+        .expect("create $3");
+
+    state
+        .update_expression_item_with_file(ChartItemId(1), "load(/series)".to_string(), Some(&file))
+        .expect("update $1 to dataset reference");
+
+    let base = state
+        .item_by_id(ChartItemId(1))
+        .expect("$1 should still exist");
+    assert!(matches!(base.source, ChartSource::DatasetSelection(_)));
+
+    state
+        .apply_loaded_item(
+            ChartItemId(1),
+            MultiChartLoadKind::Overview { generation: 0 },
+            vec![(0.0, 2.0), (1.0, 4.0), (2.0, 6.0)],
+            3,
+        )
+        .expect("apply loaded dataset");
+    state
+        .refresh_expression_dependents_for_item(ChartItemId(1), Some(&file))
+        .expect("refresh transitive dependents");
+
+    assert_eq!(
+        state.item_by_id(ChartItemId(2)).unwrap().series.points,
+        vec![(0.0, 3.0), (1.0, 5.0), (2.0, 7.0)]
+    );
+    assert_eq!(
+        state.item_by_id(ChartItemId(3)).unwrap().series.points,
+        vec![(0.0, 4.0), (1.0, 6.0), (2.0, 8.0)]
+    );
+
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn collect_expression_input_ids_includes_item_refs() {
     let tokens = tokenize_expression("($1, $2 + 1)").expect("tokenize");
     let parsed = parse_derived_expression(&tokens).expect("parse");

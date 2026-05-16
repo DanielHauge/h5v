@@ -36,7 +36,7 @@ use super::{
     help::render_help,
     input::handle_input_event,
     main_display::render_main_display,
-    mchart::{MultiChartExpressionRefreshResult, MultiChartLoadResult},
+    mchart::{MultiChartExpressionRefreshResult, MultiChartLoadKind, MultiChartLoadResult},
     preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
     state::{
         self, AppState, Focus, LastFocused, Mode, PreviewExpressionResult,
@@ -594,11 +594,22 @@ fn main_recover_loop(
                         points,
                         source_len,
                     } => {
+                        let should_refresh_dependents =
+                            matches!(kind, MultiChartLoadKind::Overview { .. });
                         if let Err(error) = state
                             .multi_chart
                             .apply_loaded_item(item_id, kind, points, source_len)
                         {
                             state.toast = AppToast::Error(error);
+                        } else if should_refresh_dependents {
+                            if let Err(error) =
+                                state.multi_chart.refresh_expression_dependents_for_item(
+                                    item_id,
+                                    state.file.as_ref(),
+                                )
+                            {
+                                state.toast = AppToast::Error(error);
+                            }
                         }
                     }
                     MultiChartLoadResult::Failure {

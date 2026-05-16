@@ -642,6 +642,7 @@ impl MultiChartState {
     }
 }
 
+#[cfg(test)]
 pub(super) fn expression_prompt_messages(
     state: &MultiChartState,
     file: Option<&File>,

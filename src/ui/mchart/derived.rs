@@ -341,12 +341,28 @@ impl MultiChartState {
         Ok(())
     }
 
+    pub(crate) fn refresh_expression_dependents_for_item(
+        &mut self,
+        item_id: ChartItemId,
+        file: Option<&File>,
+    ) -> Result<(), String> {
+        let dependents = self.transitive_expression_dependents_of(item_id);
+        if dependents.is_empty() {
+            return Ok(());
+        }
+        self.recompute_expression_dependents(dependents, file)
+    }
+
     pub(super) fn update_expression_item_with_file(
         &mut self,
         id: ChartItemId,
         expression: String,
         file: Option<&File>,
     ) -> Result<(), String> {
+        let original_items = self.items.clone();
+        let original_idx = self.idx;
+        let original_modified = self.modified;
+        let previous_dependents = self.transitive_expression_dependents_of(id);
         let use_raw_dataset_reference =
             matches!(
                 self.validate_expression_with_file(&expression, file),
@@ -356,22 +372,22 @@ impl MultiChartState {
                 })
             ) && matches!(Self::raw_dataset_reference(&expression), Ok(Some(_)));
         if use_raw_dataset_reference {
-            let item_id = self.add_dataset_reference_command(&expression, file)?;
-            if item_id != id {
-                let index = self
-                    .items
-                    .iter()
-                    .position(|item| item.id == id)
-                    .ok_or_else(|| format!("Chart item ${} no longer exists", id.0))?;
-                self.items.remove(index);
-                self.idx = self.idx.clamp(0, self.items.len().saturating_sub(1));
+            let mut captured = self.dataset_reference_item(&expression, file)?;
+            self.replace_chart_item_with_status(
+                id,
+                captured.source,
+                captured.initial_points.take(),
+                None,
+                captured.source_len,
+                captured.load_state,
+                false,
+            )?;
+            if let Some(mut request) = captured.request {
+                request.item_id = id;
+                self.queue_load(request, MultiChartLoadState::Queued);
             }
             return Ok(());
         }
-        let original_items = self.items.clone();
-        let original_idx = self.idx;
-        let original_modified = self.modified;
-        let previous_dependents = self.transitive_expression_dependents_of(id);
         let (source, series, scalar_value) =
             match self.build_expression_chart_item(&expression, file) {
                 Ok(item) => item,

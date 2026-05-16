@@ -731,6 +731,45 @@ impl MultiChartState {
         Ok(item_id)
     }
 
+    pub(crate) fn replace_chart_item_with_status(
+        &mut self,
+        item_id: ChartItemId,
+        source: ChartSource,
+        points: Option<Vec<Point>>,
+        scalar_value: Option<f64>,
+        source_len: usize,
+        load_state: MultiChartLoadState,
+        sampled: bool,
+    ) -> Result<(), String> {
+        let index = self
+            .items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| format!("Chart item ${} no longer exists", item_id.0))?;
+        let loaded_len = points.as_ref().map_or(0, Vec::len);
+        let series = ChartSeries::from_points(points.unwrap_or_else(|| vec![(0.0, 0.0)]))
+            .ok_or_else(|| format!("Failed to update chart item ${}", item_id.0))?;
+        let item = &mut self.items[index];
+        item.label = source.label();
+        item.source = source;
+        item.series = series;
+        item.scalar_value = scalar_value;
+        item.clear_detail_state(true);
+        item.detail_generation = 0;
+        item.source_len = if source_len == 0 {
+            loaded_len.max(item.series.len())
+        } else {
+            source_len
+        };
+        item.sampled = sampled || item.source_len > loaded_len.max(1);
+        item.load_state = load_state;
+        item.visible = true;
+        self.idx = index;
+        self.bump_expression_revision();
+        self.modified = true;
+        Ok(())
+    }
+
     pub fn queue_load(&mut self, request: MultiChartLoadRequest, status: MultiChartLoadState) {
         let item_id = request.item_id;
         let kind = request.kind;
@@ -804,6 +843,62 @@ impl MultiChartState {
         self.bump_expression_revision();
         self.modified = true;
         Ok(())
+    }
+
+    pub(crate) fn dataset_reference_item(
+        &self,
+        dataset_spec: &str,
+        file: Option<&File>,
+    ) -> Result<CapturedMultiChartItem, String> {
+        let normalized = dataset_spec.trim();
+        if normalized.is_empty() {
+            return Err("Dataset reference cannot be empty".to_string());
+        }
+        let prefixed = if normalized.starts_with("load(") {
+            normalized.to_string()
+        } else if let Some((path, selectors)) = normalized.split_once('[') {
+            format!("load({path})[{selectors}")
+        } else {
+            format!("load({normalized})")
+        };
+        let Some(series_ref) = Self::raw_dataset_reference(&prefixed)? else {
+            return Err(format!(
+                "Dataset reference '{}' must look like load(/path) or load(/path)[..,0]",
+                dataset_spec
+            ));
+        };
+        let file = file.ok_or_else(|| {
+            "Adding a dataset by path requires an open file handle, but no file is loaded"
+                .to_string()
+        })?;
+        let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target;
+        let dataset = file.dataset(path).map_err(|error| {
+            format!(
+                "Dataset reference {} could not be opened: {}",
+                series_ref.render(),
+                error
+            )
+        })?;
+        let shape = dataset.shape();
+        let selection = series_ref.to_series_preview_selection(&shape)?;
+        let source = ChartSource::DatasetSelection(DatasetChartSource {
+            dataset_path: dataset.name(),
+            display_path: dataset.name(),
+            selection: selection.clone(),
+            shape,
+            kind: DatasetChartKind::Dataset,
+        });
+        Ok(CapturedMultiChartItem {
+            source,
+            initial_points: None,
+            source_len: 0,
+            load_state: MultiChartLoadState::Queued,
+            request: Some(MultiChartLoadRequest {
+                item_id: ChartItemId(0),
+                kind: MultiChartLoadKind::Overview { generation: 0 },
+                source: MultiChartLoadSource::Dataset { dataset, selection },
+            }),
+        })
     }
 
     pub fn apply_load_failure(
@@ -1025,55 +1120,7 @@ impl MultiChartState {
         dataset_spec: &str,
         file: Option<&File>,
     ) -> Result<ChartItemId, String> {
-        let normalized = dataset_spec.trim();
-        if normalized.is_empty() {
-            return Err("Dataset reference cannot be empty".to_string());
-        }
-        let prefixed = if normalized.starts_with("load(") {
-            normalized.to_string()
-        } else if let Some((path, selectors)) = normalized.split_once('[') {
-            format!("load({path})[{selectors}")
-        } else {
-            format!("load({normalized})")
-        };
-        let Some(series_ref) = Self::raw_dataset_reference(&prefixed)? else {
-            return Err(format!(
-                "Dataset reference '{}' must look like load(/path) or load(/path)[..,0]",
-                dataset_spec
-            ));
-        };
-        let file = file.ok_or_else(|| {
-            "Adding a dataset by path requires an open file handle, but no file is loaded"
-                .to_string()
-        })?;
-        let ExpressionObjectTarget::AbsolutePath(path) = &series_ref.target;
-        let dataset = file.dataset(path).map_err(|error| {
-            format!(
-                "Dataset reference {} could not be opened: {}",
-                series_ref.render(),
-                error
-            )
-        })?;
-        let shape = dataset.shape();
-        let selection = series_ref.to_series_preview_selection(&shape)?;
-        let source = ChartSource::DatasetSelection(DatasetChartSource {
-            dataset_path: dataset.name(),
-            display_path: dataset.name(),
-            selection: selection.clone(),
-            shape,
-            kind: DatasetChartKind::Dataset,
-        });
-        self.queue_loaded_item(CapturedMultiChartItem {
-            source,
-            initial_points: None,
-            source_len: 0,
-            load_state: MultiChartLoadState::Queued,
-            request: Some(MultiChartLoadRequest {
-                item_id: ChartItemId(0),
-                kind: MultiChartLoadKind::Overview { generation: 0 },
-                source: MultiChartLoadSource::Dataset { dataset, selection },
-            }),
-        })
+        self.queue_loaded_item(self.dataset_reference_item(dataset_spec, file)?)
     }
 }
 

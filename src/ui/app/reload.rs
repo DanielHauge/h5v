@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::AppError,
-    h5f::{self, HasPath, Node, NodeType},
+    h5f::{self, HasPath, Node},
     ui::state::{self, AppState, AttributeCursor, ContentShowMode, Focus, MatrixViewState},
 };
 
@@ -217,9 +217,7 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
 
 fn placeholder_root(path: &str) -> Rc<RefCell<h5f::H5FNode>> {
     Rc::new(RefCell::new(h5f::H5FNode::new(Node::Broken(
-        NodeType::Group,
         path.to_string(),
-        String::new(),
     ))))
 }
 

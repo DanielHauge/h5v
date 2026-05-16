@@ -57,7 +57,7 @@ impl HasName for Node {
             }
             Node::Group(_, meta) => meta.display_name.clone(),
             Node::Dataset(_, meta) => meta.display_name.clone(),
-            Node::Broken(_, name, _) => name.clone(),
+            Node::Broken(name) => name.clone(),
         }
     }
 }
@@ -71,7 +71,7 @@ impl HasPath for Node {
                 .virtual_path()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| dataset.name()),
-            Node::Broken(_, n, _) => n.clone(),
+            Node::Broken(n) => n.clone(),
         }
         .to_string()
     }
@@ -93,7 +93,7 @@ impl HasAttributes for Node {
             Node::File(file) => Ok(file.attr_names()?),
             Node::Group(group, _) => Ok(group.attr_names()?),
             Node::Dataset(dataset, _) => Ok(dataset.attr_names()?),
-            Node::Broken(_, _, _) => Ok(vec![]),
+            Node::Broken(_) => Ok(vec![]),
         }
     }
 
@@ -102,7 +102,7 @@ impl HasAttributes for Node {
             Node::File(file) => file.attr(name),
             Node::Group(group, _) => group.attr(name),
             Node::Dataset(dataset, _) => dataset.attr(name),
-            Node::Broken(_, _, _) => Err(hdf5_metno::Error::Internal(String::from(
+            Node::Broken(_) => Err(hdf5_metno::Error::Internal(String::from(
                 "Cannot read from broken link",
             ))),
         }
@@ -147,7 +147,7 @@ impl HasAttributes for Node {
             Node::File(file) => file.as_group()?,
             Node::Group(group, _) => group.as_group()?,
             Node::Dataset(dataset, _) => dataset.as_group()?,
-            Node::Broken(_, _, _) => {
+            Node::Broken(_) => {
                 return Err(hdf5_metno::Error::Internal(String::from(
                     "Cannot update attribute on broken link",
                 ))
@@ -179,7 +179,7 @@ fn node_attribute_group(node: &Node) -> Result<Group, AppError> {
         Node::File(file) => file.as_group().map_err(AppError::from),
         Node::Group(group, _) => group.as_group().map_err(AppError::from),
         Node::Dataset(dataset, _) => dataset.as_group().map_err(AppError::from),
-        Node::Broken(_, _, _) => Err(hdf5_metno::Error::Internal(String::from(
+        Node::Broken(_) => Err(hdf5_metno::Error::Internal(String::from(
             "Cannot update attribute on broken link",
         ))
         .into()),

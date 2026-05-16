@@ -20,18 +20,12 @@ use super::{
 };
 
 #[derive(Debug, Clone)]
-pub enum NodeType {
-    Dataset,
-    Group,
-}
-
-#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Node {
     File(File),
     Group(Group, GroupMeta),
     Dataset(Dataset, DatasetMeta),
-    Broken(NodeType, String, String),
+    Broken(String),
 }
 
 impl Node {
@@ -146,7 +140,7 @@ impl H5FNode {
     }
 
     pub fn icon(&self) -> String {
-        if let Node::Broken(_, _, _) = &self.node {
+        if let Node::Broken(_) = &self.node {
             return configure::configured_symbol(|symbols| symbols.tree.broken_node_icon)
                 .to_string();
         }
@@ -190,7 +184,7 @@ impl H5FNode {
             Node::File(_) => {
                 result.push(ContentShowMode::Preview);
             }
-            Node::Broken(_, _, _) => {}
+            Node::Broken(_) => {}
             Node::Group(_, _) => {
                 result.push(ContentShowMode::Preview);
             }

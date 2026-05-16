@@ -19,7 +19,7 @@ use super::{
     attrs::HasName,
     compound::root_compound_projection,
     meta::{CompoundFieldProjection, DatasetMeta, EnumRenderOverrides, GroupMeta},
-    model::{H5FNode, Node, NodeType, H5F},
+    model::{H5FNode, Node, H5F},
 };
 
 pub trait HasChildren {
@@ -271,7 +271,7 @@ impl H5FNode {
                 .next_back()
                 .unwrap_or("")
                 .to_string(),
-            Node::Broken(_, path, _) => path.clone(),
+            Node::Broken(path) => path.clone(),
         }
     }
 
@@ -355,7 +355,7 @@ impl H5FNode {
         if self.read {
             return Ok(());
         }
-        if matches!(self.node, Node::Broken(_, _, _)) {
+        if matches!(self.node, Node::Broken(_)) {
             return Ok(());
         }
 
@@ -371,7 +371,7 @@ impl H5FNode {
         let has_children = match &self.node {
             Node::File(file) => file,
             Node::Group(group, _) => group,
-            Node::Broken(_, _, _) => unreachable!("It should be guarded by the previous match"),
+            Node::Broken(_) => unreachable!("It should be guarded by the previous match"),
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous match"),
         };
 
@@ -402,20 +402,11 @@ impl H5FNode {
 
         let mut children = Vec::new();
         for wrapped_g in groups {
-            let (g_maybe, is_link, broken) = match wrapped_g {
-                GrpType::Hard(g) => (Some(g), false, None),
-                GrpType::External(g) => (Some(g), true, None),
-                GrpType::Soft(g) => (Some(g), true, None),
+            let (g_maybe, is_link) = match wrapped_g {
+                GrpType::Hard(g) => (Some(g), false),
+                GrpType::External(g) => (Some(g), true),
+                GrpType::Soft(g) => (Some(g), true),
             };
-            if let Some((broken_name, broken_file)) = broken {
-                let node = Rc::new(RefCell::new(H5FNode::new(Node::Broken(
-                    NodeType::Group,
-                    broken_name,
-                    broken_file,
-                ))));
-                children.push(node);
-                continue;
-            }
             let Some(g) = g_maybe else {
                 continue;
             };
@@ -454,12 +445,7 @@ fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Er
         DSType::Linked(LinkedDataset { dataset, link_name }) => {
             (Some(dataset), true, Some(link_name), None)
         }
-        DSType::BrokenLink(name, fname) => (
-            None,
-            true,
-            None,
-            Some(Node::Broken(NodeType::Dataset, name, fname)),
-        ),
+        DSType::BrokenLink(name, _fname) => (None, true, None, Some(Node::Broken(name))),
     };
 
     if let Some(broken_node) = broken_node {
