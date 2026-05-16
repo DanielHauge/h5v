@@ -1,6 +1,6 @@
 <div class="oranda-hide">
 <p align="center" class="hide-">
-  <img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/banner.png" alt="h5v banner showing HDF5 terminal viewing" />
+  <img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/banner.png" alt="h5v banner with logo and title" />
 </p>
 </div>
 

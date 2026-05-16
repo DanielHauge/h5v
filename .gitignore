@@ -30,6 +30,8 @@ test.*
 !assets/**
 !docs/src/assets/
 !docs/src/assets/**
+!docs/theme/
+!docs/theme/**
 !examples/
 !examples/**
 
