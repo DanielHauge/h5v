@@ -15,6 +15,8 @@ use crate::{
     ui::mchart::ChartItem,
 };
 
+pub const PREVIEW_CHART_VISIBLE_POINT_LIMIT: usize = 50;
+
 pub struct ChartPreviewLoadRequest {
     pub key: ChartPreviewKey,
     pub source: ChartPreviewSource,
@@ -52,13 +54,17 @@ pub struct ChartPreviwState {
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
     pub rendered_viewport: Option<PreviewChartViewport>,
+    pub rendered_roi: Option<PreviewChartRoi>,
     pub pending_key: Option<ChartPreviewKey>,
     pub tx_resize_chartpreview: Sender<ResizeRequest>,
     pub tx_load_chartpreview: Sender<ChartPreviewLoadRequest>,
     pub cached_previews: VecDeque<CachedChartPreview>,
     pub viewport: Option<PreviewChartViewport>,
     pub data_bounds: Option<PreviewChartViewport>,
+    pub current_data: Option<DatasetPlotingData>,
+    pub roi: Option<PreviewChartRoi>,
     pub last_chart_area: Option<Rect>,
+    pub last_plot_area: Option<Rect>,
     pub drag_state: Option<PreviewChartDragState>,
 }
 
@@ -93,6 +99,14 @@ pub struct PreviewChartDragState {
     pub anchor_column: u16,
     pub anchor_row: u16,
     pub viewport: PreviewChartViewport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviewChartRoi {
+    pub start: usize,
+    pub end: usize,
+    pub precise: bool,
+    pub selection_count: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +201,7 @@ pub struct ChartPreviewKey {
     pub ds_path: String,
     pub selection: PreviewSelection,
     pub viewport: Option<PreviewChartViewport>,
+    pub roi: Option<PreviewChartRoi>,
 }
 
 pub struct RawImageLoadRequest {
@@ -238,6 +253,7 @@ pub struct CachedChartPreview {
     pub key: ChartPreviewKey,
     pub clipboard_image: ClipboardImageData,
     pub data_bounds: PreviewChartViewport,
+    pub data_preview: DatasetPlotingData,
 }
 
 impl ImgState {
@@ -293,13 +309,14 @@ impl ChartPreviwState {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
             viewport: self.rendered_viewport,
+            roi: self.rendered_roi,
         })
     }
 
     pub fn touch_cached_preview(
         &mut self,
         key: &ChartPreviewKey,
-    ) -> Option<(ClipboardImageData, PreviewChartViewport)> {
+    ) -> Option<(ClipboardImageData, PreviewChartViewport, DatasetPlotingData)> {
         let index = self
             .cached_previews
             .iter()
@@ -307,8 +324,9 @@ impl ChartPreviwState {
         let entry = self.cached_previews.remove(index)?;
         let clipboard_image = entry.clipboard_image.clone();
         let data_bounds = entry.data_bounds;
+        let data_preview = entry.data_preview.clone();
         self.cached_previews.push_back(entry);
-        Some((clipboard_image, data_bounds))
+        Some((clipboard_image, data_bounds, data_preview))
     }
 
     pub fn cache_preview(
@@ -316,6 +334,7 @@ impl ChartPreviwState {
         key: ChartPreviewKey,
         clipboard_image: ClipboardImageData,
         data_bounds: PreviewChartViewport,
+        data_preview: DatasetPlotingData,
         capacity: usize,
     ) {
         self.cached_previews.retain(|entry| entry.key != key);
@@ -323,6 +342,7 @@ impl ChartPreviwState {
             key,
             clipboard_image,
             data_bounds,
+            data_preview,
         });
         while self.cached_previews.len() > capacity {
             self.cached_previews.pop_front();
@@ -333,16 +353,21 @@ impl ChartPreviwState {
         self.ds_loaded = Some(key.ds_path.clone());
         self.ds_selection = Some(key.selection.clone());
         self.rendered_viewport = key.viewport;
+        self.rendered_roi = key.roi;
         self.protocol = None;
         self.clipboard_image = None;
         self.error = None;
+        self.current_data = None;
         self.pending_key = Some(key);
     }
 
     pub fn reset_viewport(&mut self) {
         self.viewport = None;
         self.data_bounds = None;
+        self.current_data = None;
+        self.roi = None;
         self.last_chart_area = None;
+        self.last_plot_area = None;
         self.drag_state = None;
     }
 
@@ -358,6 +383,8 @@ impl ChartPreviwState {
         self.data_bounds = bounds;
         let Some(full_bounds) = self.data_bounds else {
             self.viewport = None;
+            self.current_data = None;
+            self.roi = None;
             self.drag_state = None;
             return;
         };
@@ -368,6 +395,34 @@ impl ChartPreviwState {
             }
             None => None,
         };
+    }
+
+    pub fn set_current_data(&mut self, data: Option<DatasetPlotingData>) {
+        self.current_data = data;
+        if let Some(roi) = self.roi {
+            let len = self
+                .current_data
+                .as_ref()
+                .map(|data| data.data.len())
+                .unwrap_or(0);
+            if roi.start >= len || roi.end >= len {
+                self.roi = None;
+            }
+        }
+    }
+
+    pub fn clear_roi(&mut self) -> bool {
+        let had_roi = self.roi.is_some();
+        self.roi = None;
+        had_roi
+    }
+
+    pub fn clear_roi_or_zoom(&mut self) -> bool {
+        if self.clear_roi() {
+            true
+        } else {
+            self.clear_zoom()
+        }
     }
 
     pub fn effective_viewport(&self) -> Option<PreviewChartViewport> {
@@ -383,6 +438,10 @@ impl ChartPreviwState {
         if area.is_none() {
             self.drag_state = None;
         }
+    }
+
+    pub fn set_plot_area(&mut self, area: Option<Rect>) {
+        self.last_plot_area = area;
     }
 
     fn clamp_viewport(
@@ -473,12 +532,16 @@ impl ChartPreviwState {
             ),
             PreviewChartZoomMode::XOnly => (current.y_min, current.y_max),
         };
-        self.set_explicit_viewport(Some(PreviewChartViewport {
+        let changed = self.set_explicit_viewport(Some(PreviewChartViewport {
             x_min,
             x_max,
             y_min,
             y_max,
-        }))
+        }));
+        if changed {
+            self.roi = None;
+        }
+        changed
     }
 
     pub fn zoom_in_at_position(
@@ -514,7 +577,7 @@ impl ChartPreviwState {
         percent: f64,
         mode: PreviewChartZoomMode,
     ) -> bool {
-        let Some(chart_area) = self.last_chart_area else {
+        let Some(chart_area) = self.last_plot_area else {
             return false;
         };
         if !point_in_rect(chart_area, column, row) {
@@ -588,6 +651,131 @@ impl ChartPreviwState {
     pub fn end_drag(&mut self) {
         self.drag_state = None;
     }
+
+    fn selection_x_min(&self) -> f64 {
+        match self.ds_selection.as_ref().map(|selection| &selection.slice) {
+            Some(crate::data::SliceSelection::FromTo(start, _)) => *start as f64,
+            _ => 0.0,
+        }
+    }
+
+    fn visible_index_window(&self) -> Option<(usize, usize)> {
+        let data = self.current_data.as_ref()?;
+        let viewport = self.effective_viewport()?;
+        let x_min = self.selection_x_min();
+        let start = (viewport.x_min - x_min).floor().max(0.0) as usize;
+        let end = (viewport.x_max - x_min)
+            .ceil()
+            .max(viewport.x_min - x_min)
+            .min(data.data.len().saturating_sub(1) as f64) as usize;
+        Some((start.min(end), end.max(start.min(end))))
+    }
+
+    fn precise_point_mode(&self) -> bool {
+        let Some((start, end)) = self.visible_index_window() else {
+            return false;
+        };
+        let Some(chart_area) = self.last_chart_area else {
+            return false;
+        };
+        let visible = end.saturating_sub(start).saturating_add(1);
+        visible <= PREVIEW_CHART_VISIBLE_POINT_LIMIT
+            && chart_area.width as usize >= visible.saturating_mul(2)
+    }
+
+    fn roi_at_position(&self, column: u16, row: u16) -> Option<PreviewChartRoi> {
+        let chart_area = self.last_plot_area?;
+        if !point_in_rect(chart_area, column, row) || chart_area.width == 0 {
+            return None;
+        }
+        let (visible_start, visible_end) = self.visible_index_window()?;
+        let visible_len = visible_end.saturating_sub(visible_start).saturating_add(1);
+        if visible_len == 0 {
+            return None;
+        }
+        let relative_col = column.saturating_sub(chart_area.x) as usize;
+        if self.precise_point_mode() {
+            let idx = visible_start
+                + ((relative_col as f64 / chart_area.width.saturating_sub(1).max(1) as f64)
+                    * visible_len.saturating_sub(1) as f64)
+                    .round() as usize;
+            let idx = idx.clamp(visible_start, visible_end);
+            return Some(PreviewChartRoi {
+                start: idx,
+                end: idx,
+                precise: true,
+                selection_count: 1,
+            });
+        }
+        let width = chart_area.width.max(1) as usize;
+        let start = visible_start + (relative_col * visible_len) / width;
+        let end = visible_start
+            + (((relative_col + 1) * visible_len).div_ceil(width))
+                .saturating_sub(1)
+                .min(visible_len.saturating_sub(1));
+        Some(PreviewChartRoi {
+            start: start.min(visible_end),
+            end: end.min(visible_end).max(start.min(visible_end)),
+            precise: false,
+            selection_count: 1,
+        })
+    }
+
+    pub fn cycle_roi_at_position(&mut self, column: u16, row: u16) -> bool {
+        let Some(hit) = self.roi_at_position(column, row) else {
+            return false;
+        };
+        self.roi = match self.roi {
+            None => Some(hit),
+            Some(existing) if existing.selection_count < 2 => Some(PreviewChartRoi {
+                start: existing.start.min(hit.start),
+                end: existing.end.max(hit.end),
+                precise: existing.precise && hit.precise,
+                selection_count: 2,
+            }),
+            Some(_) => None,
+        };
+        true
+    }
+
+    pub fn zoom_to_roi(&mut self) -> bool {
+        let Some(roi) = self.roi else {
+            return false;
+        };
+        let Some(data) = self.current_data.as_ref() else {
+            return false;
+        };
+        let x_min = self.selection_x_min();
+        let start = roi.start.min(data.data.len().saturating_sub(1));
+        let end = roi.end.min(data.data.len().saturating_sub(1)).max(start);
+        let slice = &data.data[start..=end];
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+        for &(_, y) in slice {
+            if y.is_finite() {
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+            }
+        }
+        let x_start = x_min + start as f64;
+        let x_end = x_min + end as f64 + if roi.precise { 0.0 } else { 1.0 };
+        let Some((x_min, x_max)) = normalized_axis_bounds(x_start, x_end) else {
+            return false;
+        };
+        let Some((y_min, y_max)) = normalized_axis_bounds(y_min, y_max) else {
+            return false;
+        };
+        let changed = self.set_explicit_viewport(Some(PreviewChartViewport {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        }));
+        if changed {
+            self.roi = None;
+        }
+        changed
+    }
 }
 
 fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
@@ -602,6 +790,21 @@ fn viewport_eq(left: PreviewChartViewport, right: PreviewChartViewport) -> bool 
         && (left.x_max - right.x_max).abs() < 1e-9
         && (left.y_min - right.y_min).abs() < 1e-9
         && (left.y_max - right.y_max).abs() < 1e-9
+}
+
+fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
+    if !min.is_finite() || !max.is_finite() || max < min {
+        return None;
+    }
+    if (max - min).abs() < f64::EPSILON {
+        let pad = if min == 0.0 {
+            1.0
+        } else {
+            min.abs().max(1.0) * 0.05
+        };
+        return Some((min - pad, max + pad));
+    }
+    Some((min, max))
 }
 
 fn minimum_zoom_span(bounds_min: f64, bounds_max: f64) -> f64 {
@@ -703,6 +906,7 @@ mod tests {
                 slice: crate::data::SliceSelection::All,
             },
             viewport: None,
+            roi: None,
         }
     }
 
@@ -723,6 +927,15 @@ mod tests {
         }
     }
 
+    fn data_preview() -> DatasetPlotingData {
+        DatasetPlotingData {
+            data: vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+            length: 3,
+            min: 1.0,
+            max: 3.0,
+        }
+    }
+
     #[test]
     fn chart_preview_cache_touches_existing_entries() {
         let (tx_resize_chartpreview, _) = channel();
@@ -734,24 +947,41 @@ mod tests {
             error: None,
             ds_selection: None,
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
             viewport: None,
             data_bounds: None,
+            current_data: None,
+            roi: None,
             last_chart_area: None,
+            last_plot_area: None,
             drag_state: None,
         };
         let first = preview_key("first");
         let second = preview_key("second");
-        state.cache_preview(first.clone(), clipboard_image(1), bounds(), 2);
-        state.cache_preview(second.clone(), clipboard_image(2), bounds(), 2);
+        state.cache_preview(
+            first.clone(),
+            clipboard_image(1),
+            bounds(),
+            data_preview(),
+            2,
+        );
+        state.cache_preview(
+            second.clone(),
+            clipboard_image(2),
+            bounds(),
+            data_preview(),
+            2,
+        );
 
-        let (touched, cached_bounds) = state.touch_cached_preview(&first).unwrap();
+        let (touched, cached_bounds, cached_data) = state.touch_cached_preview(&first).unwrap();
 
         assert_eq!(touched.bytes, clipboard_image(1).bytes);
         assert_eq!(cached_bounds, bounds());
+        assert_eq!(cached_data.length, 3);
         assert_eq!(state.cached_previews.back().unwrap().key, first);
         assert_eq!(state.cached_previews.front().unwrap().key, second);
     }
@@ -767,19 +997,41 @@ mod tests {
             error: None,
             ds_selection: None,
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
             viewport: None,
             data_bounds: None,
+            current_data: None,
+            roi: None,
             last_chart_area: None,
+            last_plot_area: None,
             drag_state: None,
         };
 
-        state.cache_preview(preview_key("first"), clipboard_image(1), bounds(), 2);
-        state.cache_preview(preview_key("second"), clipboard_image(2), bounds(), 2);
-        state.cache_preview(preview_key("third"), clipboard_image(3), bounds(), 2);
+        state.cache_preview(
+            preview_key("first"),
+            clipboard_image(1),
+            bounds(),
+            data_preview(),
+            2,
+        );
+        state.cache_preview(
+            preview_key("second"),
+            clipboard_image(2),
+            bounds(),
+            data_preview(),
+            2,
+        );
+        state.cache_preview(
+            preview_key("third"),
+            clipboard_image(3),
+            bounds(),
+            data_preview(),
+            2,
+        );
 
         assert!(state
             .cached_previews
@@ -806,13 +1058,17 @@ mod tests {
             error: Some("old".to_string()),
             ds_selection: None,
             rendered_viewport: Some(bounds()),
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
             viewport: None,
             data_bounds: None,
+            current_data: Some(data_preview()),
+            roi: None,
             last_chart_area: None,
+            last_plot_area: None,
             drag_state: None,
         };
 
@@ -848,13 +1104,17 @@ mod tests {
             error: None,
             ds_selection: None,
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
             viewport: None,
             data_bounds: None,
+            current_data: None,
+            roi: None,
             last_chart_area: None,
+            last_plot_area: None,
             drag_state: None,
         };
 
@@ -875,13 +1135,17 @@ mod tests {
             error: None,
             ds_selection: Some(key.selection.clone()),
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
             cached_previews: Default::default(),
             viewport: Some(bounds()),
             data_bounds: Some(bounds()),
+            current_data: Some(data_preview()),
+            roi: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            last_plot_area: Some(Rect::new(0, 0, 10, 10)),
             drag_state: None,
         };
         let changed_selection = PreviewSelection {
@@ -908,6 +1172,7 @@ mod tests {
             error: None,
             ds_selection: None,
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
@@ -919,13 +1184,55 @@ mod tests {
                 y_min: 0.0,
                 y_max: 10.0,
             }),
+            current_data: None,
+            roi: None,
             last_chart_area: None,
+            last_plot_area: None,
             drag_state: None,
         };
 
         assert!(state.zoom_with_anchor(10.0, 0.5, 0.5, true, PreviewChartZoomMode::Uniform));
         assert!(state.viewport.is_some());
         assert_ne!(state.viewport, state.data_bounds);
+    }
+
+    #[test]
+    fn chart_preview_zoom_with_anchor_clears_roi() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 10.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            current_data: Some(data_preview()),
+            roi: Some(PreviewChartRoi {
+                start: 0,
+                end: 1,
+                precise: true,
+                selection_count: 1,
+            }),
+            last_chart_area: None,
+            last_plot_area: None,
+            drag_state: None,
+        };
+
+        assert!(state.zoom_with_anchor(10.0, 0.5, 0.5, true, PreviewChartZoomMode::Uniform));
+        assert!(state.roi.is_none());
     }
 
     #[test]
@@ -945,6 +1252,7 @@ mod tests {
             error: None,
             ds_selection: None,
             rendered_viewport: None,
+            rendered_roi: None,
             pending_key: None,
             tx_resize_chartpreview,
             tx_load_chartpreview,
@@ -956,13 +1264,147 @@ mod tests {
                 y_min: 0.0,
                 y_max: 10.0,
             }),
+            current_data: None,
+            roi: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            last_plot_area: None,
             drag_state: None,
         };
 
         assert!(state.start_drag_at_position(5, 5));
         assert!(state.drag_to_position(6, 5));
         assert_ne!(state.viewport, Some(initial_viewport));
+    }
+
+    #[test]
+    fn chart_preview_roi_coarse_clicks_cycle_from_first_to_second_to_clear() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("roi").selection),
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 100.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 100.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            current_data: Some(DatasetPlotingData {
+                data: (0..100).map(|i| (i as f64, i as f64)).collect(),
+                length: 100,
+                min: 0.0,
+                max: 99.0,
+            }),
+            roi: None,
+            last_chart_area: Some(Rect::new(5, 3, 10, 10)),
+            last_plot_area: Some(Rect::new(5, 3, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(state.cycle_roi_at_position(6, 4));
+        let first = state.roi.expect("first roi");
+        assert_eq!(first.selection_count, 1);
+        assert!(first.end >= first.start);
+
+        assert!(state.cycle_roi_at_position(13, 4));
+        let second = state.roi.expect("second roi");
+        assert_eq!(second.selection_count, 2);
+        assert!(second.end > first.end);
+
+        assert!(state.cycle_roi_at_position(10, 4));
+        assert!(state.roi.is_none());
+    }
+
+    #[test]
+    fn chart_preview_zoom_to_roi_allows_single_selection() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("roi").selection),
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 10.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            current_data: Some(data_preview()),
+            roi: Some(PreviewChartRoi {
+                start: 0,
+                end: 2,
+                precise: false,
+                selection_count: 1,
+            }),
+            last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            last_plot_area: Some(Rect::new(0, 0, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(state.zoom_to_roi());
+        assert!(state.viewport.is_some());
+        assert!(state.roi.is_none());
+    }
+
+    #[test]
+    fn chart_preview_clear_roi_or_zoom_prefers_roi() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(bounds()),
+            data_bounds: Some(bounds()),
+            current_data: Some(data_preview()),
+            roi: Some(PreviewChartRoi {
+                start: 0,
+                end: 1,
+                precise: false,
+                selection_count: 2,
+            }),
+            last_chart_area: None,
+            last_plot_area: None,
+            drag_state: None,
+        };
+
+        assert!(state.clear_roi_or_zoom());
+        assert!(state.roi.is_none());
+        assert!(state.viewport.is_some());
+        assert!(state.clear_roi_or_zoom());
+        assert!(state.viewport.is_none());
     }
 
     #[test]

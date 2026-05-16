@@ -22,6 +22,8 @@ pub fn render_dim_selector(
     shape: &[usize],
     row_columns: bool,
     page_info: Option<&PageDisplayInfo<'_>>,
+    panel_title: &str,
+    detail_lines: Option<&[Line<'static>]>,
 ) -> Result<(), Error> {
     node.sync_selection_rank(shape.len());
     let x_selection = node.selected_x;
@@ -30,7 +32,7 @@ pub fn render_dim_selector(
     let selected_dim = node.selected_dim;
     let index_selection = &node.selected_indexes;
     let block = Block::default()
-        .title("Slice selection")
+        .title(panel_title)
         .title_style(
             Style::default()
                 .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -48,11 +50,18 @@ pub fn render_dim_selector(
         horizontal: 1,
     });
 
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(inner_area);
+    let top_area = vertical[0];
+    let detail_area = vertical[1];
+
     let (labels_area, dims_area) = {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(8), Constraint::Min(0)])
-            .split(inner_area);
+            .split(top_area);
         (chunks[0], chunks[1])
     };
     // Print Shape: and View: on each line
@@ -183,6 +192,10 @@ pub fn render_dim_selector(
 
     if let (Some(info), Some(page_area)) = (page_info, page_area) {
         render_inline_page_info(f, &page_area, info);
+    }
+
+    if let Some(detail_lines) = detail_lines.filter(|lines| !lines.is_empty()) {
+        f.render_widget(Paragraph::new(detail_lines.to_vec()), detail_area);
     }
 
     Ok(())

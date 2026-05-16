@@ -12,6 +12,7 @@ use ratatui::{
 use crate::{
     compat::RuntimeConfig,
     configure,
+    data::DatasetPlotingData,
     error::{log_error, AppError},
     ui::{heatmap::HEATMAP_CACHE_CAPACITY, input::EventResult, state::AppToast},
     GIT_VERSION,
@@ -483,11 +484,13 @@ fn main_recover_loop(
                     protocol,
                     clipboard_image,
                     data_bounds,
+                    data_preview,
                 } => {
                     state.chart_preview_state.cache_preview(
                         key.clone(),
                         clipboard_image.clone(),
                         data_bounds,
+                        data_preview.clone(),
                         CHART_PREVIEW_CACHE_CAPACITY,
                     );
                     if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
@@ -500,6 +503,10 @@ fn main_recover_loop(
                     state.chart_preview_state.clipboard_image = Some(clipboard_image);
                     state.chart_preview_state.error = None;
                     state.chart_preview_state.rendered_viewport = key.viewport;
+                    state.chart_preview_state.rendered_roi = key.roi;
+                    state
+                        .chart_preview_state
+                        .set_current_data(Some(data_preview));
                     state
                         .chart_preview_state
                         .sync_data_bounds(Some(data_bounds));
@@ -760,6 +767,7 @@ pub enum ChartPreviewLoadedResult {
         protocol: ratatui_image::thread::ThreadProtocol,
         clipboard_image: state::ClipboardImageData,
         data_bounds: state::PreviewChartViewport,
+        data_preview: DatasetPlotingData,
     },
     Failure {
         key: ChartPreviewKey,

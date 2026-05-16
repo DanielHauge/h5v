@@ -119,13 +119,17 @@ pub(super) fn prepare_app<'a>(
         error: None,
         ds_selection: None,
         rendered_viewport: None,
+        rendered_roi: None,
         pending_key: None,
         tx_resize_chartpreview: tx_chart_preview_resize,
         tx_load_chartpreview,
         cached_previews: Default::default(),
         viewport: None,
         data_bounds: None,
+        current_data: None,
+        roi: None,
         last_chart_area: None,
+        last_plot_area: None,
         drag_state: None,
     };
     let preview_expression_state = PreviewExpressionState {

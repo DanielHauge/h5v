@@ -179,6 +179,8 @@ fn render_heatmap_with_dataset(
         &attr.shape,
         true,
         header_page_info.as_ref(),
+        "Slice selection",
+        None,
     )?;
     if let Some(settings_area) = layout.settings {
         panels::render_heatmap_settings(f, &settings_area, state);

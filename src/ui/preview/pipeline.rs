@@ -6,6 +6,7 @@ use std::{
 use image::DynamicImage;
 use ratatui_image::thread::ThreadProtocol;
 
+use crate::data::DatasetPlotingData;
 use crate::ui::{
     app::{AppEvent, ChartPreviewLoadedResult, ImageLoadedResult},
     mchart::background::evaluate_preview_expression,
@@ -78,6 +79,7 @@ pub(super) fn send_chart_success(
     protocol: ThreadProtocol,
     clipboard_image: ClipboardImageData,
     data_bounds: PreviewChartViewport,
+    data_preview: DatasetPlotingData,
 ) {
     send_event(
         tx_events,
@@ -86,6 +88,7 @@ pub(super) fn send_chart_success(
             protocol,
             clipboard_image,
             data_bounds,
+            data_preview,
         }),
     );
 }

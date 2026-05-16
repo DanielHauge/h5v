@@ -156,8 +156,9 @@ pub(crate) fn handle_chartpreview_load(
                 width,
                 height,
                 x_min,
-                data_preview,
+                data_preview.clone(),
                 req.key.viewport,
+                req.key.roi,
             ) {
                 send_chart_failure(
                     &tx_events,
@@ -188,6 +189,7 @@ pub(crate) fn handle_chartpreview_load(
                 thread_protocol,
                 clipboard_image,
                 data_bounds,
+                data_preview,
             );
         }
     });

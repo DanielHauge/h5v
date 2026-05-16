@@ -51,7 +51,7 @@ use prompt::{
     ExpressionPromptSuggestionKind, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 #[allow(unused_imports)]
-use render::chart_plot_area_in_rect;
+pub(crate) use render::chart_plot_area_in_rect;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ChartViewport {

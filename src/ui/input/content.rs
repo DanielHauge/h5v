@@ -8,7 +8,7 @@ use arboard::SetExtLinux;
 use hdf5_metno::types::{EnumType, TypeDescriptor};
 use hdf5_metno::{Dataset, Hyperslab, Selection, SliceOrIndex};
 use image::{DynamicImage, ImageBuffer, Rgb};
-use ratatui::crossterm::event::{Event, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
     data::{PreviewSelection, Previewable, SliceSelection},
@@ -377,6 +377,7 @@ fn copy_chart_preview(
             ds_path: ds_path.to_string(),
             selection: selection.clone(),
             viewport: state.chart_preview_state.rendered_viewport,
+            roi: state.chart_preview_state.rendered_roi,
         })
     {
         if let Some(image) = &state.chart_preview_state.clipboard_image {
@@ -412,6 +413,7 @@ fn copy_chart_preview(
         x_min,
         data_preview,
         state.chart_preview_state.effective_viewport(),
+        state.chart_preview_state.roi,
     )?;
     let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer).ok_or_else(|| {
         AppError::DrawingError("Failed to build chart preview image for clipboard".to_string())
@@ -713,6 +715,11 @@ pub fn handle_normal_content_event(
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => {
                 let content_mode = state.active_content_mode();
+                if matches!(content_mode, ContentShowMode::Preview)
+                    && key_event.code == KeyCode::Esc
+                {
+                    return Ok(redraw_if(state.chart_preview_state.clear_roi_or_zoom()));
+                }
                 let action = if matches!(content_mode, ContentShowMode::Heatmap) {
                     heatmap_action(&key_event, keymaps)
                         .or_else(|| content_action(&key_event, keymaps))

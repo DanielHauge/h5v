@@ -232,6 +232,13 @@ fn handle_left_click(
     row: u16,
     toggle_if_selected: bool,
 ) -> Result<EventResult, AppError> {
+    if state.active_content_mode() == ContentShowMode::Preview
+        && state.chart_preview_state.cycle_roi_at_position(column, row)
+    {
+        state.focus = Focus::Content;
+        return Ok(EventResult::Redraw);
+    }
+
     if let Some(tab_hitbox) = state
         .ui_layout
         .content_tabs
@@ -447,9 +454,9 @@ fn handle_preview_chart_right_mouse_up(
     if state.active_content_mode() != ContentShowMode::Preview {
         return Ok(EventResult::Continue);
     }
-    if state.chart_preview_state.drag_state.is_none() {
+    let Some(drag_state) = state.chart_preview_state.drag_state else {
         return Ok(EventResult::Continue);
-    }
+    };
     state.focus = Focus::Content;
     if state
         .chart_preview_state
@@ -457,7 +464,11 @@ fn handle_preview_chart_right_mouse_up(
     {
         Ok(EventResult::Redraw)
     } else {
+        let click_without_drag = column == drag_state.anchor_column && row == drag_state.anchor_row;
         state.chart_preview_state.end_drag();
+        if click_without_drag && state.chart_preview_state.zoom_to_roi() {
+            return Ok(EventResult::Redraw);
+        }
         Ok(EventResult::Continue)
     }
 }

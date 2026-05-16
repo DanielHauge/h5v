@@ -1964,7 +1964,7 @@ impl MultiChartState {
     }
 }
 
-pub(super) fn chart_plot_area_in_rect(
+pub(crate) fn chart_plot_area_in_rect(
     outer_area: Rect,
     width_px: u32,
     height_px: u32,

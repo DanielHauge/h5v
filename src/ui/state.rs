@@ -59,10 +59,10 @@ pub use help_state::{
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
     ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, PageState, PageType, PreviewChartViewport, PreviewChartZoomMode,
+    ImgState, PageState, PageType, PreviewChartRoi, PreviewChartViewport, PreviewChartZoomMode,
     PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
     PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
-    CHART_PREVIEW_CACHE_CAPACITY,
+    CHART_PREVIEW_CACHE_CAPACITY, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,
