@@ -13,7 +13,7 @@
   - [Image conventions](./image-conventions.md)
 - [Compound datasets](./compound-datasets.md)
 - [Commands](./commands.md)
-  - [Command reference](./command-reference.md)
+  - [Command help in app](./command-reference.md)
   - [Startup scripting](./startup-scripting.md)
 - [Configuration and theming](./configuration.md)
   - [Configuration reference](./configuration-reference.md)

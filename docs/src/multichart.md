@@ -49,10 +49,19 @@ Use `h5v.multichart = { ... }` in Lua to tune large-series behavior.
 ## Visibility and organization
 
 - move through chart items with `j` / `k`
+- reorder the selected item with `Alt+Up` / `Alt+Down`
 - hide or show an item with `Space` or `v`
 - remove the selected item with `d`, `Backspace`, or `Delete` when nothing depends on it
 - clear the whole workspace with `C`
 - open multichart help with `?`
+
+## Views
+
+- `Tab`, `Shift+Tab`, or `t` cycles line, histogram, box plot, and comparison scatter
+- line focuses sampled curves
+- histogram overlays visible-value distributions
+- box plot summarizes visible-value quartiles, whiskers, and outliers
+- comparison scatter aligns the selected series with the next visible series
 
 ## Zoom and pan
 
@@ -76,4 +85,4 @@ The same actions are available from the command line, including `mchart fit ...`
 
 ## Expression workflows
 
-See [Multichart expressions](./multichart-expressions.md) for syntax and [Command reference](./command-reference.md) for the full `mchart` command surface.
+See [Multichart expressions](./multichart-expressions.md). For commands and keys, use the in-app help.

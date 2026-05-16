@@ -116,8 +116,11 @@ Configuration lives in `init.lua`. Use `:configure` to edit it and `:configure r
 
 The manual is published at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
 
+- Inside `h5v`, press `?` for keybindings, commands, multichart, heatmap, and customization help.
+- The in-app help is the primary reference for controls and command behavior.
+
 - [Overview](https://danielhauge.github.io/h5v/book/)
-- [Commands](https://danielhauge.github.io/h5v/book/commands.html)
+- [Quick start](https://danielhauge.github.io/h5v/book/quick-start.html)
 - [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)
 - [Heatmap](https://danielhauge.github.io/h5v/book/heatmap.html)
 - [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)

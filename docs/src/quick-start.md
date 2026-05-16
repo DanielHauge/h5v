@@ -39,6 +39,8 @@ Useful keys:
 
 ## Help
 
+Press `?`. The in-app help is the reference for keys and commands.
+
 The help view has five tabs:
 
 - `Keymap`
@@ -99,4 +101,4 @@ Dry-run:
 h5v --script-test --script examples/h5v-example.h5v
 ```
 
-See [Controls reference](./controls.md), [Commands](./commands.md), [Configuration](./configuration.md), and [Startup scripting](./startup-scripting.md).
+See [Multichart](./multichart.md), [Configuration](./configuration.md), and [Startup scripting](./startup-scripting.md).
