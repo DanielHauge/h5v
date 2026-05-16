@@ -5,7 +5,10 @@ use ratatui::{
 
 use crate::{
     error::AppError,
-    ui::state::{AttributeViewSelection, ContentShowMode, Focus, Mode},
+    ui::{
+        attributes::navigate_metadata_grid,
+        state::{AttributeViewSelection, ContentShowMode, Focus, Mode},
+    },
 };
 
 use super::{super::state::AppState, EventResult};
@@ -88,7 +91,11 @@ pub(super) fn handle_normal_mouse_event(
             }
         }
         MouseEventKind::ScrollUp => {
-            if let EventResult::Redraw = handle_preview_chart_scroll(
+            if let EventResult::Redraw =
+                handle_attributes_scroll(state, mouse_event.column, mouse_event.row, true)?
+            {
+                Ok(EventResult::Redraw)
+            } else if let EventResult::Redraw = handle_preview_chart_scroll(
                 state,
                 mouse_event.column,
                 mouse_event.row,
@@ -101,7 +108,11 @@ pub(super) fn handle_normal_mouse_event(
             }
         }
         MouseEventKind::ScrollDown => {
-            if let EventResult::Redraw = handle_preview_chart_scroll(
+            if let EventResult::Redraw =
+                handle_attributes_scroll(state, mouse_event.column, mouse_event.row, false)?
+            {
+                Ok(EventResult::Redraw)
+            } else if let EventResult::Redraw = handle_preview_chart_scroll(
                 state,
                 mouse_event.column,
                 mouse_event.row,
@@ -402,6 +413,51 @@ fn handle_preview_chart_scroll(
     };
     if changed {
         state.focus = Focus::Content;
+        Ok(EventResult::Redraw)
+    } else {
+        Ok(EventResult::Continue)
+    }
+}
+
+fn handle_attributes_scroll(
+    state: &mut AppState<'_>,
+    column: u16,
+    row: u16,
+    up: bool,
+) -> Result<EventResult, AppError> {
+    let Some(attributes_hitbox) = state.ui_layout.attributes.as_ref() else {
+        return Ok(EventResult::Continue);
+    };
+    if !point_in_rect(attributes_hitbox.outer, column, row) {
+        return Ok(EventResult::Continue);
+    }
+
+    let tree_item = &state.treeview[state.tree_view_cursor];
+    let mut node = tree_item.node.borrow_mut();
+    let Some(current_index) = node.normalize_attribute_selection()? else {
+        return Ok(EventResult::Continue);
+    };
+    let selection = node.attributes_view_cursor.attribute_view_selection;
+    let direction = if up {
+        crate::ui::input::keymap::Direction::Up
+    } else {
+        crate::ui::input::keymap::Direction::Down
+    };
+    let destination = {
+        let attributes = node.read_attributes()?;
+        navigate_metadata_grid(
+            attributes,
+            attributes_hitbox.outer.width,
+            current_index,
+            selection,
+            direction,
+        )
+    };
+
+    state.focus = Focus::Attributes;
+    if let Some((new_index, new_selection)) = destination {
+        node.attributes_view_cursor.attribute_index = new_index;
+        node.attributes_view_cursor.attribute_view_selection = new_selection;
         Ok(EventResult::Redraw)
     } else {
         Ok(EventResult::Continue)
