@@ -116,6 +116,34 @@ pub struct AppState<'a> {
     pub ui_layout: UiLayoutState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeekAxis {
+    Row,
+    Col,
+}
+
+fn preferred_seek_axis(row_seekable: bool, col_seekable: bool) -> SeekAxis {
+    if !row_seekable && col_seekable {
+        SeekAxis::Col
+    } else {
+        SeekAxis::Row
+    }
+}
+
+fn clamp_absolute_seek_start(target: usize, total: usize, visible: usize) -> usize {
+    target.min(total.saturating_sub(visible.max(1)))
+}
+
+fn heatmap_page_for_target(window: &HeatmapPageWindow, target: usize) -> i32 {
+    for page in 0..window.page_count {
+        let (start, end) = window.range_for_page(page);
+        if target >= start && target < end {
+            return page;
+        }
+    }
+    window.page_count.saturating_sub(1)
+}
+
 pub(crate) fn preview_selection_for_node(
     node: &mut H5FNode,
     shape: &[usize],
@@ -1246,6 +1274,239 @@ impl AppState<'_> {
         }
     }
 
+    pub fn seek_absolute(
+        &mut self,
+        primary: usize,
+        secondary: Option<usize>,
+    ) -> Result<EventResult> {
+        match self.active_content_mode() {
+            ContentShowMode::Preview => {
+                if secondary.is_some() {
+                    return Err(AppError::InvalidCommand(
+                        "seek <x> <y> is only available in matrix or heatmap mode".to_string(),
+                    ));
+                }
+                self.set(primary)
+            }
+            ContentShowMode::Matrix => {
+                if let Some(row) = secondary {
+                    self.seek_matrix_col(primary)?;
+                    self.seek_matrix_row(row)
+                } else if matches!(self.smart_2d_seek_axis()?, Some(SeekAxis::Col)) {
+                    self.seek_matrix_col(primary)
+                } else {
+                    self.seek_matrix_row(primary)
+                }
+            }
+            ContentShowMode::Heatmap => {
+                if let Some(row) = secondary {
+                    self.seek_heatmap_col(primary)?;
+                    self.seek_heatmap_row(row)?;
+                    self.heatmap_render.selected_cells =
+                        Some(HeatmapSelectedCells::single(row, primary));
+                    Ok(EventResult::Redraw)
+                } else if matches!(self.smart_2d_seek_axis()?, Some(SeekAxis::Col)) {
+                    self.seek_heatmap_col(primary)
+                } else {
+                    self.seek_heatmap_row(primary)
+                }
+            }
+        }
+    }
+
+    pub fn seek_row_absolute(&mut self, row: usize) -> Result<EventResult> {
+        match self.active_content_mode() {
+            ContentShowMode::Matrix => self.seek_matrix_row(row),
+            ContentShowMode::Heatmap => self.seek_heatmap_row(row),
+            _ => Err(AppError::InvalidCommand(
+                "seek-row is only available in matrix or heatmap mode".to_string(),
+            )),
+        }
+    }
+
+    pub fn seek_col_absolute(&mut self, col: usize) -> Result<EventResult> {
+        match self.active_content_mode() {
+            ContentShowMode::Matrix => self.seek_matrix_col(col),
+            ContentShowMode::Heatmap => self.seek_heatmap_col(col),
+            _ => Err(AppError::InvalidCommand(
+                "seek-col is only available in matrix or heatmap mode".to_string(),
+            )),
+        }
+    }
+
+    fn smart_2d_seek_axis(&self) -> Result<Option<SeekAxis>> {
+        match self.active_content_mode() {
+            ContentShowMode::Matrix => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let node = current_node.node.borrow();
+                let Node::Dataset(_, dsattr) = &node.node else {
+                    return Ok(None);
+                };
+                let row_total = dsattr.shape[node.selected_row];
+                let col_total =
+                    if dsattr.is_compound_container() && dsattr.supports_compound_root_matrix() {
+                        dsattr
+                            .compound_root_matrix_column_count()
+                            .unwrap_or_default()
+                    } else {
+                        dsattr.shape[node.selected_col]
+                    };
+                let row_seekable =
+                    row_total > self.matrix_view_state.rows_currently_available.max(1);
+                let col_seekable =
+                    col_total > self.matrix_view_state.cols_currently_available.max(1);
+                Ok(Some(preferred_seek_axis(row_seekable, col_seekable)))
+            }
+            ContentShowMode::Heatmap => {
+                let current_node = &self.treeview[self.tree_view_cursor];
+                let node = current_node.node.borrow();
+                let Node::Dataset(_, dsattr) = &node.node else {
+                    return Ok(None);
+                };
+                let source_rows = dsattr.shape[node.selected_row];
+                let source_cols = dsattr.shape[node.selected_col];
+                let base_viewport = self.heatmap_render.viewport.unwrap_or(HeatmapViewport {
+                    row_start: 0,
+                    row_len: source_rows.max(1),
+                    col_start: 0,
+                    col_len: source_cols.max(1),
+                });
+                let row_seekable = base_viewport.row_len < source_rows
+                    || self
+                        .heatmap_render
+                        .segment
+                        .as_ref()
+                        .is_some_and(|window| matches!(window.axis, HeatmapSegmentAxis::Rows));
+                let col_seekable = base_viewport.col_len < source_cols
+                    || self
+                        .heatmap_render
+                        .segment
+                        .as_ref()
+                        .is_some_and(|window| matches!(window.axis, HeatmapSegmentAxis::Cols));
+                Ok(Some(preferred_seek_axis(row_seekable, col_seekable)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn seek_matrix_row(&mut self, row: usize) -> Result<EventResult> {
+        let Some(row_total) = ({
+            let current_node = &self.treeview[self.tree_view_cursor];
+            let node = current_node.node.borrow();
+            match &node.node {
+                Node::Dataset(_, dsattr) => Some(dsattr.shape[node.selected_row]),
+                _ => None,
+            }
+        }) else {
+            return Ok(EventResult::Continue);
+        };
+        self.matrix_view_state.row_offset = clamp_absolute_seek_start(
+            row,
+            row_total,
+            self.matrix_view_state.rows_currently_available.max(1),
+        );
+        Ok(EventResult::Redraw)
+    }
+
+    fn seek_matrix_col(&mut self, col: usize) -> Result<EventResult> {
+        let Some(col_total) = ({
+            let current_node = &self.treeview[self.tree_view_cursor];
+            let node = current_node.node.borrow();
+            match &node.node {
+                Node::Dataset(_, dsattr) => Some(
+                    if dsattr.is_compound_container() && dsattr.supports_compound_root_matrix() {
+                        dsattr
+                            .compound_root_matrix_column_count()
+                            .unwrap_or_default()
+                    } else {
+                        dsattr.shape[node.selected_col]
+                    },
+                ),
+                _ => None,
+            }
+        }) else {
+            return Ok(EventResult::Continue);
+        };
+        self.matrix_view_state.col_offset = clamp_absolute_seek_start(
+            col,
+            col_total,
+            self.matrix_view_state.cols_currently_available.max(1),
+        );
+        Ok(EventResult::Redraw)
+    }
+
+    fn seek_heatmap_row(&mut self, row: usize) -> Result<EventResult> {
+        let Some((source_rows, source_cols)) = ({
+            let current_node = &self.treeview[self.tree_view_cursor];
+            let node = current_node.node.borrow();
+            match &node.node {
+                Node::Dataset(_, dsattr) => Some((
+                    dsattr.shape[node.selected_row],
+                    dsattr.shape[node.selected_col],
+                )),
+                _ => None,
+            }
+        }) else {
+            return Ok(EventResult::Continue);
+        };
+        let mut viewport = self.heatmap_render.viewport.unwrap_or(HeatmapViewport {
+            row_start: 0,
+            row_len: source_rows.max(1),
+            col_start: 0,
+            col_len: source_cols.max(1),
+        });
+        if viewport.row_len < source_rows {
+            viewport.row_start = clamp_absolute_seek_start(row, source_rows, viewport.row_len);
+            self.heatmap_render.viewport = Some(viewport);
+        }
+        if let Some(window) = self.heatmap_render.segment.as_mut() {
+            if matches!(window.axis, HeatmapSegmentAxis::Rows) {
+                let relative = row
+                    .saturating_sub(viewport.row_start)
+                    .min(viewport.row_len.saturating_sub(1));
+                window.page = heatmap_page_for_target(window, relative);
+            }
+        }
+        self.heatmap_render.current_key = None;
+        Ok(EventResult::Redraw)
+    }
+
+    fn seek_heatmap_col(&mut self, col: usize) -> Result<EventResult> {
+        let Some((source_rows, source_cols)) = ({
+            let current_node = &self.treeview[self.tree_view_cursor];
+            let node = current_node.node.borrow();
+            match &node.node {
+                Node::Dataset(_, dsattr) => Some((
+                    dsattr.shape[node.selected_row],
+                    dsattr.shape[node.selected_col],
+                )),
+                _ => None,
+            }
+        }) else {
+            return Ok(EventResult::Continue);
+        };
+        let mut viewport = self.heatmap_render.viewport.unwrap_or(HeatmapViewport {
+            row_start: 0,
+            row_len: source_rows.max(1),
+            col_start: 0,
+            col_len: source_cols.max(1),
+        });
+        if viewport.col_len < source_cols {
+            viewport.col_start = clamp_absolute_seek_start(col, source_cols, viewport.col_len);
+            self.heatmap_render.viewport = Some(viewport);
+        }
+        if let Some(window) = self.heatmap_render.segment.as_mut() {
+            if matches!(window.axis, HeatmapSegmentAxis::Cols) {
+                let relative = col
+                    .saturating_sub(viewport.col_start)
+                    .min(viewport.col_len.saturating_sub(1));
+                window.page = heatmap_page_for_target(window, relative);
+            }
+        }
+        self.heatmap_render.current_key = None;
+        Ok(EventResult::Redraw)
+    }
+
     pub fn reexecute_command(&mut self) -> Result<EventResult> {
         let Some(last_command) = self.command_state.last_command.clone() else {
             return Ok(EventResult::Toast(
@@ -1459,8 +1720,9 @@ impl AppState<'_> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        heatmap_anchor_fraction, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
-        HelpTab, HelpViewState,
+        heatmap_anchor_fraction, heatmap_page_for_target, preferred_seek_axis, HeatmapPageWindow,
+        HeatmapSegmentAxis, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
+        HelpTab, HelpViewState, SeekAxis,
     };
 
     #[test]
@@ -1507,5 +1769,28 @@ mod tests {
             help.customization_section,
             HelpCustomizationSection::Configuration
         );
+    }
+
+    #[test]
+    fn preferred_seek_axis_switches_to_cols_when_rows_are_fully_covered() {
+        assert_eq!(preferred_seek_axis(false, true), SeekAxis::Col);
+        assert_eq!(preferred_seek_axis(true, true), SeekAxis::Row);
+        assert_eq!(preferred_seek_axis(false, false), SeekAxis::Row);
+    }
+
+    #[test]
+    fn heatmap_page_for_target_picks_page_covering_target() {
+        let window = HeatmapPageWindow {
+            ds_path: "test.h5:/data".to_string(),
+            axis: HeatmapSegmentAxis::Cols,
+            len: 100,
+            total: 1_000,
+            page: 0,
+            page_count: 19,
+        };
+        assert_eq!(heatmap_page_for_target(&window, 0), 0);
+        assert_eq!(heatmap_page_for_target(&window, 75), 0);
+        assert_eq!(heatmap_page_for_target(&window, 125), 1);
+        assert_eq!(heatmap_page_for_target(&window, 950), 18);
     }
 }

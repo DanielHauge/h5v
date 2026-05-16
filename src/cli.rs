@@ -361,7 +361,9 @@ mod tests {
         assert!(report.contains("Startup command dry run"));
         assert!(report.contains("[01] stdin:1"));
         assert!(report.contains("command seek 1"));
-        assert!(report.contains("action  Jump to an absolute index in the current content view"));
+        assert!(report.contains(
+            "action  Jump to an absolute index, or to x/y coordinates in matrix and heatmap views"
+        ));
         assert!(report.contains("[02] stdin:1[2]"));
     }
 

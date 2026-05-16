@@ -16,6 +16,33 @@ fn parses_named_seek_command() {
 }
 
 #[test]
+fn parses_named_seek_command_with_second_index() {
+    let command = parse_command_text("seek 25 35").expect("expected 2d seek command to parse");
+    assert_eq!(command.id, CommandId::Seek);
+    assert_eq!(
+        command.args,
+        vec![
+            CommandArgValue::UnsignedInt(25),
+            CommandArgValue::UnsignedInt(35),
+        ]
+    );
+}
+
+#[test]
+fn parses_seek_row_command() {
+    let command = parse_command_text("seek-row 35").expect("expected seek-row command");
+    assert_eq!(command.id, CommandId::SeekRow);
+    assert_eq!(command.args, vec![CommandArgValue::UnsignedInt(35)]);
+}
+
+#[test]
+fn parses_seek_col_command() {
+    let command = parse_command_text("seek-col 25").expect("expected seek-col command");
+    assert_eq!(command.id, CommandId::SeekCol);
+    assert_eq!(command.args, vec![CommandArgValue::UnsignedInt(25)]);
+}
+
+#[test]
 fn parses_goto_command_with_path_argument() {
     let command = parse_command_text("goto /group/dataset").expect("expected goto command");
     assert_eq!(command.id, CommandId::Goto);

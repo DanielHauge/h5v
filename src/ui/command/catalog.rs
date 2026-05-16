@@ -9,14 +9,6 @@ use super::{
     CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor, CommandId,
 };
 
-const INDEX_ARG: CommandArgSpec = CommandArgSpec {
-    name: "index",
-    kind: CommandArgKind::UnsignedInt,
-    required: true,
-    help: "Zero-based absolute index to jump to.",
-    values: &[],
-};
-
 const SEEK_PRIMARY_ARG: CommandArgSpec = CommandArgSpec {
     name: "index",
     kind: CommandArgKind::UnsignedInt,
