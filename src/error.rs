@@ -51,7 +51,7 @@ pub enum AppError {
     EditWarning(String),
     FixedStringOverflow(FixedStringOverflow),
     ChildNotFound(String),
-    PoisionedLockError(String),
+    PoisonedLockError(String),
     DrawingError(String),
 }
 
@@ -72,7 +72,7 @@ impl Display for AppError {
             AppError::FileError(x) => write!(f, "File error: {x}"),
             AppError::EditError(x) => write!(f, "Edit error: {x}"),
             AppError::ChildNotFound(x) => write!(f, "Child not found: {x}"),
-            AppError::PoisionedLockError(x) => write!(f, "Poisioned lock error: {x}"),
+            AppError::PoisonedLockError(x) => write!(f, "Poisoned lock error: {x}"),
             AppError::EditWarning(x) => write!(f, "Edit warning: {x}"),
             AppError::FixedStringOverflow(x) => write!(f, "Edit error: {x}"),
             AppError::DrawingError(x) => write!(f, "Drawing error: {x}"),
@@ -89,7 +89,7 @@ impl Display for AppError {
 
 impl<T> From<PoisonError<T>> for AppError {
     fn from(err: PoisonError<T>) -> Self {
-        AppError::PoisionedLockError(format!("Poisoned lock error: {}", err))
+        AppError::PoisonedLockError(format!("Poisoned lock error: {}", err))
     }
 }
 

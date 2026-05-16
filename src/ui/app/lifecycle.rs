@@ -83,8 +83,8 @@ pub(super) fn classify_recover_loop_error(error: AppError) -> RecoverLoopAction 
         AppError::ChildNotFound(error) => {
             RecoverLoopAction::Break(format!("Child not found: - {error}"))
         }
-        AppError::PoisionedLockError(error) => {
-            RecoverLoopAction::Break(format!("Poisioned lock error: - {error}"))
+        AppError::PoisonedLockError(error) => {
+            RecoverLoopAction::Break(format!("Poisoned lock error: - {error}"))
         }
         AppError::DrawingError(error) => {
             RecoverLoopAction::Break(format!("Drawing error: - {error}"))

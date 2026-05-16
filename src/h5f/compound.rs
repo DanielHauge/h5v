@@ -39,6 +39,16 @@ unsafe extern "C" {
 
 const H5_DEFAULT_ID: i64 = 0;
 
+fn checked_byte_len(
+    item_size: usize,
+    total_elems: usize,
+    context: &str,
+) -> Result<usize, AppError> {
+    item_size
+        .checked_mul(total_elems)
+        .ok_or_else(|| AppError::DrawingError(format!("{context} byte size overflowed usize")))
+}
+
 pub fn compound_children(meta: &DatasetMeta) -> Option<Vec<CompoundFieldProjection>> {
     let projection = meta.compound_projection.as_ref()?;
     let compound = projection.current_compound_type()?;
@@ -74,6 +84,7 @@ fn read_projected_bytes(
     let item_size = dtype.size();
     let out_shape = selection_to_shape(&selection, dataset)?;
     let total_elems = out_shape.iter().product::<usize>();
+    let buffer_len = checked_byte_len(item_size, total_elems, "Projected compound selection")?;
 
     let file_space = dataset.space()?.copy();
     let raw_selection = selection.into_raw(dataset.shape())?;
@@ -82,7 +93,7 @@ fn read_projected_bytes(
     }
     let mem_space = Dataspace::try_new(selection_mem_shape(&out_shape))?;
 
-    let mut buffer = vec![0_u8; total_elems * item_size];
+    let mut buffer = vec![0_u8; buffer_len];
     let status = unsafe {
         H5Dread(
             dataset.id(),
@@ -101,7 +112,8 @@ fn read_projected_bytes(
 
     let field_size = projection.field_type.size();
     let start_offset = projection.absolute_offset();
-    let mut out = Vec::with_capacity(total_elems * field_size);
+    let out_capacity = checked_byte_len(field_size, total_elems, "Projected compound field")?;
+    let mut out = Vec::with_capacity(out_capacity);
     for chunk in buffer.chunks_exact(item_size) {
         let end = start_offset + field_size;
         if end > chunk.len() {
@@ -200,9 +212,7 @@ pub fn read_dataset_raw_bytes(dataset: &Dataset) -> Result<Vec<u8>, AppError> {
     let dtype = dataset.dtype()?;
     let item_size = dtype.size();
     let total_elems = dataset.size();
-    let total_bytes = item_size
-        .checked_mul(total_elems)
-        .ok_or_else(|| AppError::DrawingError("Dataset byte size overflowed usize".to_string()))?;
+    let total_bytes = checked_byte_len(item_size, total_elems, "Dataset")?;
     let mut buffer = vec![0_u8; total_bytes];
 
     let status = unsafe {
@@ -232,6 +242,7 @@ pub fn read_selected_values_bytes(
     let item_size = dtype.size();
     let out_shape = selection_to_shape(&selection, dataset)?;
     let total_elems = out_shape.iter().product::<usize>();
+    let buffer_len = checked_byte_len(item_size, total_elems, "Selected dataset values")?;
 
     let file_space = dataset.space()?.copy();
     let raw_selection = selection.into_raw(dataset.shape())?;
@@ -240,7 +251,7 @@ pub fn read_selected_values_bytes(
     }
     let mem_space = Dataspace::try_new(selection_mem_shape(&out_shape))?;
 
-    let mut buffer = vec![0_u8; total_elems * item_size];
+    let mut buffer = vec![0_u8; buffer_len];
     let status = unsafe {
         H5Dread(
             dataset.id(),

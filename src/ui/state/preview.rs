@@ -12,7 +12,7 @@ use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
     h5f::{DatasetMeta, ImageType},
-    ui::mchart::ChartItem,
+    ui::{chart_math::normalized_axis_bounds, mchart::ChartItem},
 };
 
 pub const PREVIEW_CHART_VISIBLE_POINT_LIMIT: usize = 50;
@@ -597,10 +597,7 @@ impl ChartPreviwState {
     }
 
     pub fn start_drag_at_position(&mut self, column: u16, row: u16) -> bool {
-        let Some(chart_area) = self.last_chart_area else {
-            return false;
-        };
-        if !point_in_rect(chart_area, column, row) {
+        if !self.chart_contains_position(column, row) || self.precise_point_mode() {
             return false;
         }
         let Some(viewport) = self.effective_viewport() else {
@@ -639,7 +636,8 @@ impl ChartPreviwState {
     }
 
     pub fn drag_to_position(&mut self, column: u16, row: u16) -> bool {
-        self.apply_drag_position(column, row)
+        let _ = (column, row);
+        false
     }
 
     pub fn finish_drag_at_position(&mut self, column: u16, row: u16) -> bool {
@@ -650,6 +648,11 @@ impl ChartPreviwState {
 
     pub fn end_drag(&mut self) {
         self.drag_state = None;
+    }
+
+    pub fn chart_contains_position(&self, column: u16, row: u16) -> bool {
+        self.last_chart_area
+            .is_some_and(|chart_area| point_in_rect(chart_area, column, row))
     }
 
     fn selection_x_min(&self) -> f64 {
@@ -790,21 +793,6 @@ fn viewport_eq(left: PreviewChartViewport, right: PreviewChartViewport) -> bool 
         && (left.x_max - right.x_max).abs() < 1e-9
         && (left.y_min - right.y_min).abs() < 1e-9
         && (left.y_max - right.y_max).abs() < 1e-9
-}
-
-fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
-    if !min.is_finite() || !max.is_finite() || max < min {
-        return None;
-    }
-    if (max - min).abs() < f64::EPSILON {
-        let pad = if min == 0.0 {
-            1.0
-        } else {
-            min.abs().max(1.0) * 0.05
-        };
-        return Some((min - pad, max + pad));
-    }
-    Some((min, max))
 }
 
 fn minimum_zoom_span(bounds_min: f64, bounds_max: f64) -> f64 {
@@ -1272,7 +1260,9 @@ mod tests {
         };
 
         assert!(state.start_drag_at_position(5, 5));
-        assert!(state.drag_to_position(6, 5));
+        assert!(!state.drag_to_position(6, 5));
+        assert_eq!(state.viewport, Some(initial_viewport));
+        assert!(state.finish_drag_at_position(6, 5));
         assert_ne!(state.viewport, Some(initial_viewport));
     }
 
@@ -1368,6 +1358,99 @@ mod tests {
         assert!(state.zoom_to_roi());
         assert!(state.viewport.is_some());
         assert!(state.roi.is_none());
+    }
+
+    #[test]
+    fn chart_preview_starts_drag_when_points_are_not_selectable() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("drag").selection),
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 100.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 100.0,
+                y_min: 0.0,
+                y_max: 10.0,
+            }),
+            current_data: Some(DatasetPlotingData {
+                data: (0..100).map(|i| (i as f64, i as f64)).collect(),
+                length: 100,
+                min: 0.0,
+                max: 99.0,
+            }),
+            roi: None,
+            last_chart_area: Some(Rect::new(5, 3, 10, 10)),
+            last_plot_area: Some(Rect::new(5, 3, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(state.start_drag_at_position(6, 4));
+        assert!(state.drag_state.is_some());
+    }
+
+    #[test]
+    fn chart_preview_blocks_drag_when_precise_points_are_visible() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("drag").selection),
+            rendered_viewport: None,
+            rendered_roi: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 3.0,
+                y_min: 0.0,
+                y_max: 3.0,
+            }),
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 0.0,
+                x_max: 3.0,
+                y_min: 0.0,
+                y_max: 3.0,
+            }),
+            current_data: Some(DatasetPlotingData {
+                data: (0..3).map(|i| (i as f64, i as f64)).collect(),
+                length: 3,
+                min: 0.0,
+                max: 2.0,
+            }),
+            roi: Some(PreviewChartRoi {
+                start: 0,
+                end: 1,
+                precise: true,
+                selection_count: 1,
+            }),
+            last_chart_area: Some(Rect::new(5, 3, 10, 10)),
+            last_plot_area: Some(Rect::new(5, 3, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(!state.start_drag_at_position(6, 4));
+        assert!(state.drag_state.is_none());
     }
 
     #[test]

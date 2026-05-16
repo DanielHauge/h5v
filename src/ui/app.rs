@@ -1,4 +1,12 @@
-use std::{rc::Rc, thread, time::SystemTime};
+use std::{
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::SystemTime,
+};
 
 use ratatui::{
     crossterm::event::{self},
@@ -138,6 +146,16 @@ fn use_stacked_tree_layout(area: Rect, mode: &Mode, show_tree_view: bool) -> boo
 type Result<T> = std::result::Result<T, AppError>;
 
 pub struct IntendedMainLoopBreak {}
+
+struct WorkerShutdownGuard {
+    running: Arc<AtomicBool>,
+}
+
+impl Drop for WorkerShutdownGuard {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
+}
 
 const HEADER_HEIGHT: u16 = 1;
 const COMMAND_BAR_HEIGHT: u16 = 6;
@@ -284,8 +302,21 @@ fn main_recover_loop(
     // First time draw nice state
     terminal.draw(|f| draw_closure(f, &mut state))?;
 
-    handle_term_events(tx_events.clone(), state.edit_pause.clone());
-    handle_file_watch_events(tx_events.clone(), state.file_watch.path.clone());
+    let worker_running = Arc::new(AtomicBool::new(true));
+    let _worker_shutdown = WorkerShutdownGuard {
+        running: worker_running.clone(),
+    };
+
+    handle_term_events(
+        tx_events.clone(),
+        state.edit_pause.clone(),
+        worker_running.clone(),
+    );
+    handle_file_watch_events(
+        tx_events.clone(),
+        state.file_watch.path.clone(),
+        worker_running,
+    );
 
     loop {
         let event = rx_events.recv();

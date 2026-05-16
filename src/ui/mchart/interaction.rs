@@ -1,5 +1,7 @@
 use ratatui::layout::Rect;
 
+use crate::ui::chart_math::normalized_axis_bounds;
+
 use super::*;
 
 fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
@@ -14,24 +16,6 @@ fn viewport_eq(left: ChartViewport, right: ChartViewport) -> bool {
         && (left.x_max - right.x_max).abs() < 1e-9
         && (left.y_min - right.y_min).abs() < 1e-9
         && (left.y_max - right.y_max).abs() < 1e-9
-}
-
-fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
-    if !min.is_finite() || !max.is_finite() {
-        return None;
-    }
-    if max < min {
-        return None;
-    }
-    if (max - min).abs() < f64::EPSILON {
-        let pad = if min == 0.0 {
-            1.0
-        } else {
-            min.abs().max(1.0) * 0.05
-        };
-        return Some((min - pad, max + pad));
-    }
-    Some((min, max))
 }
 
 fn minimum_zoom_span(bounds_min: f64, bounds_max: f64) -> f64 {

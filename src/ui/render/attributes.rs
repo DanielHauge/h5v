@@ -115,6 +115,12 @@ where
     Ok(bracketed_spans(render_values(values)))
 }
 
+fn checked_byte_count(count: usize, element_size: usize, context: &str) -> Result<usize, Error> {
+    count
+        .checked_mul(element_size)
+        .ok_or_else(|| Error::from(format!("{context} byte size overflowed usize")))
+}
+
 macro_rules! impl_uint_renderable {
     ($($t:ty),*) => {
         $(
@@ -548,10 +554,11 @@ fn render_raw_array_values(
 ) -> Result<Vec<Span<'static>>, Error> {
     let bytes = read_attr_memory_bytes(attr).map_err(|e| Error::from(e.to_string()))?;
     let element_size = element_type.size();
-    if bytes.len() != attr.size() * element_size {
+    let expected_len = checked_byte_count(attr.size(), element_size, "Raw array")?;
+    if bytes.len() != expected_len {
         return Err(Error::from(format!(
             "Raw array byte size mismatch: expected {}, got {}",
-            attr.size() * element_size,
+            expected_len,
             bytes.len()
         )));
     }
@@ -569,8 +576,11 @@ fn render_varlen_entry(
     entry: RawVarLen,
     element_type: &TypeDescriptor,
 ) -> Result<Vec<Span<'static>>, Error> {
-    if entry.len == 0 || entry.ptr.is_null() {
+    if entry.len == 0 {
         return Ok(bracketed_spans(vec![]));
+    }
+    if entry.ptr.is_null() {
+        return Err(Error::from("Varlen value pointer was null"));
     }
 
     match element_type {
@@ -604,8 +614,8 @@ fn render_varlen_entry(
         )])),
         _ => {
             let element_size = element_type.size();
-            let bytes =
-                unsafe { slice::from_raw_parts(entry.ptr.cast::<u8>(), entry.len * element_size) };
+            let byte_len = checked_byte_count(entry.len, element_size, "Varlen value")?;
+            let bytes = unsafe { slice::from_raw_parts(entry.ptr.cast::<u8>(), byte_len) };
             let rendered = bytes
                 .chunks_exact(element_size)
                 .map(|chunk| render_value_from_bytes(chunk, element_type))
@@ -625,8 +635,11 @@ fn render_varlen_attr_values(
     let file = attr.file()?;
     let mut bytes = read_attr_memory_bytes(attr).map_err(|e| Error::from(e.to_string()))?;
     let result = (|| {
-        let entries = bytes
-            .chunks_exact(std::mem::size_of::<RawVarLen>())
+        let chunks = bytes.chunks_exact(std::mem::size_of::<RawVarLen>());
+        if !chunks.remainder().is_empty() {
+            return Err(Error::from("Invalid varlen attribute payload length"));
+        }
+        let entries = chunks
             .map(|chunk| {
                 let mut raw = [0_u8; std::mem::size_of::<RawVarLen>()];
                 raw.copy_from_slice(chunk);

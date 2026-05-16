@@ -417,14 +417,10 @@ fn handle_preview_chart_right_mouse_down(
         return Ok(EventResult::Continue);
     }
     state.focus = Focus::Content;
-    if state
+    state
         .chart_preview_state
-        .start_drag_at_position(column, row)
-    {
-        Ok(EventResult::Redraw)
-    } else {
-        Ok(EventResult::Continue)
-    }
+        .start_drag_at_position(column, row);
+    Ok(EventResult::Continue)
 }
 
 fn handle_preview_chart_right_mouse_drag(
@@ -454,10 +450,20 @@ fn handle_preview_chart_right_mouse_up(
     if state.active_content_mode() != ContentShowMode::Preview {
         return Ok(EventResult::Continue);
     }
-    let Some(drag_state) = state.chart_preview_state.drag_state else {
-        return Ok(EventResult::Continue);
-    };
     state.focus = Focus::Content;
+    let drag_state = match state.chart_preview_state.drag_state {
+        Some(drag_state) => drag_state,
+        None => {
+            if state
+                .chart_preview_state
+                .chart_contains_position(column, row)
+                && state.chart_preview_state.zoom_to_roi()
+            {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+    };
     if state
         .chart_preview_state
         .finish_drag_at_position(column, row)

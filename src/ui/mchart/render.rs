@@ -13,7 +13,11 @@ use ratatui::{
 };
 use ratatui_image::{picker::ProtocolType, StatefulImage};
 
-use crate::{configure, error::log_error};
+use crate::{
+    configure,
+    error::log_error,
+    ui::chart_math::{normalized_axis_bounds, padded_axis_bounds},
+};
 
 use super::{
     prompt::ExpressionPromptFocus, ChartItem, ChartSource, ExpressionPromptInputKind,
@@ -105,21 +109,6 @@ fn truncate_to_width(message: &str, max_width: usize) -> String {
     truncated
 }
 
-fn normalize_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
-    if !min.is_finite() || !max.is_finite() || max < min {
-        return None;
-    }
-    if (max - min).abs() < f64::EPSILON {
-        let pad = if min == 0.0 {
-            1.0
-        } else {
-            min.abs().max(1.0) * 0.05
-        };
-        return Some((min - pad, max + pad));
-    }
-    Some((min, max))
-}
-
 fn quantile_sorted(values: &[f64], quantile: f64) -> f64 {
     if values.len() == 1 {
         return values[0];
@@ -133,12 +122,6 @@ fn quantile_sorted(values: &[f64], quantile: f64) -> f64 {
         let weight = position - lower as f64;
         values[lower] * (1.0 - weight) + values[upper] * weight
     }
-}
-
-fn padded_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
-    let (min, max) = normalize_axis_bounds(min, max)?;
-    let pad = (max - min).abs().max(1.0) * 0.05;
-    Some((min - pad, max + pad))
 }
 
 fn render_line_chart_request(
@@ -894,7 +877,7 @@ impl MultiChartState {
         let (plot_x_min, plot_x_max) = if let Some(viewport) = self.viewport {
             (viewport.x_min, viewport.x_max)
         } else {
-            normalize_axis_bounds(plot_x_min, plot_x_max)?
+            normalized_axis_bounds(plot_x_min, plot_x_max)?
         };
         let (y_min, y_max) = if let Some(viewport) = self.viewport {
             (viewport.y_min, viewport.y_max)
@@ -907,7 +890,7 @@ impl MultiChartState {
                     y_max = y_max.max(y);
                 }
             }
-            normalize_axis_bounds(y_min, y_max)?
+            normalized_axis_bounds(y_min, y_max)?
         };
 
         Some(super::PreparedLineChartData {
@@ -955,7 +938,7 @@ impl MultiChartState {
             return None;
         }
 
-        let (value_min, value_max) = normalize_axis_bounds(value_min, value_max)?;
+        let (value_min, value_max) = normalized_axis_bounds(value_min, value_max)?;
         let bin_count = match max_samples {
             0 => return None,
             1..=4 => max_samples,

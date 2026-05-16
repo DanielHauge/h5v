@@ -163,7 +163,9 @@ fn read_hdf5_name(
 ) -> Result<String, AppError> {
     let len = reader(ptr::null_mut(), 0);
     if len < 0 {
-        return Err(AppError::EditError(format!("Failed to read {context}")));
+        return Err(AppError::EditError(format!(
+            "Failed to query {context} length"
+        )));
     }
     let mut buffer = vec![0 as c_char; len as usize + 1];
     let written = reader(buffer.as_mut_ptr(), buffer.len());
@@ -219,7 +221,11 @@ fn read_region_bounds(space_id: i64) -> Result<(Vec<usize>, Vec<usize>, bool), A
         H5S_SEL_POINTS => (unsafe { H5Sget_select_elem_npoints(space_id) }) > 1,
         H5S_SEL_HYPERSLABS => (unsafe { H5Sget_select_hyper_nblocks(space_id) }) > 1,
         H5S_SEL_ALL => false,
-        _ => true,
+        unsupported => {
+            return Err(AppError::EditError(format!(
+                "Unsupported referenced region selection type: {unsupported:?}"
+            )))
+        }
     };
 
     Ok((

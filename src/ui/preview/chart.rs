@@ -23,6 +23,7 @@ use crate::{
         plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
     },
     ui::{
+        chart_math::normalized_axis_bounds,
         matrix::{EnumRenderer, RenderIntercept},
         mchart::chart_plot_area_in_rect,
         page_scroll::{compact_count, PageDisplayInfo},
@@ -62,21 +63,6 @@ fn clear_active_chart_preview(state: &mut AppState<'_>) {
     state.chart_preview_state.rendered_roi = None;
     state.chart_preview_state.pending_key = None;
     state.chart_preview_state.reset_viewport();
-}
-
-fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
-    if !min.is_finite() || !max.is_finite() || max < min {
-        return None;
-    }
-    if (max - min).abs() < f64::EPSILON {
-        let pad = if min == 0.0 {
-            1.0
-        } else {
-            min.abs().max(1.0) * 0.05
-        };
-        return Some((min - pad, max + pad));
-    }
-    Some((min, max))
 }
 
 fn preview_x_min(page_state: &crate::ui::state::PageState) -> f64 {

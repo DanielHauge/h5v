@@ -1,5 +1,6 @@
 pub mod app;
 pub mod attributes;
+pub mod chart_math;
 pub mod command;
 pub mod dims;
 pub mod edit;
