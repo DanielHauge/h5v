@@ -603,34 +603,25 @@ fn render_ds_img(
         desired_window.as_ref(),
         state.img_state.pending_keys.contains(&desired_key),
     )?;
+    let mut image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
+    if !image_loaded && restore_cached_image(state, &desired_key) {
+        image_loaded = true;
+    }
     if state.should_debounce_preview(selected_node) {
-        if let Some(ref mut protocol) = state.img_state.protocol {
-            let image_widget =
-                StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
-            f.render_stateful_widget(image_widget, render_area, protocol);
+        if image_loaded {
+            if let Some(ref mut protocol) = state.img_state.protocol {
+                let image_widget =
+                    StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+                f.render_stateful_widget(image_widget, render_area, protocol);
+            }
+        } else {
+            state.img_state.protocol = None;
+            state.img_state.clipboard_image = None;
+            state.img_state.error = None;
+        }
+        if !image_loaded || state.img_state.pending_keys.contains(&desired_key) {
             render_image_loading_indicator(f, render_area);
         }
-        return Ok(());
-    }
-    let image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
-
-    if !image_loaded && restore_cached_image(state, &desired_key) {
-        if let Some(ref mut protocol) = state.img_state.protocol {
-            let image_widget =
-                StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
-            f.render_stateful_widget(image_widget, render_area, protocol);
-            if state.img_state.pending_keys.contains(&desired_key) {
-                render_image_loading_indicator(f, render_area);
-            }
-        }
-        schedule_dataset_image_prefetch(
-            state,
-            ds,
-            &img_type,
-            &desired_key,
-            desired_window.as_ref(),
-            frame_count,
-        )?;
         return Ok(());
     }
 
@@ -663,11 +654,9 @@ fn render_ds_img(
             }
         }
         false => {
-            state.img_state.error = None;
-            state.img_state.ds = Some(ds_path);
-            state.img_state.idx_loaded = state.img_state.idx_to_load;
-            state.img_state.current_key = Some(desired_key.clone());
-            state.img_state.pending_keys.insert(desired_key.clone());
+            state
+                .img_state
+                .begin_loading(desired_key.clone(), state.img_state.idx_to_load);
             state.img_state.tx_load_img.send(DatasetImageLoadRequest {
                 key: desired_key,
                 dataset: ds.clone(),
@@ -746,23 +735,23 @@ fn render_raw_img(
     };
 
     if state.should_debounce_preview(selected_node) {
-        if let Some(ref mut protocol) = state.img_state.protocol {
-            let image_widget =
-                StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
-            f.render_stateful_widget(image_widget, render_area, protocol);
-            if show_loading {
-                render_image_loading_indicator(f, render_area);
+        if image_loaded {
+            if let Some(ref mut protocol) = state.img_state.protocol {
+                let image_widget =
+                    StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
+                f.render_stateful_widget(image_widget, render_area, protocol);
             }
-            if image_loaded && !state.img_state.pending_keys.contains(&desired_key) {
-                if let Some(frame_count) = varlen_frame_count {
-                    schedule_varlen_image_prefetch(
-                        state,
-                        ds,
-                        img_format,
-                        &desired_key,
-                        frame_count,
-                    )?;
-                }
+        } else {
+            state.img_state.protocol = None;
+            state.img_state.clipboard_image = None;
+            state.img_state.error = None;
+        }
+        if show_loading {
+            render_image_loading_indicator(f, render_area);
+        }
+        if image_loaded && !state.img_state.pending_keys.contains(&desired_key) {
+            if let Some(frame_count) = varlen_frame_count {
+                schedule_varlen_image_prefetch(state, ds, img_format, &desired_key, frame_count)?;
             }
         }
         return Ok(());
@@ -807,9 +796,9 @@ fn render_raw_img(
                 hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1) => {
                     let ds_reader = ds.as_byte_reader()?;
                     state.segment_state.segumented = SegmentType::NoSegment;
-                    state.img_state.idx_loaded = state.img_state.idx_to_load;
-                    state.img_state.current_key = Some(desired_key.clone());
-                    state.img_state.pending_keys.insert(desired_key.clone());
+                    state
+                        .img_state
+                        .begin_loading(desired_key.clone(), state.img_state.idx_to_load);
                     let ds_buffered = BufReader::new(ds_reader);
                     state.img_state.tx_load_imgfs.send(RawImageLoadRequest {
                         key: desired_key,
@@ -822,9 +811,9 @@ fn render_raw_img(
                         *arr_type,
                         hdf5_metno::types::TypeDescriptor::Unsigned(IntSize::U1)
                     ) {
-                        state.img_state.idx_loaded = state.img_state.idx_to_load;
-                        state.img_state.current_key = Some(desired_key.clone());
-                        state.img_state.pending_keys.insert(desired_key.clone());
+                        state
+                            .img_state
+                            .begin_loading(desired_key.clone(), state.img_state.idx_to_load);
                         state
                             .img_state
                             .tx_load_imgfsvlen

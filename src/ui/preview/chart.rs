@@ -116,13 +116,18 @@ fn queue_chart_preview_load(
     source: ChartPreviewSource,
 ) -> Result<(), AppError> {
     let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
+    let chart_loaded =
+        state.chart_preview_state.current_request_key().as_ref() == Some(&current_key);
 
     if state.should_debounce_preview(node) {
         perf::metrics().preview.debounce_skips.increment();
+        if !chart_loaded && !restore_cached_chart_preview(state, &current_key) {
+            clear_active_chart_preview(state);
+        }
         return render_chart_protocol_state(f, chart_area, state, true);
     }
 
-    if state.chart_preview_state.current_request_key().as_ref() == Some(&current_key) {
+    if chart_loaded {
         perf::metrics().preview.cache_hits.increment();
         return render_chart_protocol_state(f, chart_area, state, is_pending);
     }
@@ -132,10 +137,7 @@ fn queue_chart_preview_load(
         return render_chart_protocol_state(f, chart_area, state, false);
     }
 
-    state.chart_preview_state.ds_loaded = Some(current_key.ds_path.clone());
-    state.chart_preview_state.ds_selection = Some(current_key.selection.clone());
-    state.chart_preview_state.error = None;
-    state.chart_preview_state.pending_key = Some(current_key.clone());
+    state.chart_preview_state.begin_loading(current_key.clone());
     state
         .chart_preview_state
         .tx_load_chartpreview

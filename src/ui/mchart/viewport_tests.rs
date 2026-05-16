@@ -590,6 +590,75 @@ fn comparison_scatter_mode_uses_selected_series_and_next_visible_series() {
 }
 
 #[test]
+fn comparison_scatter_mode_updates_when_selection_changes() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+    );
+    state.add_chart_item(
+        source("/group/c", selection),
+        vec![(0.0, 7.0), (1.0, 8.0), (2.0, 9.0)],
+    );
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    let first = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::ComparisonScatter(first) = first else {
+        panic!("expected comparison scatter data");
+    };
+    assert_eq!(first.x_label, "c[..,0]");
+    assert_eq!(first.y_label, "a[..,0]");
+
+    state.modified = false;
+    state.move_up();
+    assert!(state.modified);
+
+    let second = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::ComparisonScatter(second) = second else {
+        panic!("expected comparison scatter data");
+    };
+    assert_eq!(second.x_label, "b[..,0]");
+    assert_eq!(second.y_label, "c[..,0]");
+}
+
+#[test]
+fn comparison_scatter_mode_truncates_longer_visible_series_with_warning() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+    );
+    state.add_chart_item(source("/group/b", selection), vec![(0.0, 1.0), (1.0, 3.0)]);
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::ComparisonScatter(prepared) = prepared else {
+        panic!("expected comparison scatter data");
+    };
+    assert_eq!(prepared.points, vec![(1.0, 10.0), (3.0, 20.0)]);
+    assert_eq!(
+        state.chart_mode_subheader(),
+        "[sample aligned, truncated] - b[..,0] vs a[..,0] (using first 2 aligned samples; a[..,0] truncated by 1 trailing sample from x=2.0000)"
+    );
+}
+
+#[test]
 fn comparison_scatter_mode_rejects_misaligned_visible_windows() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -601,15 +670,14 @@ fn comparison_scatter_mode_rejects_misaligned_visible_windows() {
         source("/group/a", selection.clone()),
         vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
     );
-    state.add_chart_item(source("/group/b", selection), vec![(0.0, 1.0), (2.0, 3.0)]);
+    state.add_chart_item(
+        source("/group/b", selection),
+        vec![(0.0, 1.0), (1.5, 3.0), (2.0, 4.0)],
+    );
     state.cycle_view_mode();
     state.cycle_view_mode();
 
     assert!(state.prepared_chart_data().is_none());
-    assert_eq!(
-        state.chart_mode_subheader(),
-        "[sample aligned] - b[..,0] vs a[..,0]"
-    );
     assert_eq!(
         state.unavailable_chart_message(),
         "Comparison scatter requires matching visible sample positions in both series."

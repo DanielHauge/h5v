@@ -171,6 +171,7 @@ fn handle_global_action(
         }
         GlobalAction::ShowHelp => {
             state.help_return_mode = state.mode.clone();
+            state.help.scroll_offset = 0;
             state.mode = Mode::Help;
             Ok(EventResult::Redraw)
         }
@@ -300,6 +301,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         }
                         BoundAction::Action(NormalAction::ShowHelp) => {
                             state.help_return_mode = Mode::Normal;
+                            state.help.scroll_offset = 0;
                             state.mode = Mode::Help;
                             Ok(EventResult::Redraw)
                         }
@@ -396,7 +398,7 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         return Ok(EventResult::Continue);
                     }
                     match key_event.code {
-                        KeyCode::Esc => {
+                        KeyCode::Esc | KeyCode::Char('q') => {
                             state.mode = state.help_return_mode.clone();
                             return Ok(EventResult::Redraw);
                         }
@@ -407,6 +409,40 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                         }
                         KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                             if state.help_prev_tab() {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            let max_scroll = state
+                                .ui_layout
+                                .help_scrollbar
+                                .map(|hitbox| {
+                                    hitbox.content_lines.saturating_sub(hitbox.viewport_lines)
+                                })
+                                .unwrap_or(0);
+                            let page = state
+                                .ui_layout
+                                .help_content
+                                .map(|area| area.height.saturating_sub(1).max(1) as usize)
+                                .unwrap_or(1);
+                            if state.help_scroll_by(page as isize, max_scroll) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            let max_scroll = state
+                                .ui_layout
+                                .help_scrollbar
+                                .map(|hitbox| {
+                                    hitbox.content_lines.saturating_sub(hitbox.viewport_lines)
+                                })
+                                .unwrap_or(0);
+                            let page = state
+                                .ui_layout
+                                .help_content
+                                .map(|area| area.height.saturating_sub(1).max(1) as usize)
+                                .unwrap_or(1);
+                            if state.help_scroll_by(-(page as isize), max_scroll) {
                                 return Ok(EventResult::Redraw);
                             }
                         }

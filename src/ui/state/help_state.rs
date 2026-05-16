@@ -123,16 +123,18 @@ impl HelpCustomizationSection {
 pub enum HelpMultiChartSection {
     Overview,
     Expressions,
-    Functions,
-    Views,
+    FunctionReducers,
+    FunctionMath,
+    FunctionTransforms,
 }
 
 impl HelpMultiChartSection {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Overview,
         Self::Expressions,
-        Self::Functions,
-        Self::Views,
+        Self::FunctionReducers,
+        Self::FunctionMath,
+        Self::FunctionTransforms,
     ];
 
     pub(crate) fn step(self, delta: isize) -> Self {
@@ -152,6 +154,7 @@ pub struct HelpViewState {
     pub command_section: HelpCommandSection,
     pub customization_section: HelpCustomizationSection,
     pub multichart_section: HelpMultiChartSection,
+    pub scroll_offset: usize,
 }
 
 impl Default for HelpViewState {
@@ -162,6 +165,7 @@ impl Default for HelpViewState {
             command_section: HelpCommandSection::Navigation,
             customization_section: HelpCustomizationSection::Configuration,
             multichart_section: HelpMultiChartSection::Overview,
+            scroll_offset: 0,
         }
     }
 }

@@ -64,9 +64,9 @@ pub use preview::{
     CHART_PREVIEW_CACHE_CAPACITY,
 };
 pub use ui_layout::{
-    AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpSidebarHitbox, HelpSidebarTarget,
-    HelpTabHitbox, MatrixCellHitbox, MatrixRowHitbox, MetadataCellHitbox, TreeHitbox,
-    UiLayoutState,
+    AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,
+    HelpSidebarHitbox, HelpSidebarTarget, HelpTabHitbox, MatrixCellHitbox, MatrixRowHitbox,
+    MetadataCellHitbox, TreeHitbox, UiLayoutState,
 };
 
 pub struct AppState<'a> {
@@ -367,6 +367,7 @@ impl AppState<'_> {
             return false;
         }
         self.help.selected_tab = next;
+        self.help.scroll_offset = 0;
         true
     }
 
@@ -376,6 +377,7 @@ impl AppState<'_> {
             return false;
         }
         self.help.selected_tab = next;
+        self.help.scroll_offset = 0;
         true
     }
 
@@ -387,6 +389,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.keymap_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::Commands => {
@@ -395,6 +398,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.command_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::Configuration => {
@@ -403,6 +407,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.customization_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::MultiChart => {
@@ -411,6 +416,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.multichart_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             _ => false,
@@ -425,6 +431,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.keymap_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::Commands => {
@@ -433,6 +440,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.command_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::Configuration => {
@@ -441,6 +449,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.customization_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             HelpTab::MultiChart => {
@@ -449,6 +458,7 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.multichart_section = next;
+                self.help.scroll_offset = 0;
                 true
             }
             _ => false,
@@ -462,6 +472,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.keymap_section = HelpKeymapSection::Global;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -470,6 +481,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.command_section = HelpCommandSection::Navigation;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -478,6 +490,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.customization_section = HelpCustomizationSection::Configuration;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -486,6 +499,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.multichart_section = HelpMultiChartSection::Overview;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -500,6 +514,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.keymap_section = HelpKeymapSection::MultiChart;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -508,6 +523,7 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.command_section = HelpCommandSection::Input;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
@@ -516,19 +532,43 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.customization_section = HelpCustomizationSection::Scripting;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
             HelpTab::MultiChart => {
-                if self.help.multichart_section == HelpMultiChartSection::Views {
+                if self.help.multichart_section == HelpMultiChartSection::FunctionTransforms {
                     false
                 } else {
-                    self.help.multichart_section = HelpMultiChartSection::Views;
+                    self.help.multichart_section = HelpMultiChartSection::FunctionTransforms;
+                    self.help.scroll_offset = 0;
                     true
                 }
             }
             _ => false,
         }
+    }
+
+    pub fn help_scroll_by(&mut self, delta: isize, max_scroll: usize) -> bool {
+        let next = self
+            .help
+            .scroll_offset
+            .saturating_add_signed(delta)
+            .min(max_scroll);
+        if next == self.help.scroll_offset {
+            return false;
+        }
+        self.help.scroll_offset = next;
+        true
+    }
+
+    pub fn help_set_scroll(&mut self, offset: usize, max_scroll: usize) -> bool {
+        let next = offset.min(max_scroll);
+        if next == self.help.scroll_offset {
+            return false;
+        }
+        self.help.scroll_offset = next;
+        true
     }
 
     pub fn focus_left(&mut self) {

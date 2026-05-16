@@ -530,17 +530,9 @@ impl MultiChartState {
         ))
     }
 
-    fn comparison_scatter_points_are_aligned(&self) -> Option<bool> {
-        let (left, right) = self.comparison_scatter_pair()?;
-        let left_points = self.windowed_visible_points(left);
-        let right_points = self.windowed_visible_points(right);
-        Some(
-            left_points.len() == right_points.len()
-                && left_points
-                    .iter()
-                    .zip(&right_points)
-                    .all(|((left_x, _), (right_x, _))| left_x == right_x),
-        )
+    fn comparison_scatter_truncation_note(&self) -> Option<String> {
+        self.prepared_comparison_scatter_data()
+            .and_then(|prepared| prepared.truncation_note)
     }
 
     fn mode_window_summary(&self) -> String {
@@ -608,11 +600,16 @@ impl MultiChartState {
             super::MultiChartViewMode::Histogram => {
                 "[visible sample values] - overlaid distributions".to_string()
             }
-            super::MultiChartViewMode::ComparisonScatter => format!(
-                "[sample aligned] - {}",
-                self.comparison_scatter_pair_summary()
-                    .unwrap_or_else(|| "selected vs next visible series".to_string())
-            ),
+            super::MultiChartViewMode::ComparisonScatter => {
+                let summary = self
+                    .comparison_scatter_pair_summary()
+                    .unwrap_or_else(|| "selected vs next visible series".to_string());
+                if let Some(note) = self.comparison_scatter_truncation_note() {
+                    format!("[sample aligned, truncated] - {summary} ({note})")
+                } else {
+                    format!("[sample aligned] - {summary}")
+                }
+            }
         }
     }
 
@@ -626,7 +623,9 @@ impl MultiChartState {
                 "No histogram samples in the current visible window.".to_string()
             }
             super::MultiChartViewMode::ComparisonScatter => {
-                if matches!(self.comparison_scatter_points_are_aligned(), Some(false)) {
+                if self.comparison_scatter_pair().is_some()
+                    && self.prepared_comparison_scatter_data().is_none()
+                {
                     "Comparison scatter requires matching visible sample positions in both series."
                         .to_string()
                 } else {
@@ -800,18 +799,44 @@ impl MultiChartState {
             .windowed_visible_points(right)
             .into_iter()
             .collect::<Vec<_>>();
-        if left_points.len() != right_points.len()
+        let left_len = left_points.len();
+        let right_len = right_points.len();
+        let shared_len = left_len.min(right_len);
+        if shared_len == 0
             || left_points
                 .iter()
                 .zip(&right_points)
+                .take(shared_len)
                 .any(|((left_x, _), (right_x, _))| left_x != right_x)
         {
             return None;
         }
+        let truncation_note = match left_len.cmp(&right_len) {
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => {
+                let dropped = left_len - shared_len;
+                let truncated_at = left_points.get(shared_len).map(|(x, _)| *x)?;
+                Some(format!(
+                    "using first {shared_len} aligned samples; {} truncated by {dropped} trailing sample{} from x={truncated_at:.4}",
+                    self.item_display_label(left),
+                    if dropped == 1 { "" } else { "s" }
+                ))
+            }
+            std::cmp::Ordering::Less => {
+                let dropped = right_len - shared_len;
+                let truncated_at = right_points.get(shared_len).map(|(x, _)| *x)?;
+                Some(format!(
+                    "using first {shared_len} aligned samples; {} truncated by {dropped} trailing sample{} from x={truncated_at:.4}",
+                    self.item_display_label(right),
+                    if dropped == 1 { "" } else { "s" }
+                ))
+            }
+        };
         let points = left_points
-            .into_iter()
-            .zip(right_points)
-            .map(|((_, x), (_, y))| (x, y))
+            .iter()
+            .zip(&right_points)
+            .take(shared_len)
+            .map(|((_, x), (_, y))| (*x, *y))
             .collect::<Vec<_>>();
         let bounds = Self::bounds_from_points(points.iter())?;
 
@@ -829,6 +854,7 @@ impl MultiChartState {
             x_max: bounds.x_max,
             y_min: bounds.y_min,
             y_max: bounds.y_max,
+            truncation_note,
         })
     }
 

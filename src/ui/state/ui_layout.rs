@@ -72,6 +72,13 @@ pub struct HelpSidebarHitbox {
     pub target: HelpSidebarTarget,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HelpScrollbarHitbox {
+    pub area: Rect,
+    pub content_lines: usize,
+    pub viewport_lines: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
     pub help_toggle: Option<Rect>,
@@ -79,6 +86,8 @@ pub struct UiLayoutState {
     pub help_top_bar: Option<Rect>,
     pub help_tabs: Vec<HelpTabHitbox>,
     pub help_sidebar_items: Vec<HelpSidebarHitbox>,
+    pub help_content: Option<Rect>,
+    pub help_scrollbar: Option<HelpScrollbarHitbox>,
     pub tree: Option<TreeHitbox>,
     pub attributes: Option<AttributesHitbox>,
     pub content: Option<Rect>,

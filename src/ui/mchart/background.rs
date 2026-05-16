@@ -802,7 +802,11 @@ impl ExpressionEvalSnapshot {
 
 fn open_worker_file(file_path: Option<&str>) -> Result<Option<File>, String> {
     match file_path {
-        Some(file_path) => File::open(file_path)
+        Some(file_path) => File::with_options()
+            .with_fapl(|fapl| {
+                fapl.fclose_degree(hdf5_metno::plist::file_access::FileCloseDegree::Strong)
+            })
+            .open(file_path)
             .map(Some)
             .map_err(|error| format!("Failed to open HDF5 file '{file_path}': {error}")),
         None => Ok(None),

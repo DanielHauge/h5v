@@ -445,6 +445,7 @@ pub(super) fn handle_help(
 ) -> Result<EventResult, AppError> {
     let Some(CommandArgValue::Word(target)) = command.args.first() else {
         state.help_return_mode = state.command_return_mode.clone();
+        state.help.scroll_offset = 0;
         state.mode = Mode::Help;
         return Ok(EventResult::Redraw);
     };

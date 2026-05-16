@@ -145,6 +145,7 @@ struct PreparedComparisonScatterData {
     x_max: f64,
     y_min: f64,
     y_max: f64,
+    truncation_note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -936,14 +937,22 @@ impl MultiChartState {
     }
 
     pub fn move_up(&mut self) {
-        self.idx = self.idx.saturating_sub(1);
+        let next = self.idx.saturating_sub(1);
+        if next != self.idx {
+            self.idx = next;
+            self.modified = true;
+        }
     }
 
     pub fn move_down(&mut self) {
-        self.idx = self
+        let next = self
             .idx
             .saturating_add(1)
             .clamp(0, self.items.len().saturating_sub(1));
+        if next != self.idx {
+            self.idx = next;
+            self.modified = true;
+        }
     }
 
     pub fn toggle_selected_visible(&mut self) {

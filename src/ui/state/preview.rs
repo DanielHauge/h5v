@@ -235,6 +235,16 @@ impl ImgState {
             self.cached_images.pop_front();
         }
     }
+
+    pub fn begin_loading(&mut self, key: ImageLoadKey, idx_loaded: i32) {
+        self.protocol = None;
+        self.clipboard_image = None;
+        self.error = None;
+        self.ds = Some(key.ds_path.clone());
+        self.current_key = Some(key.clone());
+        self.idx_loaded = idx_loaded;
+        self.pending_keys.insert(key);
+    }
 }
 
 impl ChartPreviwState {
@@ -270,6 +280,15 @@ impl ChartPreviwState {
         while self.cached_previews.len() > capacity {
             self.cached_previews.pop_front();
         }
+    }
+
+    pub fn begin_loading(&mut self, key: ChartPreviewKey) {
+        self.ds_loaded = Some(key.ds_path.clone());
+        self.ds_selection = Some(key.selection.clone());
+        self.protocol = None;
+        self.clipboard_image = None;
+        self.error = None;
+        self.pending_key = Some(key);
     }
 }
 
@@ -376,5 +395,71 @@ mod tests {
             .cached_previews
             .iter()
             .any(|entry| entry.key == preview_key("third")));
+    }
+
+    #[test]
+    fn chart_preview_begin_loading_clears_active_preview_state() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            ds_loaded: Some("stale".to_string()),
+            protocol: None,
+            clipboard_image: Some(clipboard_image(9)),
+            error: Some("old".to_string()),
+            ds_selection: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+        };
+
+        let key = preview_key("fresh");
+        state.begin_loading(key.clone());
+
+        assert_eq!(state.ds_loaded, Some("fresh".to_string()));
+        assert_eq!(state.ds_selection, Some(key.selection.clone()));
+        assert!(state.clipboard_image.is_none());
+        assert!(state.error.is_none());
+        assert_eq!(state.pending_key, Some(key));
+    }
+
+    #[test]
+    fn image_begin_loading_clears_active_image_state() {
+        let (tx_resize_img, _) = channel();
+        let (tx_load_imgfs, _) = channel();
+        let (tx_load_imgfsvlen, _) = channel();
+        let (tx_load_img, _) = channel();
+        let mut state = ImgState {
+            protocol: None,
+            tx_resize_img,
+            tx_load_imgfs,
+            tx_load_imgfsvlen,
+            tx_load_img,
+            ds: Some("stale".to_string()),
+            current_key: None,
+            clipboard_image: Some(clipboard_image(7)),
+            window: None,
+            error: Some("old".to_string()),
+            idx_to_load: 3,
+            idx_loaded: -1,
+            cached_images: Default::default(),
+            pending_keys: Default::default(),
+        };
+        let key = ImageLoadKey {
+            ds_path: "fresh".to_string(),
+            idx: 2,
+            window_axis: None,
+            window_start: 0,
+            window_len: 0,
+        };
+
+        state.begin_loading(key.clone(), 2);
+
+        assert_eq!(state.ds, Some("fresh".to_string()));
+        assert_eq!(state.current_key, Some(key.clone()));
+        assert!(state.clipboard_image.is_none());
+        assert!(state.error.is_none());
+        assert_eq!(state.idx_loaded, 2);
+        assert!(state.pending_keys.contains(&key));
     }
 }

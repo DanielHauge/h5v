@@ -38,6 +38,7 @@ pub(super) fn handle_global_mouse_event(
                     state.mode = state.help_return_mode.clone();
                 } else {
                     state.help_return_mode = state.mode.clone();
+                    state.help.scroll_offset = 0;
                     state.mode = Mode::Help;
                 }
                 state.pending_chord = None;
@@ -83,12 +84,57 @@ pub(super) fn handle_help_mouse_event(
     mouse_event: MouseEvent,
 ) -> Result<EventResult, AppError> {
     state.pending_chord = None;
-    if !matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) {
-        return Ok(EventResult::Continue);
-    }
-
     let column = mouse_event.column;
     let row = mouse_event.row;
+    match mouse_event.kind {
+        MouseEventKind::ScrollUp => {
+            let max_scroll = state
+                .ui_layout
+                .help_scrollbar
+                .map(|hitbox| hitbox.content_lines.saturating_sub(hitbox.viewport_lines))
+                .unwrap_or(0);
+            if state.help_scroll_by(-3, max_scroll) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+        MouseEventKind::ScrollDown => {
+            let max_scroll = state
+                .ui_layout
+                .help_scrollbar
+                .map(|hitbox| hitbox.content_lines.saturating_sub(hitbox.viewport_lines))
+                .unwrap_or(0);
+            if state.help_scroll_by(3, max_scroll) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {}
+        _ => return Ok(EventResult::Continue),
+    }
+
+    if let Some(scrollbar) = state.ui_layout.help_scrollbar {
+        if point_in_rect(scrollbar.area, column, row)
+            && scrollbar.area.height > 0
+            && scrollbar.content_lines > scrollbar.viewport_lines
+        {
+            let max_scroll = scrollbar
+                .content_lines
+                .saturating_sub(scrollbar.viewport_lines);
+            let row_offset = row.saturating_sub(scrollbar.area.y) as usize;
+            let track_len = scrollbar.area.height.saturating_sub(1) as usize;
+            let target = if track_len == 0 {
+                0
+            } else {
+                row_offset.saturating_mul(max_scroll) / track_len
+            };
+            if state.help_set_scroll(target, max_scroll) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+    }
+
     if state
         .ui_layout
         .help_top_bar
@@ -106,6 +152,7 @@ pub(super) fn handle_help_mouse_event(
         .copied()
     {
         state.help.selected_tab = tab_hitbox.tab;
+        state.help.scroll_offset = 0;
         return Ok(EventResult::Redraw);
     }
 
@@ -134,6 +181,7 @@ pub(super) fn handle_help_mouse_event(
                 state.help.multichart_section = section;
             }
         }
+        state.help.scroll_offset = 0;
         return Ok(EventResult::Redraw);
     }
 

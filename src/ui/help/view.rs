@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -21,7 +21,7 @@ use super::panels::{
     help_key_style, help_muted_style, keymap_panel_text, multichart_panel_text, paragraph_line,
 };
 
-const HELP_PANEL_CACHE_SIZE: usize = 26;
+const HELP_PANEL_CACHE_SIZE: usize = 27;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HelpPanelCacheKey {
@@ -54,6 +54,8 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) 
     });
     state.ui_layout.help_tabs.clear();
     state.ui_layout.help_sidebar_items.clear();
+    state.ui_layout.help_content = None;
+    state.ui_layout.help_scrollbar = None;
 
     frame.render_widget(
         Block::default()
@@ -77,6 +79,9 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) 
         .title_bottom(Line::from(vec![
             Span::styled(" Esc ", help_key_style()),
             Span::styled(" close ", help_desc_style()),
+            Span::styled("  ", help_muted_style()),
+            Span::styled(" PgUp / PgDn ", help_key_style()),
+            Span::styled(" scroll ", help_desc_style()),
             Span::styled("  ", help_muted_style()),
             Span::styled(" Tab / Shift+Tab ", help_key_style()),
             Span::styled(" switch tabs ", help_desc_style()),
@@ -105,6 +110,7 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) 
         HelpTab::Heatmap => render_cached_panel(
             frame,
             sections[1],
+            state,
             HelpPanelCacheKey::Guide(HelpTab::Heatmap),
         ),
         HelpTab::Configuration => render_customization_help(frame, sections[1], state),
@@ -220,6 +226,7 @@ fn render_keymap_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_
     render_cached_panel(
         frame,
         layout[1],
+        state,
         HelpPanelCacheKey::Keymap(state.help.keymap_section),
     );
 }
@@ -249,6 +256,7 @@ fn render_command_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'
     render_cached_panel(
         frame,
         layout[1],
+        state,
         HelpPanelCacheKey::Command(state.help.command_section),
     );
 }
@@ -277,6 +285,7 @@ fn render_customization_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppS
     render_cached_panel(
         frame,
         layout[1],
+        state,
         HelpPanelCacheKey::Customization(state.help.customization_section),
     );
 }
@@ -293,8 +302,9 @@ fn render_multichart_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppStat
         &[
             (HelpMultiChartSection::Overview, "Overview"),
             (HelpMultiChartSection::Expressions, "Expressions"),
-            (HelpMultiChartSection::Functions, "Functions"),
-            (HelpMultiChartSection::Views, "Views"),
+            (HelpMultiChartSection::FunctionReducers, "Fns: reducers"),
+            (HelpMultiChartSection::FunctionMath, "Fns: math"),
+            (HelpMultiChartSection::FunctionTransforms, "Fns: transforms"),
         ],
         state.help.multichart_section,
         HelpSidebarTarget::MultiChart,
@@ -302,13 +312,19 @@ fn render_multichart_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppStat
     render_cached_panel(
         frame,
         layout[1],
+        state,
         HelpPanelCacheKey::MultiChart(state.help.multichart_section),
     );
 }
 
-fn render_cached_panel(frame: &mut Frame<'_>, area: Rect, key: HelpPanelCacheKey) {
+fn render_cached_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &mut AppState<'_>,
+    key: HelpPanelCacheKey,
+) {
     let (title, lines) = cached_panel(key);
-    render_content_panel(frame, area, title, lines);
+    render_content_panel(frame, area, state, title, lines);
 }
 
 fn render_sidebar<T: Copy + PartialEq>(
@@ -364,16 +380,60 @@ fn render_sidebar<T: Copy + PartialEq>(
 fn render_content_panel(
     frame: &mut Frame<'_>,
     area: Rect,
+    state: &mut AppState<'_>,
     title: impl Into<String>,
     lines: Vec<Line<'static>>,
 ) {
+    let title = title.into();
+    frame.render_widget(panel_block(&title), area);
+    let inner = area.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    state.ui_layout.help_content = Some(inner);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let viewport_lines = inner.height as usize;
+    let mut wrapped_lines = wrap_help_lines(&lines, inner.width as usize);
+    let mut total_lines = wrapped_lines.len().max(1);
+    let mut max_scroll = total_lines.saturating_sub(viewport_lines);
+    let show_scrollbar = max_scroll > 0 && inner.width > 3;
+    let (content_area, scrollbar_area) = if show_scrollbar {
+        let split = Layout::horizontal([Constraint::Min(0), Constraint::Length(1)])
+            .spacing(1)
+            .split(inner);
+        wrapped_lines = wrap_help_lines(&lines, split[0].width as usize);
+        total_lines = wrapped_lines.len().max(1);
+        max_scroll = total_lines.saturating_sub(viewport_lines);
+        (split[0], Some(split[1]))
+    } else {
+        (inner, None)
+    };
+    if state.help.scroll_offset > max_scroll {
+        state.help.scroll_offset = max_scroll;
+    }
+    state.ui_layout.help_content = Some(content_area);
     frame.render_widget(
-        Paragraph::new(Text::from(lines))
-            .block(panel_block(&title.into()))
+        Paragraph::new(Text::from(wrapped_lines))
             .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)))
-            .wrap(Wrap { trim: false }),
-        area,
+            .scroll((state.help.scroll_offset.min(u16::MAX as usize) as u16, 0)),
+        content_area,
     );
+    if let Some(scrollbar_area) = scrollbar_area {
+        state.ui_layout.help_scrollbar = Some(crate::ui::state::HelpScrollbarHitbox {
+            area: scrollbar_area,
+            content_lines: total_lines,
+            viewport_lines,
+        });
+        render_help_scrollbar(
+            frame,
+            scrollbar_area,
+            state.help.scroll_offset,
+            total_lines,
+            viewport_lines,
+        );
+    }
 }
 
 fn panel_block(title: &str) -> Block<'static> {
@@ -389,6 +449,124 @@ fn panel_block(title: &str) -> Block<'static> {
                 .fg(configure::themed_color(|colors| colors.help.title))
                 .bold(),
         )
+}
+
+fn render_help_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    scroll_offset: usize,
+    total_lines: usize,
+    viewport_lines: usize,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let track_len = area.height as usize;
+    let thumb_len = ((viewport_lines.saturating_mul(track_len) + total_lines.saturating_sub(1))
+        / total_lines.max(1))
+    .max(1)
+    .min(track_len);
+    let max_scroll = total_lines.saturating_sub(viewport_lines);
+    let thumb_start = if max_scroll == 0 || track_len <= thumb_len {
+        0
+    } else {
+        scroll_offset.saturating_mul(track_len.saturating_sub(thumb_len)) / max_scroll
+    };
+    let thumb_end = thumb_start.saturating_add(thumb_len).min(track_len);
+    let lines = (0..track_len)
+        .map(|idx| {
+            if (thumb_start..thumb_end).contains(&idx) {
+                Line::from(Span::styled("█", help_scrollbar_thumb_style()))
+            } else {
+                Line::from(Span::styled("│", help_scrollbar_track_style()))
+            }
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg))),
+        area,
+    );
+}
+
+fn wrap_help_lines(lines: &[Line<'static>], width: usize) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut wrapped = Vec::new();
+    for line in lines {
+        if line.spans.is_empty() || line.width() == 0 {
+            wrapped.push(Line::default());
+            continue;
+        }
+        let mut current_spans = Vec::new();
+        let mut current_width = 0usize;
+        for span in &line.spans {
+            let mut remaining = span.content.to_string();
+            if remaining.is_empty() {
+                continue;
+            }
+            while !remaining.is_empty() {
+                if current_width == width {
+                    wrapped.push(Line::from(current_spans));
+                    current_spans = Vec::new();
+                    current_width = 0;
+                }
+                let available = width.saturating_sub(current_width).max(1);
+                let (chunk, rest) = split_prefix_by_width(&remaining, available);
+                if chunk.is_empty() {
+                    break;
+                }
+                current_width += chunk.chars().count();
+                current_spans.push(Span::styled(chunk, span.style));
+                remaining = rest;
+                if current_width == width {
+                    wrapped.push(Line::from(current_spans));
+                    current_spans = Vec::new();
+                    current_width = 0;
+                }
+            }
+        }
+        if !current_spans.is_empty() {
+            wrapped.push(Line::from(current_spans));
+        }
+    }
+    if wrapped.is_empty() {
+        wrapped.push(Line::default());
+    }
+    wrapped
+}
+
+fn split_prefix_by_width(text: &str, width: usize) -> (String, String) {
+    if width == 0 {
+        return (String::new(), text.to_string());
+    }
+    let mut end = text.len();
+    let mut count = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if count == width {
+            end = idx;
+            break;
+        }
+        count += 1;
+        end = idx + ch.len_utf8();
+    }
+    if count <= width && end == text.len() {
+        (text.to_string(), String::new())
+    } else {
+        (text[..end].to_string(), text[end..].to_string())
+    }
+}
+
+fn help_scrollbar_track_style() -> Style {
+    Style::default()
+        .fg(configure::themed_color(|colors| colors.help.muted))
+        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
+}
+
+fn help_scrollbar_thumb_style() -> Style {
+    Style::default()
+        .fg(configure::themed_color(|colors| colors.text.primary))
+        .bg(configure::themed_color(|colors| colors.surface.focus_bg))
+        .bold()
 }
 
 fn cached_panel(key: HelpPanelCacheKey) -> (String, Vec<Line<'static>>) {
@@ -508,8 +686,9 @@ fn warm_help_panel_cache() {
     for section in [
         HelpMultiChartSection::Overview,
         HelpMultiChartSection::Expressions,
-        HelpMultiChartSection::Functions,
-        HelpMultiChartSection::Views,
+        HelpMultiChartSection::FunctionReducers,
+        HelpMultiChartSection::FunctionMath,
+        HelpMultiChartSection::FunctionTransforms,
     ] {
         let (title, lines) = multichart_panel_text(section);
         panels.push(CachedHelpPanel {

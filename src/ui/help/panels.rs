@@ -1,12 +1,16 @@
 use ratatui::{
     style::Style,
+    symbols::border,
     text::{Line, Span},
 };
 
 use crate::{
     configure,
     ui::{
-        command::{command_catalog, command_usage, CommandCategory, CommandDescriptor},
+        command::{
+            command_catalog, CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor,
+            CommandId,
+        },
         input::keymap::{
             AttributesAction, BoundAction, ContentAction, Direction, EffectiveKeymaps,
             GlobalAction, KeyBinding, MultiChartAction, NormalAction, TreeAction, WindowAction,
@@ -122,24 +126,187 @@ pub(super) fn command_panel_text(section: HelpCommandSection) -> (String, Vec<Li
 }
 
 fn command_descriptor_lines(descriptor: &CommandDescriptor) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(vec![
-        Span::styled(command_usage(descriptor), help_key_style()),
-        Span::raw("  "),
-        Span::styled(descriptor.description.to_string(), help_desc_style()),
-    ])];
+    let mut lines = vec![
+        command_signature_line(descriptor),
+        paragraph_line(descriptor.description),
+    ];
     if !descriptor.aliases.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("aliases: {}", descriptor.aliases.join(", ")),
-            help_muted_style(),
-        )));
+        lines.push(metadata_line("aliases", descriptor.aliases.join(", ")));
     }
     if !descriptor.keybindings.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("keys: {}", descriptor.keybindings.join(", ")),
-            help_muted_style(),
-        )));
+        lines.push(metadata_line("keys", descriptor.keybindings.join(", ")));
+    }
+    for (index, arg) in descriptor.args.iter().enumerate() {
+        lines.extend(command_arg_lines(descriptor, arg, index));
+    }
+    lines.extend(command_example_block(descriptor));
+    lines
+}
+
+fn command_signature_line(descriptor: &CommandDescriptor) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        descriptor.name.to_string(),
+        help_function_name_style(),
+    )];
+    for (index, arg) in descriptor.args.iter().enumerate() {
+        spans.push(Span::raw(" "));
+        let open = if arg.required { "<" } else { "[" };
+        let close = if arg.required { ">" } else { "]" };
+        spans.push(Span::styled(open.to_string(), help_muted_style()));
+        spans.push(Span::styled(arg.name.to_string(), help_arg_style(index)));
+        spans.push(Span::styled(": ".to_string(), help_muted_style()));
+        spans.push(Span::styled(
+            command_arg_kind_label(arg.kind).to_string(),
+            help_desc_style(),
+        ));
+        spans.push(Span::styled(close.to_string(), help_muted_style()));
+    }
+    Line::from(spans)
+}
+
+fn command_arg_kind_label(kind: CommandArgKind) -> &'static str {
+    match kind {
+        CommandArgKind::UnsignedInt => "uint",
+        CommandArgKind::Word => "word",
+    }
+}
+
+fn metadata_line(label: &str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label}: "), help_muted_style()),
+        Span::styled(value, help_desc_style()),
+    ])
+}
+
+fn command_arg_lines(
+    descriptor: &CommandDescriptor,
+    arg: &CommandArgSpec,
+    index: usize,
+) -> Vec<Line<'static>> {
+    let (description, values) = command_arg_help(descriptor.id, arg, index);
+    let mut lines = vec![Line::from(vec![
+        Span::styled("  ", help_muted_style()),
+        Span::styled(format!("{}: ", arg.name), help_arg_style(index)),
+        Span::styled(description.to_string(), help_muted_style()),
+    ])];
+    if !values.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("    values: ", help_muted_style()),
+            Span::styled(values.join(" | "), help_desc_style()),
+        ]));
     }
     lines
+}
+
+fn command_arg_help(
+    id: CommandId,
+    arg: &CommandArgSpec,
+    index: usize,
+) -> (&'static str, &'static [&'static str]) {
+    match (id, index, arg.name) {
+        (CommandId::Seek, 0, _) => ("Zero-based absolute index to jump to.", &[]),
+        (CommandId::Goto, 0, _) => ("Absolute HDF5 path to select in the tree.", &["/group/dataset"]),
+        (CommandId::Up | CommandId::Down | CommandId::Left | CommandId::Right, 0, _) => {
+            ("Optional positive step count.", &["1", "5", "10"])
+        }
+        (CommandId::Focus, 0, _) => ("Pane to focus.", &["tree", "attributes", "content"]),
+        (CommandId::Mode, 0, _) => ("Content mode to activate.", &["preview", "matrix", "heatmap"]),
+        (CommandId::Configure, 0, _) => ("Optional configure action.", &["reset"]),
+        (CommandId::X | CommandId::Row | CommandId::Col | CommandId::Dim, 0, _) => (
+            "Relative direction to move.",
+            &["next", "prev", "forward", "back", "left", "right", "up", "down"],
+        ),
+        (CommandId::Index, 0, _) => (
+            "Relative direction to move the selected index.",
+            &["next", "prev", "forward", "back", "left", "right", "up", "down"],
+        ),
+        (CommandId::Index, 1, _) => ("Optional number of index steps.", &["1", "4", "10"]),
+        (CommandId::Help, 0, _) => ("Optional command name to inspect.", &["help", "mchart", "configure"]),
+        (CommandId::Attr, 0, _) => ("Attribute action to run.", &["create", "delete"]),
+        (CommandId::Attr, 1, _) => ("Attribute name on the selected node.", &["title", "scale"]),
+        (CommandId::Attr, 2, _) => (
+            "Attribute type when creating.",
+            &["bool", "i64", "u64", "f64", "string", "ascii"],
+        ),
+        (CommandId::Attr, 3, _) => ("Optional initial value when creating.", &[]),
+        (CommandId::MultiChart, 0, _) => (
+            "Multichart action to run.",
+            &["open", "close", "toggle", "add", "expr", "prompt", "select", "visible", "remove", "clear", "fit", "zoom", "pan"],
+        ),
+        (CommandId::MultiChart, 1, _) => (
+            "Subcommand-specific argument such as a dataset spec, expression, target, or direction.",
+            &[],
+        ),
+        (CommandId::MultiChart, 2, _) => (
+            "Optional extra argument such as amount, zoom action, or selector.",
+            &[],
+        ),
+        (CommandId::MultiChart, 3, _) => (
+            "Optional extra argument such as amount or label.",
+            &[],
+        ),
+        (CommandId::Press, _, _) => ("Key spec to simulate through the input dispatcher.", &["ctrl+w", "o", "shift+tab"]),
+        (CommandId::Heatmap, 0, _) => ("Heatmap command family.", &["range"]),
+        (CommandId::Heatmap, 1, _) => ("Range action.", &["list", "use", "select", "add"]),
+        (CommandId::Heatmap, 2, _) => ("Range selector or lower bound, depending on the action.", &[]),
+        (CommandId::Heatmap, 3, _) => ("Upper bound for `heatmap range add`.", &[]),
+        (CommandId::Heatmap, 4, _) => ("Optional label for `heatmap range add`.", &[]),
+        (_, _, _) => match arg.kind {
+            CommandArgKind::UnsignedInt => ("Positive integer argument.", &["1", "5", "10"]),
+            CommandArgKind::Word => ("Word or quoted string argument.", &[]),
+        },
+    }
+}
+
+fn command_example_block(descriptor: &CommandDescriptor) -> Vec<Line<'static>> {
+    framed_example_lines(
+        Some("h5v"),
+        vec![command_example_line(command_example(descriptor.id))],
+    )
+}
+
+fn command_example_line(example: &str) -> Line<'static> {
+    match example.split_once(' ') {
+        Some((command, rest)) => Line::from(vec![
+            Span::styled(command.to_string(), help_function_name_style()),
+            Span::styled(" ".to_string(), help_code_style()),
+            Span::styled(rest.to_string(), help_code_style()),
+        ]),
+        None => Line::from(Span::styled(
+            example.to_string(),
+            help_function_name_style(),
+        )),
+    }
+}
+
+fn command_example(id: CommandId) -> &'static str {
+    match id {
+        CommandId::Seek => "seek 128",
+        CommandId::Goto => "goto /runs/run_04/signal",
+        CommandId::Up => "up 5",
+        CommandId::Down => "down 10",
+        CommandId::Left => "left 1",
+        CommandId::Right => "right 1",
+        CommandId::PageUp => "page-up",
+        CommandId::PageDown => "page-down",
+        CommandId::Focus => "focus content",
+        CommandId::Mode => "mode heatmap",
+        CommandId::ToggleTree => "toggle-tree",
+        CommandId::Reload => "reload",
+        CommandId::Configure => "configure reset",
+        CommandId::X => "x next",
+        CommandId::Row => "row prev",
+        CommandId::Col => "col next",
+        CommandId::Dim => "dim next",
+        CommandId::Index => "index next 4",
+        CommandId::Help => "help mchart",
+        CommandId::Attr => "attr create title string \"Run 42\"",
+        CommandId::Repeat => "repeat",
+        CommandId::MultiChart => "mchart add /group/signal[..,0]",
+        CommandId::Press => "press ctrl+w o",
+        CommandId::Heatmap => "heatmap range use \"Clip 1-99%\"",
+        CommandId::Noop => "noop",
+    }
 }
 
 fn grouped_keymap_lines<T>(
@@ -367,8 +534,9 @@ pub(super) fn multichart_panel_text(
     match section {
         HelpMultiChartSection::Overview => multichart_overview_panel(),
         HelpMultiChartSection::Expressions => multichart_expressions_panel(),
-        HelpMultiChartSection::Functions => multichart_functions_panel(),
-        HelpMultiChartSection::Views => multichart_views_panel(),
+        HelpMultiChartSection::FunctionReducers => multichart_function_reducers_panel(),
+        HelpMultiChartSection::FunctionMath => multichart_function_math_panel(),
+        HelpMultiChartSection::FunctionTransforms => multichart_function_transforms_panel(),
     }
 }
 
@@ -376,6 +544,7 @@ fn multichart_overview_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
         paragraph_line("Multichart compares raw selections, derived series, and scalar values in one workspace."),
         paragraph_line("Open it with M. Add the current preview selection with m. Use Enter or n to create expressions."),
+        paragraph_line("Use t / Tab to cycle line, histogram, and comparison scatter views; f / F fit the visible data; 0 / c resets the line viewport."),
         Line::raw(""),
         section_title_line("Quick flow"),
     ];
@@ -391,54 +560,365 @@ fn multichart_overview_panel() -> (String, Vec<Line<'static>>) {
 
 fn multichart_expressions_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
-        paragraph_line("$id or $name references an existing multichart item."),
-        paragraph_line("load(path) reads datasets or attributes and infers whether the result is a series or a scalar."),
+        paragraph_line("Use $id or $name to reference items already loaded into multichart. Use load(...) to bring in datasets or attributes directly from the file."),
+        paragraph_line("The editor accepts plain expressions, named derived series, scalar reducers, and transforms like interp(...) or slice(...)."),
         Line::raw(""),
-        section_title_line("Common shapes"),
+        section_title_line("Editor examples"),
     ];
-    lines.extend(highlighted_code_block(
-        "expr",
-        "expr",
-        "$1 - $2\nload(/signals/sine_wave)\nload(/matrix)[..,0]\nload(/group/ds:BIAS)\n($1 * load(/scale), load(/time))",
+    lines.extend(expression_editor_example(
+        "Reference an existing series",
+        "raw-a",
+        "$1",
+        "Keep a raw source around under a readable name so later expressions can reference $raw-a instead of a numeric id.",
     ));
     lines.push(Line::raw(""));
-    lines.push(paragraph_line("Tab switches between the name and expression fields while editing. Invalid expressions stay as drafts so they can be repaired."));
+    lines.extend(expression_editor_example(
+        "Load a dataset as a series",
+        "trace",
+        "load(/signals/trace)",
+        "load(/path) reads a one-dimensional dataset directly into multichart as a named series.",
+    ));
+    lines.push(Line::raw(""));
+    lines.extend(expression_editor_example(
+        "Slice a dataset while loading it",
+        "first-column",
+        "load(/matrix)[..,0]",
+        "Selectors let you pick one series axis from higher-rank arrays. Here the expression reads column 0 across all rows.",
+    ));
+    lines.push(Line::raw(""));
+    lines.extend(expression_editor_example(
+        "Load an attribute and use it in math",
+        "scaled",
+        "$1 * load(/group/ds:SCALE) + load(/group/ds:BIAS)",
+        "Attributes loaded with :ATTR_NAME behave like scalars, so they can scale or offset an existing series.",
+    ));
+    lines.push(Line::raw(""));
+    lines.extend(expression_editor_example(
+        "Slice or smooth an existing series",
+        "focus-window",
+        "rolling_mean(slice($1, 25.0, 250.0), 16)",
+        "slice($item, start_x, end_x) narrows a series to an x-range; rolling helpers then build a new derived series from the windowed data.",
+    ));
+    lines.push(Line::raw(""));
+    lines.extend(expression_editor_example(
+        "Normalize a series by its own statistics",
+        "normalized",
+        "($1 - mean($1)) / stddev($1)",
+        "Reducers return scalars, so they combine naturally with per-sample math to build normalized derived series.",
+    ));
+    lines.push(Line::raw(""));
+    lines.push(paragraph_line("Tab switches between the name and expression fields while editing. Invalid expressions stay as drafts so they can be repaired instead of being discarded."));
     ("Expressions".to_string(), lines)
 }
 
-fn multichart_functions_panel() -> (String, Vec<Line<'static>>) {
+fn multichart_function_reducers_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
-        paragraph_line("Reducers like avg/mean, min, max, stddev, and len return scalars."),
-        paragraph_line(
-            "Math like abs, sqrt, sin, round, and exp preserves scalar-vs-series shape.",
-        ),
-        paragraph_line("Rolling helpers and transforms build new derived series."),
-        Line::raw(""),
-        section_title_line("Examples"),
+        paragraph_line("Reducers collapse a whole series to one scalar value. They are useful for labels, normalization, thresholds, and scalar-only derived items."),
     ];
-    lines.extend(highlighted_code_block(
-        "expr",
-        "func",
-        "mean($1) + stddev($1)\nabs(round(sin($1)))\nrolling_mean($1, 16)\nthreshold($1, 0.5)\ndiff($1)\ninterp($3, 0.05)\nslice($3, 25.5, 250.5)",
-    ));
-    ("Functions and transforms".to_string(), lines)
+    for entry in [
+        function_card(
+            "avg",
+            &[("series", "Series")],
+            "scalar",
+            "Alias of mean(...); returns the arithmetic mean of the series values.",
+            &[("series", "The input series to reduce.")],
+            "avg($1)",
+        ),
+        function_card(
+            "mean",
+            &[("series", "Series")],
+            "scalar",
+            "Returns the arithmetic mean of the series values.",
+            &[("series", "The input series to reduce.")],
+            "mean($1)",
+        ),
+        function_card(
+            "min",
+            &[("series", "Series")],
+            "scalar",
+            "Returns the minimum y-value in the series.",
+            &[("series", "The input series to reduce.")],
+            "min($1)",
+        ),
+        function_card(
+            "max",
+            &[("series", "Series")],
+            "scalar",
+            "Returns the maximum y-value in the series.",
+            &[("series", "The input series to reduce.")],
+            "max($1)",
+        ),
+        function_card(
+            "stddev",
+            &[("series", "Series")],
+            "scalar",
+            "Returns the standard deviation of the series values.",
+            &[("series", "The input series to reduce.")],
+            "stddev($1)",
+        ),
+        function_card(
+            "len",
+            &[("series", "Series")],
+            "scalar",
+            "Returns the number of samples in the series.",
+            &[("series", "The input series to count.")],
+            "len($1)",
+        ),
+        function_card(
+            "max2",
+            &[("lhs", "Scalar"), ("rhs", "Scalar")],
+            "scalar",
+            "Returns the larger of two scalar values.",
+            &[
+                ("lhs", "Left scalar value."),
+                ("rhs", "Right scalar value."),
+            ],
+            "max2(mean($1), mean($2))",
+        ),
+        function_card(
+            "min2",
+            &[("lhs", "Scalar"), ("rhs", "Scalar")],
+            "scalar",
+            "Returns the smaller of two scalar values.",
+            &[
+                ("lhs", "Left scalar value."),
+                ("rhs", "Right scalar value."),
+            ],
+            "min2(max($1), max($2))",
+        ),
+    ] {
+        lines.extend(entry);
+        lines.push(Line::raw(""));
+    }
+    ("Functions · reducers".to_string(), lines)
 }
 
-fn multichart_views_panel() -> (String, Vec<Line<'static>>) {
+fn multichart_function_math_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
-        paragraph_line("Line mode plots visible series. Histogram overlays visible sample distributions. Comparison scatter plots the selected visible series against the next visible series."),
-        paragraph_line("Histogram and comparison scatter reuse the current visible x-window as their sample window."),
-        Line::raw(""),
-        section_title_line("View controls"),
+        paragraph_line("These helpers preserve shape: series stay series, scalars stay scalars. Use them for cleanup, scaling, and nonlinear transforms."),
     ];
-    lines.extend(highlighted_code_block(
-        "expr",
-        "view",
-        "t / Tab / Shift+Tab   cycle views\nf / F                  fit all / fit selected\n0 / c                  reset viewport\nh / l                  pan line view",
-    ));
-    lines.push(Line::raw(""));
-    lines.push(paragraph_line("Only line mode zooms. Histogram and comparison scatter keep the sample window but ignore zoom gestures."));
-    ("Views and navigation".to_string(), lines)
+    for entry in [
+        function_card(
+            "abs",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Absolute value.",
+            &[("value", "Scalar or series to transform.")],
+            "abs($1)",
+        ),
+        function_card(
+            "sqrt",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Square root.",
+            &[("value", "Scalar or series to transform.")],
+            "sqrt(abs($1))",
+        ),
+        function_card(
+            "ln",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Natural logarithm.",
+            &[("value", "Scalar or series to transform.")],
+            "ln($1)",
+        ),
+        function_card(
+            "log10",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Base-10 logarithm.",
+            &[("value", "Scalar or series to transform.")],
+            "log10($1)",
+        ),
+        function_card(
+            "sin",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Sine.",
+            &[("value", "Scalar or series to transform.")],
+            "sin($1)",
+        ),
+        function_card(
+            "cos",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Cosine.",
+            &[("value", "Scalar or series to transform.")],
+            "cos($1)",
+        ),
+        function_card(
+            "tan",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Tangent.",
+            &[("value", "Scalar or series to transform.")],
+            "tan($1)",
+        ),
+        function_card(
+            "floor",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Round toward negative infinity.",
+            &[("value", "Scalar or series to transform.")],
+            "floor($1)",
+        ),
+        function_card(
+            "ceil",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Round toward positive infinity.",
+            &[("value", "Scalar or series to transform.")],
+            "ceil($1)",
+        ),
+        function_card(
+            "round",
+            &[("value", "Scalar | Series")],
+            "same shape",
+            "Round to the nearest integer value.",
+            &[("value", "Scalar or series to transform.")],
+            "round($1)",
+        ),
+        function_card(
+            "exp",
+            &[("base", "Scalar | Series"), ("power", "Scalar | Series")],
+            "same shape",
+            "Raises base to power element-wise.",
+            &[
+                ("base", "Base value or series."),
+                ("power", "Exponent value or series."),
+            ],
+            "exp($1, 2)",
+        ),
+    ] {
+        lines.extend(entry);
+        lines.push(Line::raw(""));
+    }
+    ("Functions · math".to_string(), lines)
+}
+
+fn multichart_function_transforms_panel() -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        paragraph_line("Transforms build new series from existing ones. rolling_* helpers work anywhere; interp(...) and slice(...) must stay at the top level of the expression."),
+    ];
+    for entry in [
+        function_card(
+            "rolling_mean",
+            &[("series", "Series"), ("window", "Scalar")],
+            "series",
+            "Sliding-window mean.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+            ],
+            "rolling_mean($1, 16)",
+        ),
+        function_card(
+            "rolling_median",
+            &[("series", "Series"), ("window", "Scalar")],
+            "series",
+            "Sliding-window median.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+            ],
+            "rolling_median($1, 16)",
+        ),
+        function_card(
+            "rolling_stddev",
+            &[("series", "Series"), ("window", "Scalar")],
+            "series",
+            "Sliding-window standard deviation.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+            ],
+            "rolling_stddev($1, 16)",
+        ),
+        function_card(
+            "rolling_min",
+            &[("series", "Series"), ("window", "Scalar")],
+            "series",
+            "Sliding-window minimum.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+            ],
+            "rolling_min($1, 16)",
+        ),
+        function_card(
+            "rolling_max",
+            &[("series", "Series"), ("window", "Scalar")],
+            "series",
+            "Sliding-window maximum.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+            ],
+            "rolling_max($1, 16)",
+        ),
+        function_card(
+            "rolling_quantile",
+            &[("series", "Series"), ("window", "Scalar"), ("q", "Scalar")],
+            "series",
+            "Sliding-window quantile.",
+            &[
+                ("series", "Input series."),
+                ("window", "Window size in samples."),
+                ("q", "Quantile from 0.0 to 1.0."),
+            ],
+            "rolling_quantile($1, 32, 0.95)",
+        ),
+        function_card(
+            "threshold",
+            &[("value", "Scalar | Series"), ("threshold", "Scalar")],
+            "same shape",
+            "Returns 1.0 where value >= threshold, otherwise 0.0.",
+            &[
+                ("value", "Scalar or series to test."),
+                ("threshold", "Threshold value."),
+            ],
+            "threshold($1, 0.5)",
+        ),
+        function_card(
+            "diff",
+            &[("series", "Series")],
+            "series",
+            "Returns the first difference of a series.",
+            &[("series", "Input series.")],
+            "diff($1)",
+        ),
+        function_card(
+            "interp",
+            &[("series", "Series"), ("step", "Scalar")],
+            "series",
+            "Top-level transform that resamples a series to a fixed x-step.",
+            &[
+                ("series", "Direct chart item reference like $1."),
+                ("step", "Target spacing between samples."),
+            ],
+            "interp($1, 0.05)",
+        ),
+        function_card(
+            "slice",
+            &[
+                ("series", "Series"),
+                ("start_x", "Scalar"),
+                ("end_x", "Scalar"),
+            ],
+            "series",
+            "Top-level transform that keeps only the requested x-range.",
+            &[
+                ("series", "Direct chart item reference like $1."),
+                ("start_x", "Inclusive starting x value."),
+                ("end_x", "Inclusive ending x value."),
+            ],
+            "slice($1, 25.5, 250.5)",
+        ),
+    ] {
+        lines.extend(entry);
+        lines.push(Line::raw(""));
+    }
+    ("Functions · transforms".to_string(), lines)
 }
 
 pub(super) fn heatmap_help_lines() -> Vec<Line<'static>> {
@@ -513,7 +993,7 @@ fn customization_configuration_panel() -> (String, Vec<Line<'static>>) {
     ];
     lines.extend(highlighted_code_block(
         "sh",
-        "terminal",
+        "h5v",
         ":configure\n:configure reset\nhelp reload",
     ));
     lines.push(Line::raw(""));
@@ -634,13 +1114,13 @@ fn customization_scripting_panel() -> (String, Vec<Line<'static>>) {
     ];
     lines.extend(highlighted_code_block(
         "sh",
-        "terminal",
+        "shell",
         "h5v data.h5 --script workflow.h5v\nh5v data.h5 --script-test < workflow.h5v",
     ));
     lines.push(Line::raw(""));
     lines.extend(highlighted_code_block(
         "sh",
-        "script",
+        "h5v",
         "goto /experiments/run_04/image\nmode heatmap\nheatmap range use \"Clip 1-99%\"\nmchart add /experiments/run_04/signal[..,0]\npress ctrl+w o",
     ));
     lines.push(Line::raw(""));
@@ -651,7 +1131,7 @@ fn customization_scripting_panel() -> (String, Vec<Line<'static>>) {
     lines.push(section_title_line("Mixing CLI and Lua"));
     lines.extend(highlighted_code_block(
         "sh",
-        "terminal",
+        "shell",
         "h5v data.h5 \\\n  --command 'goto /group/image' \\\n  --command 'mode heatmap' \\\n  --command 'heatmap range use \"Clip 1-99%\"'",
     ));
     lines.push(Line::raw(""));
@@ -694,18 +1174,93 @@ pub(super) fn paragraph_line(text: &str) -> Line<'static> {
     Line::from(Span::styled(text.to_string(), help_desc_style()))
 }
 
-fn highlighted_code_block(language: &str, badge: &str, source: &str) -> Vec<Line<'static>> {
-    let mut rendered = Vec::new();
-    rendered.push(Line::from(vec![
-        Span::styled(format!(" {badge} "), help_code_badge_style()),
-        Span::styled(
-            format!("  {}", language_label(language)),
-            help_muted_style(),
-        ),
-    ]));
+fn expression_editor_example(
+    title: &str,
+    name: &str,
+    expression: &str,
+    description: &str,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![section_title_line(title)];
+    lines.extend(multichart_prompt_example(7, name, expression, "prompt"));
+    lines.push(Line::from(Span::styled(
+        description.to_string(),
+        help_muted_style(),
+    )));
+    lines
+}
+
+fn function_card(
+    name: &str,
+    args: &[(&str, &str)],
+    returns: &str,
+    description: &str,
+    params: &[(&str, &str)],
+    example: &str,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![function_signature_line(name, args, returns)];
+    lines.push(paragraph_line(description));
+    for (index, (arg_name, arg_desc)) in params.iter().enumerate() {
+        lines.push(Line::from(vec![
+            Span::styled("  ", help_muted_style()),
+            Span::styled(format!("{arg_name}: "), help_arg_style(index)),
+            Span::styled(arg_desc.to_string(), help_muted_style()),
+        ]));
+    }
+    lines.extend(multichart_prompt_example(
+        7,
+        &format!("{name}-demo"),
+        example,
+        "prompt",
+    ));
+    lines
+}
+
+fn function_signature_line(name: &str, args: &[(&str, &str)], returns: &str) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled(name.to_string(), help_function_name_style()),
+        Span::styled("(".to_string(), help_muted_style()),
+    ];
+    for (index, (arg_name, arg_kind)) in args.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(", ".to_string(), help_muted_style()));
+        }
+        spans.push(Span::styled(arg_name.to_string(), help_arg_style(index)));
+        spans.push(Span::styled(": ".to_string(), help_muted_style()));
+        spans.push(Span::styled(arg_kind.to_string(), help_desc_style()));
+    }
+    spans.push(Span::styled(")".to_string(), help_muted_style()));
+    spans.push(Span::styled(" -> ".to_string(), help_muted_style()));
+    spans.push(Span::styled(returns.to_string(), help_return_style()));
+    Line::from(spans)
+}
+
+fn highlighted_code_block(language: &str, title: &str, source: &str) -> Vec<Line<'static>> {
     let mut code_lines = highlighted_lines(source, language)
         .unwrap_or_else(|| source.lines().map(code_fallback_line).collect::<Vec<_>>());
-    for line in &mut code_lines {
+    if code_lines.is_empty() {
+        code_lines.push(code_fallback_line(""));
+    }
+    framed_example_lines(Some(title), code_lines)
+}
+
+fn code_fallback_line(code: &str) -> Line<'static> {
+    Line::from(Span::styled(code.to_string(), help_code_style()))
+}
+
+fn framed_example_lines(
+    title: Option<&str>,
+    mut content_lines: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let content_width = content_lines.iter().map(Line::width).max().unwrap_or(0);
+    let title_width = title
+        .map(|title| title.chars().count().saturating_add(2))
+        .unwrap_or(0);
+    let inner_width = content_width.max(title_width);
+    let mut rendered = Vec::with_capacity(content_lines.len().saturating_add(2));
+    rendered.push(example_box_top_line(title, inner_width));
+    for line in &mut content_lines {
+        let current_width = line.width();
+        let padding = inner_width.saturating_sub(current_width);
         for span in &mut line.spans {
             span.style = span
                 .style
@@ -715,21 +1270,97 @@ fn highlighted_code_block(language: &str, badge: &str, source: &str) -> Vec<Line
             line.spans
                 .push(Span::styled("".to_string(), help_code_style()));
         }
+        let mut spans = Vec::with_capacity(line.spans.len().saturating_add(3));
+        spans.push(Span::styled("│ ".to_string(), help_code_border_style()));
+        spans.extend(line.spans.clone());
+        if padding > 0 {
+            spans.push(Span::styled(" ".repeat(padding), help_code_style()));
+        }
+        spans.push(Span::styled(" │".to_string(), help_code_border_style()));
+        rendered.push(Line::from(spans));
     }
-    rendered.extend(code_lines);
+    rendered.push(example_box_bottom_line(inner_width));
     rendered
 }
 
-fn code_fallback_line(code: &str) -> Line<'static> {
-    Line::from(Span::styled(code.to_string(), help_code_style()))
+fn example_box_top_line(title: Option<&str>, inner_width: usize) -> Line<'static> {
+    let set = border::ROUNDED;
+    let total_width = inner_width.saturating_add(2);
+    let Some(title) = title.filter(|title| !title.is_empty()) else {
+        return Line::from(vec![
+            Span::styled(set.top_left.to_string(), help_code_border_style()),
+            Span::styled(
+                set.horizontal_top.repeat(total_width),
+                help_code_border_style(),
+            ),
+            Span::styled(set.top_right.to_string(), help_code_border_style()),
+        ]);
+    };
+    let title_text = format!(" {title} ");
+    let trailing_width = total_width.saturating_sub(title_text.chars().count());
+    Line::from(vec![
+        Span::styled(set.top_left.to_string(), help_code_border_style()),
+        Span::styled(title_text, help_code_title_style(title)),
+        Span::styled(
+            set.horizontal_top.repeat(trailing_width),
+            help_code_border_style(),
+        ),
+        Span::styled(set.top_right.to_string(), help_code_border_style()),
+    ])
 }
 
-fn language_label(language: &str) -> &'static str {
-    match language {
-        "lua" => "Lua",
-        "sh" => "Shell",
-        _ => "Code",
-    }
+fn example_box_bottom_line(inner_width: usize) -> Line<'static> {
+    let set = border::ROUNDED;
+    Line::from(vec![
+        Span::styled(set.bottom_left.to_string(), help_code_border_style()),
+        Span::styled(
+            set.horizontal_bottom.repeat(inner_width.saturating_add(2)),
+            help_code_border_style(),
+        ),
+        Span::styled(set.bottom_right.to_string(), help_code_border_style()),
+    ])
+}
+
+fn multichart_prompt_example(
+    item_id: usize,
+    name: &str,
+    expression: &str,
+    title: &str,
+) -> Vec<Line<'static>> {
+    let expression_line = highlighted_lines(expression, "expr")
+        .and_then(|mut lines| {
+            if lines.is_empty() {
+                None
+            } else {
+                Some(lines.remove(0))
+            }
+        })
+        .unwrap_or_else(|| code_fallback_line(expression));
+    let mut line = Line::from(vec![
+        Span::styled(
+            format!("${item_id} "),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.toast.warning))
+                .bold(),
+        ),
+        Span::styled(
+            format!("${name}"),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.tree.dataset_file))
+                .underlined(),
+        ),
+        Span::styled(
+            " = ".to_string(),
+            Style::default()
+                .fg(configure::themed_color(|colors| {
+                    colors.mchart.prompt_prefix
+                }))
+                .bold()
+                .dim(),
+        ),
+    ]);
+    line.spans.extend(expression_line.spans);
+    framed_example_lines(Some(title), vec![line])
 }
 
 pub(super) fn help_key_style() -> Style {
@@ -761,9 +1392,46 @@ fn help_code_style() -> Style {
         .bg(configure::themed_color(|colors| colors.surface.bg_val3))
 }
 
-fn help_code_badge_style() -> Style {
+fn help_function_name_style() -> Style {
+    Style::default()
+        .fg(configure::themed_color(|colors| colors.help.section))
+        .bold()
+}
+
+fn help_arg_style(index: usize) -> Style {
+    Style::default().fg(configure::themed_color(|colors| {
+        colors.chart.series[index % colors.chart.series.len()]
+    }))
+}
+
+fn help_return_style() -> Style {
     Style::default()
         .fg(configure::themed_color(|colors| colors.accent.selection_fg))
         .bg(configure::themed_color(|colors| colors.accent.selection_bg))
         .bold()
+}
+
+fn help_code_border_style() -> Style {
+    Style::default()
+        .fg(configure::themed_color(|colors| colors.help.muted))
+        .bg(configure::themed_color(|colors| colors.surface.bg_val3))
+        .dim()
+}
+
+fn help_code_title_style(title: &str) -> Style {
+    let key = title.to_ascii_lowercase();
+    let fg = match key.as_str() {
+        "shell" => configure::themed_color(|colors| colors.toast.warning),
+        "lua" => {
+            configure::themed_color(|colors| colors.chart.series[2 % colors.chart.series.len()])
+        }
+        "h5v" => configure::themed_color(|colors| colors.mchart.prompt_prefix),
+        "prompt" => configure::themed_color(|colors| colors.tree.dataset_file),
+        _ => configure::themed_color(|colors| colors.help.muted),
+    };
+    Style::default()
+        .fg(fg)
+        .bg(configure::themed_color(|colors| colors.surface.bg_val3))
+        .bold()
+        .dim()
 }

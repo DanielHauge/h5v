@@ -135,6 +135,7 @@ pub(crate) fn handle_mchart_event(
                     Some(BoundAction::Action(MultiChartAction::Quit)) => Ok(EventResult::Quit),
                     Some(BoundAction::Action(MultiChartAction::ShowHelp)) => {
                         state.help_return_mode = Mode::MultiChart;
+                        state.help.scroll_offset = 0;
                         state.mode = Mode::Help;
                         state.help.selected_tab = crate::ui::state::HelpTab::MultiChart;
                         Ok(EventResult::Redraw)
