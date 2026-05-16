@@ -22,7 +22,21 @@ pub(super) fn handle_seek(
     state: &mut AppState<'_>,
     command: &CommandInvocation,
 ) -> Result<EventResult, AppError> {
-    state.set(command.usize_arg(0)?)
+    state.seek_absolute(command.usize_arg(0)?, command.usize_arg_optional(1)?)
+}
+
+pub(super) fn handle_seek_row(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    state.seek_row_absolute(command.usize_arg(0)?)
+}
+
+pub(super) fn handle_seek_col(
+    state: &mut AppState<'_>,
+    command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    state.seek_col_absolute(command.usize_arg(0)?)
 }
 
 pub(super) fn handle_goto(

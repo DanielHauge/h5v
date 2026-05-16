@@ -2,18 +2,6 @@ use std::time::SystemTime;
 
 use crate::{error::FixedStringOverflow, h5f::AttributeCreateType};
 
-#[allow(dead_code)]
-#[cfg(target_os = "windows")]
-pub fn display_path(path: &str) -> String {
-    path.replace('/', "\\")
-}
-
-#[allow(dead_code)]
-#[cfg(not(target_os = "windows"))]
-pub fn display_path(path: &str) -> String {
-    path.to_string()
-}
-
 #[derive(Debug, Clone)]
 pub enum LastFocused {
     Attributes,

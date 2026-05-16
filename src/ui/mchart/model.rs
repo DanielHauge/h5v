@@ -197,7 +197,6 @@ impl DatasetChartSource {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChartSource {
     DatasetSelection(DatasetChartSource),
-    #[allow(dead_code)]
     DerivedExpression {
         expression: String,
         input_ids: Vec<ChartItemId>,

@@ -280,7 +280,6 @@ impl RenderedAttributeRow {
 #[derive(Debug)]
 pub struct ComputedAttributes {
     pub longest_name_length: u16,
-    #[allow(dead_code)]
     pub attributes: Vec<(String, Attribute)>,
     pub rendered_rows: Vec<RenderedAttributeRow>,
 }

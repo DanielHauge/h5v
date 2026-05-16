@@ -11,9 +11,9 @@ pub use catalogs::{
     parse_window_action_name,
 };
 use defaults::{
-    default_attributes_bindings, default_content_bindings, default_heatmap_bindings,
-    default_multichart_bindings, default_normal_bindings, default_tree_bindings,
-    default_window_bindings,
+    default_attributes_bindings, default_content_bindings, default_global_bindings,
+    default_heatmap_bindings, default_multichart_bindings, default_normal_bindings,
+    default_tree_bindings, default_window_bindings,
 };
 pub use parse::{parse_key_pattern, parse_simulated_key};
 
@@ -195,6 +195,7 @@ pub struct ActionCode<T> {
     pub symbol: &'static str,
     pub code: &'static str,
     pub action: T,
+    pub default_keys: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,7 +269,7 @@ pub struct EffectiveKeymaps {
 impl Default for EffectiveKeymaps {
     fn default() -> Self {
         Self {
-            global: Vec::new(),
+            global: default_global_bindings(),
             normal: default_normal_bindings(),
             window: default_window_bindings(),
             tree: default_tree_bindings(),
@@ -385,7 +386,11 @@ pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
 
 pub fn merge_keymap_config(config: &KeymapConfig) -> Result<EffectiveKeymaps, String> {
     Ok(EffectiveKeymaps {
-        global: merge_scope(KeymapScope::Global, &[], &config.global)?,
+        global: merge_scope(
+            KeymapScope::Global,
+            &default_global_bindings(),
+            &config.global,
+        )?,
         normal: merge_scope(
             KeymapScope::Normal,
             &default_normal_bindings(),

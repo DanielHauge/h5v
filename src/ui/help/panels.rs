@@ -9,7 +9,6 @@ use crate::{
     ui::{
         command::{
             command_catalog, CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor,
-            CommandId,
         },
         input::keymap::{
             AttributesAction, BoundAction, ContentAction, Direction, EffectiveKeymaps,
@@ -137,7 +136,7 @@ fn command_descriptor_lines(descriptor: &CommandDescriptor) -> Vec<Line<'static>
         lines.push(metadata_line("keys", descriptor.keybindings.join(", ")));
     }
     for (index, arg) in descriptor.args.iter().enumerate() {
-        lines.extend(command_arg_lines(descriptor, arg, index));
+        lines.extend(command_arg_lines(arg, index));
     }
     lines.extend(command_example_block(descriptor));
     lines
@@ -178,91 +177,23 @@ fn metadata_line(label: &str, value: String) -> Line<'static> {
     ])
 }
 
-fn command_arg_lines(
-    descriptor: &CommandDescriptor,
-    arg: &CommandArgSpec,
-    index: usize,
-) -> Vec<Line<'static>> {
-    let (description, values) = command_arg_help(descriptor.id, arg, index);
+fn command_arg_lines(arg: &CommandArgSpec, index: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("  ", help_muted_style()),
         Span::styled(format!("{}: ", arg.name), help_arg_style(index)),
-        Span::styled(description.to_string(), help_muted_style()),
+        Span::styled(arg.help.to_string(), help_muted_style()),
     ])];
-    if !values.is_empty() {
+    if !arg.values.is_empty() {
         lines.push(Line::from(vec![
             Span::styled("    values: ", help_muted_style()),
-            Span::styled(values.join(" | "), help_desc_style()),
+            Span::styled(arg.values.join(" | "), help_desc_style()),
         ]));
     }
     lines
 }
 
-fn command_arg_help(
-    id: CommandId,
-    arg: &CommandArgSpec,
-    index: usize,
-) -> (&'static str, &'static [&'static str]) {
-    match (id, index, arg.name) {
-        (CommandId::Seek, 0, _) => ("Zero-based absolute index to jump to.", &[]),
-        (CommandId::Goto, 0, _) => ("Absolute HDF5 path to select in the tree.", &["/group/dataset"]),
-        (CommandId::Up | CommandId::Down | CommandId::Left | CommandId::Right, 0, _) => {
-            ("Optional positive step count.", &["1", "5", "10"])
-        }
-        (CommandId::Focus, 0, _) => ("Pane to focus.", &["tree", "attributes", "content"]),
-        (CommandId::Mode, 0, _) => ("Content mode to activate.", &["preview", "matrix", "heatmap"]),
-        (CommandId::Configure, 0, _) => ("Optional configure action.", &["reset"]),
-        (CommandId::X | CommandId::Row | CommandId::Col | CommandId::Dim, 0, _) => (
-            "Relative direction to move.",
-            &["next", "prev", "forward", "back", "left", "right", "up", "down"],
-        ),
-        (CommandId::Index, 0, _) => (
-            "Relative direction to move the selected index.",
-            &["next", "prev", "forward", "back", "left", "right", "up", "down"],
-        ),
-        (CommandId::Index, 1, _) => ("Optional number of index steps.", &["1", "4", "10"]),
-        (CommandId::Help, 0, _) => ("Optional command name to inspect.", &["help", "mchart", "configure"]),
-        (CommandId::Attr, 0, _) => ("Attribute action to run.", &["create", "delete"]),
-        (CommandId::Attr, 1, _) => ("Attribute name on the selected node.", &["title", "scale"]),
-        (CommandId::Attr, 2, _) => (
-            "Attribute type when creating.",
-            &["bool", "i64", "u64", "f64", "string", "ascii"],
-        ),
-        (CommandId::Attr, 3, _) => ("Optional initial value when creating.", &[]),
-        (CommandId::MultiChart, 0, _) => (
-            "Multichart action to run.",
-            &["open", "close", "toggle", "add", "expr", "prompt", "select", "visible", "remove", "clear", "fit", "zoom", "pan"],
-        ),
-        (CommandId::MultiChart, 1, _) => (
-            "Subcommand-specific argument such as a dataset spec, expression, target, or direction.",
-            &[],
-        ),
-        (CommandId::MultiChart, 2, _) => (
-            "Optional extra argument such as amount, zoom action, or selector.",
-            &[],
-        ),
-        (CommandId::MultiChart, 3, _) => (
-            "Optional extra argument such as amount or label.",
-            &[],
-        ),
-        (CommandId::Press, _, _) => ("Key spec to simulate through the input dispatcher.", &["ctrl+w", "o", "shift+tab"]),
-        (CommandId::Heatmap, 0, _) => ("Heatmap command family.", &["range"]),
-        (CommandId::Heatmap, 1, _) => ("Range action.", &["list", "use", "select", "add"]),
-        (CommandId::Heatmap, 2, _) => ("Range selector or lower bound, depending on the action.", &[]),
-        (CommandId::Heatmap, 3, _) => ("Upper bound for `heatmap range add`.", &[]),
-        (CommandId::Heatmap, 4, _) => ("Optional label for `heatmap range add`.", &[]),
-        (_, _, _) => match arg.kind {
-            CommandArgKind::UnsignedInt => ("Positive integer argument.", &["1", "5", "10"]),
-            CommandArgKind::Word => ("Word or quoted string argument.", &[]),
-        },
-    }
-}
-
 fn command_example_block(descriptor: &CommandDescriptor) -> Vec<Line<'static>> {
-    framed_example_lines(
-        Some("h5v"),
-        vec![command_example_line(command_example(descriptor.id))],
-    )
+    framed_example_lines(Some("h5v"), vec![command_example_line(descriptor.example)])
 }
 
 fn command_example_line(example: &str) -> Line<'static> {
@@ -276,36 +207,6 @@ fn command_example_line(example: &str) -> Line<'static> {
             example.to_string(),
             help_function_name_style(),
         )),
-    }
-}
-
-fn command_example(id: CommandId) -> &'static str {
-    match id {
-        CommandId::Seek => "seek 128",
-        CommandId::Goto => "goto /runs/run_04/signal",
-        CommandId::Up => "up 5",
-        CommandId::Down => "down 10",
-        CommandId::Left => "left 1",
-        CommandId::Right => "right 1",
-        CommandId::PageUp => "page-up",
-        CommandId::PageDown => "page-down",
-        CommandId::Focus => "focus content",
-        CommandId::Mode => "mode heatmap",
-        CommandId::ToggleTree => "toggle-tree",
-        CommandId::Reload => "reload",
-        CommandId::Configure => "configure reset",
-        CommandId::X => "x next",
-        CommandId::Row => "row prev",
-        CommandId::Col => "col next",
-        CommandId::Dim => "dim next",
-        CommandId::Index => "index next 4",
-        CommandId::Help => "help mchart",
-        CommandId::Attr => "attr create title string \"Run 42\"",
-        CommandId::Repeat => "repeat",
-        CommandId::MultiChart => "mchart add /group/signal[..,0]",
-        CommandId::Press => "press ctrl+w o",
-        CommandId::Heatmap => "heatmap range use \"Clip 1-99%\"",
-        CommandId::Noop => "noop",
     }
 }
 

@@ -83,16 +83,11 @@ fn classify_function_value_kind(
             if arg_kinds.len() != 2 {
                 return Err("exp() expects exactly 2 arguments".to_string());
             }
-            Ok(
-                if arg_kinds
-                    .iter()
-                    .any(|kind| *kind == ExpressionValueKind::Series)
-                {
-                    ExpressionValueKind::Series
-                } else {
-                    ExpressionValueKind::Scalar
-                },
-            )
+            Ok(if arg_kinds.contains(&ExpressionValueKind::Series) {
+                ExpressionValueKind::Series
+            } else {
+                ExpressionValueKind::Scalar
+            })
         }
         "avg" | "mean" | "min" | "max" | "stddev" | "len" => {
             if arg_kinds.len() != 1 {

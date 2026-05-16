@@ -637,7 +637,6 @@ impl MultiChartState {
     }
 }
 
-#[allow(dead_code)]
 pub(super) fn expression_prompt_messages(
     state: &MultiChartState,
     file: Option<&File>,
@@ -993,17 +992,6 @@ pub(super) fn current_expression_fragment(
         }
     }
     None
-}
-
-#[allow(dead_code)]
-pub(super) fn expression_prompt_suggestions(
-    state: &MultiChartState,
-    file: Option<&File>,
-    buffer: &str,
-    cursor: usize,
-) -> Vec<ExpressionPromptSuggestion> {
-    let mut cache = ExpressionPromptLookupCache::default();
-    expression_prompt_suggestions_with_cache(state, file, buffer, cursor, &mut cache)
 }
 
 fn expression_prompt_suggestions_with_cache(

@@ -35,7 +35,7 @@ mod preview;
 mod ui_layout;
 #[allow(unused_imports)]
 pub use core::{
-    display_path, AppToast, AttributeCreateDialogState, AttributeCreateField, AttributeCursor,
+    AppToast, AttributeCreateDialogState, AttributeCreateField, AttributeCursor,
     AttributeDeleteDialogState, AttributeEditRequest, AttributeViewSelection, ContentShowMode,
     FileWatchState, FixedStringOverflowChoice, FixedStringOverflowDialogState, Focus, LastFocused,
     MatrixViewState, Mode, PendingChord,

@@ -3,7 +3,8 @@ use super::{
         handle_attr, handle_col, handle_configure, handle_dim, handle_down, handle_focus,
         handle_goto, handle_heatmap, handle_help, handle_index, handle_left, handle_mchart,
         handle_mode, handle_page_down, handle_page_up, handle_press, handle_reload, handle_repeat,
-        handle_right, handle_row, handle_seek, handle_toggle_tree, handle_up, handle_x,
+        handle_right, handle_row, handle_seek, handle_seek_col, handle_seek_row,
+        handle_toggle_tree, handle_up, handle_x,
     },
     CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor, CommandId,
 };
@@ -12,96 +13,237 @@ const INDEX_ARG: CommandArgSpec = CommandArgSpec {
     name: "index",
     kind: CommandArgKind::UnsignedInt,
     required: true,
+    help: "Zero-based absolute index to jump to.",
+    values: &[],
+};
+
+const SEEK_PRIMARY_ARG: CommandArgSpec = CommandArgSpec {
+    name: "index",
+    kind: CommandArgKind::UnsignedInt,
+    required: true,
+    help: "Absolute index, or x/column when a second y argument is provided in matrix or heatmap mode.",
+    values: &[],
+};
+
+const SEEK_SECONDARY_ARG: CommandArgSpec = CommandArgSpec {
+    name: "index2",
+    kind: CommandArgKind::UnsignedInt,
+    required: false,
+    help: "Optional y/row coordinate for matrix or heatmap mode.",
+    values: &[],
+};
+
+const ROW_INDEX_ARG: CommandArgSpec = CommandArgSpec {
+    name: "row",
+    kind: CommandArgKind::UnsignedInt,
+    required: true,
+    help: "Absolute row index to bring into view.",
+    values: &[],
+};
+
+const COL_INDEX_ARG: CommandArgSpec = CommandArgSpec {
+    name: "col",
+    kind: CommandArgKind::UnsignedInt,
+    required: true,
+    help: "Absolute column index to bring into view.",
+    values: &[],
 };
 
 const OPTIONAL_AMOUNT_ARG: CommandArgSpec = CommandArgSpec {
     name: "amount",
     kind: CommandArgKind::UnsignedInt,
     required: false,
+    help: "Optional positive step count.",
+    values: &["1", "5", "10"],
 };
 
 const TARGET_ARG: CommandArgSpec = CommandArgSpec {
     name: "target",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Pane to focus.",
+    values: &["tree", "attributes", "content"],
 };
 
 const DIRECTION_ARG: CommandArgSpec = CommandArgSpec {
     name: "direction",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Relative direction to move.",
+    values: &[
+        "next", "prev", "forward", "back", "left", "right", "up", "down",
+    ],
 };
 
 const MODE_ARG: CommandArgSpec = CommandArgSpec {
     name: "mode",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Content mode to activate.",
+    values: &["preview", "matrix", "heatmap"],
 };
 
 const PATH_ARG: CommandArgSpec = CommandArgSpec {
     name: "path",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Absolute HDF5 path to select in the tree.",
+    values: &["/group/dataset"],
 };
 
 const OPTIONAL_COMMAND_ARG: CommandArgSpec = CommandArgSpec {
     name: "command",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional command name to inspect.",
+    values: &["help", "mchart", "configure"],
 };
 
-const ACTION_ARG: CommandArgSpec = CommandArgSpec {
+const ATTR_ACTION_ARG: CommandArgSpec = CommandArgSpec {
     name: "action",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Attribute action to run.",
+    values: &["create", "delete"],
 };
 
-const OPTIONAL_WORD_ARG: CommandArgSpec = CommandArgSpec {
+const CONFIGURE_ACTION_ARG: CommandArgSpec = CommandArgSpec {
+    name: "action",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Optional configure action.",
+    values: &["reset"],
+};
+
+const ATTR_NAME_ARG: CommandArgSpec = CommandArgSpec {
+    name: "name",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Attribute name on the selected node.",
+    values: &["title", "scale"],
+};
+
+const ATTR_TYPE_ARG: CommandArgSpec = CommandArgSpec {
+    name: "type",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Attribute type when creating.",
+    values: &["bool", "i64", "u64", "f64", "string", "ascii"],
+};
+
+const ATTR_VALUE_ARG: CommandArgSpec = CommandArgSpec {
+    name: "value",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Optional initial value when creating.",
+    values: &[],
+};
+
+const MCHART_ACTION_ARG: CommandArgSpec = CommandArgSpec {
+    name: "action",
+    kind: CommandArgKind::Word,
+    required: true,
+    help: "Multichart action to run.",
+    values: &[
+        "open", "close", "toggle", "add", "expr", "prompt", "select", "visible", "remove", "clear",
+        "fit", "zoom", "pan",
+    ],
+};
+
+const MCHART_ARG_1: CommandArgSpec = CommandArgSpec {
     name: "arg",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Subcommand-specific argument such as a dataset spec, expression, target, or direction.",
+    values: &[],
 };
 
-const OPTIONAL_WORD_ARG_2: CommandArgSpec = CommandArgSpec {
+const MCHART_ARG_2: CommandArgSpec = CommandArgSpec {
     name: "arg2",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional extra argument such as amount, zoom action, or selector.",
+    values: &[],
 };
 
-const OPTIONAL_WORD_ARG_3: CommandArgSpec = CommandArgSpec {
+const MCHART_ARG_3: CommandArgSpec = CommandArgSpec {
     name: "arg3",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional extra argument such as amount or label.",
+    values: &[],
 };
 
-const OPTIONAL_WORD_ARG_4: CommandArgSpec = CommandArgSpec {
+const HEATMAP_ACTION_ARG: CommandArgSpec = CommandArgSpec {
+    name: "action",
+    kind: CommandArgKind::Word,
+    required: true,
+    help: "Heatmap command family.",
+    values: &["range"],
+};
+
+const HEATMAP_ARG_1: CommandArgSpec = CommandArgSpec {
+    name: "arg",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Range action.",
+    values: &["list", "use", "select", "add"],
+};
+
+const HEATMAP_ARG_2: CommandArgSpec = CommandArgSpec {
+    name: "arg2",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Range selector or lower bound, depending on the action.",
+    values: &[],
+};
+
+const HEATMAP_ARG_3: CommandArgSpec = CommandArgSpec {
+    name: "arg3",
+    kind: CommandArgKind::Word,
+    required: false,
+    help: "Upper bound for `heatmap range add`.",
+    values: &[],
+};
+
+const HEATMAP_ARG_4: CommandArgSpec = CommandArgSpec {
     name: "arg4",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional label for `heatmap range add`.",
+    values: &[],
 };
 
 const KEY_ARG_1: CommandArgSpec = CommandArgSpec {
     name: "key1",
     kind: CommandArgKind::Word,
     required: true,
+    help: "Key spec to simulate through the input dispatcher.",
+    values: &["ctrl+w", "o", "shift+tab"],
 };
 
 const KEY_ARG_2: CommandArgSpec = CommandArgSpec {
     name: "key2",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional extra key spec to simulate.",
+    values: &[],
 };
 
 const KEY_ARG_3: CommandArgSpec = CommandArgSpec {
     name: "key3",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional extra key spec to simulate.",
+    values: &[],
 };
 
 const KEY_ARG_4: CommandArgSpec = CommandArgSpec {
     name: "key4",
     kind: CommandArgKind::Word,
     required: false,
+    help: "Optional extra key spec to simulate.",
+    values: &[],
 };
 
 const COMMAND_CATALOG: &[CommandDescriptor] = &[
@@ -109,11 +251,34 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         id: CommandId::Seek,
         name: "seek",
         aliases: &[],
-        description: "Jump to an absolute index in the current content view",
+        description: "Jump to an absolute index, or to x/y coordinates in matrix and heatmap views",
         category: CommandCategory::Navigation,
         keybindings: &[],
-        args: &[INDEX_ARG],
+        args: &[SEEK_PRIMARY_ARG, SEEK_SECONDARY_ARG],
+        example: "seek 25 35",
         handler: handle_seek,
+    },
+    CommandDescriptor {
+        id: CommandId::SeekRow,
+        name: "seek-row",
+        aliases: &["row-seek"],
+        description: "Jump to an absolute row while keeping the current column or x position",
+        category: CommandCategory::Navigation,
+        keybindings: &[],
+        args: &[ROW_INDEX_ARG],
+        example: "seek-row 35",
+        handler: handle_seek_row,
+    },
+    CommandDescriptor {
+        id: CommandId::SeekCol,
+        name: "seek-col",
+        aliases: &["col-seek", "seek-column"],
+        description: "Jump to an absolute column while keeping the current row or y position",
+        category: CommandCategory::Navigation,
+        keybindings: &[],
+        args: &[COL_INDEX_ARG],
+        example: "seek-col 25",
+        handler: handle_seek_col,
     },
     CommandDescriptor {
         id: CommandId::Goto,
@@ -123,6 +288,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &[],
         args: &[PATH_ARG],
+        example: "goto /runs/run_04/signal",
         handler: handle_goto,
     },
     CommandDescriptor {
@@ -133,6 +299,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["Up", "k"],
         args: &[OPTIONAL_AMOUNT_ARG],
+        example: "up 5",
         handler: handle_up,
     },
     CommandDescriptor {
@@ -143,6 +310,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["Down", "j"],
         args: &[OPTIONAL_AMOUNT_ARG],
+        example: "down 10",
         handler: handle_down,
     },
     CommandDescriptor {
@@ -153,6 +321,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["Left", "h"],
         args: &[OPTIONAL_AMOUNT_ARG],
+        example: "left 1",
         handler: handle_left,
     },
     CommandDescriptor {
@@ -163,6 +332,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["Right", "l"],
         args: &[OPTIONAL_AMOUNT_ARG],
+        example: "right 1",
         handler: handle_right,
     },
     CommandDescriptor {
@@ -173,6 +343,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["PageUp", "Ctrl+u"],
         args: &[],
+        example: "page-up",
         handler: handle_page_up,
     },
     CommandDescriptor {
@@ -183,6 +354,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Navigation,
         keybindings: &["PageDown", "Ctrl+d"],
         args: &[],
+        example: "page-down",
         handler: handle_page_down,
     },
     CommandDescriptor {
@@ -193,6 +365,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::View,
         keybindings: &["Shift+Arrows"],
         args: &[TARGET_ARG],
+        example: "focus content",
         handler: handle_focus,
     },
     CommandDescriptor {
@@ -203,6 +376,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::View,
         keybindings: &["Tab"],
         args: &[MODE_ARG],
+        example: "mode heatmap",
         handler: handle_mode,
     },
     CommandDescriptor {
@@ -213,6 +387,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::View,
         keybindings: &["s"],
         args: &[],
+        example: "toggle-tree",
         handler: handle_toggle_tree,
     },
     CommandDescriptor {
@@ -223,6 +398,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::App,
         keybindings: &["Ctrl+r"],
         args: &[],
+        example: "reload",
         handler: handle_reload,
     },
     CommandDescriptor {
@@ -232,7 +408,8 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         description: "Open the Lua config, or `configure reset` to recreate the default scaffold",
         category: CommandCategory::App,
         keybindings: &[],
-        args: &[OPTIONAL_WORD_ARG],
+        args: &[CONFIGURE_ACTION_ARG],
+        example: "configure reset",
         handler: handle_configure,
     },
     CommandDescriptor {
@@ -243,6 +420,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Selection,
         keybindings: &["x", "X"],
         args: &[DIRECTION_ARG],
+        example: "x next",
         handler: handle_x,
     },
     CommandDescriptor {
@@ -253,6 +431,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Selection,
         keybindings: &["r", "R"],
         args: &[DIRECTION_ARG],
+        example: "row prev",
         handler: handle_row,
     },
     CommandDescriptor {
@@ -263,6 +442,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Selection,
         keybindings: &["c", "C"],
         args: &[DIRECTION_ARG],
+        example: "col next",
         handler: handle_col,
     },
     CommandDescriptor {
@@ -273,6 +453,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Selection,
         keybindings: &["[", "]"],
         args: &[DIRECTION_ARG],
+        example: "dim next",
         handler: handle_dim,
     },
     CommandDescriptor {
@@ -283,6 +464,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Selection,
         keybindings: &["Ctrl+a", "Ctrl+x", "Alt+Up/Down"],
         args: &[DIRECTION_ARG, OPTIONAL_AMOUNT_ARG],
+        example: "index next 4",
         handler: handle_index,
     },
     CommandDescriptor {
@@ -293,6 +475,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::App,
         keybindings: &["?"],
         args: &[OPTIONAL_COMMAND_ARG],
+        example: "help mchart",
         handler: handle_help,
     },
     CommandDescriptor {
@@ -302,7 +485,8 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         description: "Create or delete scalar attributes on the selected node",
         category: CommandCategory::Attributes,
         keybindings: &["a", "d", "Delete"],
-        args: &[ACTION_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG],
+        args: &[ATTR_ACTION_ARG, ATTR_NAME_ARG, ATTR_TYPE_ARG, ATTR_VALUE_ARG],
+        example: "attr create title string \"Run 42\"",
         handler: handle_attr,
     },
     CommandDescriptor {
@@ -313,6 +497,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::App,
         keybindings: &["."],
         args: &[],
+        example: "repeat",
         handler: handle_repeat,
     },
     CommandDescriptor {
@@ -322,7 +507,8 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         description: "Control multichart from command mode: open, add, expr, derive, select, pan, zoom, clear, and more",
         category: CommandCategory::MultiChart,
         keybindings: &["M"],
-        args: &[ACTION_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG, OPTIONAL_WORD_ARG],
+        args: &[MCHART_ACTION_ARG, MCHART_ARG_1, MCHART_ARG_2, MCHART_ARG_3],
+        example: "mchart add /group/signal[..,0]",
         handler: handle_mchart,
     },
     CommandDescriptor {
@@ -333,6 +519,7 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::Input,
         keybindings: &[],
         args: &[KEY_ARG_1, KEY_ARG_2, KEY_ARG_3, KEY_ARG_4],
+        example: "press ctrl+w o",
         handler: handle_press,
     },
     CommandDescriptor {
@@ -343,12 +530,13 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         category: CommandCategory::View,
         keybindings: &[],
         args: &[
-            ACTION_ARG,
-            OPTIONAL_WORD_ARG,
-            OPTIONAL_WORD_ARG_2,
-            OPTIONAL_WORD_ARG_3,
-            OPTIONAL_WORD_ARG_4,
+            HEATMAP_ACTION_ARG,
+            HEATMAP_ARG_1,
+            HEATMAP_ARG_2,
+            HEATMAP_ARG_3,
+            HEATMAP_ARG_4,
         ],
+        example: "heatmap range use \"Clip 1-99%\"",
         handler: handle_heatmap,
     },
 ];

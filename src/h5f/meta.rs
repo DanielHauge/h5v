@@ -75,7 +75,6 @@ pub struct DatasetMeta {
     pub data_type: String,
     pub unsupported_reason: Option<String>,
     pub type_descriptor: TypeDescriptor,
-    #[allow(dead_code)]
     pub(crate) data_bytesize: usize,
     pub(crate) storage_required: u64,
     pub(crate) total_bytes: usize,

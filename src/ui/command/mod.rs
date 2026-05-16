@@ -37,6 +37,8 @@ pub enum CommandCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
     Seek,
+    SeekRow,
+    SeekCol,
     Goto,
     Up,
     Down,
@@ -74,6 +76,8 @@ pub struct CommandArgSpec {
     pub name: &'static str,
     pub kind: CommandArgKind,
     pub required: bool,
+    pub help: &'static str,
+    pub values: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -81,13 +85,11 @@ pub struct CommandDescriptor {
     pub id: CommandId,
     pub name: &'static str,
     pub aliases: &'static [&'static str],
-    #[allow(dead_code)]
     pub description: &'static str,
-    #[allow(dead_code)]
     pub category: CommandCategory,
-    #[allow(dead_code)]
     pub keybindings: &'static [&'static str],
     pub args: &'static [CommandArgSpec],
+    pub example: &'static str,
     pub handler: CommandHandler,
 }
 
@@ -169,6 +171,18 @@ impl CommandInvocation {
                 self.command_name
             ))),
             None => Ok(default),
+        }
+    }
+
+    pub fn usize_arg_optional(&self, index: usize) -> Result<Option<usize>, AppError> {
+        match self.args.get(index) {
+            Some(CommandArgValue::UnsignedInt(value)) => Ok(Some(*value)),
+            Some(CommandArgValue::Word(_)) => Err(AppError::InvalidCommand(format!(
+                "Argument {} for command '{}' must be a number",
+                index + 1,
+                self.command_name
+            ))),
+            None => Ok(None),
         }
     }
 

@@ -21,11 +21,6 @@ pub trait MatrixValues {
         T: H5Type;
 }
 
-pub trait StringLengths {
-    #[allow(dead_code)]
-    fn string_lengths(&self) -> Vec<usize>;
-}
-
 #[derive(Debug, Clone)]
 pub struct DatasetPlotingData {
     pub data: Vec<(f64, f64)>,
@@ -36,28 +31,6 @@ pub struct DatasetPlotingData {
 
 pub struct DatasetTableData<T> {
     pub data: Array2<T>,
-}
-
-impl StringLengths for DatasetTableData<String> {
-    fn string_lengths(&self) -> Vec<usize> {
-        let shape = self.data.shape();
-        if shape.len() < 2 {
-            return Vec::new();
-        }
-        let rows = shape[0];
-        let cols = shape[1];
-        let mut lengths = Vec::with_capacity(rows);
-        (0..rows).for_each(|i| {
-            lengths.push(0);
-            for j in 0..cols.saturating_sub(1) {
-                let len = self.data[[i, j]].len();
-                if lengths[i] + 2 < len {
-                    lengths[i] = len + 2;
-                }
-            }
-        });
-        lengths
-    }
 }
 
 impl From<DatasetTableData<f64>> for DatasetTableData<String> {
@@ -229,10 +202,9 @@ pub(crate) fn plot_sampling_step_with_cap(length: usize, max_samples: usize) -> 
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        plot_sampling_step_with_cap, validate_preview_selection_shape, DatasetTableData,
-        PreviewSelection, SliceSelection, StringLengths, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
+        plot_sampling_step_with_cap, validate_preview_selection_shape, PreviewSelection,
+        SliceSelection, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
     };
-    use ndarray::Array2;
 
     #[test]
     fn preview_selection_validation_rejects_short_index_rank() {
@@ -259,14 +231,6 @@ mod tests {
     #[test]
     fn uncapped_plot_sampling_keeps_every_point() {
         assert_eq!(plot_sampling_step_with_cap(10_000, usize::MAX), 1);
-    }
-
-    #[test]
-    fn string_lengths_handles_empty_second_dimension() {
-        let data = DatasetTableData {
-            data: Array2::<String>::default((2, 0)),
-        };
-        assert_eq!(data.string_lengths(), vec![0, 0]);
     }
 
     #[test]
