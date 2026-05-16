@@ -855,6 +855,44 @@ fn click_item_hitbox_selects_item() {
 }
 
 #[test]
+fn reorder_selected_item_moves_it_up_and_keeps_it_selected() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection.clone()), vec![(0.0, 1.0)]);
+    state.add_chart_item(source("/group/b", selection.clone()), vec![(0.0, 2.0)]);
+    state.add_chart_item(source("/group/c", selection), vec![(0.0, 3.0)]);
+    state.idx = 1;
+
+    assert!(state.reorder_selected_up());
+    assert_eq!(state.idx, 0);
+    assert_eq!(state.items[0].label, "b[..,0]");
+    assert_eq!(state.items[1].label, "a[..,0]");
+}
+
+#[test]
+fn reorder_selected_item_moves_it_down_and_keeps_it_selected() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0, 0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection.clone()), vec![(0.0, 1.0)]);
+    state.add_chart_item(source("/group/b", selection.clone()), vec![(0.0, 2.0)]);
+    state.add_chart_item(source("/group/c", selection), vec![(0.0, 3.0)]);
+    state.idx = 1;
+
+    assert!(state.reorder_selected_down());
+    assert_eq!(state.idx, 2);
+    assert_eq!(state.items[1].label, "c[..,0]");
+    assert_eq!(state.items[2].label, "b[..,0]");
+}
+
+#[test]
 fn click_view_mode_hitbox_switches_modes() {
     let mut state = make_state();
     state.view_mode_hitboxes = vec![

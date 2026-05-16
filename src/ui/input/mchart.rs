@@ -231,6 +231,20 @@ pub(crate) fn handle_mchart_event(
                         state.multi_chart.move_up();
                         Ok(EventResult::Redraw)
                     }
+                    Some(BoundAction::Action(MultiChartAction::ReorderUp)) => {
+                        Ok(if state.multi_chart.reorder_selected_up() {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
+                    }
+                    Some(BoundAction::Action(MultiChartAction::ReorderDown)) => {
+                        Ok(if state.multi_chart.reorder_selected_down() {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Continue
+                        })
+                    }
                     Some(BoundAction::Command(command)) => execute_bound_command(state, &command),
                     Some(BoundAction::Script(script)) => {
                         execute_bound_script(state, &script, "keybinding script")

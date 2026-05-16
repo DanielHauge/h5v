@@ -1073,6 +1073,26 @@ impl MultiChartState {
         }
     }
 
+    pub fn reorder_selected_up(&mut self) -> bool {
+        if self.idx == 0 || self.idx >= self.items.len() {
+            return false;
+        }
+        self.items.swap(self.idx, self.idx - 1);
+        self.idx -= 1;
+        self.modified = true;
+        true
+    }
+
+    pub fn reorder_selected_down(&mut self) -> bool {
+        if self.items.is_empty() || self.idx + 1 >= self.items.len() {
+            return false;
+        }
+        self.items.swap(self.idx, self.idx + 1);
+        self.idx += 1;
+        self.modified = true;
+        true
+    }
+
     pub fn toggle_selected_visible(&mut self) {
         if let Some(item) = self.items.get_mut(self.idx) {
             item.visible = !item.visible;

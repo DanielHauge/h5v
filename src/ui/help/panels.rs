@@ -368,7 +368,7 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::Quit => "Quit the app".to_string(),
             MultiChartAction::ShowHelp => "Open the multichart help page".to_string(),
             MultiChartAction::CycleViewMode => {
-                "Cycle line, histogram, and comparison scatter modes".to_string()
+                "Cycle line, histogram, box plot, and comparison scatter modes".to_string()
             }
             MultiChartAction::ZoomIn => "Zoom in".to_string(),
             MultiChartAction::ZoomOut => "Zoom out".to_string(),
@@ -388,6 +388,12 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             }
             MultiChartAction::MoveUp => "Select the previous series".to_string(),
             MultiChartAction::MoveDown => "Select the next series".to_string(),
+            MultiChartAction::ReorderUp => {
+                "Move the selected series earlier in the list".to_string()
+            }
+            MultiChartAction::ReorderDown => {
+                "Move the selected series later in the list".to_string()
+            }
         }
     })
 }

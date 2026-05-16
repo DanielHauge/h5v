@@ -125,6 +125,8 @@ pub enum MultiChartAction {
     EditSelectedExpression,
     MoveUp,
     MoveDown,
+    ReorderUp,
+    ReorderDown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,6 +569,26 @@ mod tests {
                 &keymaps
             ),
             Some(BoundAction::Action(MultiChartAction::ZoomOut))
+        );
+    }
+
+    #[test]
+    fn multichart_alt_up_reorders_selected_item_up() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::ReorderUp))
+        );
+    }
+
+    #[test]
+    fn multichart_alt_down_reorders_selected_item_down() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Down, KeyModifiers::ALT);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::ReorderDown))
         );
         assert_eq!(
             multichart_action(

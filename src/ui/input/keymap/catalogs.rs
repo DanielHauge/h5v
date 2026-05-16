@@ -606,6 +606,18 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::MoveDown,
         default_keys: &["Down", "j"],
     },
+    ActionCode {
+        symbol: "ReorderUp",
+        code: "reorder-up",
+        action: MultiChartAction::ReorderUp,
+        default_keys: &["Alt+Up"],
+    },
+    ActionCode {
+        symbol: "ReorderDown",
+        code: "reorder-down",
+        action: MultiChartAction::ReorderDown,
+        default_keys: &["Alt+Down"],
+    },
 ];
 
 pub(super) fn global_action_codes() -> &'static [ActionCode<GlobalAction>] {
