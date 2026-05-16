@@ -27,6 +27,7 @@ impl ChartXAxisPolicy {
 pub enum MultiChartViewMode {
     Line,
     Histogram,
+    BoxPlot,
     ComparisonScatter,
 }
 
@@ -35,6 +36,7 @@ impl MultiChartViewMode {
         match self {
             MultiChartViewMode::Line => "Line",
             MultiChartViewMode::Histogram => "Histogram",
+            MultiChartViewMode::BoxPlot => "Box plot",
             MultiChartViewMode::ComparisonScatter => "Comparison scatter",
         }
     }
@@ -42,7 +44,8 @@ impl MultiChartViewMode {
     pub fn next(self) -> Self {
         match self {
             MultiChartViewMode::Line => MultiChartViewMode::Histogram,
-            MultiChartViewMode::Histogram => MultiChartViewMode::ComparisonScatter,
+            MultiChartViewMode::Histogram => MultiChartViewMode::BoxPlot,
+            MultiChartViewMode::BoxPlot => MultiChartViewMode::ComparisonScatter,
             MultiChartViewMode::ComparisonScatter => MultiChartViewMode::Line,
         }
     }
@@ -50,7 +53,9 @@ impl MultiChartViewMode {
     pub fn sample_window_description(self) -> &'static str {
         match self {
             MultiChartViewMode::Line => "view",
-            MultiChartViewMode::Histogram | MultiChartViewMode::ComparisonScatter => "window",
+            MultiChartViewMode::Histogram
+            | MultiChartViewMode::BoxPlot
+            | MultiChartViewMode::ComparisonScatter => "window",
         }
     }
 }

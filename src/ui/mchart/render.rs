@@ -112,6 +112,27 @@ fn normalize_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
     Some((min, max))
 }
 
+fn quantile_sorted(values: &[f64], quantile: f64) -> f64 {
+    if values.len() == 1 {
+        return values[0];
+    }
+    let position = quantile.clamp(0.0, 1.0) * (values.len() - 1) as f64;
+    let lower = position.floor() as usize;
+    let upper = position.ceil() as usize;
+    if lower == upper {
+        values[lower]
+    } else {
+        let weight = position - lower as f64;
+        values[lower] * (1.0 - weight) + values[upper] * weight
+    }
+}
+
+fn padded_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
+    let (min, max) = normalize_axis_bounds(min, max)?;
+    let pad = (max - min).abs().max(1.0) * 0.05;
+    Some((min - pad, max + pad))
+}
+
 fn render_line_chart_request(
     request: &MultiChartRenderRequest,
     prepared: &super::PreparedLineChartData,
@@ -330,6 +351,188 @@ fn render_histogram_request(
     }
 }
 
+fn render_box_plot_request(
+    request: &MultiChartRenderRequest,
+    prepared: &super::PreparedBoxPlotData,
+) -> MultiChartRenderResult {
+    let mut plot_buffer = vec![0; (request.width * request.height * 3) as usize];
+    let (plot_x_range, plot_y_range) = {
+        let root = BitMapBackend::with_buffer(&mut plot_buffer, (request.width, request.height))
+            .into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(error) = root.fill(&plot_bg) {
+            log_error(&error);
+            return MultiChartRenderResult::Failure {
+                generation: request.generation,
+                message: error.to_string(),
+            };
+        }
+        let x_max = prepared.series.len().max(1) as f64 + 0.5;
+        let chart = plotters::prelude::ChartBuilder::on(&root)
+            .margin(12)
+            .x_label_area_size(60)
+            .y_label_area_size(45)
+            .build_cartesian_2d(0.5..x_max, prepared.value_min..prepared.value_max);
+        let mut chart = match chart {
+            Ok(chart) => chart,
+            Err(error) => {
+                log_error(&error);
+                return MultiChartRenderResult::Failure {
+                    generation: request.generation,
+                    message: error.to_string(),
+                };
+            }
+        };
+        let ranges = chart.plotting_area().get_pixel_range();
+        let labels = prepared
+            .series
+            .iter()
+            .map(|series| series.label.clone())
+            .collect::<Vec<_>>();
+        if let Err(error) = chart
+            .configure_mesh()
+            .x_desc("visible series")
+            .y_desc("value")
+            .x_labels(labels.len().max(1))
+            .disable_x_mesh()
+            .x_label_formatter(&move |value| {
+                let index = value.round() as isize - 1;
+                if index < 0 || index as usize >= labels.len() {
+                    String::new()
+                } else {
+                    labels[index as usize].clone()
+                }
+            })
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 16).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+        {
+            log_error(&error);
+        }
+        let y_span = (prepared.value_max - prepared.value_min).abs().max(1.0);
+        for series in &prepared.series {
+            let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+                colors.chart.series[series.color_slot % colors.chart.series.len()]
+            }));
+            let color = RGBColor(r, g, b);
+            let x = series.x_index as f64 + 1.0;
+            let half_width = 0.28_f64;
+            let whisker_width = if series.is_selected { 3 } else { 2 };
+            let box_outline_width = if series.is_selected { 4 } else { 2 };
+            let median_width = if series.is_selected { 4 } else { 3 };
+            let outlier_radius = if series.is_selected { 5 } else { 4 };
+            let box_fill = color
+                .mix(if series.is_selected { 0.38 } else { 0.24 })
+                .filled();
+            let whisker_style = ShapeStyle::from(&color.mix(0.82)).stroke_width(whisker_width);
+            let box_outline = ShapeStyle::from(&color.mix(0.98)).stroke_width(box_outline_width);
+            let median_style = ShapeStyle::from(&axis.mix(0.98)).stroke_width(median_width);
+            let spine_style = ShapeStyle::from(&axis.mix(0.28)).stroke_width(1);
+            let cap_style = ShapeStyle::from(&color.mix(0.72)).stroke_width(whisker_width);
+            let box_height = (series.q3 - series.q1).abs();
+            let corner_x = half_width * 0.24;
+            let corner_y = (box_height * 0.22).min(y_span * 0.018);
+            let use_chamfered_box = corner_y > f64::EPSILON && box_height > corner_y * 2.0;
+
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![(x, series.whisker_low), (x, series.q1)],
+                whisker_style,
+            )));
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![(x, series.q3), (x, series.whisker_high)],
+                whisker_style,
+            )));
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![
+                    (x - half_width / 2.0, series.whisker_low),
+                    (x + half_width / 2.0, series.whisker_low),
+                ],
+                cap_style,
+            )));
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![
+                    (x - half_width / 2.0, series.whisker_high),
+                    (x + half_width / 2.0, series.whisker_high),
+                ],
+                cap_style,
+            )));
+            if use_chamfered_box {
+                let box_points = vec![
+                    (x - half_width + corner_x, series.q1),
+                    (x + half_width - corner_x, series.q1),
+                    (x + half_width, series.q1 + corner_y),
+                    (x + half_width, series.q3 - corner_y),
+                    (x + half_width - corner_x, series.q3),
+                    (x - half_width + corner_x, series.q3),
+                    (x - half_width, series.q3 - corner_y),
+                    (x - half_width, series.q1 + corner_y),
+                ];
+                let _ = chart.draw_series(std::iter::once(plotters::element::Polygon::new(
+                    box_points.clone(),
+                    box_fill,
+                )));
+                let mut box_outline_points = box_points;
+                box_outline_points.push(box_outline_points[0]);
+                let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                    box_outline_points,
+                    box_outline,
+                )));
+            } else {
+                let _ = chart.draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                    [(x - half_width, series.q1), (x + half_width, series.q3)],
+                    box_fill,
+                )));
+                let _ = chart.draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                    [(x - half_width, series.q1), (x + half_width, series.q3)],
+                    box_outline,
+                )));
+            }
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![(x, series.q1), (x, series.q3)],
+                spine_style,
+            )));
+            let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![
+                    (x - half_width, series.median),
+                    (x + half_width, series.median),
+                ],
+                median_style,
+            )));
+            let _ = chart.draw_series(series.outliers.iter().map(|value| {
+                plotters::element::Circle::new((x, *value), outlier_radius, plot_bg.filled())
+            }));
+            let _ = chart.draw_series(series.outliers.iter().map(|value| {
+                plotters::element::Circle::new(
+                    (x, *value),
+                    outlier_radius,
+                    ShapeStyle::from(&color).stroke_width(2),
+                )
+            }));
+        }
+        ranges
+    };
+    MultiChartRenderResult::Success {
+        generation: request.generation,
+        chart_area: request.chart_area,
+        width: request.width,
+        height: request.height,
+        rgb_bytes: plot_buffer,
+        plot_x_range,
+        plot_y_range,
+    }
+}
+
 fn render_comparison_scatter_request(
     request: &MultiChartRenderRequest,
     prepared: &super::PreparedComparisonScatterData,
@@ -448,6 +651,7 @@ pub(super) fn render_prepared_chart_request(
         super::PreparedChartData::Histogram(prepared) => {
             render_histogram_request(&request, prepared)
         }
+        super::PreparedChartData::BoxPlot(prepared) => render_box_plot_request(&request, prepared),
         super::PreparedChartData::ComparisonScatter(prepared) => {
             render_comparison_scatter_request(&request, prepared)
         }
@@ -558,6 +762,7 @@ impl MultiChartState {
         let labels = [
             (super::MultiChartViewMode::Line, " Line "),
             (super::MultiChartViewMode::Histogram, " Histogram "),
+            (super::MultiChartViewMode::BoxPlot, " Box plot "),
             (
                 super::MultiChartViewMode::ComparisonScatter,
                 " Comparison scatter ",
@@ -600,6 +805,9 @@ impl MultiChartState {
             super::MultiChartViewMode::Histogram => {
                 "[visible sample values] - overlaid distributions".to_string()
             }
+            super::MultiChartViewMode::BoxPlot => {
+                "[visible sample values] - quartiles, whiskers, and outliers".to_string()
+            }
             super::MultiChartViewMode::ComparisonScatter => {
                 let summary = self
                     .comparison_scatter_pair_summary()
@@ -621,6 +829,9 @@ impl MultiChartState {
             ),
             super::MultiChartViewMode::Histogram => {
                 "No histogram samples in the current visible window.".to_string()
+            }
+            super::MultiChartViewMode::BoxPlot => {
+                "No box-plot samples in the current visible window.".to_string()
             }
             super::MultiChartViewMode::ComparisonScatter => {
                 if self.comparison_scatter_pair().is_some()
@@ -709,6 +920,7 @@ impl MultiChartState {
         if visible_items.is_empty() {
             return None;
         }
+
         let selected_item_id = self.selected_item().map(|item| item.id);
         let mut series_values = Vec::new();
         let mut value_min = f64::MAX;
@@ -785,6 +997,79 @@ impl MultiChartState {
             value_max,
             count_max: count_max.max(1.0),
             bin_count,
+            series,
+        })
+    }
+
+    fn prepared_box_plot_data(&self) -> Option<super::PreparedBoxPlotData> {
+        let visible_items = self
+            .items
+            .iter()
+            .filter(|item| item.visible && item.has_loaded_series())
+            .collect::<Vec<_>>();
+        if visible_items.is_empty() {
+            return None;
+        }
+        let selected_item_id = self.selected_item().map(|item| item.id);
+        let mut value_min = f64::MAX;
+        let mut value_max = f64::MIN;
+        let mut series = Vec::new();
+
+        for (x_index, item) in visible_items.into_iter().enumerate() {
+            let mut values: Vec<f64> = self
+                .windowed_visible_points(item)
+                .into_iter()
+                .map(|(_, y)| y)
+                .filter(|value| value.is_finite())
+                .collect();
+            if values.is_empty() {
+                continue;
+            }
+            values.sort_by(|left: &f64, right: &f64| left.total_cmp(right));
+            let q1 = quantile_sorted(&values, 0.25);
+            let median = quantile_sorted(&values, 0.5);
+            let q3 = quantile_sorted(&values, 0.75);
+            let iqr = q3 - q1;
+            let fence_low = q1 - 1.5 * iqr;
+            let fence_high = q3 + 1.5 * iqr;
+            let whisker_low = values
+                .iter()
+                .copied()
+                .find(|value| *value >= fence_low)
+                .unwrap_or(values[0]);
+            let whisker_high = values
+                .iter()
+                .copied()
+                .rev()
+                .find(|value| *value <= fence_high)
+                .unwrap_or(*values.last()?);
+            let outliers = values
+                .iter()
+                .copied()
+                .filter(|value| *value < whisker_low || *value > whisker_high)
+                .collect::<Vec<_>>();
+            value_min = value_min.min(*values.first()?);
+            value_max = value_max.max(*values.last()?);
+            series.push(super::PreparedBoxPlotSeries {
+                label: self.item_display_label(item),
+                color_slot: item.color_slot,
+                x_index,
+                q1,
+                median,
+                q3,
+                whisker_low,
+                whisker_high,
+                outliers,
+                is_selected: selected_item_id == Some(item.id),
+            });
+        }
+        if series.is_empty() {
+            return None;
+        }
+        let (value_min, value_max) = padded_axis_bounds(value_min, value_max)?;
+        Some(super::PreparedBoxPlotData {
+            value_min,
+            value_max,
             series,
         })
     }
@@ -866,6 +1151,9 @@ impl MultiChartState {
             super::MultiChartViewMode::Histogram => self
                 .prepared_histogram_data()
                 .map(super::PreparedChartData::Histogram),
+            super::MultiChartViewMode::BoxPlot => self
+                .prepared_box_plot_data()
+                .map(super::PreparedChartData::BoxPlot),
             super::MultiChartViewMode::ComparisonScatter => self
                 .prepared_comparison_scatter_data()
                 .map(super::PreparedChartData::ComparisonScatter),

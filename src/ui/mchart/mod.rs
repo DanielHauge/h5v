@@ -136,6 +136,27 @@ struct PreparedHistogramData {
 }
 
 #[derive(Debug, Clone)]
+struct PreparedBoxPlotSeries {
+    label: String,
+    color_slot: usize,
+    x_index: usize,
+    q1: f64,
+    median: f64,
+    q3: f64,
+    whisker_low: f64,
+    whisker_high: f64,
+    outliers: Vec<f64>,
+    is_selected: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedBoxPlotData {
+    value_min: f64,
+    value_max: f64,
+    series: Vec<PreparedBoxPlotSeries>,
+}
+
+#[derive(Debug, Clone)]
 struct PreparedComparisonScatterData {
     label: String,
     x_label: String,
@@ -153,6 +174,7 @@ struct PreparedComparisonScatterData {
 enum PreparedChartData {
     Line(PreparedLineChartData),
     Histogram(PreparedHistogramData),
+    BoxPlot(PreparedBoxPlotData),
     ComparisonScatter(PreparedComparisonScatterData),
 }
 

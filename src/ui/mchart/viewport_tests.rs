@@ -501,11 +501,50 @@ fn cycle_view_mode_rotates_through_first_pass_modes() {
     let mut state = make_state();
     assert_eq!(state.view_mode(), MultiChartViewMode::Line);
     assert_eq!(state.cycle_view_mode(), MultiChartViewMode::Histogram);
+    assert_eq!(state.cycle_view_mode(), MultiChartViewMode::BoxPlot);
     assert_eq!(
         state.cycle_view_mode(),
         MultiChartViewMode::ComparisonScatter
     );
     assert_eq!(state.cycle_view_mode(), MultiChartViewMode::Line);
+}
+
+#[test]
+fn box_plot_mode_prepares_visible_window_distribution_summaries() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 100.0)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection),
+        vec![(0.0, 5.0), (1.0, 6.0), (2.0, 7.0), (3.0, 8.0)],
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 0.0,
+        x_max: 3.0,
+        y_min: -10.0,
+        y_max: 200.0,
+    });
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::BoxPlot(prepared) = prepared else {
+        panic!("expected box plot chart data");
+    };
+    assert_eq!(prepared.series.len(), 2);
+    assert_eq!(prepared.series[0].label, "a[..,0]");
+    assert_eq!(prepared.series[0].outliers, vec![100.0]);
+    assert!(prepared.series[0].median > prepared.series[0].q1);
+    assert!(prepared.series[0].q3 >= prepared.series[0].median);
+    assert!(prepared.value_min < 1.0);
+    assert!(prepared.value_max > 100.0);
 }
 
 #[test]
@@ -579,6 +618,7 @@ fn comparison_scatter_mode_uses_selected_series_and_next_visible_series() {
     state.idx = 1;
     state.cycle_view_mode();
     state.cycle_view_mode();
+    state.cycle_view_mode();
 
     let prepared = state.prepared_chart_data().expect("prepared chart data");
     let PreparedChartData::ComparisonScatter(prepared) = prepared else {
@@ -609,6 +649,7 @@ fn comparison_scatter_mode_updates_when_selection_changes() {
         source("/group/c", selection),
         vec![(0.0, 7.0), (1.0, 8.0), (2.0, 9.0)],
     );
+    state.cycle_view_mode();
     state.cycle_view_mode();
     state.cycle_view_mode();
 
@@ -646,6 +687,7 @@ fn comparison_scatter_mode_truncates_longer_visible_series_with_warning() {
     state.add_chart_item(source("/group/b", selection), vec![(0.0, 1.0), (1.0, 3.0)]);
     state.cycle_view_mode();
     state.cycle_view_mode();
+    state.cycle_view_mode();
 
     let prepared = state.prepared_chart_data().expect("prepared chart data");
     let PreparedChartData::ComparisonScatter(prepared) = prepared else {
@@ -674,6 +716,7 @@ fn comparison_scatter_mode_rejects_misaligned_visible_windows() {
         source("/group/b", selection),
         vec![(0.0, 1.0), (1.5, 3.0), (2.0, 4.0)],
     );
+    state.cycle_view_mode();
     state.cycle_view_mode();
     state.cycle_view_mode();
 
@@ -711,6 +754,37 @@ fn histogram_render_request_succeeds() {
                         count: 1.0,
                     },
                 ],
+                is_selected: true,
+            }],
+        }),
+    };
+
+    assert!(matches!(
+        render::render_prepared_chart_request(request),
+        MultiChartRenderResult::Success { .. }
+    ));
+}
+
+#[test]
+fn box_plot_render_request_succeeds() {
+    let request = MultiChartRenderRequest {
+        generation: 1,
+        chart_area: Rect::new(0, 0, 40, 12),
+        width: 400,
+        height: 240,
+        prepared: PreparedChartData::BoxPlot(PreparedBoxPlotData {
+            value_min: 0.0,
+            value_max: 10.0,
+            series: vec![PreparedBoxPlotSeries {
+                label: "series".to_string(),
+                color_slot: 0,
+                x_index: 0,
+                q1: 2.0,
+                median: 4.0,
+                q3: 6.0,
+                whisker_low: 1.0,
+                whisker_high: 8.0,
+                outliers: vec![9.5],
                 is_selected: true,
             }],
         }),
