@@ -12,22 +12,23 @@ use crate::{
     configure,
     ui::state::{
         AppState, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
-        HelpSidebarHitbox, HelpSidebarTarget, HelpTab, HelpTabHitbox,
+        HelpMultiChartSection, HelpSidebarHitbox, HelpSidebarTarget, HelpTab, HelpTabHitbox,
     },
 };
 
 use super::panels::{
     command_panel_text, customization_panel_text, heatmap_help_lines, help_desc_style,
-    help_key_style, help_muted_style, keymap_panel_text, multichart_help_lines, paragraph_line,
+    help_key_style, help_muted_style, keymap_panel_text, multichart_panel_text, paragraph_line,
 };
 
-const HELP_PANEL_CACHE_SIZE: usize = 23;
+const HELP_PANEL_CACHE_SIZE: usize = 26;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HelpPanelCacheKey {
     Keymap(HelpKeymapSection),
     Command(HelpCommandSection),
     Customization(HelpCustomizationSection),
+    MultiChart(HelpMultiChartSection),
     Guide(HelpTab),
 }
 
@@ -100,11 +101,7 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) 
     match state.help.selected_tab {
         HelpTab::Keymap => render_keymap_help(frame, sections[1], state),
         HelpTab::Commands => render_command_help(frame, sections[1], state),
-        HelpTab::MultiChart => render_cached_panel(
-            frame,
-            sections[1],
-            HelpPanelCacheKey::Guide(HelpTab::MultiChart),
-        ),
+        HelpTab::MultiChart => render_multichart_help(frame, sections[1], state),
         HelpTab::Heatmap => render_cached_panel(
             frame,
             sections[1],
@@ -281,6 +278,31 @@ fn render_customization_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppS
         frame,
         layout[1],
         HelpPanelCacheKey::Customization(state.help.customization_section),
+    );
+}
+
+fn render_multichart_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
+    let layout = Layout::horizontal([Constraint::Length(24), Constraint::Min(0)])
+        .spacing(1)
+        .split(area);
+    render_sidebar(
+        frame,
+        state,
+        layout[0],
+        "Topics",
+        &[
+            (HelpMultiChartSection::Overview, "Overview"),
+            (HelpMultiChartSection::Expressions, "Expressions"),
+            (HelpMultiChartSection::Functions, "Functions"),
+            (HelpMultiChartSection::Views, "Views"),
+        ],
+        state.help.multichart_section,
+        HelpSidebarTarget::MultiChart,
+    );
+    render_cached_panel(
+        frame,
+        layout[1],
+        HelpPanelCacheKey::MultiChart(state.help.multichart_section),
     );
 }
 
@@ -471,21 +493,28 @@ fn warm_help_panel_cache() {
         });
     }
 
-    for (tab, title, lines) in [
-        (
-            HelpTab::MultiChart,
-            "Multichart".to_string(),
-            multichart_help_lines(),
-        ),
-        (
-            HelpTab::Heatmap,
-            "Heatmap".to_string(),
-            heatmap_help_lines(),
-        ),
-    ] {
+    for (tab, title, lines) in [(
+        HelpTab::Heatmap,
+        "Heatmap".to_string(),
+        heatmap_help_lines(),
+    )] {
         panels.push(CachedHelpPanel {
             generation,
             key: HelpPanelCacheKey::Guide(tab),
+            title,
+            lines,
+        });
+    }
+    for section in [
+        HelpMultiChartSection::Overview,
+        HelpMultiChartSection::Expressions,
+        HelpMultiChartSection::Functions,
+        HelpMultiChartSection::Views,
+    ] {
+        let (title, lines) = multichart_panel_text(section);
+        panels.push(CachedHelpPanel {
+            generation,
+            key: HelpPanelCacheKey::MultiChart(section),
             title,
             lines,
         });

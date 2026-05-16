@@ -129,6 +129,10 @@ pub(super) fn handle_help_mouse_event(
                 state.help.selected_tab = super::super::state::HelpTab::Configuration;
                 state.help.customization_section = section;
             }
+            super::super::state::HelpSidebarTarget::MultiChart(section) => {
+                state.help.selected_tab = super::super::state::HelpTab::MultiChart;
+                state.help.multichart_section = section;
+            }
         }
         return Ok(EventResult::Redraw);
     }

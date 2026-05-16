@@ -1,7 +1,8 @@
 use ratatui::layout::Rect;
 
 use super::{
-    ContentShowMode, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab,
+    ContentShowMode, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
+    HelpMultiChartSection, HelpTab,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +63,7 @@ pub enum HelpSidebarTarget {
     Keymap(HelpKeymapSection),
     Command(HelpCommandSection),
     Customization(HelpCustomizationSection),
+    MultiChart(HelpMultiChartSection),
 }
 
 #[derive(Debug, Clone, Copy)]

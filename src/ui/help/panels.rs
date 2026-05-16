@@ -11,7 +11,9 @@ use crate::{
             AttributesAction, BoundAction, ContentAction, Direction, EffectiveKeymaps,
             GlobalAction, KeyBinding, MultiChartAction, NormalAction, TreeAction, WindowAction,
         },
-        state::{HelpCommandSection, HelpCustomizationSection, HelpKeymapSection},
+        state::{
+            HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection,
+        },
         std_comp_render::highlighted_lines,
     },
 };
@@ -359,72 +361,84 @@ fn step_description(label: &str, delta: isize) -> String {
     }
 }
 
-pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
-    guide_text(&[
-        (
-            "Overview",
-            &[
-                "Multichart compares dataset selections and derived expressions in one plot.",
-                "Open with M. Add the current previewable selection with m or :mchart add.",
-            ],
+pub(super) fn multichart_panel_text(
+    section: HelpMultiChartSection,
+) -> (String, Vec<Line<'static>>) {
+    match section {
+        HelpMultiChartSection::Overview => multichart_overview_panel(),
+        HelpMultiChartSection::Expressions => multichart_expressions_panel(),
+        HelpMultiChartSection::Functions => multichart_functions_panel(),
+        HelpMultiChartSection::Views => multichart_views_panel(),
+    }
+}
+
+fn multichart_overview_panel() -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        paragraph_line("Multichart compares raw selections, derived series, and scalar values in one workspace."),
+        paragraph_line("Open it with M. Add the current preview selection with m. Use Enter or n to create expressions."),
+        Line::raw(""),
+        section_title_line("Quick flow"),
+    ];
+    lines.extend(highlighted_code_block(
+        "expr",
+        "flow",
+        "1. Add raw series with m\n2. Reference them as $1, $2, $name\n3. Build derived series or scalars\n4. Switch views with t / Tab",
+    ));
+    lines.push(Line::raw(""));
+    lines.push(paragraph_line("Use j/k to pick items, Space or v to hide/show them, and e to reopen the selected expression."));
+    ("Multichart overview".to_string(), lines)
+}
+
+fn multichart_expressions_panel() -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        paragraph_line("$id or $name references an existing multichart item."),
+        paragraph_line("load(path) reads datasets or attributes and infers whether the result is a series or a scalar."),
+        Line::raw(""),
+        section_title_line("Common shapes"),
+    ];
+    lines.extend(highlighted_code_block(
+        "expr",
+        "expr",
+        "$1 - $2\nload(/signals/sine_wave)\nload(/matrix)[..,0]\nload(/group/ds:BIAS)\n($1 * load(/scale), load(/time))",
+    ));
+    lines.push(Line::raw(""));
+    lines.push(paragraph_line("Tab switches between the name and expression fields while editing. Invalid expressions stay as drafts so they can be repaired."));
+    ("Expressions".to_string(), lines)
+}
+
+fn multichart_functions_panel() -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        paragraph_line("Reducers like avg/mean, min, max, stddev, and len return scalars."),
+        paragraph_line(
+            "Math like abs, sqrt, sin, round, and exp preserves scalar-vs-series shape.",
         ),
-        (
-            "Workflow",
-            &[
-                "Add raw series first so you have stable $1, $2, and $3 references.",
-                "Press Enter or n for a new expression, e to edit the selected one, Tab to switch between name and expression, and Esc to close.",
-                "Press t, Tab, or Shift+Tab to cycle chart modes: line, histogram, and comparison scatter.",
-            ],
-        ),
-        (
-            "Reference rules",
-            &[
-                "$id or $name refers to a chart item. Series items can be sliced, scalar items cannot.",
-                "load(path) reads data and infers whether it stays a series or becomes a scalar.",
-                "Use selectors after the call, for example load(/signals/sine_wave), load(/matrix)[..,0], or load(/group/ds:BIAS).",
-                "Series helpers avg(x)/mean(x), min(x), max(x), stddev(x), and len(x) return scalars; abs/sqrt/ln/log10/sin/cos/tan/floor/ceil/round preserve scalar-vs-series shape; rolling_mean/median/stddev/min/max(x, window), rolling_quantile(x, window, q), threshold(x, cutoff), and diff(x) return derived series. interp($xy, step) and slice($item, x_min, x_max) are top-level transforms.",
-                "(x_expr, y_expr) creates an explicit x/y plot.",
-            ],
-        ),
-        (
-            "Examples",
-            &[
-                "$1 - $2",
-                "$temperature * load(/measurements/sensors/group1/temperature:scale)",
-                "load(/signals/sine_wave) + load(/group_preview/offset)",
-                "avg($1) / max2(load(/scalar), 1.0)",
-                "mean($1) + stddev($1) + len($1)",
-                "sqrt(abs($1 - 4)) + round(load(/scalar))",
-                "rolling_mean($1, 16), threshold($1, 0.5), diff($1)",
-                "interp($3, 0.05)",
-                "slice($3, 25.5, 250.5)",
-                "exp($1, load(/scalar))",
-                "($1 * load(/group_preview:scale), load(/group_preview/time))",
-                "(load(/signals/sine_wave), load(/signals/cosine_wave))",
-            ],
-        ),
-        (
-            "Viewport and items",
-            &[
-                "j/k selects, Space or v toggles visibility, d removes, and C clears all.",
-                "f fits all visible series, F fits the selected series, and 0 or c resets the viewport.",
-                "z / Z and + / - zoom, h / l pan, and the chart title shows the active viewport whenever zoom is active.",
-                "Histogram and comparison scatter use the current visible x-window as their sample window, but only line mode supports zooming.",
-                "Comparison scatter uses the selected visible series against the next visible series; if needed it falls back to the first two visible series.",
-                "Wheel zoom is anchored to the pointer; Ctrl-wheel zooms x only, and Shift-wheel zooms y only.",
-                "Right-drag snapshots on press and pans on release.",
-            ],
-        ),
-        (
-            "Config",
-            &[
-                "Use h5v.multichart in Lua to tune large-series behavior.",
-                "overview_max_samples sets the background overview cap, and detail_enabled toggles viewport refinement.",
-                "detail_samples_per_column with detail_min_samples and detail_max_samples controls detail density.",
-                "detail_padding_ratio loads extra x-range around the viewport, and derived_detail_enabled lets derived series refine from shared detail windows.",
-            ],
-        ),
-    ])
+        paragraph_line("Rolling helpers and transforms build new derived series."),
+        Line::raw(""),
+        section_title_line("Examples"),
+    ];
+    lines.extend(highlighted_code_block(
+        "expr",
+        "func",
+        "mean($1) + stddev($1)\nabs(round(sin($1)))\nrolling_mean($1, 16)\nthreshold($1, 0.5)\ndiff($1)\ninterp($3, 0.05)\nslice($3, 25.5, 250.5)",
+    ));
+    ("Functions and transforms".to_string(), lines)
+}
+
+fn multichart_views_panel() -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        paragraph_line("Line mode plots visible series. Histogram overlays visible sample distributions. Comparison scatter plots the selected visible series against the next visible series."),
+        paragraph_line("Histogram and comparison scatter reuse the current visible x-window as their sample window."),
+        Line::raw(""),
+        section_title_line("View controls"),
+    ];
+    lines.extend(highlighted_code_block(
+        "expr",
+        "view",
+        "t / Tab / Shift+Tab   cycle views\nf / F                  fit all / fit selected\n0 / c                  reset viewport\nh / l                  pan line view",
+    ));
+    lines.push(Line::raw(""));
+    lines.push(paragraph_line("Only line mode zooms. Histogram and comparison scatter keep the sample window but ignore zoom gestures."));
+    ("Views and navigation".to_string(), lines)
 }
 
 pub(super) fn heatmap_help_lines() -> Vec<Line<'static>> {

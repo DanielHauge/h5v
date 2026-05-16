@@ -53,7 +53,8 @@ pub use heatmap::{
     HEATMAP_SETTING_FIELDS,
 };
 pub use help_state::{
-    HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpTab, HelpViewState,
+    HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection,
+    HelpTab, HelpViewState,
 };
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
@@ -401,6 +402,14 @@ impl AppState<'_> {
                 self.help.customization_section = next;
                 true
             }
+            HelpTab::MultiChart => {
+                let next = self.help.multichart_section.step(1);
+                if next == self.help.multichart_section {
+                    return false;
+                }
+                self.help.multichart_section = next;
+                true
+            }
             _ => false,
         }
     }
@@ -429,6 +438,14 @@ impl AppState<'_> {
                     return false;
                 }
                 self.help.customization_section = next;
+                true
+            }
+            HelpTab::MultiChart => {
+                let next = self.help.multichart_section.step(-1);
+                if next == self.help.multichart_section {
+                    return false;
+                }
+                self.help.multichart_section = next;
                 true
             }
             _ => false,
@@ -461,6 +478,14 @@ impl AppState<'_> {
                     true
                 }
             }
+            HelpTab::MultiChart => {
+                if self.help.multichart_section == HelpMultiChartSection::Overview {
+                    false
+                } else {
+                    self.help.multichart_section = HelpMultiChartSection::Overview;
+                    true
+                }
+            }
             _ => false,
         }
     }
@@ -488,6 +513,14 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.customization_section = HelpCustomizationSection::Scripting;
+                    true
+                }
+            }
+            HelpTab::MultiChart => {
+                if self.help.multichart_section == HelpMultiChartSection::Views {
+                    false
+                } else {
+                    self.help.multichart_section = HelpMultiChartSection::Views;
                     true
                 }
             }

@@ -120,11 +120,38 @@ impl HelpCustomizationSection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpMultiChartSection {
+    Overview,
+    Expressions,
+    Functions,
+    Views,
+}
+
+impl HelpMultiChartSection {
+    const ALL: [Self; 4] = [
+        Self::Overview,
+        Self::Expressions,
+        Self::Functions,
+        Self::Views,
+    ];
+
+    pub(crate) fn step(self, delta: isize) -> Self {
+        let current = Self::ALL
+            .iter()
+            .position(|section| *section == self)
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(Self::ALL.len() as isize) as usize;
+        Self::ALL[next]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HelpViewState {
     pub selected_tab: HelpTab,
     pub keymap_section: HelpKeymapSection,
     pub command_section: HelpCommandSection,
     pub customization_section: HelpCustomizationSection,
+    pub multichart_section: HelpMultiChartSection,
 }
 
 impl Default for HelpViewState {
@@ -134,6 +161,7 @@ impl Default for HelpViewState {
             keymap_section: HelpKeymapSection::Global,
             command_section: HelpCommandSection::Navigation,
             customization_section: HelpCustomizationSection::Configuration,
+            multichart_section: HelpMultiChartSection::Overview,
         }
     }
 }
