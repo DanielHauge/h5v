@@ -18,6 +18,19 @@ pub(super) fn handle_global_mouse_event(
         MouseEventKind::Down(MouseButton::Left) => {
             if state
                 .ui_layout
+                .mchart_toggle
+                .is_some_and(|rect| point_in_rect(rect, mouse_event.column, mouse_event.row))
+            {
+                state.mode = if matches!(state.mode, Mode::MultiChart) {
+                    Mode::Normal
+                } else {
+                    Mode::MultiChart
+                };
+                state.pending_chord = None;
+                return Ok(Some(EventResult::Redraw));
+            }
+            if state
+                .ui_layout
                 .help_toggle
                 .is_some_and(|rect| point_in_rect(rect, mouse_event.column, mouse_event.row))
             {

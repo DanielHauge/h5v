@@ -40,7 +40,7 @@ use model::sanitize_chart_points;
 pub use model::{
     ChartItem, ChartItemId, ChartItemStats, ChartLodWindow, ChartSeries, ChartSource,
     ChartXAxisPolicy, DatasetChartKind, DatasetChartSource, DerivedExpressionKind,
-    MultiChartLoadState, Point,
+    MultiChartLoadState, MultiChartViewMode, Point,
 };
 use prompt::{
     ExpressionPromptFocus, ExpressionPromptInputKind, ExpressionPromptMessageKind,
@@ -71,6 +71,12 @@ pub(super) struct MultiChartEditorHitbox {
     pub(super) expression_area: Rect,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MultiChartViewModeHitbox {
+    pub(super) area: Rect,
+    pub(super) mode: MultiChartViewMode,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChartZoomMode {
     Uniform,
@@ -86,7 +92,7 @@ struct ChartDragState {
 }
 
 #[derive(Debug, Clone)]
-struct PreparedChartSeries {
+struct PreparedLineChartSeries {
     label: String,
     color_slot: usize,
     points: Vec<Point>,
@@ -94,12 +100,56 @@ struct PreparedChartSeries {
 }
 
 #[derive(Debug, Clone)]
-struct PreparedChartData {
+struct PreparedLineChartData {
     plot_x_min: f64,
     plot_x_max: f64,
     y_min: f64,
     y_max: f64,
-    series: Vec<PreparedChartSeries>,
+    series: Vec<PreparedLineChartSeries>,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedHistogramBin {
+    start: f64,
+    end: f64,
+    count: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedHistogramSeries {
+    label: String,
+    color_slot: usize,
+    bins: Vec<PreparedHistogramBin>,
+    is_selected: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedHistogramData {
+    value_min: f64,
+    value_max: f64,
+    count_max: f64,
+    bin_count: usize,
+    series: Vec<PreparedHistogramSeries>,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedComparisonScatterData {
+    label: String,
+    x_label: String,
+    y_label: String,
+    color_slot: usize,
+    points: Vec<Point>,
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+}
+
+#[derive(Debug, Clone)]
+enum PreparedChartData {
+    Line(PreparedLineChartData),
+    Histogram(PreparedHistogramData),
+    ComparisonScatter(PreparedComparisonScatterData),
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +158,6 @@ pub struct MultiChartRenderRequest {
     chart_area: Rect,
     width: u32,
     height: u32,
-    x_axis_label: String,
     prepared: PreparedChartData,
 }
 
@@ -203,12 +252,14 @@ pub struct MultiChartState {
     next_id: u64,
     next_color_slot: usize,
     x_axis_policy: ChartXAxisPolicy,
+    view_mode: MultiChartViewMode,
     expression_prompt: Option<ExpressionPromptState>,
     last_chart_area: Option<Rect>,
     last_chart_panel_area: Option<Rect>,
     drag_state: Option<ChartDragState>,
     pub(super) item_hitboxes: Vec<MultiChartItemHitbox>,
     pub(super) editor_hitbox: Option<MultiChartEditorHitbox>,
+    pub(super) view_mode_hitboxes: Vec<MultiChartViewModeHitbox>,
 }
 
 impl MultiChartState {
@@ -234,12 +285,14 @@ impl MultiChartState {
             next_id: 1,
             next_color_slot: 0,
             x_axis_policy: ChartXAxisPolicy::SampleIndex,
+            view_mode: MultiChartViewMode::Line,
             expression_prompt: None,
             last_chart_area: None,
             last_chart_panel_area: None,
             drag_state: None,
             item_hitboxes: Vec::new(),
             editor_hitbox: None,
+            view_mode_hitboxes: Vec::new(),
         }
     }
 
@@ -263,7 +316,6 @@ impl MultiChartState {
             chart_area,
             width: self.width,
             height: self.height,
-            x_axis_label: self.x_axis_policy.label().to_string(),
             prepared,
         };
         self.pending_render_generation = Some(generation);
@@ -338,19 +390,22 @@ impl MultiChartState {
         self.items.iter().filter(|item| item.visible).count()
     }
 
-    pub fn loading_item_count(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| !matches!(item.load_state, MultiChartLoadState::Ready))
-            .count()
-    }
-
     pub fn selected_item(&self) -> Option<&ChartItem> {
         self.items.get(self.idx)
     }
 
     pub fn is_expression_prompt_active(&self) -> bool {
         self.expression_prompt.is_some()
+    }
+
+    pub fn view_mode(&self) -> MultiChartViewMode {
+        self.view_mode
+    }
+
+    pub fn cycle_view_mode(&mut self) -> MultiChartViewMode {
+        self.view_mode = self.view_mode.next();
+        self.modified = true;
+        self.view_mode
     }
 
     pub(crate) fn refresh_expression_detail_series(

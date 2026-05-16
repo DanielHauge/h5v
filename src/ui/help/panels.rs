@@ -289,6 +289,9 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::Exit => "Close multichart".to_string(),
             MultiChartAction::Quit => "Quit the app".to_string(),
             MultiChartAction::ShowHelp => "Open the multichart help page".to_string(),
+            MultiChartAction::CycleViewMode => {
+                "Cycle line, histogram, and comparison scatter modes".to_string()
+            }
             MultiChartAction::ZoomIn => "Zoom in".to_string(),
             MultiChartAction::ZoomOut => "Zoom out".to_string(),
             MultiChartAction::PanLeft => "Pan left".to_string(),
@@ -370,6 +373,7 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
             &[
                 "Add raw series first so you have stable $1, $2, and $3 references.",
                 "Press Enter or n for a new expression, e to edit the selected one, Tab to switch between name and expression, and Esc to close.",
+                "Press t, Tab, or Shift+Tab to cycle chart modes: line, histogram, and comparison scatter.",
             ],
         ),
         (
@@ -405,6 +409,8 @@ pub(super) fn multichart_help_lines() -> Vec<Line<'static>> {
                 "j/k selects, Space or v toggles visibility, d removes, and C clears all.",
                 "f fits all visible series, F fits the selected series, and 0 or c resets the viewport.",
                 "z / Z and + / - zoom, h / l pan, and the chart title shows the active viewport whenever zoom is active.",
+                "Histogram and comparison scatter use the current visible x-window as their sample window, but only line mode supports zooming.",
+                "Comparison scatter uses the selected visible series against the next visible series; if needed it falls back to the first two visible series.",
                 "Wheel zoom is anchored to the pointer; Ctrl-wheel zooms x only, and Shift-wheel zooms y only.",
                 "Right-drag snapshots on press and pans on release.",
             ],

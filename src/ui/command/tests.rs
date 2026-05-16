@@ -177,6 +177,23 @@ fn history_navigation_restores_draft() {
 }
 
 #[test]
+fn apply_selected_suggestion_completes_partial_command_name() {
+    let mut state = CommandState {
+        command_buffer: "mc".to_string(),
+        cursor: 2,
+        last_command: None,
+        selected_suggestion: 0,
+        history: std::collections::VecDeque::new(),
+        history_cursor: None,
+        history_draft: None,
+    };
+
+    assert!(state.apply_selected_suggestion());
+    assert_eq!(state.command_buffer, "mchart ");
+    assert_eq!(state.cursor, state.command_buffer.len());
+}
+
+#[test]
 fn parses_startup_script_lines_with_comments() {
     let commands = parse_startup_commands("\n# comment\nseek 1\n  down 2  \n", "stdin");
     assert_eq!(commands.len(), 2);

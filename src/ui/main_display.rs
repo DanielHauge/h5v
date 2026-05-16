@@ -32,11 +32,19 @@ use super::{
     std_comp_render::render_empty_dataset,
 };
 
-fn split_main_display(area: Rect, focus: &ui::state::Focus) -> (Rect, Rect) {
+fn split_main_display(
+    area: Rect,
+    focus: &ui::state::Focus,
+    prepared_attributes: Option<&super::attributes::PreparedMetadataLayout>,
+) -> (Rect, Rect) {
     let layout = configure::current_auto_layout_settings();
+    let focused_attributes_constraint = attribute_constraint(
+        &layout.attributes.focused,
+        prepared_attributes.map(|layout| layout.preferred_panel_height()),
+    );
     let (attributes_constraint, content_constraint) = match super::app::main_content_focus(focus) {
         ui::state::LastFocused::Attributes => (
-            layout.attributes.focused.as_constraint(),
+            focused_attributes_constraint,
             layout.content.unfocused.as_constraint(),
         ),
         ui::state::LastFocused::Content => (
@@ -49,6 +57,21 @@ fn split_main_display(area: Rect, focus: &ui::state::Focus) -> (Rect, Rect) {
         .constraints([attributes_constraint, content_constraint])
         .split(area);
     (chunks[0], chunks[1])
+}
+
+fn attribute_constraint(
+    size: &configure::LayoutSize,
+    preferred_height: Option<u16>,
+) -> ratatui::layout::Constraint {
+    match (size, preferred_height) {
+        (configure::LayoutSize::Max(cap), Some(preferred)) => {
+            ratatui::layout::Constraint::Length(preferred.min(*cap).max(3))
+        }
+        (configure::LayoutSize::Min(floor), Some(preferred)) => {
+            ratatui::layout::Constraint::Length(preferred.max(*floor))
+        }
+        _ => size.as_constraint(),
+    }
 }
 
 pub fn render_main_display(
@@ -65,7 +88,8 @@ pub fn render_main_display(
     };
 
     let content_area = if state.show_tree_view {
-        let (attr_area, content_area) = split_main_display(*area, &state.focus);
+        let (attr_area, content_area) =
+            split_main_display(*area, &state.focus, prepared_attributes.as_ref());
         render_info_attributes(
             f,
             &attr_area,

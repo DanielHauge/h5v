@@ -58,7 +58,12 @@ pub(super) fn primary_text_style() -> Style {
     style
 }
 
-fn make_panels_rect(area: Rect, mode: &Mode, focus: &Focus) -> Rc<[Rect]> {
+fn make_panels_rect(
+    area: Rect,
+    mode: &Mode,
+    focus: &Focus,
+    treeview: &[super::tree_view::TreeItem<'_>],
+) -> Rc<[Rect]> {
     if let Mode::Search = mode {
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -70,8 +75,10 @@ fn make_panels_rect(area: Rect, mode: &Mode, focus: &Focus) -> Rc<[Rect]> {
             Focus::Tree(_) => PanelFocus::Focused,
             Focus::Attributes | Focus::Content => PanelFocus::Unfocused,
         };
+        let focused_tree_constraint =
+            tree_constraint(&layout.tree.focused, preferred_tree_panel_width(treeview));
         let tree_constraint = match tree_focus {
-            PanelFocus::Focused => layout.tree.focused.as_constraint(),
+            PanelFocus::Focused => focused_tree_constraint,
             PanelFocus::Unfocused => layout.tree.unfocused.as_constraint(),
         };
         if area.width < 100 {
@@ -86,6 +93,23 @@ fn make_panels_rect(area: Rect, mode: &Mode, focus: &Focus) -> Rc<[Rect]> {
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([tree_constraint, Constraint::Fill(1)])
             .split(area)
+    }
+}
+
+fn preferred_tree_panel_width(treeview: &[super::tree_view::TreeItem<'_>]) -> Option<u16> {
+    let widest_line = treeview.iter().map(|item| item.line.width() as u16).max()?;
+    Some(widest_line.saturating_add(4).max(12))
+}
+
+fn tree_constraint(size: &configure::LayoutSize, preferred_width: Option<u16>) -> Constraint {
+    match (size, preferred_width) {
+        (configure::LayoutSize::Max(cap), Some(preferred)) => {
+            Constraint::Length(preferred.min(*cap).max(12))
+        }
+        (configure::LayoutSize::Min(floor), Some(preferred)) => {
+            Constraint::Length(preferred.max(*floor))
+        }
+        _ => size.as_constraint(),
     }
 }
 
@@ -200,7 +224,8 @@ fn main_recover_loop(
 
         let main_display_area = match show_tree_view {
             true => {
-                let areas = make_panels_rect(content_area, &state.mode, &state.focus);
+                let areas =
+                    make_panels_rect(content_area, &state.mode, &state.focus, &state.treeview);
                 let (tree_area, main_display_area) = (areas[0], areas[1]);
                 render_tree(frame, tree_area, state);
                 main_display_area
@@ -808,17 +833,45 @@ fn render_header(
         columns[1],
     );
 
-    let right = Line::from(vec![Span::styled(
-        "(type ? for help)",
-        Style::default().fg(configure::themed_color(|colors| colors.content.help_hint)),
-    )]);
+    let mchart_label = format!(
+        " 📊 mchart [{}/{}] ",
+        state.multi_chart.visible_item_count(),
+        state.multi_chart.chart_items().len()
+    );
+    let mchart_style = if matches!(state.mode, Mode::MultiChart) {
+        Style::default()
+            .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+            .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+            .bold()
+    } else {
+        Style::default()
+            .fg(configure::themed_color(|colors| colors.help.description))
+            .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
+            .bold()
+    };
+    let right = Line::from(vec![
+        Span::styled(mchart_label.clone(), mchart_style),
+        Span::raw(" "),
+        Span::styled(
+            "(type ? for help)",
+            Style::default().fg(configure::themed_color(|colors| colors.content.help_hint)),
+        ),
+    ]);
     let right_width = right.width() as u16;
-    state.ui_layout.help_toggle = Some(Rect {
-        x: columns[2]
-            .x
-            .saturating_add(columns[2].width.saturating_sub(right_width)),
+    let mchart_width = Line::from(mchart_label.as_str()).width() as u16;
+    let right_start_x = columns[2]
+        .x
+        .saturating_add(columns[2].width.saturating_sub(right_width));
+    state.ui_layout.mchart_toggle = Some(Rect {
+        x: right_start_x,
         y: columns[2].y,
-        width: right_width,
+        width: mchart_width,
+        height: columns[2].height,
+    });
+    state.ui_layout.help_toggle = Some(Rect {
+        x: right_start_x.saturating_add(mchart_width + 1),
+        y: columns[2].y,
+        width: right_width.saturating_sub(mchart_width + 1),
         height: columns[2].height,
     });
     frame.render_widget(

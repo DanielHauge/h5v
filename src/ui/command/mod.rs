@@ -244,6 +244,31 @@ impl CommandState {
         }
     }
 
+    pub fn apply_selected_suggestion(&mut self) -> bool {
+        let trimmed = self.command_buffer.trim_start();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let Some(descriptor) =
+            selected_command_descriptor(&self.command_buffer, self.selected_suggestion)
+        else {
+            return false;
+        };
+        let leading_len = self.command_buffer.len() - trimmed.len();
+        let leading = self.command_buffer[..leading_len].to_string();
+        let suffix = trimmed
+            .find(char::is_whitespace)
+            .map(|index| trimmed[index..].to_string())
+            .unwrap_or_default();
+        self.command_buffer = format!("{leading}{}{}", descriptor.name, suffix);
+        if suffix.is_empty() {
+            self.command_buffer.push(' ');
+        }
+        self.cursor = self.command_buffer.len();
+        self.note_buffer_edited();
+        true
+    }
+
     pub fn record_successful_command(&mut self, invocation: &CommandInvocation) {
         if invocation.is_noop() {
             return;

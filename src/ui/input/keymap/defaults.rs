@@ -330,6 +330,12 @@ pub(super) fn default_multichart_bindings() -> Vec<KeyBinding<MultiChartAction>>
         binding("Esc", BoundAction::Action(MultiChartAction::Exit)),
         binding("M", BoundAction::Action(MultiChartAction::Exit)),
         binding("q", BoundAction::Action(MultiChartAction::Quit)),
+        binding("Tab", BoundAction::Action(MultiChartAction::CycleViewMode)),
+        binding(
+            "Shift+Tab",
+            BoundAction::Action(MultiChartAction::CycleViewMode),
+        ),
+        binding("t", BoundAction::Action(MultiChartAction::CycleViewMode)),
         binding("Shift+Up", BoundAction::Action(MultiChartAction::ZoomIn)),
         binding("z", BoundAction::Action(MultiChartAction::ZoomIn)),
         binding("+", BoundAction::Action(MultiChartAction::ZoomIn)),

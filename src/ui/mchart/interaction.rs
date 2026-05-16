@@ -100,6 +100,10 @@ fn zoom_axis_range(
 }
 
 impl MultiChartState {
+    fn supports_zoom(&self) -> bool {
+        matches!(self.view_mode(), MultiChartViewMode::Line)
+    }
+
     pub(super) fn bounds_from_points<'a>(
         points: impl Iterator<Item = &'a (f64, f64)>,
     ) -> Option<ChartViewport> {
@@ -208,6 +212,9 @@ impl MultiChartState {
         zoom_in: bool,
         mode: ChartZoomMode,
     ) -> bool {
+        if !self.supports_zoom() {
+            return false;
+        }
         let Some(bounds) = self.visible_data_bounds() else {
             return false;
         };
@@ -431,6 +438,23 @@ impl MultiChartState {
 }
 
 impl MultiChartState {
+    pub fn click_view_mode_hitbox(&mut self, column: u16, row: u16) -> bool {
+        let Some(hitbox) = self
+            .view_mode_hitboxes
+            .iter()
+            .find(|hitbox| point_in_rect(hitbox.area, column, row))
+            .copied()
+        else {
+            return false;
+        };
+        if self.view_mode == hitbox.mode {
+            return false;
+        }
+        self.view_mode = hitbox.mode;
+        self.modified = true;
+        true
+    }
+
     pub(super) fn item_by_id(&self, id: ChartItemId) -> Option<&ChartItem> {
         self.items.iter().find(|item| item.id == id)
     }

@@ -23,6 +23,38 @@ impl ChartXAxisPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiChartViewMode {
+    Line,
+    Histogram,
+    ComparisonScatter,
+}
+
+impl MultiChartViewMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            MultiChartViewMode::Line => "Line",
+            MultiChartViewMode::Histogram => "Histogram",
+            MultiChartViewMode::ComparisonScatter => "Comparison scatter",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            MultiChartViewMode::Line => MultiChartViewMode::Histogram,
+            MultiChartViewMode::Histogram => MultiChartViewMode::ComparisonScatter,
+            MultiChartViewMode::ComparisonScatter => MultiChartViewMode::Line,
+        }
+    }
+
+    pub fn sample_window_description(self) -> &'static str {
+        match self {
+            MultiChartViewMode::Line => "view",
+            MultiChartViewMode::Histogram | MultiChartViewMode::ComparisonScatter => "window",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChartItemId(pub u64);
 

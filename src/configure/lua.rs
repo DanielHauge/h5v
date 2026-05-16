@@ -489,6 +489,27 @@ mod tests {
     }
 
     #[test]
+    fn applies_max_layout_constraint_configuration() {
+        let lua = Lua::new();
+        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.layout.attributes.focused = "max(12)"
+        "#,
+        )
+        .exec()
+        .expect("assign layout config");
+
+        apply_lua_config(&h5v).expect("apply config");
+        assert_eq!(
+            current_auto_layout_settings().attributes.focused,
+            LayoutSize::max(12)
+        );
+        configure::reset_config(ThemeName::Dark);
+    }
+
+    #[test]
     fn layout_configuration_rejects_invalid_pairing() {
         let lua = Lua::new();
         let h5v = build_h5v_table(&lua, None, false).expect("build h5v");

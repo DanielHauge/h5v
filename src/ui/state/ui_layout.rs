@@ -73,6 +73,7 @@ pub struct HelpSidebarHitbox {
 #[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
     pub help_toggle: Option<Rect>,
+    pub mchart_toggle: Option<Rect>,
     pub help_top_bar: Option<Rect>,
     pub help_tabs: Vec<HelpTabHitbox>,
     pub help_sidebar_items: Vec<HelpSidebarHitbox>,

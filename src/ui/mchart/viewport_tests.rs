@@ -41,7 +41,7 @@ fn chart_panel_title_includes_viewport_when_zoomed() {
         (0..10).map(|i| (i as f64, (i * 2) as f64)).collect(),
     );
 
-    assert_eq!(state.chart_panel_title(), "Overlay chart [x values]");
+    assert_eq!(state.chart_panel_title(), " 📈 Chart ");
 
     state.viewport = Some(ChartViewport {
         x_min: 2.0,
@@ -49,10 +49,63 @@ fn chart_panel_title_includes_viewport_when_zoomed() {
         y_min: 4.0,
         y_max: 12.0,
     });
+    assert_eq!(state.chart_panel_title(), " 📈 Chart ");
+}
+
+#[test]
+fn chart_mode_subheader_tracks_active_view_mode() {
+    let mut state = make_state();
     assert_eq!(
-        state.chart_panel_title(),
-        "Overlay chart [x values] · view x=[2.0000, 6.0000] y=[4.0000, 12.0000]"
+        state.chart_mode_subheader(),
+        "[x values] - parametric curves and sampled series"
     );
+
+    state.cycle_view_mode();
+    assert_eq!(
+        state.chart_mode_subheader(),
+        "[visible sample values] - overlaid distributions"
+    );
+}
+
+#[test]
+fn histogram_mode_disables_zoom_changes() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        (0..10).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.cycle_view_mode();
+
+    assert!(!state.zoom_in(10.0));
+    assert_viewport(&state, None);
+}
+
+#[test]
+fn comparison_scatter_mode_disables_zoom_changes() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        (0..10).map(|i| (i as f64, i as f64)).collect(),
+    );
+    state.add_chart_item(
+        source("/group/b", selection),
+        (0..10).map(|i| (i as f64, (i * 2) as f64)).collect(),
+    );
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    assert!(!state.zoom_in(10.0));
+    assert_viewport(&state, None);
 }
 
 #[test]
@@ -326,6 +379,9 @@ fn prepared_chart_data_filters_legacy_non_finite_points() {
     state.items[0].series.points[1] = (1.0, f64::NAN);
 
     let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::Line(prepared) = prepared else {
+        panic!("expected line chart data");
+    };
     assert_eq!(prepared.series.len(), 1);
     assert_eq!(prepared.series[0].points, vec![(0.0, 1.0), (2.0, 3.0)]);
     assert_eq!(prepared.y_min, 1.0);
@@ -357,6 +413,9 @@ fn prepared_chart_data_respects_visibility_and_viewport() {
     });
 
     let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::Line(prepared) = prepared else {
+        panic!("expected line chart data");
+    };
     assert_eq!(prepared.series.len(), 1);
     assert_eq!(
         prepared.series[0].points,
@@ -366,6 +425,137 @@ fn prepared_chart_data_respects_visibility_and_viewport() {
     assert_eq!(prepared.plot_x_max, 3.0);
     assert_eq!(prepared.y_min, 100.0);
     assert_eq!(prepared.y_max, 200.0);
+}
+
+#[test]
+fn cycle_view_mode_rotates_through_first_pass_modes() {
+    let mut state = make_state();
+    assert_eq!(state.view_mode(), MultiChartViewMode::Line);
+    assert_eq!(state.cycle_view_mode(), MultiChartViewMode::Histogram);
+    assert_eq!(
+        state.cycle_view_mode(),
+        MultiChartViewMode::ComparisonScatter
+    );
+    assert_eq!(state.cycle_view_mode(), MultiChartViewMode::Line);
+}
+
+#[test]
+fn histogram_mode_prepares_overlayed_bins_from_visible_window() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 1.5), (2.0, 2.0), (3.0, 3.5)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection),
+        vec![(0.0, 2.0), (1.0, 2.5), (2.0, 3.0), (3.0, 4.0)],
+    );
+    state.viewport = Some(ChartViewport {
+        x_min: 1.0,
+        x_max: 2.0,
+        y_min: -10.0,
+        y_max: 10.0,
+    });
+    state.cycle_view_mode();
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::Histogram(prepared) = prepared else {
+        panic!("expected histogram chart data");
+    };
+    assert_eq!(prepared.series.len(), 2);
+    assert_eq!(prepared.bin_count, 2);
+    assert_eq!(
+        prepared.series[0]
+            .bins
+            .iter()
+            .map(|bin| bin.count as usize)
+            .sum::<usize>(),
+        2
+    );
+    assert_eq!(
+        prepared.series[1]
+            .bins
+            .iter()
+            .map(|bin| bin.count as usize)
+            .sum::<usize>(),
+        2
+    );
+}
+
+#[test]
+fn comparison_scatter_mode_uses_selected_series_and_next_visible_series() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 10.0), (1.0, 20.0), (2.0, 30.0)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)],
+    );
+    state.add_chart_item(
+        source("/group/c", selection),
+        vec![(0.0, 7.0), (1.0, 8.0), (2.0, 9.0)],
+    );
+    state.idx = 1;
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    let prepared = state.prepared_chart_data().expect("prepared chart data");
+    let PreparedChartData::ComparisonScatter(prepared) = prepared else {
+        panic!("expected comparison scatter data");
+    };
+    assert_eq!(prepared.x_label, "b[..,0]");
+    assert_eq!(prepared.y_label, "c[..,0]");
+    assert_eq!(prepared.points, vec![(1.0, 7.0), (2.0, 8.0), (3.0, 9.0)]);
+}
+
+#[test]
+fn histogram_render_request_succeeds() {
+    let request = MultiChartRenderRequest {
+        generation: 1,
+        chart_area: Rect::new(0, 0, 40, 12),
+        width: 400,
+        height: 240,
+        prepared: PreparedChartData::Histogram(PreparedHistogramData {
+            value_min: 0.0,
+            value_max: 4.0,
+            count_max: 3.0,
+            bin_count: 2,
+            series: vec![PreparedHistogramSeries {
+                label: "series".to_string(),
+                color_slot: 0,
+                bins: vec![
+                    PreparedHistogramBin {
+                        start: 0.0,
+                        end: 2.0,
+                        count: 3.0,
+                    },
+                    PreparedHistogramBin {
+                        start: 2.0,
+                        end: 4.0,
+                        count: 1.0,
+                    },
+                ],
+                is_selected: true,
+            }],
+        }),
+    };
+
+    assert!(matches!(
+        render::render_prepared_chart_request(request),
+        MultiChartRenderResult::Success { .. }
+    ));
 }
 
 #[test]

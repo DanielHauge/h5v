@@ -792,3 +792,21 @@ fn click_item_hitbox_selects_item() {
     assert!(state.click_item_hitbox(1, 3));
     assert_eq!(state.idx, 1);
 }
+
+#[test]
+fn click_view_mode_hitbox_switches_modes() {
+    let mut state = make_state();
+    state.view_mode_hitboxes = vec![
+        MultiChartViewModeHitbox {
+            area: ratatui::layout::Rect::new(0, 0, 8, 1),
+            mode: MultiChartViewMode::Line,
+        },
+        MultiChartViewModeHitbox {
+            area: ratatui::layout::Rect::new(10, 0, 12, 1),
+            mode: MultiChartViewMode::Histogram,
+        },
+    ];
+
+    assert!(state.click_view_mode_hitbox(11, 0));
+    assert_eq!(state.view_mode(), MultiChartViewMode::Histogram);
+}

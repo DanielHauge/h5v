@@ -28,6 +28,13 @@ pub struct PreparedMetadataLayout {
     initial_display_rows: Vec<MetadataDisplayRow>,
 }
 
+impl PreparedMetadataLayout {
+    pub fn preferred_panel_height(&self) -> u16 {
+        let rows = self.initial_display_rows.len().min(u16::MAX as usize) as u16;
+        rows.saturating_add(2).max(3)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MetadataCellPosition {
     display_row: usize,

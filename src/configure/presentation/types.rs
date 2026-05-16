@@ -178,8 +178,11 @@ impl Default for MultiChartSettings {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutSize {
     Cells(u16),
+    Min(u16),
+    Max(u16),
     Percent(u16),
-    Fill,
+    Ratio(u32, u32),
+    Fill(u16),
 }
 
 impl LayoutSize {
@@ -187,19 +190,38 @@ impl LayoutSize {
         Self::Cells(value)
     }
 
+    pub const fn min(value: u16) -> Self {
+        Self::Min(value)
+    }
+
+    pub const fn max(value: u16) -> Self {
+        Self::Max(value)
+    }
+
     pub const fn percent(value: u16) -> Self {
         Self::Percent(value)
     }
 
+    pub const fn ratio(numerator: u32, denominator: u32) -> Self {
+        Self::Ratio(numerator, denominator)
+    }
+
     pub const fn fill() -> Self {
-        Self::Fill
+        Self::Fill(1)
+    }
+
+    pub const fn fill_weight(weight: u16) -> Self {
+        Self::Fill(weight)
     }
 
     pub const fn as_constraint(&self) -> Constraint {
         match self {
             Self::Cells(value) => Constraint::Length(*value),
+            Self::Min(value) => Constraint::Min(*value),
+            Self::Max(value) => Constraint::Max(*value),
             Self::Percent(value) => Constraint::Percentage(*value),
-            Self::Fill => Constraint::Fill(1),
+            Self::Ratio(numerator, denominator) => Constraint::Ratio(*numerator, *denominator),
+            Self::Fill(weight) => Constraint::Fill(*weight),
         }
     }
 }
@@ -226,8 +248,8 @@ pub struct AutoLayoutSettings {
 impl Default for AutoLayoutSettings {
     fn default() -> Self {
         Self {
-            tree: PanelLayoutSizes::new(LayoutSize::percent(28), LayoutSize::percent(20)),
-            attributes: PanelLayoutSizes::new(LayoutSize::cells(12), LayoutSize::cells(5)),
+            tree: PanelLayoutSizes::new(LayoutSize::max(60), LayoutSize::percent(16)),
+            attributes: PanelLayoutSizes::new(LayoutSize::max(12), LayoutSize::cells(5)),
             content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
         }
     }

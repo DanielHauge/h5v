@@ -435,6 +435,11 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         action: MultiChartAction::ShowHelp,
     },
     ActionCode {
+        symbol: "CycleViewMode",
+        code: "cycle-view-mode",
+        action: MultiChartAction::CycleViewMode,
+    },
+    ActionCode {
         symbol: "ZoomIn",
         code: "zoom-in",
         action: MultiChartAction::ZoomIn,

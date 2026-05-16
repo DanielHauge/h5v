@@ -110,6 +110,7 @@ pub enum MultiChartAction {
     Exit,
     Quit,
     ShowHelp,
+    CycleViewMode,
     ZoomIn,
     ZoomOut,
     PanLeft,
@@ -130,6 +131,7 @@ pub enum MultiChartAction {
 pub enum CommandAction {
     Submit,
     Cancel,
+    CompleteSuggestion,
     SelectPrevSuggestion,
     SelectNextSuggestion,
     SelectPrevHistory,
@@ -353,7 +355,8 @@ pub fn command_action(key: &KeyEvent) -> Option<CommandAction> {
     match (key.code, key.modifiers) {
         (KeyCode::Enter, _) => Some(CommandAction::Submit),
         (KeyCode::Esc, _) => Some(CommandAction::Cancel),
-        (KeyCode::Tab, _) | (KeyCode::Down, _) => Some(CommandAction::SelectNextSuggestion),
+        (KeyCode::Tab, _) => Some(CommandAction::CompleteSuggestion),
+        (KeyCode::Down, _) => Some(CommandAction::SelectNextSuggestion),
         (KeyCode::BackTab, _) | (KeyCode::Up, _) => Some(CommandAction::SelectPrevSuggestion),
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => Some(CommandAction::SelectPrevHistory),
         (KeyCode::Char('n'), KeyModifiers::CONTROL) => Some(CommandAction::SelectNextHistory),
@@ -510,6 +513,36 @@ mod tests {
         assert_eq!(
             multichart_action(&key, &keymaps),
             Some(BoundAction::Action(MultiChartAction::ShowHelp))
+        );
+    }
+
+    #[test]
+    fn multichart_t_cycles_view_modes() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::CycleViewMode))
+        );
+    }
+
+    #[test]
+    fn multichart_tab_cycles_view_modes() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::CycleViewMode))
+        );
+    }
+
+    #[test]
+    fn multichart_shift_tab_cycles_view_modes() {
+        let keymaps = EffectiveKeymaps::default();
+        let key = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
+        assert_eq!(
+            multichart_action(&key, &keymaps),
+            Some(BoundAction::Action(MultiChartAction::CycleViewMode))
         );
     }
 

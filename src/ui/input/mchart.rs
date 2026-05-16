@@ -139,6 +139,10 @@ pub(crate) fn handle_mchart_event(
                         state.help.selected_tab = crate::ui::state::HelpTab::MultiChart;
                         Ok(EventResult::Redraw)
                     }
+                    Some(BoundAction::Action(MultiChartAction::CycleViewMode)) => {
+                        state.multi_chart.cycle_view_mode();
+                        Ok(EventResult::Redraw)
+                    }
                     Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
                         Ok(if state.multi_chart.zoom_in(10.0) {
                             EventResult::Redraw
@@ -261,6 +265,12 @@ pub(crate) fn handle_mchart_event(
         },
         Event::Mouse(mouse_event) => match mouse_event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                if state
+                    .multi_chart
+                    .click_view_mode_hitbox(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
                 if state
                     .multi_chart
                     .click_item_hitbox(mouse_event.column, mouse_event.row)

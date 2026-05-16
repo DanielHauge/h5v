@@ -72,10 +72,22 @@ fn parse_panel_config(
 fn layout_size_to_lua(lua: &Lua, size: &configure::LayoutSize) -> Result<Value, ConfigureErrors> {
     Ok(match size {
         configure::LayoutSize::Cells(value) => Value::Integer(i64::from(*value)),
+        configure::LayoutSize::Min(value) => {
+            Value::String(lua.create_string(format!("min({value})"))?)
+        }
+        configure::LayoutSize::Max(value) => {
+            Value::String(lua.create_string(format!("max({value})"))?)
+        }
         configure::LayoutSize::Percent(value) => {
             Value::String(lua.create_string(format!("{value}%"))?)
         }
-        configure::LayoutSize::Fill => Value::String(lua.create_string("*")?),
+        configure::LayoutSize::Ratio(numerator, denominator) => {
+            Value::String(lua.create_string(format!("ratio({numerator},{denominator})"))?)
+        }
+        configure::LayoutSize::Fill(1) => Value::String(lua.create_string("*")?),
+        configure::LayoutSize::Fill(weight) => {
+            Value::String(lua.create_string(format!("fill({weight})"))?)
+        }
     })
 }
 
@@ -98,7 +110,7 @@ fn parse_size_field(
             Ok(configure::LayoutSize::cells(value as u16))
         }
         Value::Integer(_) | Value::Number(_) => Err(mlua::Error::runtime(format!(
-            "h5v.layout.{panel_name}.{field_name} must be a non-negative integer, a percentage string like \"30%\", or \"*\""
+            "h5v.layout.{panel_name}.{field_name} must be a non-negative integer, a percentage string like \"30%\", \"*\", or a constraint like \"max(12)\""
         ))
         .into()),
         Value::String(value) => parse_layout_string(value.to_str()?.as_ref(), panel_name, field_name),
@@ -119,9 +131,12 @@ fn parse_layout_string(
     if value == "*" {
         return Ok(configure::LayoutSize::fill());
     }
+    if let Some(parsed) = parse_constraint_call(value, panel_name, field_name)? {
+        return Ok(parsed);
+    }
     let Some(percent) = value.strip_suffix('%') else {
         return Err(mlua::Error::runtime(format!(
-            "h5v.layout.{panel_name}.{field_name} must use \"*\" or an integer percentage string like \"30%\""
+            "h5v.layout.{panel_name}.{field_name} must use \"*\", an integer percentage string like \"30%\", or a constraint like \"max(12)\""
         ))
         .into());
     };
@@ -137,6 +152,73 @@ fn parse_layout_string(
         .into());
     }
     Ok(configure::LayoutSize::percent(percent))
+}
+
+fn parse_constraint_call(
+    value: &str,
+    panel_name: &str,
+    field_name: &str,
+) -> Result<Option<configure::LayoutSize>, ConfigureErrors> {
+    let Some(open_index) = value.find('(') else {
+        return Ok(None);
+    };
+    let Some(close_index) = value.rfind(')') else {
+        return Err(mlua::Error::runtime(format!(
+            "h5v.layout.{panel_name}.{field_name} has invalid constraint '{value}'"
+        ))
+        .into());
+    };
+    if close_index <= open_index || close_index + 1 != value.len() {
+        return Err(mlua::Error::runtime(format!(
+            "h5v.layout.{panel_name}.{field_name} has invalid constraint '{value}'"
+        ))
+        .into());
+    }
+    let name = value[..open_index].trim().to_ascii_lowercase();
+    let args = value[open_index + 1..close_index]
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let parse_u16 = |raw: &str| {
+        raw.parse::<u16>().map_err(|_| {
+            mlua::Error::runtime(format!(
+                "h5v.layout.{panel_name}.{field_name} has invalid constraint '{value}'"
+            ))
+        })
+    };
+    let parse_u32 = |raw: &str| {
+        raw.parse::<u32>().map_err(|_| {
+            mlua::Error::runtime(format!(
+                "h5v.layout.{panel_name}.{field_name} has invalid constraint '{value}'"
+            ))
+        })
+    };
+
+    let parsed = match name.as_str() {
+        "min" if args.len() == 1 => configure::LayoutSize::min(parse_u16(args[0])?),
+        "max" if args.len() == 1 => configure::LayoutSize::max(parse_u16(args[0])?),
+        "length" | "cells" if args.len() == 1 => configure::LayoutSize::cells(parse_u16(args[0])?),
+        "fill" if args.len() == 1 => configure::LayoutSize::fill_weight(parse_u16(args[0])?),
+        "ratio" if args.len() == 2 => {
+            let numerator = parse_u32(args[0])?;
+            let denominator = parse_u32(args[1])?;
+            if denominator == 0 {
+                return Err(mlua::Error::runtime(format!(
+                    "h5v.layout.{panel_name}.{field_name} ratio denominator must be non-zero"
+                ))
+                .into());
+            }
+            configure::LayoutSize::ratio(numerator, denominator)
+        }
+        _ => {
+            return Err(mlua::Error::runtime(format!(
+                "h5v.layout.{panel_name}.{field_name} has invalid constraint '{value}'"
+            ))
+            .into())
+        }
+    };
+    Ok(Some(parsed))
 }
 
 fn validate_layout_settings(

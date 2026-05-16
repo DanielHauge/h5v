@@ -6,7 +6,7 @@ use plotters::{
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
-    style::{Style, Stylize},
+    style::Style,
     symbols::Marker,
     text::{Line, Span, Text},
     widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType, Paragraph, Wrap},
@@ -16,11 +16,11 @@ use ratatui_image::{picker::ProtocolType, StatefulImage};
 use crate::{configure, error::log_error};
 
 use super::{
-    prompt::ExpressionPromptFocus, ChartSource, ExpressionPromptInputKind,
+    prompt::ExpressionPromptFocus, ChartItem, ChartSource, ExpressionPromptInputKind,
     ExpressionPromptMessageKind, ExpressionPromptMode, ExpressionPromptSuggestion,
     ExpressionPromptSuggestionKind, MultiChartEditorHitbox, MultiChartItemHitbox,
-    MultiChartRenderRequest, MultiChartRenderResult, MultiChartState,
-    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    MultiChartRenderRequest, MultiChartRenderResult, MultiChartState, MultiChartViewModeHitbox,
+    Point, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 fn mchart_body_style() -> Style {
@@ -33,6 +33,20 @@ fn mchart_body_style() -> Style {
 
 fn mchart_body_span(content: impl Into<String>) -> Span<'static> {
     Span::styled(content.into(), mchart_body_style())
+}
+
+fn mchart_mode_tab_style(selected: bool) -> Style {
+    if selected {
+        Style::default()
+            .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+            .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+            .bold()
+    } else {
+        Style::default()
+            .fg(configure::themed_color(|colors| colors.help.description))
+            .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
+            .bold()
+    }
 }
 
 fn render_suggestion_label(
@@ -83,8 +97,24 @@ fn truncate_to_width(message: &str, max_width: usize) -> String {
     truncated
 }
 
-pub(super) fn render_prepared_chart_request(
-    request: MultiChartRenderRequest,
+fn normalize_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
+    if !min.is_finite() || !max.is_finite() || max < min {
+        return None;
+    }
+    if (max - min).abs() < f64::EPSILON {
+        let pad = if min == 0.0 {
+            1.0
+        } else {
+            min.abs().max(1.0) * 0.05
+        };
+        return Some((min - pad, max + pad));
+    }
+    Some((min, max))
+}
+
+fn render_line_chart_request(
+    request: &MultiChartRenderRequest,
+    prepared: &super::PreparedLineChartData,
 ) -> MultiChartRenderResult {
     let mut plot_buffer = vec![0; (request.width * request.height * 3) as usize];
     let (plot_x_range, plot_y_range) = {
@@ -106,14 +136,14 @@ pub(super) fn render_prepared_chart_request(
                 message: error.to_string(),
             };
         }
-        let y_label_area_size = format!("{:.4}", request.prepared.y_max).len() as u32 * 3 + 30;
+        let y_label_area_size = format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30;
         let chart = plotters::prelude::ChartBuilder::on(&root)
             .margin(10)
             .x_label_area_size(30)
             .y_label_area_size(y_label_area_size)
             .build_cartesian_2d(
-                request.prepared.plot_x_min..request.prepared.plot_x_max,
-                request.prepared.y_min..request.prepared.y_max,
+                prepared.plot_x_min..prepared.plot_x_max,
+                prepared.y_min..prepared.y_max,
             );
 
         let mut chart = match chart {
@@ -131,7 +161,8 @@ pub(super) fn render_prepared_chart_request(
 
         if let Err(error) = chart
             .configure_mesh()
-            .x_desc(request.x_axis_label)
+            .x_desc("x values")
+            .y_desc("value")
             .y_label_style(("sans-serif", 18).into_font().color(&axis))
             .x_label_style(("sans-serif", 18).into_font().color(&axis))
             .axis_style(ShapeStyle::from(&axis).stroke_width(2))
@@ -142,7 +173,7 @@ pub(super) fn render_prepared_chart_request(
             log_error(&error);
         }
 
-        for series in request.prepared.series {
+        for series in prepared.series.iter().cloned() {
             let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
                 colors.chart.series[series.color_slot % colors.chart.series.len()]
             }));
@@ -191,16 +222,241 @@ pub(super) fn render_prepared_chart_request(
     }
 }
 
+fn render_histogram_request(
+    request: &MultiChartRenderRequest,
+    prepared: &super::PreparedHistogramData,
+) -> MultiChartRenderResult {
+    let mut plot_buffer = vec![0; (request.width * request.height * 3) as usize];
+    let (plot_x_range, plot_y_range) = {
+        let root = BitMapBackend::with_buffer(&mut plot_buffer, (request.width, request.height))
+            .into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(error) = root.fill(&plot_bg) {
+            log_error(&error);
+            return MultiChartRenderResult::Failure {
+                generation: request.generation,
+                message: error.to_string(),
+            };
+        }
+        let y_label_area_size = format!("{:.0}", prepared.count_max).len() as u32 * 3 + 30;
+        let chart = plotters::prelude::ChartBuilder::on(&root)
+            .margin(10)
+            .x_label_area_size(30)
+            .y_label_area_size(y_label_area_size)
+            .build_cartesian_2d(
+                prepared.value_min..prepared.value_max,
+                0.0..prepared.count_max,
+            );
+        let mut chart = match chart {
+            Ok(chart) => chart,
+            Err(error) => {
+                log_error(&error);
+                return MultiChartRenderResult::Failure {
+                    generation: request.generation,
+                    message: error.to_string(),
+                };
+            }
+        };
+        let ranges = chart.plotting_area().get_pixel_range();
+        if let Err(error) = chart
+            .configure_mesh()
+            .x_desc(format!("value ({} bins)", prepared.bin_count))
+            .y_desc("count")
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+        {
+            log_error(&error);
+        }
+        for series in prepared.series.iter().cloned() {
+            let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+                colors.chart.series[series.color_slot % colors.chart.series.len()]
+            }));
+            let color = RGBColor(r, g, b);
+            let stroke_width = if series.is_selected { 3 } else { 2 };
+            let drawn_series = match chart.draw_series(series.bins.iter().map(|bin| {
+                plotters::prelude::Rectangle::new(
+                    [(bin.start, 0.0), (bin.end, bin.count)],
+                    color
+                        .mix(if series.is_selected { 0.45 } else { 0.28 })
+                        .filled(),
+                )
+            })) {
+                Ok(series_drawn) => series_drawn,
+                Err(error) => {
+                    log_error(&error);
+                    continue;
+                }
+            };
+            drawn_series
+                .label(series.label.clone())
+                .legend(move |(x, y)| {
+                    plotters::prelude::Rectangle::new(
+                        [(x, y - 5), (x + 20, y + 5)],
+                        color.mix(0.45).stroke_width(stroke_width).filled(),
+                    )
+                });
+        }
+        if let Err(error) = chart
+            .configure_series_labels()
+            .background_style(plot_bg.mix(0.85))
+            .border_style(axis.mix(0.8))
+            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .draw()
+        {
+            log_error(&error);
+        }
+        ranges
+    };
+    MultiChartRenderResult::Success {
+        generation: request.generation,
+        chart_area: request.chart_area,
+        width: request.width,
+        height: request.height,
+        rgb_bytes: plot_buffer,
+        plot_x_range,
+        plot_y_range,
+    }
+}
+
+fn render_comparison_scatter_request(
+    request: &MultiChartRenderRequest,
+    prepared: &super::PreparedComparisonScatterData,
+) -> MultiChartRenderResult {
+    let mut plot_buffer = vec![0; (request.width * request.height * 3) as usize];
+    let (plot_x_range, plot_y_range) = {
+        let root = BitMapBackend::with_buffer(&mut plot_buffer, (request.width, request.height))
+            .into_drawing_area();
+        let (bg_r, bg_g, bg_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.plot_bg));
+        let (grid_r, grid_g, grid_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.grid));
+        let (axis_r, axis_g, axis_b) =
+            configure::rgb_channels(configure::themed_color(|colors| colors.chart.axis));
+        let plot_bg = RGBColor(bg_r, bg_g, bg_b);
+        let grid = RGBColor(grid_r, grid_g, grid_b);
+        let axis = RGBColor(axis_r, axis_g, axis_b);
+        if let Err(error) = root.fill(&plot_bg) {
+            log_error(&error);
+            return MultiChartRenderResult::Failure {
+                generation: request.generation,
+                message: error.to_string(),
+            };
+        }
+        let chart = plotters::prelude::ChartBuilder::on(&root)
+            .margin(10)
+            .x_label_area_size(30)
+            .y_label_area_size(45)
+            .build_cartesian_2d(
+                prepared.x_min..prepared.x_max,
+                prepared.y_min..prepared.y_max,
+            );
+        let mut chart = match chart {
+            Ok(chart) => chart,
+            Err(error) => {
+                log_error(&error);
+                return MultiChartRenderResult::Failure {
+                    generation: request.generation,
+                    message: error.to_string(),
+                };
+            }
+        };
+        let ranges = chart.plotting_area().get_pixel_range();
+        if let Err(error) = chart
+            .configure_mesh()
+            .x_desc(prepared.x_label.clone())
+            .y_desc(prepared.y_label.clone())
+            .y_label_style(("sans-serif", 18).into_font().color(&axis))
+            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+        {
+            log_error(&error);
+        }
+        let diagonal_min = prepared.x_min.min(prepared.y_min);
+        let diagonal_max = prepared.x_max.max(prepared.y_max);
+        let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
+            colors.chart.series[prepared.color_slot % colors.chart.series.len()]
+        }));
+        let color = RGBColor(r, g, b);
+        let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+            vec![(diagonal_min, diagonal_min), (diagonal_max, diagonal_max)],
+            axis.mix(0.4).stroke_width(2),
+        )));
+        let points = prepared.points.clone();
+        let drawn_series = match chart.draw_series(plotters::prelude::PointSeries::of_element(
+            points,
+            4,
+            color.filled(),
+            &|coord, size, style| {
+                plotters::element::EmptyElement::at(coord)
+                    + plotters::element::Circle::new((0, 0), size, style)
+            },
+        )) {
+            Ok(series) => series,
+            Err(error) => {
+                log_error(&error);
+                return MultiChartRenderResult::Failure {
+                    generation: request.generation,
+                    message: error.to_string(),
+                };
+            }
+        };
+        drawn_series
+            .label(prepared.label.clone())
+            .legend(move |(x, y)| plotters::element::Circle::new((x + 10, y), 4, color.filled()));
+        if let Err(error) = chart
+            .configure_series_labels()
+            .background_style(plot_bg.mix(0.85))
+            .border_style(axis.mix(0.8))
+            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .draw()
+        {
+            log_error(&error);
+        }
+        ranges
+    };
+    MultiChartRenderResult::Success {
+        generation: request.generation,
+        chart_area: request.chart_area,
+        width: request.width,
+        height: request.height,
+        rgb_bytes: plot_buffer,
+        plot_x_range,
+        plot_y_range,
+    }
+}
+
+pub(super) fn render_prepared_chart_request(
+    request: MultiChartRenderRequest,
+) -> MultiChartRenderResult {
+    match &request.prepared {
+        super::PreparedChartData::Line(prepared) => render_line_chart_request(&request, prepared),
+        super::PreparedChartData::Histogram(prepared) => {
+            render_histogram_request(&request, prepared)
+        }
+        super::PreparedChartData::ComparisonScatter(prepared) => {
+            render_comparison_scatter_request(&request, prepared)
+        }
+    }
+}
+
 impl MultiChartState {
     pub(super) fn chart_panel_title(&self) -> String {
-        let mut parts = vec![format!("Overlay chart [{}]", self.x_axis_policy.label())];
-        if self.viewport.is_some() {
-            parts.push(format!("view {}", self.viewport_summary()));
-        }
-        if self.loading_item_count() != 0 {
-            parts.push(format!("{} loading", self.loading_item_count()));
-        }
-        parts.join(" · ")
+        " 📈 Chart ".to_string()
     }
 
     pub(super) fn should_defer_image_protocol_frame(&self, chart_area: Rect) -> bool {
@@ -210,7 +466,160 @@ impl MultiChartState {
             && self.last_chart_panel_area == Some(chart_area)
     }
 
-    pub(super) fn prepared_chart_data(&self) -> Option<super::PreparedChartData> {
+    fn item_display_label(&self, item: &ChartItem) -> String {
+        item.name
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| item.label.clone())
+    }
+
+    fn sample_window(&self) -> Option<(f64, f64)> {
+        self.effective_viewport()
+            .map(|viewport| (viewport.x_min, viewport.x_max))
+    }
+
+    fn windowed_visible_points(&self, item: &ChartItem) -> Vec<Point> {
+        let points = item.active_series().points.iter().copied();
+        match self.sample_window() {
+            Some((x_min, x_max)) => super::model::sanitize_chart_points(
+                points
+                    .filter(|(x, _)| *x >= x_min && *x <= x_max)
+                    .collect::<Vec<_>>(),
+            ),
+            None => super::model::sanitize_chart_points(points.collect::<Vec<_>>()),
+        }
+    }
+
+    fn comparison_scatter_pair(&self) -> Option<(&ChartItem, &ChartItem)> {
+        let visible_items = self
+            .items
+            .iter()
+            .filter(|item| item.visible && item.has_loaded_series())
+            .collect::<Vec<_>>();
+        if visible_items.len() < 2 {
+            return None;
+        }
+        if let Some(selected) = self
+            .selected_item()
+            .filter(|item| item.visible && item.has_loaded_series())
+        {
+            if let Some(selected_index) =
+                visible_items.iter().position(|item| item.id == selected.id)
+            {
+                if let Some(other) = visible_items
+                    .iter()
+                    .skip(selected_index + 1)
+                    .find(|item| item.id != selected.id)
+                {
+                    return Some((selected, *other));
+                }
+                if let Some(other) = visible_items.iter().find(|item| item.id != selected.id) {
+                    return Some((selected, *other));
+                }
+            }
+        }
+        Some((visible_items[0], visible_items[1]))
+    }
+
+    fn comparison_scatter_pair_summary(&self) -> Option<String> {
+        let (left, right) = self.comparison_scatter_pair()?;
+        Some(format!(
+            "{} vs {}",
+            self.item_display_label(left),
+            self.item_display_label(right)
+        ))
+    }
+
+    fn mode_window_summary(&self) -> String {
+        match (self.view_mode(), self.viewport) {
+            (mode, _) if matches!(mode, super::MultiChartViewMode::Line) => {
+                format!(
+                    "{} {}",
+                    mode.sample_window_description(),
+                    self.viewport_summary()
+                )
+            }
+            (mode, Some(viewport)) => format!(
+                "{} x=[{:.4}, {:.4}]",
+                mode.sample_window_description(),
+                viewport.x_min,
+                viewport.x_max
+            ),
+            (mode, None) => format!("{} auto-fit visible", mode.sample_window_description()),
+        }
+    }
+
+    fn chart_mode_tab_specs(&self) -> Vec<(super::MultiChartViewMode, String, u16)> {
+        let labels = [
+            (super::MultiChartViewMode::Line, " Line "),
+            (super::MultiChartViewMode::Histogram, " Histogram "),
+            (
+                super::MultiChartViewMode::ComparisonScatter,
+                " Comparison scatter ",
+            ),
+        ];
+        labels
+            .iter()
+            .map(|(mode, label)| {
+                (
+                    *mode,
+                    (*label).to_string(),
+                    Line::from(*label).width() as u16,
+                )
+            })
+            .collect()
+    }
+
+    fn chart_mode_tabs(&self) -> Line<'static> {
+        let mut spans = Vec::new();
+        for (index, (mode, label, _)) in self.chart_mode_tab_specs().iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::styled(
+                    "  ",
+                    Style::default().fg(configure::themed_color(|colors| colors.help.muted)),
+                ));
+            }
+            spans.push(Span::styled(
+                label.clone(),
+                mchart_mode_tab_style(*mode == self.view_mode()),
+            ));
+        }
+        Line::from(spans)
+    }
+
+    pub(super) fn chart_mode_subheader(&self) -> String {
+        match self.view_mode() {
+            super::MultiChartViewMode::Line => {
+                "[x values] - parametric curves and sampled series".to_string()
+            }
+            super::MultiChartViewMode::Histogram => {
+                "[visible sample values] - overlaid distributions".to_string()
+            }
+            super::MultiChartViewMode::ComparisonScatter => format!(
+                "[sample aligned] - {}",
+                self.comparison_scatter_pair_summary()
+                    .unwrap_or_else(|| "selected vs next visible series".to_string())
+            ),
+        }
+    }
+
+    fn unavailable_chart_message(&self) -> String {
+        match self.view_mode() {
+            super::MultiChartViewMode::Line => format!(
+                "No plottable series in the current viewport. {}.",
+                self.x_axis_policy.description()
+            ),
+            super::MultiChartViewMode::Histogram => {
+                "No histogram samples in the current visible window.".to_string()
+            }
+            super::MultiChartViewMode::ComparisonScatter => {
+                "Comparison scatter needs two visible loaded series; it uses the selected series and the next visible series."
+                    .to_string()
+            }
+        }
+    }
+
+    fn prepared_line_chart_data(&self) -> Option<super::PreparedLineChartData> {
         let visible_items = self
             .items
             .iter()
@@ -219,23 +628,13 @@ impl MultiChartState {
         if visible_items.is_empty() {
             return None;
         }
-
-        let viewport = self.effective_viewport()?;
-
         let selected_item_id = self.selected_item().map(|item| item.id);
         let mut plot_x_min = f64::MAX;
         let mut plot_x_max = f64::MIN;
         let mut series = Vec::new();
 
         for item in visible_items {
-            let points = super::model::sanitize_chart_points(
-                item.active_series()
-                    .points
-                    .iter()
-                    .copied()
-                    .filter(|(x, _)| *x >= viewport.x_min && *x <= viewport.x_max)
-                    .collect(),
-            );
+            let points = self.windowed_visible_points(item);
             if points.is_empty() {
                 continue;
             }
@@ -245,12 +644,8 @@ impl MultiChartState {
                 plot_x_max = plot_x_max.max(x);
             }
 
-            series.push(super::PreparedChartSeries {
-                label: item
-                    .name
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_else(|| item.label.clone()),
+            series.push(super::PreparedLineChartSeries {
+                label: self.item_display_label(item),
                 color_slot: item.color_slot,
                 points,
                 is_selected: selected_item_id == Some(item.id),
@@ -263,19 +658,7 @@ impl MultiChartState {
         let (plot_x_min, plot_x_max) = if let Some(viewport) = self.viewport {
             (viewport.x_min, viewport.x_max)
         } else {
-            if !plot_x_min.is_finite() || !plot_x_max.is_finite() {
-                return None;
-            }
-            if (plot_x_max - plot_x_min).abs() < f64::EPSILON {
-                let pad = if plot_x_min == 0.0 {
-                    1.0
-                } else {
-                    plot_x_min.abs() * 0.05
-                };
-                (plot_x_min - pad, plot_x_max + pad)
-            } else {
-                (plot_x_min, plot_x_max)
-            }
+            normalize_axis_bounds(plot_x_min, plot_x_max)?
         };
         let (y_min, y_max) = if let Some(viewport) = self.viewport {
             (viewport.y_min, viewport.y_max)
@@ -288,22 +671,10 @@ impl MultiChartState {
                     y_max = y_max.max(y);
                 }
             }
-            if !y_min.is_finite() || !y_max.is_finite() {
-                return None;
-            }
-            if (y_max - y_min).abs() < f64::EPSILON {
-                let pad = if y_min == 0.0 {
-                    1.0
-                } else {
-                    y_min.abs() * 0.05
-                };
-                (y_min - pad, y_max + pad)
-            } else {
-                (y_min, y_max)
-            }
+            normalize_axis_bounds(y_min, y_max)?
         };
 
-        Some(super::PreparedChartData {
+        Some(super::PreparedLineChartData {
             plot_x_min,
             plot_x_max,
             y_min,
@@ -312,27 +683,152 @@ impl MultiChartState {
         })
     }
 
-    pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
-        let header_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(configure::themed_color(|colors| {
-                colors.surface.panel_border
-            })))
-            .border_type(BorderType::Rounded)
-            .title("Multi-Chart Comparison Workspace")
-            .bg(configure::themed_color(|colors| colors.surface.bg))
-            .title_style(
-                Style::default()
-                    .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                    .bold(),
-            )
-            .title_alignment(Alignment::Center);
-        f.render_widget(header_block, area);
+    fn prepared_histogram_data(&self) -> Option<super::PreparedHistogramData> {
+        let visible_items = self
+            .items
+            .iter()
+            .filter(|item| item.visible && item.has_loaded_series())
+            .collect::<Vec<_>>();
+        if visible_items.is_empty() {
+            return None;
+        }
+        let selected_item_id = self.selected_item().map(|item| item.id);
+        let mut series_values = Vec::new();
+        let mut value_min = f64::MAX;
+        let mut value_max = f64::MIN;
+        let mut max_samples = 0usize;
 
-        let inner_area = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
+        for item in visible_items {
+            let values = self
+                .windowed_visible_points(item)
+                .into_iter()
+                .map(|(_, y)| y)
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                continue;
+            }
+            max_samples = max_samples.max(values.len());
+            for value in &values {
+                value_min = value_min.min(*value);
+                value_max = value_max.max(*value);
+            }
+            series_values.push((item, values));
+        }
+        if series_values.is_empty() {
+            return None;
+        }
+
+        let (value_min, value_max) = normalize_axis_bounds(value_min, value_max)?;
+        let bin_count = match max_samples {
+            0 => return None,
+            1..=4 => max_samples,
+            n => ((n as f64).sqrt().round() as usize).clamp(6, 64),
+        };
+        let bin_width = (value_max - value_min) / bin_count as f64;
+        let mut count_max = 0.0_f64;
+        let mut series = Vec::new();
+
+        for (item, values) in series_values {
+            let mut counts = vec![0usize; bin_count];
+            for value in values {
+                let normalized: f64 = (value - value_min) / bin_width;
+                let normalized = normalized.floor();
+                let index = normalized
+                    .max(0.0)
+                    .min((bin_count.saturating_sub(1)) as f64) as usize;
+                counts[index] = counts[index].saturating_add(1);
+            }
+            count_max = count_max.max(counts.iter().copied().max().unwrap_or_default() as f64);
+            let bins = counts
+                .into_iter()
+                .enumerate()
+                .map(|(index, count)| {
+                    let start = value_min + bin_width * index as f64;
+                    let end = if index + 1 == bin_count {
+                        value_max
+                    } else {
+                        start + bin_width
+                    };
+                    super::PreparedHistogramBin {
+                        start,
+                        end,
+                        count: count as f64,
+                    }
+                })
+                .collect::<Vec<_>>();
+            series.push(super::PreparedHistogramSeries {
+                label: self.item_display_label(item),
+                color_slot: item.color_slot,
+                bins,
+                is_selected: selected_item_id == Some(item.id),
+            });
+        }
+        Some(super::PreparedHistogramData {
+            value_min,
+            value_max,
+            count_max: count_max.max(1.0),
+            bin_count,
+            series,
+        })
+    }
+
+    fn prepared_comparison_scatter_data(&self) -> Option<super::PreparedComparisonScatterData> {
+        let (left, right) = self.comparison_scatter_pair()?;
+        let left_values = self
+            .windowed_visible_points(left)
+            .into_iter()
+            .map(|(_, y)| y)
+            .collect::<Vec<_>>();
+        let right_values = self
+            .windowed_visible_points(right)
+            .into_iter()
+            .map(|(_, y)| y)
+            .collect::<Vec<_>>();
+        let points = left_values
+            .into_iter()
+            .zip(right_values)
+            .map(|(x, y)| (x, y))
+            .collect::<Vec<_>>();
+        let bounds = Self::bounds_from_points(points.iter())?;
+
+        Some(super::PreparedComparisonScatterData {
+            label: format!(
+                "{} vs {}",
+                self.item_display_label(left),
+                self.item_display_label(right)
+            ),
+            x_label: self.item_display_label(left),
+            y_label: self.item_display_label(right),
+            color_slot: left.color_slot,
+            points,
+            x_min: bounds.x_min,
+            x_max: bounds.x_max,
+            y_min: bounds.y_min,
+            y_max: bounds.y_max,
+        })
+    }
+
+    pub(super) fn prepared_chart_data(&self) -> Option<super::PreparedChartData> {
+        match self.view_mode() {
+            super::MultiChartViewMode::Line => self
+                .prepared_line_chart_data()
+                .map(super::PreparedChartData::Line),
+            super::MultiChartViewMode::Histogram => self
+                .prepared_histogram_data()
+                .map(super::PreparedChartData::Histogram),
+            super::MultiChartViewMode::ComparisonScatter => self
+                .prepared_comparison_scatter_data()
+                .map(super::PreparedChartData::ComparisonScatter),
+        }
+    }
+
+    pub(crate) fn render(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
+        let inner_area = area;
+        f.render_widget(
+            Paragraph::new(Line::raw(""))
+                .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg))),
+            inner_area,
+        );
         let wide_layout = inner_area.width >= 110;
 
         if wide_layout {
@@ -406,6 +902,7 @@ impl MultiChartState {
     fn render_empty(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         self.last_chart_area = None;
         self.drag_state = None;
+        self.view_mode_hitboxes.clear();
         let no_data_message = concat!(
             "No chart items yet.\n\n",
             "Press 'm' on any previewable dataset view to add it here.\n",
@@ -421,22 +918,18 @@ impl MultiChartState {
 
     fn render_item_list(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         let block = Block::default()
-            .title(format!(
-                "Items ({}/{} visible, {} loading)",
-                self.visible_item_count(),
-                self.items.len(),
-                self.loading_item_count()
-            ))
+            .title(" 🧾 Items ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(
-                Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
-            )
+            .border_style(Style::default().fg(configure::themed_color(|colors| {
+                colors.surface.panel_border
+            })))
             .title_style(
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.surface.panel_title))
                     .bold(),
-            );
+            )
+            .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         f.render_widget(block, area);
         self.item_hitboxes.clear();
@@ -578,9 +1071,9 @@ impl MultiChartState {
             .title("Active item")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(
-                Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-            )
+            .border_style(Style::default().fg(configure::themed_color(|colors| {
+                colors.surface.panel_border
+            })))
             .title_style(
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -593,9 +1086,18 @@ impl MultiChartState {
             return;
         };
 
-        let viewport = self.viewport_summary();
+        let viewport = self.mode_window_summary();
+        let mode_label = self.view_mode().label();
         let lines = match &item.source {
             ChartSource::DatasetSelection(source) => vec![
+                Line::from(vec![
+                    Span::styled(
+                        "mode ",
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                    ),
+                    mchart_body_span(mode_label),
+                ]),
                 Line::from(vec![
                     Span::styled(
                         "path ",
@@ -654,6 +1156,14 @@ impl MultiChartState {
             ChartSource::DerivedExpression { expression, .. } => vec![
                 Line::from(vec![
                     Span::styled(
+                        "mode ",
+                        Style::default()
+                            .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
+                    ),
+                    mchart_body_span(mode_label),
+                ]),
+                Line::from(vec![
+                    Span::styled(
                         "expr ",
                         Style::default()
                             .fg(configure::themed_color(|colors| colors.mchart.detail_label)),
@@ -707,9 +1217,9 @@ impl MultiChartState {
             .title("Statistics")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(
-                Style::default().fg(configure::themed_color(|colors| colors.mchart.detail_label)),
-            )
+            .border_style(Style::default().fg(configure::themed_color(|colors| {
+                colors.surface.panel_border
+            })))
             .title_style(
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -788,10 +1298,10 @@ impl MultiChartState {
     }
 
     fn render_chart_panel(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
+        self.view_mode_hitboxes.clear();
         let block = Block::default()
             .title(self.chart_panel_title())
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .borders(Borders::TOP)
             .border_style(
                 Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
             )
@@ -799,16 +1309,61 @@ impl MultiChartState {
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.surface.panel_title))
                     .bold(),
-            );
-        let chart_area = block.inner(area);
+            )
+            .title_alignment(Alignment::Center);
+        let chart_panel_area = block.inner(area);
         f.render_widget(block, area);
+
+        let (tabs_area, subheader_area, chart_area) = if chart_panel_area.height >= 3 {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(chart_panel_area);
+            (Some(chunks[0]), Some(chunks[1]), chunks[2])
+        } else {
+            (None, None, chart_panel_area)
+        };
+        if let Some(tabs_area) = tabs_area {
+            let tabs = self.chart_mode_tabs();
+            let tab_specs = self.chart_mode_tab_specs();
+            let tabs_width = tabs.width() as u16;
+            let start_x = tabs_area
+                .x
+                .saturating_add(tabs_area.width.saturating_sub(tabs_width) / 2);
+            let separator_width = Line::from("  ").width() as u16;
+            let mut current_x = start_x;
+            for (index, (mode, _, width)) in tab_specs.iter().enumerate() {
+                self.view_mode_hitboxes.push(MultiChartViewModeHitbox {
+                    area: Rect::new(current_x, tabs_area.y, *width, 1),
+                    mode: *mode,
+                });
+                current_x = current_x.saturating_add(*width);
+                if index + 1 != tab_specs.len() {
+                    current_x = current_x.saturating_add(separator_width);
+                }
+            }
+            f.render_widget(Paragraph::new(tabs).alignment(Alignment::Center), tabs_area);
+        }
+        if let Some(subheader_area) = subheader_area {
+            f.render_widget(
+                Paragraph::new(self.chart_mode_subheader())
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(configure::themed_color(|colors| colors.help.muted)))
+                    .wrap(Wrap { trim: true }),
+                subheader_area,
+            );
+        }
 
         if self.visible_item_count() == 0 {
             self.last_chart_area = None;
             self.last_chart_panel_area = None;
             let paragraph = Paragraph::new(format!(
-                "All chart items are hidden.\nPress Space or 'v' to toggle the selected item back on.\nCurrent alignment: {}.",
-                self.x_axis_policy.description()
+                "All chart items are hidden.\nPress Space or 'v' to toggle the selected item back on.\nCurrent mode: {}.",
+                self.view_mode().label()
             ))
             .style(Style::default().fg(configure::themed_color(|colors| colors.mchart.empty_state)))
             .alignment(Alignment::Center)
@@ -839,11 +1394,13 @@ impl MultiChartState {
             self.last_chart_panel_area = None;
             return;
         }
-        if self.picker.protocol_type() == ProtocolType::Halfblocks {
+        if self.picker.protocol_type() == ProtocolType::Halfblocks
+            && matches!(self.view_mode(), super::MultiChartViewMode::Line)
+        {
             self.last_chart_area = Some(chart_area);
             self.last_chart_panel_area = Some(chart_area);
             if !self.render_braille_chart_panel(f, chart_area) {
-                let paragraph = Paragraph::new("Rendering failed")
+                let paragraph = Paragraph::new(self.unavailable_chart_message())
                     .style(Style::default().fg(configure::themed_color(|colors| colors.text.error)))
                     .alignment(Alignment::Center)
                     .wrap(Wrap { trim: true });
@@ -875,18 +1432,18 @@ impl MultiChartState {
             None => {
                 let (message, color) = if let Some(error) = &self.render_error {
                     (
-                        error.as_str(),
+                        error.clone(),
                         configure::themed_color(|colors| colors.text.error),
                     )
                 } else if self.pending_render_generation.is_some() {
                     (
-                        "Rendering chart...",
+                        "Rendering chart...".to_string(),
                         configure::themed_color(|colors| colors.mchart.empty_state),
                     )
                 } else {
                     (
-                        "Rendering failed",
-                        configure::themed_color(|colors| colors.text.error),
+                        self.unavailable_chart_message(),
+                        configure::themed_color(|colors| colors.mchart.empty_state),
                     )
                 };
                 let paragraph = Paragraph::new(message)
@@ -902,7 +1459,7 @@ impl MultiChartState {
     }
 
     fn render_braille_chart_panel(&self, f: &mut ratatui::Frame<'_>, chart_area: Rect) -> bool {
-        let Some(prepared) = self.prepared_chart_data() else {
+        let Some(super::PreparedChartData::Line(prepared)) = self.prepared_chart_data() else {
             return false;
         };
 
@@ -987,27 +1544,28 @@ impl MultiChartState {
                     .iter()
                     .any(|message| message.kind == ExpressionPromptMessageKind::Error) =>
             {
-                "Expression editor [invalid]"
+                " ∑ Expression editor [invalid]"
             }
             Some(prompt) if matches!(prompt.mode, ExpressionPromptMode::EditExisting(_)) => {
-                "Expression editor [edit]"
+                " ∑ Expression editor [edit]"
             }
-            Some(_) => "Expression editor",
-            None => "Expression editor",
+            Some(_) => " ∑ Expression editor ",
+            None => " ∑ Expression editor ",
         };
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .style(Style::default().bg(panel_bg))
-            .border_style(
-                Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
-            )
+            .border_style(Style::default().fg(configure::themed_color(|colors| {
+                colors.surface.panel_border
+            })))
             .title_style(
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.surface.panel_title))
                     .bold(),
-            );
+            )
+            .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         f.render_widget(block, area);
 
@@ -1149,8 +1707,16 @@ impl MultiChartState {
             .border_style(
                 Style::default().fg(configure::themed_color(|colors| colors.surface.break_line)),
             );
-        let input_inner = input_block.inner(chunks[0]);
-        f.render_widget(input_block.clone(), chunks[0]);
+        let input_area = if chunks[0].width > 2 {
+            chunks[0].inner(Margin {
+                horizontal: 1,
+                vertical: 0,
+            })
+        } else {
+            chunks[0]
+        };
+        let input_inner = input_block.inner(input_area);
+        f.render_widget(input_block.clone(), input_area);
         f.render_widget(
             Paragraph::new(input_text).style(mchart_body_style().bg(panel_bg)),
             input_inner,
@@ -1325,24 +1891,20 @@ impl MultiChartState {
             } else {
                 format!("${}", prompt.name_buffer)
             };
-            let prefix_width = 1
-                + prompt.item_id.0.to_string().chars().count()
-                + 1
-                + name_display.chars().count()
-                + 3;
+            let id_prefix_width = format!("${} ", prompt.item_id.0).chars().count();
+            let prefix_width = id_prefix_width + name_display.chars().count() + 3;
             let cursor = ratatui::layout::Position::new(
                 if prompt.focus == ExpressionPromptFocus::Name {
-                    let id_width = prompt.item_id.0.to_string().chars().count();
-                    let name_offset = 1;
-                    chunks[0].x.saturating_add(
-                        (1 + 2 + id_width + name_offset + prompt.name_cursor) as u16,
-                    )
-                } else {
-                    chunks[0]
+                    let name_offset = usize::from(!prompt.name_buffer.is_empty());
+                    input_inner
                         .x
-                        .saturating_add((1 + prefix_width + prompt.cursor) as u16)
+                        .saturating_add((id_prefix_width + name_offset + prompt.name_cursor) as u16)
+                } else {
+                    input_inner
+                        .x
+                        .saturating_add((prefix_width + prompt.cursor) as u16)
                 },
-                chunks[0].y.saturating_add(1),
+                input_inner.y,
             );
             f.set_cursor_position(cursor);
         }
@@ -1398,7 +1960,7 @@ pub(super) fn chart_plot_area_in_rect(
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{mchart_body_span, mchart_body_style};
+    use super::{mchart_body_span, mchart_body_style, mchart_mode_tab_style};
 
     #[test]
     fn mchart_body_style_uses_primary_text_color() {
@@ -1411,5 +1973,22 @@ mod tests {
     #[test]
     fn mchart_body_spans_use_primary_text_color() {
         assert_eq!(mchart_body_span("value").style.fg, mchart_body_style().fg);
+    }
+
+    #[test]
+    fn selected_mode_tabs_use_selection_accent_colors() {
+        let style = mchart_mode_tab_style(true);
+        assert_eq!(
+            style.fg,
+            Some(crate::configure::themed_color(|colors| {
+                colors.accent.selection_fg
+            }))
+        );
+        assert_eq!(
+            style.bg,
+            Some(crate::configure::themed_color(|colors| {
+                colors.accent.selection_bg
+            }))
+        );
     }
 }
