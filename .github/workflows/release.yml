@@ -46,6 +46,7 @@ jobs:
       - name: Verify crate
         run: |
           cargo package --allow-dirty -p h5v-macros
+          cargo package --allow-dirty -p h5v
           cargo check --workspace --locked
 
   generate-changelog:
@@ -478,20 +479,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Publish to crates.io
         run: |
-          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" Cargo.toml
-          sed -i -E "s|^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \"\\./macros\" \\}$|macros = { package = \"h5v-macros\", version = \"${{ needs.generate-changelog.outputs.version }}\", path = \"./macros\" }|" Cargo.toml
-          sed -i -E "s|^version = \".*\"$|version = \"${{ needs.generate-changelog.outputs.version }}\"|" macros/Cargo.toml
+          version="${{ needs.generate-changelog.outputs.version }}"
 
-          for i in {1..5}; do
-            cargo publish -p h5v-macros --allow-dirty && break
-            echo "Publishing h5v-macros failed, retrying in 10s..."
-            sleep 10
-          done
+          publish_with_retries() {
+            local crate="$1"
+            local retries="$2"
+            local delay="$3"
 
-          for i in {1..10}; do
-            cargo publish -p h5v --allow-dirty && break
-            echo "Publishing h5v failed, retrying in 15s..."
-            sleep 15
-          done
+            for ((attempt = 1; attempt <= retries; attempt++)); do
+              if cargo publish -p "$crate" --allow-dirty; then
+                return 0
+              fi
+
+              if (( attempt == retries )); then
+                echo "Publishing $crate failed after $retries attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing $crate failed, retrying in ${delay}s..."
+              sleep "$delay"
+            done
+          }
+
+          wait_for_crate_release() {
+            local crate="$1"
+            local version="$2"
+            local retries="$3"
+            local delay="$4"
+            local url="https://crates.io/api/v1/crates/${crate}/${version}"
+
+            for ((attempt = 1; attempt <= retries; attempt++)); do
+              if curl --fail --silent --show-error --location "$url" >/dev/null; then
+                return 0
+              fi
+
+              if (( attempt == retries )); then
+                echo "Timed out waiting for $crate v$version to appear on crates.io." >&2
+                return 1
+              fi
+
+              echo "Waiting for $crate v$version to appear on crates.io (${attempt}/${retries})..."
+              sleep "$delay"
+            done
+          }
+
+          sed -i -E "s|^version = \".*\"$|version = \"$version\"|" Cargo.toml
+          sed -i -E "s|^macros = \\{ package = \"h5v-macros\", version = \".*\", path = \"\\./macros\" \\}$|macros = { package = \"h5v-macros\", version = \"$version\", path = \"./macros\" }|" Cargo.toml
+          sed -i -E "s|^version = \".*\"$|version = \"$version\"|" macros/Cargo.toml
+
+          publish_with_retries h5v-macros 5 10
+          wait_for_crate_release h5v-macros "$version" 20 15
+          publish_with_retries h5v 10 15
