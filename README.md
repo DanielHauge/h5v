@@ -118,7 +118,7 @@ Configuration lives in `init.lua`.
 - `:configure` opens the config file and reloads it on exit.
 - `:configure reset` writes a fresh scaffold.
 - `--config <PATH>` uses a different config file.
-- `--init-plugin <PATH>` creates a plugin scaffold with LuaLS support files.
+- `--init-plugin <PATH>` creates a plugin scaffold. Rerun it to refresh `.luarc.json` and `.h5v-luals/h5v.lua` without overwriting `h5v-plugin.toml` or `lua/init.lua`.
 
 Plugins are loaded from `init.lua` with `h5v.plugins.use(...)` and can come from:
 
