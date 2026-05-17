@@ -1,17 +1,17 @@
 class H5v < Formula
   desc "Terminal HDF5 viewer with matrix/chart/image previews"
   homepage "https://github.com/DanielHauge/h5v"
-  version "0.10.0"
+  version "0.11.0"
   license "Apache-2.0"
 
   on_macos do
-      url "https://github.com/DanielHauge/h5v/releases/download/v0.10.0/h5v-aarch64-apple-darwin-v0.10.0.tar.gz"
-      sha256 "1869018b0e0800977cb88fe2f212b7c58ff9d797d9617461400b28611a53b9df"
+      url "https://github.com/DanielHauge/h5v/releases/download/v0.11.0/h5v-aarch64-apple-darwin-v0.11.0.tar.gz"
+      sha256 "4a4c625d231749070560f2ce0c2d053455e920785ae78718804d9af21ff367b4"
   end
 
   on_linux do
-    url "https://github.com/DanielHauge/h5v/releases/download/v0.10.0/h5v-x86_64-unknown-linux-gnu-v0.10.0.tar.gz"
-    sha256 "28a1e23738bfd5eb7a3f11cec6c32174c675c1a8d6fd00c300cf37ccd65c830f"
+    url "https://github.com/DanielHauge/h5v/releases/download/v0.11.0/h5v-x86_64-unknown-linux-gnu-v0.11.0.tar.gz"
+    sha256 "7710b60817cc30ec6e36715b3d9ce4c51eee758e7600ad7f1b22f6938a5c4e35"
   end
 
   def install
