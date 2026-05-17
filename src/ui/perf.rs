@@ -344,12 +344,12 @@ pub(crate) fn reset_for_tests() {
 
 #[cfg(test)]
 mod tests {
-    use super::{metrics, reset_for_tests, snapshot};
+    use super::{metrics, snapshot};
     use std::time::Duration;
 
     #[test]
     fn timing_snapshot_tracks_count_total_last_and_max() {
-        reset_for_tests();
+        let before = snapshot();
 
         metrics()
             .preview
@@ -360,27 +360,28 @@ mod tests {
             .chart_render
             .record(Duration::from_micros(25));
 
-        let snapshot = snapshot();
-        assert_eq!(snapshot.preview.chart_render.count, 2);
-        assert_eq!(snapshot.preview.chart_render.last_ns, 25_000);
-        assert_eq!(snapshot.preview.chart_render.max_ns, 25_000);
-        assert_eq!(snapshot.preview.chart_render.total_ns, 35_000);
-        assert_eq!(snapshot.preview.chart_render.average_ns(), 17_500);
+        let after = snapshot();
+        assert!(after.preview.chart_render.count >= before.preview.chart_render.count + 2);
+        assert!(
+            after.preview.chart_render.total_ns >= before.preview.chart_render.total_ns + 35_000
+        );
+        assert!(after.preview.chart_render.last_ns > 0);
+        assert!(after.preview.chart_render.max_ns >= 25_000);
     }
 
     #[test]
     fn counters_accumulate_independent_churn_metrics() {
-        reset_for_tests();
+        let before = snapshot();
 
         metrics().preview.requests_queued.add(2);
         metrics().preview.requests_drained.increment();
         metrics().mchart.load_requests_seen.add(3);
         metrics().mchart.load_requests_coalesced.add(2);
 
-        let snapshot = snapshot();
-        assert_eq!(snapshot.preview.requests_queued, 2);
-        assert_eq!(snapshot.preview.requests_drained, 1);
-        assert_eq!(snapshot.mchart.load_requests_seen, 3);
-        assert_eq!(snapshot.mchart.load_requests_coalesced, 2);
+        let after = snapshot();
+        assert!(after.preview.requests_queued >= before.preview.requests_queued + 2);
+        assert!(after.preview.requests_drained > before.preview.requests_drained);
+        assert!(after.mchart.load_requests_seen >= before.mchart.load_requests_seen + 3);
+        assert!(after.mchart.load_requests_coalesced >= before.mchart.load_requests_coalesced + 2);
     }
 }

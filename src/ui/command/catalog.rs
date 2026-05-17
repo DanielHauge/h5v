@@ -1,10 +1,10 @@
 use super::{
     handlers::{
         handle_attr, handle_col, handle_configure, handle_dim, handle_down, handle_focus,
-        handle_goto, handle_heatmap, handle_help, handle_index, handle_left, handle_mchart,
-        handle_mode, handle_page_down, handle_page_up, handle_press, handle_reload, handle_repeat,
-        handle_right, handle_row, handle_seek, handle_seek_col, handle_seek_page, handle_seek_row,
-        handle_toggle_tree, handle_up, handle_x,
+        handle_goto, handle_heatmap, handle_help, handle_index, handle_left, handle_logs,
+        handle_mchart, handle_mode, handle_page_down, handle_page_up, handle_press, handle_quit,
+        handle_reload, handle_repeat, handle_right, handle_row, handle_seek, handle_seek_col,
+        handle_seek_page, handle_seek_row, handle_toggle_tree, handle_up, handle_x,
     },
     CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor, CommandId,
 };
@@ -424,6 +424,28 @@ const COMMAND_CATALOG: &[CommandDescriptor] = &[
         handler: handle_configure,
     },
     CommandDescriptor {
+        id: CommandId::Quit,
+        name: "quit",
+        aliases: &["q"],
+        description: "Quit h5v immediately",
+        category: CommandCategory::App,
+        keybindings: &["q"],
+        args: &[],
+        example: "q",
+        handler: handle_quit,
+    },
+    CommandDescriptor {
+        id: CommandId::Logs,
+        name: "logs",
+        aliases: &[],
+        description: "Open the logs panel and inspect persistent h5v log output",
+        category: CommandCategory::App,
+        keybindings: &[],
+        args: &[],
+        example: "logs",
+        handler: handle_logs,
+    },
+    CommandDescriptor {
         id: CommandId::X,
         name: "x",
         aliases: &[],
@@ -565,10 +587,4 @@ pub fn find_command_descriptor(name: &str) -> Option<&'static CommandDescriptor>
                 .iter()
                 .any(|alias| alias.eq_ignore_ascii_case(&normalized))
     })
-}
-
-pub fn find_command_descriptor_by_id(id: CommandId) -> Option<&'static CommandDescriptor> {
-    COMMAND_CATALOG
-        .iter()
-        .find(|descriptor| descriptor.id == id)
 }

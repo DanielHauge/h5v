@@ -1,8 +1,88 @@
 use super::*;
-use crate::ui::mchart::functions::{
-    find_mchart_function, MchartFunctionExecutionKind, MchartReducerKind, MchartRollingKind,
-    MchartScalarCompareKind, MchartUnaryMathKind,
+use crate::{
+    configure,
+    ui::mchart::functions::{
+        find_builtin_mchart_function, find_registered_mchart_function, MchartFunctionExecutionKind,
+        MchartReducerKind, MchartRollingKind, MchartScalarCompareKind, MchartUnaryMathKind,
+    },
 };
+
+struct ExpressionEvalContext<'a> {
+    item_series_values: &'a std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &'a std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &'a std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &'a std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+}
+
+impl<'a> ExpressionEvalContext<'a> {
+    fn new(
+        item_series_values: &'a std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+        item_scalar_values: &'a std::collections::HashMap<ExpressionItemRef, f64>,
+        series_values: &'a std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+        scalar_values: &'a std::collections::HashMap<ExpressionLoadRef, f64>,
+        series_sample_count: usize,
+    ) -> Self {
+        Self {
+            item_series_values,
+            item_scalar_values,
+            series_values,
+            scalar_values,
+            series_sample_count,
+        }
+    }
+
+    fn eval_at(&self, expr: &ExpressionAst, idx: usize) -> Result<f64, String> {
+        eval_expression_at(
+            expr,
+            idx,
+            self.item_series_values,
+            self.item_scalar_values,
+            self.series_values,
+            self.scalar_values,
+            self.series_sample_count,
+        )
+    }
+
+    fn eval_scalar(&self, expr: &ExpressionAst) -> Result<f64, String> {
+        eval_scalar_expression(
+            expr,
+            self.item_series_values,
+            self.item_scalar_values,
+            self.series_values,
+            self.scalar_values,
+            self.series_sample_count,
+        )
+    }
+
+    fn eval_window_size(
+        &self,
+        function_name: &str,
+        window_expr: &ExpressionAst,
+    ) -> Result<usize, String> {
+        let window = self.eval_scalar(window_expr)?;
+        if window < 1.0 || window.fract() != 0.0 {
+            return Err(format!(
+                "{function_name}() window must be a positive integer"
+            ));
+        }
+        Ok(window as usize)
+    }
+
+    fn trailing_series_window(
+        &self,
+        series_expr: &ExpressionAst,
+        idx: usize,
+        window: usize,
+    ) -> Result<Vec<f64>, String> {
+        let start = idx.saturating_add(1).saturating_sub(window);
+        let mut values = Vec::with_capacity(idx - start + 1);
+        for sample_idx in start..=idx {
+            values.push(self.eval_at(series_expr, sample_idx)?);
+        }
+        Ok(values)
+    }
+}
 
 pub(crate) fn eval_expression_at(
     expr: &ExpressionAst,
@@ -81,9 +161,41 @@ pub(crate) fn eval_expression_at(
             }
         }
         ExpressionAst::FunctionCall { name, args } => {
-            let function = find_mchart_function(name)
+            let ctx = ExpressionEvalContext::new(
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            );
+            let function = find_registered_mchart_function(name)
                 .ok_or_else(|| format!("Unsupported function '{name}'"))?;
-            match function.execution {
+            let Some(execution) =
+                find_builtin_mchart_function(&function.name).map(|builtin| builtin.execution)
+            else {
+                return match eval_custom_function_result(
+                    &function,
+                    args,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )? {
+                    configure::LuaMchartReturnValue::Scalar(value) => Ok(value),
+                    configure::LuaMchartReturnValue::Series(values) => {
+                        values.get(idx).copied().ok_or_else(|| {
+                            format!(
+                                "{}() returned {} samples, missing sample index {}",
+                                function.name,
+                                values.len(),
+                                idx
+                            )
+                        })
+                    }
+                };
+            };
+            match execution {
                 MchartFunctionExecutionKind::Power => {
                     if args.len() != 2 {
                         return Err("exp() expects exactly 2 arguments".to_string());
@@ -126,25 +238,12 @@ pub(crate) fn eval_expression_at(
                         )?,
                     )
                 }
-                MchartFunctionExecutionKind::Rolling(kind) => eval_rolling_series_function(
-                    kind,
-                    args,
-                    idx,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                ),
-                MchartFunctionExecutionKind::RollingQuantile => eval_rolling_quantile_function(
-                    args,
-                    idx,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                ),
+                MchartFunctionExecutionKind::Rolling(kind) => {
+                    eval_rolling_series_function(kind, args, idx, &ctx)
+                }
+                MchartFunctionExecutionKind::RollingQuantile => {
+                    eval_rolling_quantile_function(args, idx, &ctx)
+                }
                 MchartFunctionExecutionKind::Threshold => {
                     if args.len() != 2 {
                         return Err("threshold() expects exactly 2 arguments".to_string());
@@ -168,15 +267,7 @@ pub(crate) fn eval_expression_at(
                     )?;
                     Ok(if value >= threshold { 1.0 } else { 0.0 })
                 }
-                MchartFunctionExecutionKind::Diff => eval_diff_series_function(
-                    args,
-                    idx,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                ),
+                MchartFunctionExecutionKind::Diff => eval_diff_series_function(args, idx, &ctx),
                 MchartFunctionExecutionKind::Reducer(_)
                 | MchartFunctionExecutionKind::ScalarCompare(_) => eval_scalar_expression(
                     expr,
@@ -251,9 +342,35 @@ pub(crate) fn eval_scalar_expression(
             }
         }
         ExpressionAst::FunctionCall { name, args } => {
-            let function = find_mchart_function(name)
+            let ctx = ExpressionEvalContext::new(
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            );
+            let function = find_registered_mchart_function(name)
                 .ok_or_else(|| format!("Unsupported function '{name}'"))?;
-            match function.execution {
+            let Some(execution) =
+                find_builtin_mchart_function(&function.name).map(|builtin| builtin.execution)
+            else {
+                return match eval_custom_function_result(
+                    &function,
+                    args,
+                    item_series_values,
+                    item_scalar_values,
+                    series_values,
+                    scalar_values,
+                    series_sample_count,
+                )? {
+                    configure::LuaMchartReturnValue::Scalar(value) => Ok(value),
+                    configure::LuaMchartReturnValue::Series(_) => Err(format!(
+                        "{}() resolves to a series, not a scalar",
+                        function.name
+                    )),
+                };
+            };
+            match execution {
                 MchartFunctionExecutionKind::Power => {
                     if args.len() != 2 {
                         return Err("exp() expects exactly 2 arguments".to_string());
@@ -315,16 +432,9 @@ pub(crate) fn eval_scalar_expression(
                     )?;
                     Ok(if value >= threshold { 1.0 } else { 0.0 })
                 }
-                MchartFunctionExecutionKind::Reducer(kind) => reduce_series_function(
-                    name,
-                    args,
-                    item_series_values,
-                    item_scalar_values,
-                    series_values,
-                    scalar_values,
-                    series_sample_count,
-                    reducer_for_kind(kind),
-                ),
+                MchartFunctionExecutionKind::Reducer(kind) => {
+                    reduce_series_function(name, args, &ctx, reducer_for_kind(kind))
+                }
                 MchartFunctionExecutionKind::ScalarCompare(kind) => {
                     if args.len() != 2 {
                         return Err(format!("{name}() expects exactly 2 arguments"));
@@ -365,11 +475,7 @@ pub(crate) fn eval_scalar_expression(
 fn reduce_series_function<F>(
     name: &str,
     args: &[ExpressionAst],
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
+    ctx: &ExpressionEvalContext<'_>,
     reducer: F,
 ) -> Result<f64, String>
 where
@@ -378,33 +484,115 @@ where
     if args.len() != 1 {
         return Err(format!("{name}() expects exactly 1 argument"));
     }
-    if series_sample_count == 0 {
+    if ctx.series_sample_count == 0 {
         return Err(format!("{name}() requires at least one series input"));
     }
-    let mut values = Vec::with_capacity(series_sample_count);
+    let mut values = Vec::with_capacity(ctx.series_sample_count);
+    for idx in 0..ctx.series_sample_count {
+        values.push(ctx.eval_at(&args[0], idx)?);
+    }
+    reducer(&values)
+}
+
+fn eval_custom_function_result(
+    function: &crate::configure::registry::MchartFunctionMetadata,
+    args: &[ExpressionAst],
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<configure::LuaMchartReturnValue, String> {
+    let callback_id = function
+        .callback_id
+        .as_deref()
+        .ok_or_else(|| format!("Unsupported function '{}'", function.name))?;
+    if args.len() != function.params.len() {
+        return Err(format!(
+            "{}() expects exactly {} arguments",
+            function.name,
+            function.params.len()
+        ));
+    }
+    let resolved_args = function
+        .params
+        .iter()
+        .zip(args.iter())
+        .map(|(param, arg)| match param.value_kind {
+            crate::configure::registry::RegistryValueKind::Scalar => eval_scalar_expression(
+                arg,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )
+            .map(configure::LuaMchartArgValue::Scalar),
+            crate::configure::registry::RegistryValueKind::Series => eval_series_expression_points(
+                arg,
+                item_series_values,
+                item_scalar_values,
+                series_values,
+                scalar_values,
+                series_sample_count,
+            )
+            .map(configure::LuaMchartArgValue::Series),
+            _ => Err(format!(
+                "{}() param '{}' has an unsupported value kind",
+                function.name, param.name
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    configure::run_registered_mchart_function(callback_id, &resolved_args, function.return_kind)
+}
+
+fn eval_series_expression_points(
+    expr: &ExpressionAst,
+    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
+    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
+    series_sample_count: usize,
+) -> Result<Vec<Point>, String> {
+    let x_points = first_series_points(item_series_values, series_values)
+        .ok_or_else(|| "Series arguments must reference at least one loaded series".to_string())?;
+    if x_points.len() != series_sample_count {
+        return Err(
+            "Series argument sample count is inconsistent with the expression context".to_string(),
+        );
+    }
+    let mut points = Vec::with_capacity(series_sample_count);
     for idx in 0..series_sample_count {
-        values.push(eval_expression_at(
-            &args[0],
+        let y = eval_expression_at(
+            expr,
             idx,
             item_series_values,
             item_scalar_values,
             series_values,
             scalar_values,
             series_sample_count,
-        )?);
+        )?;
+        points.push((x_points[idx].0, y));
     }
-    reducer(&values)
+    Ok(points)
+}
+
+fn first_series_points<'a>(
+    item_series_values: &'a std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
+    series_values: &'a std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
+) -> Option<&'a [Point]> {
+    item_series_values
+        .values()
+        .next()
+        .map(Vec::as_slice)
+        .or_else(|| series_values.values().next().map(Vec::as_slice))
 }
 
 fn eval_rolling_series_function(
     kind: MchartRollingKind,
     args: &[ExpressionAst],
     idx: usize,
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
+    ctx: &ExpressionEvalContext<'_>,
 ) -> Result<f64, String> {
     if args.len() != 2 {
         return Err(format!(
@@ -412,25 +600,8 @@ fn eval_rolling_series_function(
             rolling_function_name(kind)
         ));
     }
-    let window = eval_window_size(
-        rolling_function_name(kind),
-        &args[1],
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
-    let values = eval_trailing_series_window(
-        &args[0],
-        idx,
-        window,
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
+    let window = ctx.eval_window_size(rolling_function_name(kind), &args[1])?;
+    let values = ctx.trailing_series_window(&args[0], idx, window)?;
     let mut values = values;
     match kind {
         MchartRollingKind::Mean => Ok(values.iter().sum::<f64>() / values.len() as f64),
@@ -459,45 +630,17 @@ fn eval_rolling_series_function(
 fn eval_rolling_quantile_function(
     args: &[ExpressionAst],
     idx: usize,
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
+    ctx: &ExpressionEvalContext<'_>,
 ) -> Result<f64, String> {
     if args.len() != 3 {
         return Err("rolling_quantile() expects exactly 3 arguments".to_string());
     }
-    let window = eval_window_size(
-        "rolling_quantile",
-        &args[1],
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
-    let quantile = eval_scalar_expression(
-        &args[2],
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
+    let window = ctx.eval_window_size("rolling_quantile", &args[1])?;
+    let quantile = ctx.eval_scalar(&args[2])?;
     if !(0.0..=1.0).contains(&quantile) {
         return Err("rolling_quantile() quantile must be between 0 and 1".to_string());
     }
-    let values = eval_trailing_series_window(
-        &args[0],
-        idx,
-        window,
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
+    let values = ctx.trailing_series_window(&args[0], idx, window)?;
     let mut values = values;
     rolling_quantile_from_sorted(&mut values, quantile)
 }
@@ -505,11 +648,7 @@ fn eval_rolling_quantile_function(
 fn eval_diff_series_function(
     args: &[ExpressionAst],
     idx: usize,
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
+    ctx: &ExpressionEvalContext<'_>,
 ) -> Result<f64, String> {
     if args.len() != 1 {
         return Err("diff() expects exactly 1 argument".to_string());
@@ -517,79 +656,12 @@ fn eval_diff_series_function(
     if idx == 0 {
         return Ok(0.0);
     }
-    let current = eval_expression_at(
-        &args[0],
-        idx,
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
-    let previous = eval_expression_at(
-        &args[0],
-        idx - 1,
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
+    let current = ctx.eval_at(&args[0], idx)?;
+    let previous = ctx.eval_at(&args[0], idx - 1)?;
     Ok(current - previous)
 }
 
-fn eval_window_size(
-    function_name: &str,
-    window_expr: &ExpressionAst,
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
-) -> Result<usize, String> {
-    let window = eval_scalar_expression(
-        window_expr,
-        item_series_values,
-        item_scalar_values,
-        series_values,
-        scalar_values,
-        series_sample_count,
-    )?;
-    if window < 1.0 || window.fract() != 0.0 {
-        return Err(format!(
-            "{function_name}() window must be a positive integer"
-        ));
-    }
-    Ok(window as usize)
-}
-
-fn eval_trailing_series_window(
-    series_expr: &ExpressionAst,
-    idx: usize,
-    window: usize,
-    item_series_values: &std::collections::HashMap<ExpressionItemRef, Vec<Point>>,
-    item_scalar_values: &std::collections::HashMap<ExpressionItemRef, f64>,
-    series_values: &std::collections::HashMap<ExpressionLoadRef, Vec<Point>>,
-    scalar_values: &std::collections::HashMap<ExpressionLoadRef, f64>,
-    series_sample_count: usize,
-) -> Result<Vec<f64>, String> {
-    let start = idx.saturating_add(1).saturating_sub(window);
-    let mut values = Vec::with_capacity(idx - start + 1);
-    for sample_idx in start..=idx {
-        values.push(eval_expression_at(
-            series_expr,
-            sample_idx,
-            item_series_values,
-            item_scalar_values,
-            series_values,
-            scalar_values,
-            series_sample_count,
-        )?);
-    }
-    Ok(values)
-}
-
-fn rolling_quantile_from_sorted(values: &mut Vec<f64>, quantile: f64) -> Result<f64, String> {
+fn rolling_quantile_from_sorted(values: &mut [f64], quantile: f64) -> Result<f64, String> {
     if values.is_empty() {
         return Err("rolling quantile requires at least one sample".to_string());
     }

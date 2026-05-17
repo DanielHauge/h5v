@@ -3,10 +3,11 @@ use ratatui::{layout::Constraint, prelude::Color};
 
 use crate::ui::{
     input::keymap::{EffectiveKeymaps, KeymapConfig},
-    state::{ContentShowMode, HeatmapRangeMode, HeatmapSettings},
+    state::{HeatmapRangeMode, HeatmapSettings},
 };
 
 use super::palette::{SymbolThemeName, ThemeName};
+use crate::configure::registry::ContentModeHandle;
 
 #[derive(Clone, Debug, PartialEq, Eq, ColorGroup)]
 pub(crate) struct TextColors {
@@ -276,11 +277,12 @@ pub(crate) struct ThemeColors {
 
 #[derive(Clone, Debug)]
 pub struct ConfigSnapshot {
-    pub(crate) active_theme: ThemeName,
+    pub(crate) active_theme_handle: String,
+    pub(crate) active_theme_variant: ThemeName,
     pub(crate) active_symbol_theme: SymbolThemeName,
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
-    pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) content_mode_order: Vec<ContentModeHandle>,
     pub(crate) auto_layout: AutoLayoutSettings,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
@@ -292,11 +294,12 @@ pub struct ConfigSnapshot {
 #[derive(Clone, Debug)]
 pub(crate) struct ConfigState {
     pub(crate) config_generation: u64,
-    pub(crate) active_theme: ThemeName,
+    pub(crate) active_theme_handle: String,
+    pub(crate) active_theme_variant: ThemeName,
     pub(crate) active_symbol_theme: SymbolThemeName,
     pub(crate) colors: ThemeColors,
     pub(crate) symbols: UiSymbols,
-    pub(crate) content_mode_order: Vec<ContentShowMode>,
+    pub(crate) content_mode_order: Vec<ContentModeHandle>,
     pub(crate) auto_layout: AutoLayoutSettings,
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,

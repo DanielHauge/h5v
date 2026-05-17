@@ -11,6 +11,13 @@ pub(super) struct ValidatedExpression {
     pub(super) sample_count: usize,
 }
 
+struct ExpressionValueSources<'a> {
+    item_series_values: &'a std::collections::HashMap<expression::ExpressionItemRef, Vec<Point>>,
+    item_scalar_values: &'a std::collections::HashMap<expression::ExpressionItemRef, f64>,
+    external_series: &'a std::collections::HashMap<expression::ExpressionLoadRef, Vec<Point>>,
+    scalar_values: &'a std::collections::HashMap<expression::ExpressionLoadRef, f64>,
+}
+
 impl MultiChartState {
     pub(super) fn raw_dataset_reference(
         expression: &str,
@@ -375,12 +382,14 @@ impl MultiChartState {
             let mut captured = self.dataset_reference_item(&expression, file)?;
             self.replace_chart_item_with_status(
                 id,
-                captured.source,
-                captured.initial_points.take(),
-                None,
-                captured.source_len,
-                captured.load_state,
-                false,
+                super::ChartItemStatus {
+                    source: captured.source,
+                    points: captured.initial_points.take(),
+                    scalar_value: None,
+                    source_len: captured.source_len,
+                    load_state: captured.load_state,
+                    sampled: false,
+                },
             )?;
             if let Some(mut request) = captured.request {
                 request.item_id = id;
@@ -489,15 +498,12 @@ impl MultiChartState {
         Ok((points, kind))
     }
 
-    pub(super) fn evaluate_interp_expression_with_resolution(
+    fn evaluate_interp_expression_with_resolution(
         &self,
         expr: &ExpressionAst,
         refs: &ExpressionRefs,
         resolution: ExpressionSeriesResolution,
-        item_series_values: &HashMap<expression::ExpressionItemRef, Vec<Point>>,
-        item_scalar_values: &HashMap<expression::ExpressionItemRef, f64>,
-        external_series: &HashMap<expression::ExpressionLoadRef, Vec<Point>>,
-        scalar_values: &HashMap<expression::ExpressionLoadRef, f64>,
+        values: &ExpressionValueSources<'_>,
     ) -> Result<EvaluatedExpression, String> {
         let Some((item_ref, sample_rate_expr)) = interp_call_args(expr) else {
             return Err("interp() must be the top-level expression".to_string());
@@ -508,10 +514,10 @@ impl MultiChartState {
         }
         let sample_rate = eval_scalar_expression(
             sample_rate_expr,
-            item_series_values,
-            item_scalar_values,
-            external_series,
-            scalar_values,
+            values.item_series_values,
+            values.item_scalar_values,
+            values.external_series,
+            values.scalar_values,
             input_points.len(),
         )?;
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
@@ -555,15 +561,12 @@ impl MultiChartState {
         })
     }
 
-    pub(super) fn evaluate_slice_expression_with_resolution(
+    fn evaluate_slice_expression_with_resolution(
         &self,
         expr: &ExpressionAst,
         refs: &ExpressionRefs,
         resolution: ExpressionSeriesResolution,
-        item_series_values: &HashMap<expression::ExpressionItemRef, Vec<Point>>,
-        item_scalar_values: &HashMap<expression::ExpressionItemRef, f64>,
-        external_series: &HashMap<expression::ExpressionLoadRef, Vec<Point>>,
-        scalar_values: &HashMap<expression::ExpressionLoadRef, f64>,
+        values: &ExpressionValueSources<'_>,
     ) -> Result<EvaluatedExpression, String> {
         let Some((item_ref, start_expr, end_expr)) = slice_call_args(expr) else {
             return Err("slice() must be the top-level expression".to_string());
@@ -571,18 +574,18 @@ impl MultiChartState {
         let (input_points, kind) = self.series_transform_input(item_ref, resolution)?;
         let start_x = eval_scalar_expression(
             start_expr,
-            item_series_values,
-            item_scalar_values,
-            external_series,
-            scalar_values,
+            values.item_series_values,
+            values.item_scalar_values,
+            values.external_series,
+            values.scalar_values,
             input_points.len(),
         )?;
         let end_x = eval_scalar_expression(
             end_expr,
-            item_series_values,
-            item_scalar_values,
-            external_series,
-            scalar_values,
+            values.item_series_values,
+            values.item_scalar_values,
+            values.external_series,
+            values.scalar_values,
             input_points.len(),
         )?;
         if !start_x.is_finite() || !end_x.is_finite() {
@@ -819,27 +822,19 @@ impl MultiChartState {
             }
         }
         if let ParsedExpression::YSeries(ast) = &parsed {
+            let values = ExpressionValueSources {
+                item_series_values: &item_series_values,
+                item_scalar_values: &item_scalar_values,
+                external_series: &external_series,
+                scalar_values: &scalar_values,
+            };
             if interp_call_args(ast).is_some() {
-                return self.evaluate_interp_expression_with_resolution(
-                    ast,
-                    &refs,
-                    resolution,
-                    &item_series_values,
-                    &item_scalar_values,
-                    &external_series,
-                    &scalar_values,
-                );
+                return self
+                    .evaluate_interp_expression_with_resolution(ast, &refs, resolution, &values);
             }
             if slice_call_args(ast).is_some() {
-                return self.evaluate_slice_expression_with_resolution(
-                    ast,
-                    &refs,
-                    resolution,
-                    &item_series_values,
-                    &item_scalar_values,
-                    &external_series,
-                    &scalar_values,
-                );
+                return self
+                    .evaluate_slice_expression_with_resolution(ast, &refs, resolution, &values);
             }
         }
         let mut series_inputs = item_series_values

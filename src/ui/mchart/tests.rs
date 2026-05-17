@@ -6,7 +6,9 @@ use super::prompt::{
 };
 use super::*;
 use std::{
+    ops::Deref,
     sync::mpsc::channel,
+    sync::MutexGuard,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,8 +16,24 @@ use hdf5_metno::File;
 use image::{DynamicImage, ImageBuffer, Rgb};
 use ndarray::Array;
 
+pub(super) struct LockedTestFile {
+    file: File,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Deref for LockedTestFile {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
+
 #[allow(deprecated)]
 pub(super) fn make_state() -> MultiChartState {
+    crate::configure::install_registry_snapshot(
+        crate::configure::builtin_registry_snapshot().expect("build builtin registry snapshot"),
+    );
     let (tx_load, _rx_load) = channel();
     let (tx_render, _rx_render) = channel();
     let (tx_expression_refresh, _rx_expression_refresh) = channel();
@@ -151,7 +169,8 @@ fn temp_hdf5_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("h5v-{name}-{unique}.h5"))
 }
 
-pub(super) fn make_attribute_test_file() -> (File, std::path::PathBuf) {
+pub(super) fn make_attribute_test_file() -> (LockedTestFile, std::path::PathBuf) {
+    let guard = crate::test_support::hdf5_test_guard();
     let path = temp_hdf5_path("mchart-attr");
     let file = File::create(&path).expect("failed creating temp hdf5 file");
     let parent = file
@@ -224,10 +243,17 @@ pub(super) fn make_attribute_test_file() -> (File, std::path::PathBuf) {
         .write_scalar(&7.0_f64)
         .expect("failed writing scalar dataset");
     file.flush().expect("failed flushing temp hdf5 file");
-    (file, path)
+    (
+        LockedTestFile {
+            file,
+            _guard: guard,
+        },
+        path,
+    )
 }
 
-pub(super) fn make_dataset_ref_test_file() -> (File, std::path::PathBuf) {
+pub(super) fn make_dataset_ref_test_file() -> (LockedTestFile, std::path::PathBuf) {
+    let guard = crate::test_support::hdf5_test_guard();
     let path = temp_hdf5_path("mchart-dataset-ref");
     let file = File::create(&path).expect("failed creating temp hdf5 file");
     file.new_dataset_builder()
@@ -249,7 +275,13 @@ pub(super) fn make_dataset_ref_test_file() -> (File, std::path::PathBuf) {
         .write_scalar(&1.5_f64)
         .expect("failed writing scalar dataset");
     file.flush().expect("failed flushing temp hdf5 file");
-    (file, path)
+    (
+        LockedTestFile {
+            file,
+            _guard: guard,
+        },
+        path,
+    )
 }
 
 #[test]

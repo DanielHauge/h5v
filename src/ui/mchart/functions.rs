@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::configure::{self, registry::MchartFunctionMetadata};
+
 use super::expression::{self, ExpressionAst};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,20 +86,8 @@ pub(crate) struct MchartFunctionDefinition {
     pub(crate) example: &'static str,
     pub(crate) completion_insert: &'static str,
     pub(super) execution: MchartFunctionExecutionKind,
-    pub(super) top_level_only: bool,
-    pub(super) first_arg_direct_item_ref_only: bool,
-}
-
-impl MchartFunctionDefinition {
-    pub(crate) fn signature(self) -> String {
-        let args = self
-            .params
-            .iter()
-            .map(|arg| arg.name)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{}({args})", self.name)
-    }
+    pub(crate) top_level_only: bool,
+    pub(crate) first_arg_direct_item_ref_only: bool,
 }
 
 const SERIES_ARG: MchartFunctionArgDoc = MchartFunctionArgDoc {
@@ -533,10 +523,16 @@ pub(crate) fn mchart_functions() -> &'static [MchartFunctionDefinition] {
     MCHART_FUNCTIONS
 }
 
-pub(super) fn find_mchart_function(name: &str) -> Option<&'static MchartFunctionDefinition> {
+pub(super) fn find_builtin_mchart_function(
+    name: &str,
+) -> Option<&'static MchartFunctionDefinition> {
     MCHART_FUNCTIONS
         .iter()
         .find(|function| function.name.eq_ignore_ascii_case(name))
+}
+
+pub(super) fn find_registered_mchart_function(name: &str) -> Option<MchartFunctionMetadata> {
+    configure::with_registry_snapshot(|registry| registry.find_mchart_function(name).cloned())
 }
 
 pub(super) fn classify_expression_value_kind(
@@ -580,15 +576,51 @@ pub(super) fn classify_registered_function_value_kind(
     item_kinds: &HashMap<expression::ExpressionItemRef, ExpressionValueKind>,
     load_kinds: &HashMap<expression::ExpressionLoadRef, ExpressionValueKind>,
 ) -> Result<ExpressionValueKind, String> {
-    let function =
-        find_mchart_function(name).ok_or_else(|| format!("Unsupported function '{name}'"))?;
+    let function = find_registered_mchart_function(name)
+        .ok_or_else(|| format!("Unsupported function '{name}'"))?;
     let arg_kinds = args
         .iter()
         .map(|arg| classify_expression_value_kind(arg, item_kinds, load_kinds))
         .collect::<Result<Vec<_>, _>>()?;
-    match function.execution {
+    let Some(execution) =
+        find_builtin_mchart_function(&function.name).map(|builtin| builtin.execution)
+    else {
+        expect_arg_count(&function.name, args, function.params.len())?;
+        for (index, param) in function.params.iter().enumerate() {
+            match param.value_kind {
+                configure::registry::RegistryValueKind::Scalar => {
+                    expect_scalar_arg(
+                        &function.name,
+                        index,
+                        arg_kinds[index],
+                        &format!("a scalar {} argument", param.name),
+                    )?;
+                }
+                configure::registry::RegistryValueKind::Series => {
+                    expect_series_arg(
+                        &function.name,
+                        index,
+                        arg_kinds[index],
+                        &format!("a series {} argument", param.name),
+                    )?;
+                }
+                _ => {}
+            }
+        }
+        return Ok(match function.return_kind {
+            configure::registry::RegistryValueKind::Scalar => ExpressionValueKind::Scalar,
+            configure::registry::RegistryValueKind::Series => ExpressionValueKind::Series,
+            _ => {
+                return Err(format!(
+                    "{}() has an unsupported return kind for expression evaluation",
+                    function.name
+                ))
+            }
+        });
+    };
+    match execution {
         MchartFunctionExecutionKind::Power => {
-            expect_arg_count(function, args, 2)?;
+            expect_arg_count(&function.name, args, 2)?;
             Ok(if arg_kinds.contains(&ExpressionValueKind::Series) {
                 ExpressionValueKind::Series
             } else {
@@ -596,31 +628,41 @@ pub(super) fn classify_registered_function_value_kind(
             })
         }
         MchartFunctionExecutionKind::UnaryMath(_) => {
-            expect_arg_count(function, args, 1)?;
+            expect_arg_count(&function.name, args, 1)?;
             Ok(arg_kinds[0])
         }
         MchartFunctionExecutionKind::Reducer(_) => {
-            expect_arg_count(function, args, 1)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series argument")?;
+            expect_arg_count(&function.name, args, 1)?;
+            expect_series_arg(&function.name, 0, arg_kinds[0], "a series argument")?;
             Ok(ExpressionValueKind::Scalar)
         }
         MchartFunctionExecutionKind::Rolling(_) => {
-            expect_arg_count(function, args, 2)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series as the first argument")?;
-            expect_scalar_arg(function, 1, arg_kinds[1], "a scalar window argument")?;
+            expect_arg_count(&function.name, args, 2)?;
+            expect_series_arg(
+                &function.name,
+                0,
+                arg_kinds[0],
+                "a series as the first argument",
+            )?;
+            expect_scalar_arg(&function.name, 1, arg_kinds[1], "a scalar window argument")?;
             Ok(ExpressionValueKind::Series)
         }
         MchartFunctionExecutionKind::RollingQuantile => {
-            expect_arg_count(function, args, 3)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series as the first argument")?;
+            expect_arg_count(&function.name, args, 3)?;
+            expect_series_arg(
+                &function.name,
+                0,
+                arg_kinds[0],
+                "a series as the first argument",
+            )?;
             expect_scalar_arg(
-                function,
+                &function.name,
                 1,
                 arg_kinds[1],
                 "scalar window and quantile arguments",
             )?;
             expect_scalar_arg(
-                function,
+                &function.name,
                 2,
                 arg_kinds[2],
                 "scalar window and quantile arguments",
@@ -628,32 +670,52 @@ pub(super) fn classify_registered_function_value_kind(
             Ok(ExpressionValueKind::Series)
         }
         MchartFunctionExecutionKind::Threshold => {
-            expect_arg_count(function, args, 2)?;
-            expect_scalar_arg(function, 1, arg_kinds[1], "a scalar threshold argument")?;
+            expect_arg_count(&function.name, args, 2)?;
+            expect_scalar_arg(
+                &function.name,
+                1,
+                arg_kinds[1],
+                "a scalar threshold argument",
+            )?;
             Ok(arg_kinds[0])
         }
         MchartFunctionExecutionKind::Diff => {
-            expect_arg_count(function, args, 1)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series argument")?;
+            expect_arg_count(&function.name, args, 1)?;
+            expect_series_arg(&function.name, 0, arg_kinds[0], "a series argument")?;
             Ok(ExpressionValueKind::Series)
         }
         MchartFunctionExecutionKind::ScalarCompare(_) => {
-            expect_arg_count(function, args, 2)?;
-            expect_scalar_arg(function, 0, arg_kinds[0], "scalar arguments")?;
-            expect_scalar_arg(function, 1, arg_kinds[1], "scalar arguments")?;
+            expect_arg_count(&function.name, args, 2)?;
+            expect_scalar_arg(&function.name, 0, arg_kinds[0], "scalar arguments")?;
+            expect_scalar_arg(&function.name, 1, arg_kinds[1], "scalar arguments")?;
             Ok(ExpressionValueKind::Scalar)
         }
         MchartFunctionExecutionKind::Interp => {
-            expect_arg_count(function, args, 2)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series as the first argument")?;
-            expect_scalar_arg(function, 1, arg_kinds[1], "a scalar sample rate argument")?;
+            expect_arg_count(&function.name, args, 2)?;
+            expect_series_arg(
+                &function.name,
+                0,
+                arg_kinds[0],
+                "a series as the first argument",
+            )?;
+            expect_scalar_arg(
+                &function.name,
+                1,
+                arg_kinds[1],
+                "a scalar sample rate argument",
+            )?;
             Ok(ExpressionValueKind::Series)
         }
         MchartFunctionExecutionKind::Slice => {
-            expect_arg_count(function, args, 3)?;
-            expect_series_arg(function, 0, arg_kinds[0], "a series as the first argument")?;
-            expect_scalar_arg(function, 1, arg_kinds[1], "finite scalar bounds")?;
-            expect_scalar_arg(function, 2, arg_kinds[2], "finite scalar bounds")?;
+            expect_arg_count(&function.name, args, 3)?;
+            expect_series_arg(
+                &function.name,
+                0,
+                arg_kinds[0],
+                "a series as the first argument",
+            )?;
+            expect_scalar_arg(&function.name, 1, arg_kinds[1], "finite scalar bounds")?;
+            expect_scalar_arg(&function.name, 2, arg_kinds[2], "finite scalar bounds")?;
             Ok(ExpressionValueKind::Series)
         }
     }
@@ -665,8 +727,9 @@ pub(super) fn interp_call_args(
     let ExpressionAst::FunctionCall { name, args } = ast else {
         return None;
     };
-    let function = find_mchart_function(name)?;
-    if !matches!(function.execution, MchartFunctionExecutionKind::Interp) || args.len() != 2 {
+    let function = find_registered_mchart_function(name)?;
+    let execution = find_builtin_mchart_function(&function.name)?.execution;
+    if !matches!(execution, MchartFunctionExecutionKind::Interp) || args.len() != 2 {
         return None;
     }
     let ExpressionAst::ItemRef(item_ref) = &args[0] else {
@@ -685,8 +748,9 @@ pub(super) fn slice_call_args(
     let ExpressionAst::FunctionCall { name, args } = ast else {
         return None;
     };
-    let function = find_mchart_function(name)?;
-    if !matches!(function.execution, MchartFunctionExecutionKind::Slice) || args.len() != 3 {
+    let function = find_registered_mchart_function(name)?;
+    let execution = find_builtin_mchart_function(&function.name)?.execution;
+    if !matches!(execution, MchartFunctionExecutionKind::Slice) || args.len() != 3 {
         return None;
     }
     let ExpressionAst::ItemRef(item_ref) = &args[0] else {
@@ -709,7 +773,7 @@ pub(super) fn ensure_top_level_transform_usage_is_supported(
             ensure_top_level_transform_usage_is_supported(rhs, false)
         }
         ExpressionAst::FunctionCall { name, args } => {
-            if let Some(function) = find_mchart_function(name) {
+            if let Some(function) = find_registered_mchart_function(name) {
                 if function.top_level_only {
                     if !allow_top_level {
                         return Err(format!(
@@ -717,7 +781,7 @@ pub(super) fn ensure_top_level_transform_usage_is_supported(
                             function.name
                         ));
                     }
-                    expect_arg_count(function, args, function.params.len())?;
+                    expect_arg_count(&function.name, args, function.params.len())?;
                     if function.first_arg_direct_item_ref_only
                         && !matches!(args.first(), Some(ExpressionAst::ItemRef(_)))
                     {
@@ -737,39 +801,39 @@ pub(super) fn ensure_top_level_transform_usage_is_supported(
 }
 
 fn expect_arg_count(
-    function: &MchartFunctionDefinition,
+    function_name: &str,
     args: &[ExpressionAst],
     expected: usize,
 ) -> Result<(), String> {
     if args.len() != expected {
         return Err(format!(
             "{}() expects exactly {expected} arguments",
-            function.name
+            function_name
         ));
     }
     Ok(())
 }
 
 fn expect_series_arg(
-    function: &MchartFunctionDefinition,
+    function_name: &str,
     _index: usize,
     kind: ExpressionValueKind,
     message: &str,
 ) -> Result<(), String> {
     if kind != ExpressionValueKind::Series {
-        return Err(format!("{}() requires {message}", function.name));
+        return Err(format!("{}() requires {message}", function_name));
     }
     Ok(())
 }
 
 fn expect_scalar_arg(
-    function: &MchartFunctionDefinition,
+    function_name: &str,
     _index: usize,
     kind: ExpressionValueKind,
     message: &str,
 ) -> Result<(), String> {
     if kind != ExpressionValueKind::Scalar {
-        return Err(format!("{}() requires {message}", function.name));
+        return Err(format!("{}() requires {message}", function_name));
     }
     Ok(())
 }

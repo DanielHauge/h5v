@@ -15,6 +15,7 @@ use crate::{
     h5f::{H5FNode, Node},
     ui::{
         self,
+        custom_content::render_custom_content_mode,
         heatmap::render_heatmap,
         matrix::{DefaultMatrixResultRenderIntercept, EnumRenderer},
         render::MatrixRenderType,
@@ -74,6 +75,26 @@ fn attribute_constraint(
     }
 }
 
+fn content_mode_title(handle: &crate::configure::registry::ContentModeHandle) -> String {
+    if let Some(mode) = ContentShowMode::parse_handle(handle.as_str()) {
+        return match mode {
+            ContentShowMode::Preview => {
+                configure::configured_symbol(|symbols| symbols.title.preview)
+            }
+            ContentShowMode::Matrix => {
+                configure::configured_symbol(|symbols| symbols.title.matrix_tab)
+            }
+            ContentShowMode::Heatmap => "# Heatmap",
+        }
+        .to_string();
+    }
+
+    configure::current_registry_snapshot()
+        .content_mode(handle)
+        .map(|metadata| metadata.title.clone())
+        .unwrap_or_else(|| handle.as_str().to_string())
+}
+
 pub fn render_main_display(
     f: &mut Frame,
     area: &Rect,
@@ -106,9 +127,8 @@ pub fn render_main_display(
     state.ui_layout.matrix_rows.clear();
     state.ui_layout.matrix_cells.clear();
 
-    let current_display_mode = &state.content_mode;
-    let available = state.filter_runtime_content_modes(node.content_show_modes());
-    let supported_display_modes = configure::ordered_content_modes(&available);
+    let available_handles = state.available_content_mode_handles(node.content_show_modes());
+    let supported_display_modes = configure::ordered_content_mode_handles(&available_handles);
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {
             Node::Dataset(_, meta) if meta.is_compound_container() => "Compound",
@@ -125,38 +145,31 @@ pub fn render_main_display(
         f.render_widget(paragraph, content_area);
         return Ok(());
     }
-    let is_supported = supported_display_modes.contains(current_display_mode);
+    let current_display_mode = state.active_content_mode_handle();
+    let is_supported = supported_display_modes.contains(&current_display_mode);
     let supported_modes_count = supported_display_modes.len();
     let display_mode = if is_supported {
-        *current_display_mode
+        current_display_mode
     } else {
         supported_display_modes
             .first()
-            .copied()
-            .unwrap_or(ContentShowMode::Preview)
+            .cloned()
+            .unwrap_or_else(|| ContentShowMode::Preview.handle())
     };
     let display_index = supported_display_modes
         .iter()
-        .position(|x| *x == display_mode)
+        .position(|handle| *handle == display_mode)
         .unwrap_or(0);
 
     // Do tab titles:
 
     let mut tab_titles = vec![];
     let mut tab_layout = Vec::new();
-    for (i, x) in supported_display_modes.iter().enumerate() {
-        let title = match x {
-            ContentShowMode::Preview => {
-                configure::configured_symbol(|symbols| symbols.title.preview)
-            }
-            ContentShowMode::Matrix => {
-                configure::configured_symbol(|symbols| symbols.title.matrix_tab)
-            }
-            ContentShowMode::Heatmap => "# Heatmap",
-        };
+    for (i, handle) in supported_display_modes.iter().enumerate() {
+        let title = content_mode_title(handle);
         let padded = format!(" {title} ");
         tab_layout.push((
-            *x,
+            handle.clone(),
             padded.clone(),
             Line::from(padded.as_str()).width() as u16,
         ));
@@ -204,7 +217,7 @@ pub fn render_main_display(
                     width: *width,
                     height: 1,
                 },
-                mode: *mode,
+                mode: mode.clone(),
             });
         current_x = current_x.saturating_add(*width);
         if i != supported_modes_count - 1 {
@@ -229,9 +242,9 @@ pub fn render_main_display(
             .style(Style::default().bg(bg_color)),
         content_area,
     );
-    match state.content_show_mode_eval(available) {
-        ContentShowMode::Preview => render_preview(f, &content_area, &mut node, state),
-        ContentShowMode::Matrix => {
+    match ContentShowMode::parse_handle(display_mode.as_str()) {
+        Some(ContentShowMode::Preview) => render_preview(f, &content_area, &mut node, state),
+        Some(ContentShowMode::Matrix) => {
             //
             let (ds, attr) = match node.node.clone() {
                 Node::Dataset(ds, attr) => (ds, attr),
@@ -399,7 +412,8 @@ pub fn render_main_display(
                 },
             }
         }
-        ContentShowMode::Heatmap => render_heatmap(f, &content_area, &mut node, state)?,
+        Some(ContentShowMode::Heatmap) => render_heatmap(f, &content_area, &mut node, state)?,
+        None => render_custom_content_mode(f, &content_area, state, &display_mode)?,
     }
 
     Ok(())

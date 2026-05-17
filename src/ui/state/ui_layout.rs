@@ -1,8 +1,9 @@
 use ratatui::layout::Rect;
 
+use crate::configure::registry::ContentModeHandle;
+
 use super::{
-    ContentShowMode, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
-    HelpMultiChartSection, HelpTab,
+    HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection, HelpTab,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -27,10 +28,10 @@ pub struct AttributesHitbox {
     pub cells: Vec<MetadataCellHitbox>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ContentTabHitbox {
     pub area: Rect,
-    pub mode: ContentShowMode,
+    pub mode: ContentModeHandle,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +65,7 @@ pub enum HelpSidebarTarget {
     Command(HelpCommandSection),
     Customization(HelpCustomizationSection),
     MultiChart(HelpMultiChartSection),
+    Health(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +81,19 @@ pub struct HelpScrollbarHitbox {
     pub viewport_lines: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum LogsFilterTarget {
+    Scope,
+    Level,
+    Handle,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LogsFilterHitbox {
+    pub area: Rect,
+    pub target: LogsFilterTarget,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UiLayoutState {
     pub help_toggle: Option<Rect>,
@@ -88,6 +103,10 @@ pub struct UiLayoutState {
     pub help_sidebar_items: Vec<HelpSidebarHitbox>,
     pub help_content: Option<Rect>,
     pub help_scrollbar: Option<HelpScrollbarHitbox>,
+    pub logs_top_bar: Option<Rect>,
+    pub logs_content: Option<Rect>,
+    pub logs_scrollbar: Option<HelpScrollbarHitbox>,
+    pub logs_filters: Vec<LogsFilterHitbox>,
     pub tree: Option<TreeHitbox>,
     pub attributes: Option<AttributesHitbox>,
     pub content: Option<Rect>,

@@ -10,7 +10,10 @@ use keymap::{
     global_action, normal_action, window_action, BoundAction, Direction, GlobalAction,
     NormalAction, WindowAction,
 };
-use mouse::{handle_global_mouse_event, handle_help_mouse_event, handle_normal_mouse_event};
+use mouse::{
+    handle_global_mouse_event, handle_help_mouse_event, handle_logs_mouse_event,
+    handle_normal_mouse_event,
+};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tree::handle_normal_tree_event;
 
@@ -144,10 +147,121 @@ pub(crate) fn execute_bound_lua_callback(
                         .map_err(|error| mlua::Error::runtime(error.to_string()))?;
                 Ok(())
             })?;
+            let toast_info_fn = scope.create_function_mut(|_, message: String| {
+                let mut state = state_cell.borrow_mut();
+                configure::set_lua_toast(*state, configure::LuaToastLevel::Info, message);
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let toast_warn_fn = scope.create_function_mut(|_, message: String| {
+                let mut state = state_cell.borrow_mut();
+                configure::set_lua_toast(*state, configure::LuaToastLevel::Warning, message);
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let toast_error_fn = scope.create_function_mut(|_, message: String| {
+                let mut state = state_cell.borrow_mut();
+                configure::set_lua_toast(*state, configure::LuaToastLevel::Error, message);
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let process_run_fn = scope.create_function_mut(|lua, spec: mlua::Table| {
+                configure::run_lua_process_spec(lua, spec, false)
+            })?;
+            let process_spawn_fn = scope.create_function_mut(|lua, spec: mlua::Table| {
+                configure::run_lua_process_spec(lua, spec, true)
+            })?;
+            let content_open_fn = scope.create_function_mut(|lua, target: String| {
+                let mut state = state_cell.borrow_mut();
+                configure::open_lua_content_mode_target(lua, *state, &target)?;
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let content_toggle_fn = scope.create_function_mut(|_, ()| {
+                let mut state = state_cell.borrow_mut();
+                let available = state.treeview[state.tree_view_cursor]
+                    .node
+                    .borrow_mut()
+                    .content_show_modes();
+                let available = state.available_content_mode_handles(available);
+                state.swap_content_mode_handle(available);
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let mchart_open_fn = scope.create_function_mut(|_, ()| {
+                let mut state = state_cell.borrow_mut();
+                state.mode = Mode::MultiChart;
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let mchart_close_fn = scope.create_function_mut(|_, ()| {
+                let mut state = state_cell.borrow_mut();
+                state.multi_chart.close_expression_prompt();
+                state.mode = Mode::Normal;
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
+            let mchart_toggle_fn = scope.create_function_mut(|_, ()| {
+                let mut state = state_cell.borrow_mut();
+                state.multi_chart.close_expression_prompt();
+                state.mode = if matches!(state.mode, Mode::MultiChart) {
+                    Mode::Normal
+                } else {
+                    Mode::MultiChart
+                };
+                if matches!(*callback_result.borrow(), EventResult::Continue) {
+                    *callback_result.borrow_mut() = EventResult::Redraw;
+                }
+                Ok(())
+            })?;
             let ctx = lua.create_table()?;
+            let toast = lua.create_table()?;
+            toast.set("info", toast_info_fn)?;
+            toast.set("warning", toast_warn_fn.clone())?;
+            toast.set("warn", toast_warn_fn)?;
+            toast.set("error", toast_error_fn)?;
+            let process = lua.create_table()?;
+            process.set("run", process_run_fn)?;
+            process.set("spawn", process_spawn_fn)?;
+            let content = lua.create_table()?;
+            content.set("open", content_open_fn)?;
+            content.set("toggle", content_toggle_fn)?;
+            let mchart = lua.create_table()?;
+            mchart.set("open", mchart_open_fn)?;
+            mchart.set("close", mchart_close_fn)?;
+            mchart.set("toggle", mchart_toggle_fn)?;
             ctx.set("command", command_fn)?;
             ctx.set("commands", commands_fn)?;
             ctx.set("script", script_fn)?;
+            ctx.set("toast", toast)?;
+            ctx.set("process", process)?;
+            ctx.set("content", content)?;
+            ctx.set("mchart", mchart)?;
+            {
+                let state = state_cell.borrow();
+                ctx.set("app", configure::build_lua_app_context(lua, &state)?)?;
+                ctx.set("config", configure::build_lua_config_context(lua)?)?;
+                ctx.set("fs", configure::build_lua_fs_context(lua, &state)?)?;
+                ctx.set(
+                    "selection",
+                    configure::build_lua_selection_context(lua, &state)?,
+                )?;
+                ctx.set("plugin", configure::build_lua_plugin_context(lua)?)?;
+            }
             callback.call::<()>(ctx)?;
             Ok(())
         })
@@ -390,6 +504,95 @@ pub fn handle_input_event(state: &mut AppState<'_>, event: Event) -> Result<Even
                 }
             }
             search::handle_search_event(state, event)
+        }
+        Mode::Logs => {
+            match event {
+                Event::Key(key_event) => {
+                    if !is_handled_key_press(&key_event) {
+                        return Ok(EventResult::Continue);
+                    }
+                    match key_event.code {
+                        KeyCode::Esc | KeyCode::Char('q') => {
+                            state.mode = state.logs_return_mode.clone();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::Tab => {
+                            state.logs_next_filter_focus();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::BackTab => {
+                            state.logs_prev_filter_focus();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::Right | KeyCode::Char('l') => {
+                            state.logs_next_filter_focus();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::Left | KeyCode::Char('h') => {
+                            state.logs_prev_filter_focus();
+                            return Ok(EventResult::Redraw);
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if crate::ui::logs::cycle_active_logs_filter(state, 1) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if crate::ui::logs::cycle_active_logs_filter(state, -1) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Char('t') => {
+                            if crate::ui::logs::cycle_logs_filter(
+                                state,
+                                crate::ui::state::LogsFilterTarget::Scope,
+                                1,
+                            ) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            let page = state.logs.viewport_lines.saturating_sub(1).max(1);
+                            if state.logs_scroll_by(page as isize) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            let page = state.logs.viewport_lines.saturating_sub(1).max(1);
+                            if state.logs_scroll_by(-(page as isize)) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::Home | KeyCode::Char('g') => {
+                            if state.logs_set_scroll(0) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        KeyCode::End | KeyCode::Char('G') => {
+                            if state.logs_set_scroll(state.logs_max_scroll()) {
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
+                        _ => {}
+                    }
+                    let keymaps = configure::current_keymaps();
+                    if let Some(action) = global_action(&key_event, &keymaps) {
+                        return match action {
+                            BoundAction::Action(action) => handle_global_action(state, action),
+                            BoundAction::Command(command) => execute_bound_command(state, &command),
+                            BoundAction::Script(script) => {
+                                execute_bound_script(state, &script, "keybinding script")
+                            }
+                            BoundAction::LuaCallback(callback_id) => {
+                                execute_bound_lua_callback(state, &callback_id)
+                            }
+                        };
+                    }
+                }
+                Event::Mouse(mouse_event) => return handle_logs_mouse_event(state, mouse_event),
+                _ => {}
+            }
+            Ok(EventResult::Continue)
         }
         Mode::Help => {
             match event {

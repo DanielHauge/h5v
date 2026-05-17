@@ -1,9 +1,16 @@
-use crate::error::AppError;
+use crate::{
+    configure::{
+        self,
+        registry::{CommandArgMetadata, CommandArgValueKind, CommandMetadata, CommandVisibility},
+    },
+    error::AppError,
+};
 
 use super::{
-    catalog::{command_catalog, find_command_descriptor, find_command_descriptor_by_id},
-    CommandArgKind, CommandArgValue, CommandDescriptor, CommandId, CommandInvocation, CommandToken,
-    StartupCommand,
+    builtin_command_handle,
+    catalog::{command_catalog, find_command_descriptor},
+    find_command_descriptor_by_handle, CommandArgKind, CommandArgValue, CommandDescriptor,
+    CommandId, CommandInvocation, CommandToken, StartupCommand,
 };
 
 pub fn parse_command_text(command_text: &str) -> Result<CommandInvocation, AppError> {
@@ -12,32 +19,27 @@ pub fn parse_command_text(command_text: &str) -> Result<CommandInvocation, AppEr
         return Ok(CommandInvocation::noop(trimmed));
     }
 
-    if let Some(invocation) = parse_legacy_numeric_alias(trimmed)? {
-        return Ok(invocation);
-    }
-
     let tokens = tokenize_command_text(trimmed)?;
     let command_name = tokens
         .first()
         .map(|token| token.value.as_str())
         .ok_or_else(|| AppError::InvalidCommand("Command was empty".to_string()))?;
-    let descriptor = find_command_descriptor(command_name).ok_or_else(|| {
-        let known = command_catalog()
-            .iter()
-            .map(|descriptor| descriptor.name)
-            .collect::<Vec<_>>()
-            .join(", ");
+    let metadata = command_metadata(command_name).ok_or_else(|| {
+        let known = command_names().join(", ");
         AppError::InvalidCommand(format!(
             "Unknown command '{}'. Known commands: {}",
             command_name, known
         ))
     })?;
 
-    let args = parse_command_args(descriptor, &tokens[1..])?;
+    let args = parse_command_args(&metadata, &tokens[1..])?;
     Ok(CommandInvocation {
-        id: descriptor.id,
+        handle: metadata.handle.clone(),
+        id: find_command_descriptor_by_handle(&metadata.handle)
+            .map(|descriptor| descriptor.id)
+            .unwrap_or(CommandId::Custom),
         raw_input: trimmed.to_string(),
-        command_name: descriptor.name.to_string(),
+        command_name: metadata.name,
         args,
     })
 }
@@ -47,7 +49,7 @@ pub fn format_command_invocation(command: &CommandInvocation) -> String {
         return String::new();
     }
 
-    let command_name = find_command_descriptor_by_id(command.id)
+    let command_name = find_command_descriptor_by_handle(&command.handle)
         .map(|descriptor| descriptor.name)
         .unwrap_or(command.command_name.as_str());
     let args = command
@@ -63,20 +65,26 @@ pub fn format_command_invocation(command: &CommandInvocation) -> String {
     }
 }
 
-pub fn describe_command_invocation(command: &CommandInvocation) -> Option<&'static str> {
-    find_command_descriptor_by_id(command.id).map(|descriptor| descriptor.description)
+pub fn describe_command_invocation(command: &CommandInvocation) -> Option<String> {
+    command_metadata_by_handle(&command.handle).map(|metadata| metadata.summary)
 }
 
+#[allow(dead_code)]
 pub fn describe_command_descriptor(descriptor: &CommandDescriptor) -> String {
+    let metadata = builtin_descriptor_metadata(descriptor);
+    describe_command_metadata(&metadata)
+}
+
+pub fn describe_command_metadata(metadata: &CommandMetadata) -> String {
     let mut parts = vec![format!(
         "{} - {}",
-        command_usage(descriptor),
-        descriptor.description
+        command_usage_metadata(metadata),
+        metadata.summary
     )];
-    if !descriptor.aliases.is_empty() {
-        parts.push(format!("aliases: {}", descriptor.aliases.join(", ")));
+    if !metadata.aliases.is_empty() {
+        parts.push(format!("aliases: {}", metadata.aliases.join(", ")));
     }
-    let keybindings = command_keybindings(descriptor);
+    let keybindings = command_keybindings_metadata(metadata);
     if !keybindings.is_empty() {
         parts.push(format!("keys: {keybindings}"));
     }
@@ -154,56 +162,58 @@ pub fn parse_startup_commands(script: &str, origin: &str) -> Vec<StartupCommand>
     commands
 }
 
-pub fn command_matches(buffer: &str) -> Vec<&'static CommandDescriptor> {
+pub fn command_matches(buffer: &str) -> Vec<CommandMetadata> {
     let trimmed = buffer.trim();
     if trimmed.is_empty() {
-        return command_catalog().iter().collect();
-    }
-
-    if let Some(descriptor) = legacy_descriptor_for_input(trimmed) {
-        return vec![descriptor];
+        let mut commands = command_catalog_metadata();
+        commands.sort_by(|left, right| left.name.cmp(&right.name));
+        return commands;
     }
 
     let fragment = first_token(trimmed)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let mut matches = command_catalog()
-        .iter()
-        .filter(|descriptor| {
-            descriptor.name.starts_with(&fragment)
-                || descriptor
+    let mut matches = command_catalog_metadata()
+        .into_iter()
+        .filter(|metadata| {
+            metadata.name.starts_with(&fragment)
+                || metadata
                     .aliases
                     .iter()
                     .any(|alias| alias.to_ascii_lowercase().starts_with(&fragment))
         })
         .collect::<Vec<_>>();
-    matches.sort_by_key(|descriptor| descriptor.name);
+    matches.sort_by(|left, right| left.name.cmp(&right.name));
     matches
 }
 
-pub fn selected_command_descriptor(
+pub fn selected_command_metadata(
     buffer: &str,
     selected_suggestion: usize,
-) -> Option<&'static CommandDescriptor> {
+) -> Option<CommandMetadata> {
     let matches = command_matches(buffer);
     if matches.is_empty() {
         None
     } else {
-        Some(matches[selected_suggestion.min(matches.len() - 1)])
+        Some(matches[selected_suggestion.min(matches.len() - 1)].clone())
     }
 }
 
-pub fn current_command_descriptor(buffer: &str) -> Option<&'static CommandDescriptor> {
+pub fn current_command_metadata(buffer: &str) -> Option<CommandMetadata> {
     let trimmed = buffer.trim();
     if trimmed.is_empty() {
         return None;
     }
-    legacy_descriptor_for_input(trimmed)
-        .or_else(|| first_token(trimmed).and_then(find_command_descriptor))
+    first_token(trimmed).and_then(command_metadata)
 }
 
+#[allow(dead_code)]
 pub fn command_usage(descriptor: &CommandDescriptor) -> String {
-    let args = descriptor
+    command_usage_metadata(&builtin_descriptor_metadata(descriptor))
+}
+
+pub fn command_usage_metadata(metadata: &CommandMetadata) -> String {
+    let args = metadata
         .args
         .iter()
         .map(|arg| {
@@ -215,29 +225,114 @@ pub fn command_usage(descriptor: &CommandDescriptor) -> String {
         })
         .collect::<Vec<_>>();
     if args.is_empty() {
-        descriptor.name.to_string()
+        metadata.name.to_string()
     } else {
-        format!("{} {}", descriptor.name, args.join(" "))
+        format!("{} {}", metadata.name, args.join(" "))
     }
 }
 
+#[allow(dead_code)]
 pub fn command_keybindings(descriptor: &CommandDescriptor) -> String {
-    descriptor.keybindings.join(", ")
+    command_keybindings_metadata(&builtin_descriptor_metadata(descriptor))
 }
 
-pub(super) fn legacy_descriptor_for_input(
-    command_text: &str,
-) -> Option<&'static CommandDescriptor> {
-    let first = command_text.chars().next()?;
-    if first == '+' {
-        find_command_descriptor_by_id(CommandId::Down)
-    } else if first == '-' {
-        find_command_descriptor_by_id(CommandId::Up)
-    } else if command_text.chars().all(|c| c.is_ascii_digit()) {
-        find_command_descriptor_by_id(CommandId::Seek)
-    } else {
-        None
+pub fn command_keybindings_metadata(metadata: &CommandMetadata) -> String {
+    configure::current_registry_snapshot()
+        .command(&metadata.handle)
+        .map(|live| live.keybindings.join(", "))
+        .filter(|keybindings| !keybindings.is_empty())
+        .unwrap_or_else(|| metadata.keybindings.join(", "))
+}
+
+fn builtin_descriptor_metadata(descriptor: &CommandDescriptor) -> CommandMetadata {
+    configure::current_registry_snapshot()
+        .command(&builtin_command_handle(descriptor.name))
+        .cloned()
+        .unwrap_or_else(|| CommandMetadata {
+            handle: builtin_command_handle(descriptor.name),
+            name: descriptor.name.to_string(),
+            aliases: descriptor
+                .aliases
+                .iter()
+                .map(|alias| (*alias).to_string())
+                .collect(),
+            summary: descriptor.description.to_string(),
+            category: format!("{:?}", descriptor.category),
+            keybindings: descriptor
+                .keybindings
+                .iter()
+                .map(|binding| (*binding).to_string())
+                .collect(),
+            callback_id: None,
+            args: descriptor
+                .args
+                .iter()
+                .map(|arg| CommandArgMetadata {
+                    name: arg.name.to_string(),
+                    kind: match arg.kind {
+                        CommandArgKind::UnsignedInt => CommandArgValueKind::UnsignedInt,
+                        CommandArgKind::Word => CommandArgValueKind::Word,
+                    },
+                    required: arg.required,
+                    help: arg.help.to_string(),
+                    values: arg
+                        .values
+                        .iter()
+                        .map(|value| (*value).to_string())
+                        .collect(),
+                })
+                .collect(),
+            examples: vec![descriptor.example.to_string()],
+            visibility: CommandVisibility::Visible,
+            owner: configure::registry::RegistryOwner::Builtin,
+        })
+}
+
+fn command_catalog_metadata() -> Vec<CommandMetadata> {
+    let snapshot = configure::current_registry_snapshot();
+    let mut commands = snapshot.commands().cloned().collect::<Vec<_>>();
+    if commands.is_empty() {
+        commands = command_catalog()
+            .iter()
+            .map(builtin_descriptor_metadata)
+            .collect();
     }
+    commands
+        .into_iter()
+        .filter(|metadata| metadata.visibility == CommandVisibility::Visible)
+        .collect()
+}
+
+pub fn command_metadata(name: &str) -> Option<CommandMetadata> {
+    let snapshot = configure::current_registry_snapshot();
+    snapshot
+        .find_command(name)
+        .cloned()
+        .or_else(|| {
+            snapshot
+                .command(&crate::configure::registry::CommandHandle::new(name))
+                .cloned()
+        })
+        .or_else(|| find_command_descriptor(name).map(builtin_descriptor_metadata))
+}
+
+pub fn command_metadata_by_handle(
+    handle: &crate::configure::registry::CommandHandle,
+) -> Option<CommandMetadata> {
+    let snapshot = configure::current_registry_snapshot();
+    snapshot
+        .command(handle)
+        .cloned()
+        .or_else(|| find_command_descriptor_by_handle(handle).map(builtin_descriptor_metadata))
+}
+
+fn command_names() -> Vec<String> {
+    let mut names = command_catalog_metadata()
+        .into_iter()
+        .map(|metadata| metadata.name)
+        .collect::<Vec<_>>();
+    names.sort();
+    names
 }
 
 pub(super) fn tokenize_command_text(command_text: &str) -> Result<Vec<CommandToken>, AppError> {
@@ -304,74 +399,34 @@ pub(super) fn tokenize_command_text(command_text: &str) -> Result<Vec<CommandTok
     Ok(tokens)
 }
 
-fn parse_legacy_numeric_alias(command_text: &str) -> Result<Option<CommandInvocation>, AppError> {
-    let Some(first) = command_text.chars().next() else {
-        return Ok(Some(CommandInvocation::noop(command_text)));
-    };
-
-    if first == '+' || first == '-' {
-        let amount_text = command_text[1..].trim();
-        if amount_text.is_empty() {
-            return Err(AppError::InvalidCommand(format!(
-                "Expected a number after '{}'",
-                first
-            )));
-        }
-        let amount = parse_usize_arg(amount_text, "amount", command_text)?;
-        let (id, name) = if first == '+' {
-            (CommandId::Down, "down")
-        } else {
-            (CommandId::Up, "up")
-        };
-        return Ok(Some(CommandInvocation {
-            id,
-            raw_input: command_text.to_string(),
-            command_name: name.to_string(),
-            args: vec![CommandArgValue::UnsignedInt(amount)],
-        }));
-    }
-
-    if command_text.chars().all(|c| c.is_ascii_digit()) {
-        let index = parse_usize_arg(command_text, "index", command_text)?;
-        return Ok(Some(CommandInvocation {
-            id: CommandId::Seek,
-            raw_input: command_text.to_string(),
-            command_name: "seek".to_string(),
-            args: vec![CommandArgValue::UnsignedInt(index)],
-        }));
-    }
-
-    Ok(None)
-}
-
 fn parse_command_args(
-    descriptor: &CommandDescriptor,
+    metadata: &CommandMetadata,
     tokens: &[CommandToken],
 ) -> Result<Vec<CommandArgValue>, AppError> {
-    let required_args = descriptor.args.iter().filter(|arg| arg.required).count();
+    let required_args = metadata.args.iter().filter(|arg| arg.required).count();
     if tokens.len() < required_args {
         return Err(AppError::InvalidCommand(format!(
             "Command '{}' expects {} argument(s)",
-            descriptor.name, required_args
+            metadata.name, required_args
         )));
     }
-    if tokens.len() > descriptor.args.len() {
+    if tokens.len() > metadata.args.len() {
         return Err(AppError::InvalidCommand(format!(
             "Command '{}' received too many arguments",
-            descriptor.name
+            metadata.name
         )));
     }
 
-    descriptor
+    metadata
         .args
         .iter()
         .zip(tokens.iter())
         .map(|(arg_spec, token)| match arg_spec.kind {
-            CommandArgKind::UnsignedInt => {
-                parse_usize_arg(&token.value, arg_spec.name, descriptor.name)
+            CommandArgValueKind::UnsignedInt => {
+                parse_usize_arg(&token.value, &arg_spec.name, &metadata.name)
                     .map(CommandArgValue::UnsignedInt)
             }
-            CommandArgKind::Word => Ok(CommandArgValue::Word(token.value.clone())),
+            CommandArgValueKind::Word => Ok(CommandArgValue::Word(token.value.clone())),
         })
         .collect()
 }

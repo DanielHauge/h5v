@@ -301,7 +301,7 @@ fn resolve_std_reference_target(attr: &Attribute) -> Result<ReferenceNavigationT
     }
 }
 
-fn resolve_legacy_region_reference_target(
+fn resolve_region_reference_target(
     attr: &Attribute,
 ) -> Result<ReferenceNavigationTarget, AppError> {
     let file = attr.file()?;
@@ -567,7 +567,7 @@ fn navigate_reference_attribute_value(
                 )));
             }
             Some(
-                resolve_legacy_region_reference_target(&attr).map_err(|error| {
+                resolve_region_reference_target(&attr).map_err(|error| {
                     EventResult::Toast(AppToast::Error(error.to_string()), false)
                 })?,
             )

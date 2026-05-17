@@ -1,158 +1,128 @@
 # Configuration
 
-h5v loads `init.lua` at startup.
+`h5v` loads one Lua file: `init.lua`.
 
-If the file is invalid, h5v keeps running, shows a warning toast, and marks the header with a config warning badge until the configuration loads cleanly again.
-
-## Config file location
-
-`init.lua` lives under your platform config directory:
+## File location
 
 - Linux: `~/.config/h5v/init.lua`
 - macOS: `~/Library/Application Support/h5v/init.lua`
-- Windows: `%AppData%\h5v\init.lua`
+- Windows: `%AppData%\\h5v\\init.lua`
 
-If it does not exist, `h5v` creates it.
+Commands:
 
-LuaLS sidecar files are generated next to it under `.h5v-luals/`. `h5v.lua` is refreshed automatically. `.luarc.json` is refreshed only while h5v manages it.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `configure` | Opens `init.lua` in `$VISUAL` or `$EDITOR`, then reloads the configuration when you exit the editor. |
-| `configure reset` | Replaces `init.lua` with a fresh default scaffold, then reloads it immediately. |
-
-## Start here
-
-Most configs only need these fields:
-
-- `h5v.theme`
-- `h5v.symbol_theme`
-- `h5v.content_mode_order`
-- `h5v.compatibility`
-- `h5v.layout.*`
-- `h5v.heatmap.*`
-- `h5v.keymaps`
-- `h5v.colors`
-- `h5v.symbols`
-
-For all keys, scopes, themes, and accepted color names, see [Configuration reference](./configuration-reference.md).
-
-## Keymaps
-
-Keymaps live in `h5v.keymaps`.
-
-Scopes:
-
-- `global`
-- `normal`
-- `window`
-- `tree`
-- `content`
-- `heatmap`
-- `attributes`
-- `mchart`
-
-Precedence:
-
-1. `heatmap`
-2. `content` / `tree` / `attributes` / `mchart` / `window`
-3. `normal`
-4. `global`
-
-Each scope supports:
-
-- `clear_defaults = true` to remove shipped bindings for that scope
-- `unbind = { "key", ... }` to remove selected shipped bindings
-- `bind = { { key = "...", action = "..." }, { key = "...", command = "..." } }`
-- `bind(mode, key, action[, description])`
-- `bind_command(mode, key, command[, description])`
-- `bind_commands(mode, key, commands[, description])`
-- `bind_script(mode, key, script[, description])`
-- `bind_lua(mode, key, callback[, description])`
-- `unbind(mode, key)`
-
-Use `h5v.modes.*` and `h5v.actions.*` constants in Lua. Examples: `h5v.modes.Global`, `h5v.modes.Heatmap`, `h5v.actions.ShowHelp`, `h5v.actions.HeatmapZoomIn`.
-
-Example:
-
-```lua
-bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp, "Show help")
-unbind(h5v.modes.Heatmap, "v")
-bind_command(h5v.modes.Heatmap, "ctrl+alt+r", "heatmap range use \"Clip 1-99%\"")
-bind_commands(h5v.modes.Global, "ctrl+k", { "down 2", "up 1" })
-bind_script(h5v.modes.Global, "ctrl+s", "down 2\nup 1")
-bind_lua(h5v.modes.Global, "ctrl+l", function(ctx)
-  ctx.command("help reload")
-end)
-bind(h5v.modes.Heatmap, "ctrl+z", h5v.actions.HeatmapZoomIn)
+```text
+:configure
+:configure reset
+h5v --config /path/to/init.lua file.h5
 ```
 
-## Heatmap defaults
+LuaLS support files live next to the config under `.h5v-luals/`.
 
-Heatmap settings live under `h5v.heatmap`:
-
-- `default_range`
-- `default_colormap`
-- `default_normalization`
-- `default_invert_x`
-- `default_invert_y`
-- `default_invert_c`
-- `range_modes`
-
-## Panel layout
-
-Main panel sizing lives under `h5v.layout`:
-
-- `tree.focused`
-- `tree.unfocused`
-- `attributes.focused`
-- `attributes.unfocused`
-- `content.focused`
-- `content.unfocused`
-
-Layout values accept:
-
-- integers like `12` for exact terminal rows/columns
-- strings like `"28%"` for percentages
-- `"*"` to fill the remaining space
-
-If both sides of an attributes/content focus pair use percentages, they must add up to `100%`.
-
-## Example
+## Start with this shape
 
 ```lua
-h5v.theme = "light"
-h5v.content_mode_order = { "matrix", "preview" }
-h5v.symbol_theme = "compatibility"
-h5v.compatibility = true
-
-h5v.layout.tree.focused = "28%"
-h5v.layout.tree.unfocused = "20%"
-h5v.layout.attributes.focused = 12
-h5v.layout.attributes.unfocused = 5
-h5v.layout.content.focused = "*"
-h5v.layout.content.unfocused = "*"
+h5v.theme = "dark"
+h5v.symbol_theme = "rich"
+h5v.compatibility = false
+h5v.content_mode_order = { "preview", "matrix" }
 
 h5v.heatmap.default_colormap = "inferno"
-h5v.heatmap.default_normalization = "log"
-h5v.heatmap.default_invert_c = true
+h5v.layout.tree.focused = "28%"
 
-bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp)
+h5v.colors.accent.selection_bg = "#005f87"
+h5v.symbols.title.help = " Help "
 
-h5v.colors.accent.selection_bg = "#e1c878"
-h5v.colors.tree.group = "#d26c00"
-h5v.colors.surface.panel_border = "#1e3755"
-
-h5v.symbols.tree.dataset_link_icon = "D@"
-h5v.symbols.tree.load_more_label = "v Load more"
-h5v.symbols.title.matrix_tab = "Matrix"
-h5v.symbols.chart.visibility_visible = "*"
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+h",
+  target = h5v.actions.ShowHelp,
+  description = "Show help",
+})
 ```
 
-The built-in light theme is a good starting point for a bright palette plus a few targeted overrides:
+## Main pieces
 
-![Light theme example](./assets/themes.png)
+| Lua entry | Use it for |
+| --- | --- |
+| `h5v.theme`, `h5v.symbol_theme` | shipped themes |
+| `h5v.colors.*`, `h5v.symbols.*` | targeted overrides |
+| `h5v.content_mode_order` | preferred preview/matrix/heatmap order |
+| `h5v.compatibility` | compatibility mode default |
+| `h5v.layout.*` | tree / attributes / content sizing |
+| `h5v.heatmap.*` | heatmap defaults and custom ranges |
+| `h5v.multichart.*` | multichart sampling defaults |
+| `h5v.keys.*` | keybindings |
+| `h5v.commands.register(...)` | custom commands |
+| `h5v.events.on(...)` | autocommands |
+| `h5v.mchart.functions.register(...)` | custom multichart functions |
+| `h5v.plugins.use(...)` | plugins |
+| `h5v.logs.*` | log from Lua |
 
-Use `h5v.themes.<name>` and `h5v.symbol_themes.<name>` as built-in catalogs when you want to copy values from a shipped theme.
+## Use constants, not magic strings
+
+Prefer the generated constants and action ids:
+
+```lua
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+l",
+  target = h5v.actions.ReloadFile,
+})
+```
+
+Use the in-app help for the current command list, action names, keymaps, multichart functions, and health details.
+
+## Examples
+
+### Keybinding
+
+```lua
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.heatmap,
+  key = "ctrl+alt+r",
+  command = "heatmap range use \"Clip 1-99%\"",
+  description = "Use clipped range",
+})
+```
+
+### Custom command
+
+```lua
+h5v.commands.register({
+  id = "analysis.refresh",
+  title = "Refresh analysis",
+  summary = "Refresh plugin output",
+  run = function(ctx)
+    ctx.toast.info("refreshing")
+    ctx.command("logs")
+  end,
+})
+```
+
+### Event hook
+
+```lua
+h5v.events.on({
+  event = h5v.ids.events.file_opened,
+  run = function(ctx)
+    ctx.log.info("file opened: " .. ctx.event.path)
+  end,
+})
+```
+
+### Plugin from config
+
+```lua
+h5v.plugins.use("~/dev/h5v-demo-plugin")
+h5v.plugins.use("owner/example-plugin")
+h5v.plugins.use("owner/example-plugin@main")
+h5v.plugins.use("owner/example-plugin", { auto_pull = false })
+```
+
+## Health and logs
+
+- Bad config loads show up in the header and in `Help -> Health`.
+- Plugin problems show up on the plugin health page when the plugin has a valid manifest.
+- `:logs` opens the log panel.
+
+For plugin authoring, see [Plugins](./plugins.md).

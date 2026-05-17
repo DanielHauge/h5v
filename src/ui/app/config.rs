@@ -6,6 +6,7 @@ use crate::{
     configure,
     configure::{ensure_config_path, reset_config_path, run_lua_engine},
     error::{log_error, AppError},
+    health::HealthStatus,
     ui::{
         edit::edit_existing_file,
         state::{AppState, AppToast},
@@ -22,6 +23,30 @@ pub(super) fn configuration_warning_message(
         format!("Configuration warning: {error}. Keeping previous settings.")
     } else {
         format!("Configuration warning: {error}. Using built-in settings.")
+    }
+}
+
+pub(super) fn plugin_health_warning_message() -> Option<String> {
+    let warnings = configure::current_registry_snapshot()
+        .plugins()
+        .filter(|plugin| plugin.health_status != HealthStatus::Healthy)
+        .map(|plugin| {
+            let message = plugin
+                .health_message
+                .clone()
+                .unwrap_or_else(|| "no details provided".to_string());
+            format!(
+                "plugin '{}' {}: {}",
+                plugin.handle.as_str(),
+                plugin.health_status.as_str(),
+                message
+            )
+        })
+        .collect::<Vec<_>>();
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(format!("Healthcheck warning: {}", warnings.join("; ")))
     }
 }
 
@@ -47,6 +72,7 @@ pub(super) fn open_configuration_and_reload(
         state.configuration_warning = Some(message.clone());
         return Ok(AppToast::Warning(message));
     }
+    let plugin_health_warning = plugin_health_warning_message();
     if let Ok(Some(compatibility_mode)) =
         configure::load_config_compatibility(state.compatibility_mode)
     {
@@ -56,12 +82,19 @@ pub(super) fn open_configuration_and_reload(
         }
     }
     state.configuration_warning = None;
-    if let Some(preferred_mode) = configure::current_content_mode_order().first().copied() {
+    if let Some(preferred_mode) = configure::current_content_mode_order_handles()
+        .first()
+        .cloned()
+    {
         state.content_mode = preferred_mode;
     }
     state.sync_heatmap_configuration();
     state.compute_tree_view();
     let config_path = config_path.display();
+    if let Some(message) = plugin_health_warning {
+        state.configuration_warning = Some(message.clone());
+        return Ok(AppToast::Warning(message));
+    }
     if reset {
         Ok(AppToast::Info(format!(
             "Reset configuration to default at {config_path}"

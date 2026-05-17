@@ -755,6 +755,7 @@ mod tests {
 
     #[test]
     fn resolve_enum_overrides_reads_dataset_string_attrs() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -809,6 +810,7 @@ mod tests {
 
     #[test]
     fn unsupported_dataset_meta_disables_preview_features() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -843,6 +845,7 @@ mod tests {
 
     #[test]
     fn linked_dataset_nodes_preserve_link_name_metadata() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file

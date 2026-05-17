@@ -15,17 +15,27 @@ use super::{
     state::AppState,
 };
 
+pub struct RenderDimSelectorOptions<'a> {
+    pub row_columns: bool,
+    pub page_info: Option<&'a PageDisplayInfo<'a>>,
+    pub panel_title: &'a str,
+    pub detail_lines: Option<&'a [Line<'static>]>,
+}
+
 pub fn render_dim_selector(
     f: &mut Frame,
     area: &Rect,
     node: &mut H5FNode,
     shape: &[usize],
-    row_columns: bool,
-    page_info: Option<&PageDisplayInfo<'_>>,
-    panel_title: &str,
-    detail_lines: Option<&[Line<'static>]>,
+    options: RenderDimSelectorOptions<'_>,
 ) -> Result<(), Error> {
     node.sync_selection_rank(shape.len());
+    let RenderDimSelectorOptions {
+        row_columns,
+        page_info,
+        panel_title,
+        detail_lines,
+    } = options;
     let x_selection = node.selected_x;
     let row_selection = node.selected_row;
     let col_selection = node.selected_col;

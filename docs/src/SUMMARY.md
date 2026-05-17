@@ -17,6 +17,7 @@
   - [Startup scripting](./startup-scripting.md)
 - [Configuration and theming](./configuration.md)
   - [Configuration reference](./configuration-reference.md)
+  - [Plugins](./plugins.md)
 - [Multichart](./multichart.md)
   - [Multichart expressions](./multichart-expressions.md)
 - [Troubleshooting and limits](./troubleshooting.md)

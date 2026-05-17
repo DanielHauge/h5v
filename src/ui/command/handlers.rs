@@ -11,9 +11,8 @@ use super::super::{
     state::{AppState, AppToast, ContentShowMode, Focus, Mode},
 };
 use super::{
-    execute_command, find_command_descriptor,
-    parsing::{describe_command_descriptor, legacy_descriptor_for_input},
-    CommandArgValue, CommandInvocation,
+    command_metadata, execute_command, parsing::describe_command_metadata, CommandArgValue,
+    CommandInvocation,
 };
 
 pub(crate) use crate::ui::input::keymap::parse_simulated_key;
@@ -188,6 +187,23 @@ pub(super) fn handle_configure(
         }
     };
     Ok(EventResult::Configure { reset })
+}
+
+pub(super) fn handle_quit(
+    _state: &mut AppState<'_>,
+    _command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    Ok(EventResult::Quit)
+}
+
+pub(super) fn handle_logs(
+    state: &mut AppState<'_>,
+    _command: &CommandInvocation,
+) -> Result<EventResult, AppError> {
+    state.logs_return_mode = state.command_return_mode.clone();
+    state.logs.scroll_offset = usize::MAX;
+    state.mode = Mode::Logs;
+    Ok(EventResult::Redraw)
 }
 
 pub(super) fn handle_x(
@@ -471,17 +487,15 @@ pub(super) fn handle_help(
         return Ok(EventResult::Redraw);
     };
 
-    let descriptor = legacy_descriptor_for_input(target)
-        .or_else(|| find_command_descriptor(target))
-        .ok_or_else(|| {
-            AppError::InvalidCommand(format!(
-                "Unknown command '{}'. Try 'help' to open the command reference",
-                target
-            ))
-        })?;
+    let metadata = command_metadata(target).ok_or_else(|| {
+        AppError::InvalidCommand(format!(
+            "Unknown command '{}'. Try 'help' to open the command reference",
+            target
+        ))
+    })?;
 
     Ok(EventResult::Toast(
-        AppToast::Info(describe_command_descriptor(descriptor)),
+        AppToast::Info(describe_command_metadata(&metadata)),
         false,
     ))
 }

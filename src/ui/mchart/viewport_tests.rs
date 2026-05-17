@@ -434,7 +434,7 @@ fn dataset_plot_preview_filters_non_finite_points() {
 }
 
 #[test]
-fn prepared_chart_data_filters_legacy_non_finite_points() {
+fn prepared_chart_data_filters_non_finite_points() {
     let mut state = make_state();
     let selection = PreviewSelection {
         index: vec![0],

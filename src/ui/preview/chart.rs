@@ -1330,7 +1330,7 @@ fn render_chart_widget(
                             }))
                             .bold(),
                     )
-                    .data(&roi_data),
+                    .data(roi_data),
             );
         }
     }

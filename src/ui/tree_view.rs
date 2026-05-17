@@ -413,6 +413,6 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
                 offset += 1;
             }
         }
-        Mode::Help | Mode::MultiChart => {}
+        Mode::Help | Mode::Logs | Mode::MultiChart => {}
     }
 }

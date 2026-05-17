@@ -2,13 +2,14 @@ use std::sync::{
     mpsc::{channel, Receiver, Sender},
     Arc, RwLock,
 };
+use std::time::Instant;
 
 use arboard::Clipboard;
 use image::Rgba;
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::{
-    compat::RuntimeConfig,
+    compat::{run_runtime_healthcheck, summarize_runtime_healthcheck, RuntimeConfig},
     configure,
     configure::run_lua_engine,
     error::AppError,
@@ -33,6 +34,7 @@ use crate::{
 };
 
 use super::{
+    config::plugin_health_warning_message,
     config::{configuration_warning_message, log_configuration_error},
     AppEvent,
 };
@@ -51,20 +53,38 @@ pub(super) fn prepare_app<'a>(
     writable: bool,
     runtime_config: RuntimeConfig,
 ) -> Result<PreparedApp<'a>> {
-    let h5f = h5f::H5F::open(filename.to_string(), link, writable).map_err(|error| {
-        AppError::Hdf5(hdf5_metno::Error::from(format!(
-            "Failed to open HDF5 file: {}",
-            error
-        )))
-    })?;
-
     let (tx_events, rx_events) = channel();
+    let config_started = Instant::now();
     let startup_config_error = run_lua_engine(tx_events.clone(), runtime_config.compatibility_mode)
         .err()
         .map(|error| {
             log_configuration_error(&error);
             configuration_warning_message(&error, false)
         });
+    tracing::info!(
+        kind = "config",
+        phase = "startup_lua",
+        success = startup_config_error.is_none(),
+        duration_ms = config_started.elapsed().as_millis() as u64,
+        compatibility_mode = runtime_config.compatibility_mode,
+        message = "startup Lua configuration finished"
+    );
+    let file_open_started = Instant::now();
+    let h5f = h5f::H5F::open(filename.to_string(), link, writable).map_err(|error| {
+        AppError::Hdf5(hdf5_metno::Error::from(format!(
+            "Failed to open HDF5 file: {}",
+            error
+        )))
+    })?;
+    tracing::info!(
+        kind = "startup",
+        phase = "open_file",
+        file_path = filename,
+        linked = link,
+        writable,
+        duration_ms = file_open_started.elapsed().as_millis() as u64,
+        message = "opened HDF5 file"
+    );
 
     #[allow(deprecated)]
     let mut picker = if runtime_config.terminal_graphics {
@@ -205,9 +225,11 @@ pub(super) fn prepare_app<'a>(
         mode: Mode::Normal,
         command_return_mode: Mode::Normal,
         help_return_mode: Mode::Normal,
+        logs_return_mode: Mode::Normal,
         copying: false,
         searcher: None,
         help: state::HelpViewState::default(),
+        logs: state::LogsViewState::default(),
         pending_chord: None,
         binding_command_depth: 0,
         show_tree_view: true,
@@ -217,10 +239,10 @@ pub(super) fn prepare_app<'a>(
         preview_debounce_generation: 0,
         preview_debounce_until: None,
         preview_debounce_path: None,
-        content_mode: configure::current_content_mode_order()
+        content_mode: configure::current_content_mode_order_handles()
             .first()
-            .copied()
-            .unwrap_or(ContentShowMode::Preview),
+            .cloned()
+            .unwrap_or_else(|| ContentShowMode::Preview.handle()),
         img_state,
         matrix_view_state,
         heatmap_viewport_region: None,
@@ -247,12 +269,63 @@ pub(super) fn prepare_app<'a>(
         preview_expression_state,
         ui_layout: state::UiLayoutState::default(),
     };
+    let startup_health_warning = summarize_runtime_healthcheck(&run_runtime_healthcheck(
+        runtime_config,
+        state.image_protocol_enabled,
+    ));
+    let startup_health_warning = match (startup_health_warning, plugin_health_warning_message()) {
+        (Some(runtime), Some(plugin)) => Some(format!("{runtime}; {plugin}")),
+        (Some(runtime), None) => Some(runtime),
+        (None, Some(plugin)) => Some(plugin),
+        (None, None) => None,
+    };
     if let Some(message) = startup_config_error {
-        state.toast = AppToast::Warning(message);
+        tracing::warn!(kind = "config", phase = "startup_warning", message);
+        crate::ui::toast::apply_app_toast(&mut state, AppToast::Warning(message));
+    } else if let Some(message) = startup_health_warning {
+        tracing::warn!(kind = "startup", phase = "health_warning", message);
+        crate::ui::toast::apply_app_toast(&mut state, AppToast::Warning(message));
     }
     state.sync_heatmap_configuration();
     state.sync_file_watch();
     state.compute_tree_view();
+    let opened_path = state.file_watch.path.clone();
+    let readonly = state.readonly;
+    if let Err(error) =
+        configure::dispatch_lua_event(&mut state, "builtin.event.file_opened", |lua| {
+            let event = lua.create_table()?;
+            event.set("path", opened_path.clone())?;
+            event.set("readonly", readonly)?;
+            Ok(event)
+        })
+    {
+        let message = error.to_string();
+        state.configuration_warning = Some(message.clone());
+        tracing::warn!(kind = "lua_event", event = "file_opened", message);
+        crate::ui::toast::apply_app_toast(&mut state, AppToast::Warning(message));
+    }
+    if let Err(error) =
+        configure::dispatch_lua_event(&mut state, "builtin.event.app_started", |lua| {
+            let event = lua.create_table()?;
+            event.set("path", opened_path.clone())?;
+            event.set("readonly", readonly)?;
+            Ok(event)
+        })
+    {
+        let message = error.to_string();
+        state.configuration_warning = Some(message.clone());
+        tracing::warn!(kind = "lua_event", event = "app_started", message);
+        crate::ui::toast::apply_app_toast(&mut state, AppToast::Warning(message));
+    }
+
+    tracing::info!(
+        kind = "startup",
+        phase = "prepared",
+        file_path = state.file_watch.path.clone(),
+        readonly = state.readonly,
+        image_protocol_enabled = state.image_protocol_enabled,
+        message = "prepared app state"
+    );
 
     Ok(PreparedApp {
         state,

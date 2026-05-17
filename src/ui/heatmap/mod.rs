@@ -177,10 +177,12 @@ fn render_heatmap_with_dataset(
         &layout.header_dims,
         node,
         &attr.shape,
-        true,
-        header_page_info.as_ref(),
-        "Slice selection",
-        None,
+        crate::ui::dims::RenderDimSelectorOptions {
+            row_columns: true,
+            page_info: header_page_info.as_ref(),
+            panel_title: "Slice selection",
+            detail_lines: None,
+        },
     )?;
     if let Some(settings_area) = layout.settings {
         panels::render_heatmap_settings(f, &settings_area, state);

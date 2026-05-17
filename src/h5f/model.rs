@@ -327,6 +327,7 @@ mod tests {
 
     #[test]
     fn file_nodes_support_preview_mode() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let node = H5FNode::new(Node::File(file));
@@ -336,6 +337,7 @@ mod tests {
 
     #[test]
     fn projected_multi_value_string_leaves_are_matrix_only() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -377,6 +379,7 @@ mod tests {
 
     #[test]
     fn multi_value_string_datasets_are_matrix_only() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -414,6 +417,7 @@ mod tests {
 
     #[test]
     fn one_dimensional_compound_roots_support_preview_and_matrix() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -463,6 +467,7 @@ mod tests {
 
     #[test]
     fn multi_axis_compound_roots_support_preview_and_matrix() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -512,6 +517,7 @@ mod tests {
 
     #[test]
     fn multi_value_opaque_datasets_are_matrix_only() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -549,6 +555,7 @@ mod tests {
 
     #[test]
     fn multi_value_varlen_byte_arrays_are_matrix_only_without_image_attrs() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -588,6 +595,7 @@ mod tests {
 
     #[test]
     fn rank_two_numeric_datasets_support_heatmap_mode() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file
@@ -632,6 +640,7 @@ mod tests {
 
     #[test]
     fn rank_one_numeric_datasets_do_not_support_heatmap_mode() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
         let dataset = file

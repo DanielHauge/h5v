@@ -41,12 +41,13 @@ Useful keys:
 
 Press `?`. The in-app help is the reference for keys and commands.
 
-The help view has five tabs:
+The help view has six tabs:
 
 - `Keymap`
 - `Commands`
 - `Multichart`
 - `Heatmap`
+- `Health`
 - `Customization`
 
 Use `Tab` / `Shift+Tab` or `h` / `l` to switch tabs.

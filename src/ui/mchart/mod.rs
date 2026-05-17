@@ -170,6 +170,15 @@ struct PreparedComparisonScatterData {
     truncation_note: Option<String>,
 }
 
+pub(crate) struct ChartItemStatus {
+    pub source: ChartSource,
+    pub points: Option<Vec<Point>>,
+    pub scalar_value: Option<f64>,
+    pub source_len: usize,
+    pub load_state: MultiChartLoadState,
+    pub sampled: bool,
+}
+
 #[derive(Debug, Clone)]
 enum PreparedChartData {
     Line(PreparedLineChartData),
@@ -756,35 +765,30 @@ impl MultiChartState {
     pub(crate) fn replace_chart_item_with_status(
         &mut self,
         item_id: ChartItemId,
-        source: ChartSource,
-        points: Option<Vec<Point>>,
-        scalar_value: Option<f64>,
-        source_len: usize,
-        load_state: MultiChartLoadState,
-        sampled: bool,
+        status: ChartItemStatus,
     ) -> Result<(), String> {
         let index = self
             .items
             .iter()
             .position(|item| item.id == item_id)
             .ok_or_else(|| format!("Chart item ${} no longer exists", item_id.0))?;
-        let loaded_len = points.as_ref().map_or(0, Vec::len);
-        let series = ChartSeries::from_points(points.unwrap_or_else(|| vec![(0.0, 0.0)]))
+        let loaded_len = status.points.as_ref().map_or(0, Vec::len);
+        let series = ChartSeries::from_points(status.points.unwrap_or_else(|| vec![(0.0, 0.0)]))
             .ok_or_else(|| format!("Failed to update chart item ${}", item_id.0))?;
         let item = &mut self.items[index];
-        item.label = source.label();
-        item.source = source;
+        item.label = status.source.label();
+        item.source = status.source;
         item.series = series;
-        item.scalar_value = scalar_value;
+        item.scalar_value = status.scalar_value;
         item.clear_detail_state(true);
         item.detail_generation = 0;
-        item.source_len = if source_len == 0 {
+        item.source_len = if status.source_len == 0 {
             loaded_len.max(item.series.len())
         } else {
-            source_len
+            status.source_len
         };
-        item.sampled = sampled || item.source_len > loaded_len.max(1);
-        item.load_state = load_state;
+        item.sampled = status.sampled || item.source_len > loaded_len.max(1);
+        item.load_state = status.load_state;
         item.visible = true;
         self.idx = index;
         self.bump_expression_revision();

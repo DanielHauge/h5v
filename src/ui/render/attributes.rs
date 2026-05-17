@@ -1022,6 +1022,7 @@ mod tests {
     #[test]
     #[ignore = "flaky low-level H5Aread in test environment"]
     fn renders_real_scalar_compound_attribute() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -1085,6 +1086,7 @@ mod tests {
 
     #[test]
     fn renders_varlen_compound_entry() {
+        let _guard = crate::test_support::hdf5_test_guard();
         let compound = CompoundType {
             fields: vec![
                 CompoundField::new("field1", TypeDescriptor::Integer(IntSize::U4), 0, 0),

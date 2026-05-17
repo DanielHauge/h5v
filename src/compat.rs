@@ -1,6 +1,7 @@
-use std::{ffi::OsStr, sync::OnceLock};
+use std::{ffi::OsStr, io::IsTerminal, sync::OnceLock};
 
 use crate::error::AppError;
+use crate::health::{HealthStatus, HealthcheckResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -48,6 +49,61 @@ pub fn install_runtime_config(config: RuntimeConfig) -> Result<(), AppError> {
 
 pub fn current() -> RuntimeConfig {
     RUNTIME_CONFIG.get().copied().unwrap_or_default()
+}
+
+pub fn run_runtime_healthcheck(
+    config: RuntimeConfig,
+    image_protocol_enabled: bool,
+) -> Vec<HealthcheckResult> {
+    let mut results = Vec::new();
+    if !std::io::stdout().is_terminal() {
+        results.push(HealthcheckResult::fail(
+            "stdout is not a terminal; h5v expects an interactive terminal session",
+        ));
+    }
+
+    let term = std::env::var("TERM").unwrap_or_default();
+    if term.trim().eq_ignore_ascii_case("dumb") {
+        results.push(HealthcheckResult::fail(
+            "TERM is set to 'dumb'; terminal capabilities are too limited for h5v",
+        ));
+    }
+
+    if !config.compatibility_mode && std::env::var_os("COLORTERM").is_none() && term.is_empty() {
+        results.push(HealthcheckResult::warning(
+            "terminal color capabilities could not be detected",
+        ));
+    }
+
+    if !config.terminal_graphics {
+        results.push(HealthcheckResult::warning(
+            "terminal graphics are disabled; image previews will fall back to text rendering",
+        ));
+    } else if !image_protocol_enabled {
+        results.push(HealthcheckResult::warning(
+            "terminal graphics probing fell back to halfblocks; graphics previews are unavailable",
+        ));
+    }
+
+    if results.is_empty() {
+        results.push(HealthcheckResult::healthy(
+            "terminal capabilities look good",
+        ));
+    }
+    results
+}
+
+pub fn summarize_runtime_healthcheck(results: &[HealthcheckResult]) -> Option<String> {
+    let summary = results
+        .iter()
+        .filter(|result| result.status != HealthStatus::Healthy)
+        .map(|result| format!("{}: {}", result.status.as_str(), result.message))
+        .collect::<Vec<_>>();
+    if summary.is_empty() {
+        None
+    } else {
+        Some(format!("Healthcheck warning: {}", summary.join("; ")))
+    }
 }
 
 fn parse_bool_env(value: &OsStr) -> Result<bool, AppError> {

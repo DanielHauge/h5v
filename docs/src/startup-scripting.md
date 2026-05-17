@@ -98,4 +98,4 @@ mchart expr "$1 - $2"
 mchart zoom in 20
 ```
 
-See [Command reference](./command-reference.md) for the full command surface.
+Use the in-app `Commands` help tab for the current command list and examples.

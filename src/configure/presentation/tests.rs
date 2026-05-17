@@ -1,4 +1,5 @@
 use ratatui::style::Color;
+use std::sync::MutexGuard;
 
 use crate::configure::{
     available_color_names, available_symbol_names, color_to_lua_string,
@@ -9,8 +10,13 @@ use crate::configure::{
 };
 use crate::ui::state::ContentShowMode;
 
+fn test_guard() -> MutexGuard<'static, ()> {
+    crate::test_support::serial_test_guard()
+}
+
 #[test]
 fn parses_named_and_hex_colors() {
+    let _guard = test_guard();
     assert_eq!(parse_color("blue"), Some(Color::Blue));
     assert_eq!(parse_color("#00ff7f"), Some(Color::Rgb(0, 255, 127)));
     assert_eq!(parse_color(""), None);
@@ -19,6 +25,7 @@ fn parses_named_and_hex_colors() {
 
 #[test]
 fn resets_to_selected_theme_and_applies_overrides() {
+    let _guard = test_guard();
     reset_config(ThemeName::Light);
     assert_eq!(current_theme_name(), ThemeName::Light);
     assert_eq!(
@@ -41,6 +48,7 @@ fn resets_to_selected_theme_and_applies_overrides() {
 
 #[test]
 fn exposes_named_colors_for_scaffolding() {
+    let _guard = test_guard();
     let names = available_color_names();
     assert!(names.contains(&"content.app_brand"));
     assert!(names.contains(&"chart.series_8"));
@@ -53,6 +61,7 @@ fn exposes_named_colors_for_scaffolding() {
 
 #[test]
 fn exposes_named_symbols_for_scaffolding() {
+    let _guard = test_guard();
     let names = available_symbol_names();
     assert!(names.contains(&"chart.error_marker"));
     assert!(names.contains(&"chart.loading_indicator"));
@@ -60,6 +69,7 @@ fn exposes_named_symbols_for_scaffolding() {
 
 #[test]
 fn parses_symbol_theme_aliases() {
+    let _guard = test_guard();
     assert_eq!(
         SymbolThemeName::parse("compatibility"),
         Some(SymbolThemeName::Compatibility)
@@ -76,6 +86,7 @@ fn parses_symbol_theme_aliases() {
 
 #[test]
 fn content_mode_order_reorders_available_modes() {
+    let _guard = test_guard();
     reset_config(ThemeName::Dark);
     set_content_mode_order(&[ContentShowMode::Matrix]);
     assert_eq!(
@@ -87,6 +98,7 @@ fn content_mode_order_reorders_available_modes() {
 
 #[test]
 fn config_generation_tracks_successful_mutations() {
+    let _guard = test_guard();
     reset_config(ThemeName::Dark);
     let start = current_config_generation();
     set_content_mode_order(&[ContentShowMode::Heatmap, ContentShowMode::Preview]);
@@ -100,6 +112,7 @@ fn config_generation_tracks_successful_mutations() {
 
 #[test]
 fn auto_layout_settings_round_trip() {
+    let _guard = test_guard();
     reset_config(ThemeName::Dark);
     let custom = AutoLayoutSettings {
         tree: PanelLayoutSizes::new(LayoutSize::percent(32), LayoutSize::percent(18)),

@@ -19,7 +19,7 @@ pub(crate) fn validate_expression_load_ref(
                     load_ref.render()
                 ));
             }
-            let object_path = normalize_absolute_object_path(&path)?;
+            let object_path = normalize_absolute_object_path(path)?;
             let dataset = file.dataset(&object_path).map_err(|error| {
                 format!(
                     "Reference {} could not open dataset '{}': {}",
@@ -52,7 +52,7 @@ pub(crate) fn resolve_expression_load_value(
                     load_ref.render()
                 ));
             }
-            let object_path = normalize_absolute_object_path(&path)?;
+            let object_path = normalize_absolute_object_path(path)?;
             let dataset = file.dataset(&object_path).map_err(|error| {
                 format!(
                     "Reference {} could not open dataset '{}': {}",

@@ -10,6 +10,7 @@ use ratatui::{
 
 use crate::{
     configure,
+    health::HealthStatus,
     ui::state::{
         AppState, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
         HelpMultiChartSection, HelpSidebarHitbox, HelpSidebarTarget, HelpTab, HelpTabHitbox,
@@ -17,8 +18,9 @@ use crate::{
 };
 
 use super::panels::{
-    command_panel_text, customization_panel_text, heatmap_help_lines, help_desc_style,
-    help_key_style, help_muted_style, keymap_panel_text, multichart_panel_text, paragraph_line,
+    command_panel_text, customization_panel_text, health_panel_text, heatmap_help_lines,
+    help_desc_style, help_key_style, help_muted_style, keymap_panel_text, multichart_panel_text,
+    paragraph_line,
 };
 
 const HELP_PANEL_CACHE_SIZE: usize = 27;
@@ -113,6 +115,7 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) 
             state,
             HelpPanelCacheKey::Guide(HelpTab::Heatmap),
         ),
+        HelpTab::Health => render_health_help(frame, sections[1], state),
         HelpTab::Configuration => render_customization_help(frame, sections[1], state),
     }
 }
@@ -142,6 +145,7 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
         (HelpTab::Commands, "Commands"),
         (HelpTab::MultiChart, "Multichart"),
         (HelpTab::Heatmap, "Heatmap"),
+        (HelpTab::Health, "Health"),
         (HelpTab::Configuration, "Customization"),
     ];
     let mut spans = Vec::new();
@@ -317,6 +321,34 @@ fn render_multichart_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppStat
     );
 }
 
+fn render_health_help(frame: &mut Frame<'_>, area: Rect, state: &mut AppState<'_>) {
+    let layout = Layout::horizontal([Constraint::Length(24), Constraint::Min(0)])
+        .spacing(1)
+        .split(area);
+    let mut items = vec![(0usize, runtime_health_status(state), "h5v".to_string())];
+    items.extend(
+        configure::current_registry_snapshot()
+            .plugins()
+            .enumerate()
+            .map(|(index, plugin)| (index + 1, plugin.health_status, plugin.name.clone())),
+    );
+    let max_index = items.len().saturating_sub(1);
+    if state.help.health_section > max_index {
+        state.help.health_section = max_index;
+    }
+    render_health_sidebar(
+        frame,
+        state,
+        layout[0],
+        "Sections",
+        &items,
+        state.help.health_section,
+        HelpSidebarTarget::Health,
+    );
+    let (title, lines) = health_panel_text(state, state.help.health_section);
+    render_content_panel(frame, layout[1], state, title, lines);
+}
+
 fn render_cached_panel(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -366,6 +398,68 @@ fn render_sidebar<T: Copy + PartialEq>(
             } else {
                 Line::from(Span::styled(format!("  {label}"), help_desc_style()))
             }
+        })
+        .collect::<Vec<_>>();
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(panel_block(title))
+            .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg))),
+        area,
+    );
+}
+
+fn render_health_sidebar(
+    frame: &mut Frame<'_>,
+    state: &mut AppState<'_>,
+    area: Rect,
+    title: &str,
+    items: &[(usize, HealthStatus, String)],
+    selected: usize,
+    make_target: impl Fn(usize) -> HelpSidebarTarget,
+) {
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    let lines = items
+        .iter()
+        .enumerate()
+        .map(|(index, (item, status, label))| {
+            if index < inner.height as usize {
+                state.ui_layout.help_sidebar_items.push(HelpSidebarHitbox {
+                    area: Rect {
+                        x: inner.x,
+                        y: inner.y.saturating_add(index as u16),
+                        width: inner.width,
+                        height: 1,
+                    },
+                    target: make_target(*item),
+                });
+            }
+            let selected_style = if *item == selected {
+                Style::default()
+                    .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+                    .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+                    .bold()
+            } else {
+                help_desc_style()
+            };
+            let symbol_style = if *item == selected {
+                health_status_style(*status)
+                    .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+            } else {
+                health_status_style(*status)
+            };
+            Line::from(vec![
+                Span::styled(
+                    if *item == selected { "> " } else { "  " }.to_string(),
+                    selected_style,
+                ),
+                Span::styled(health_status_symbol(*status).to_string(), symbol_style),
+                Span::styled(" ".to_string(), selected_style),
+                Span::styled(label.clone(), selected_style),
+            ])
         })
         .collect::<Vec<_>>();
 
@@ -556,6 +650,41 @@ fn split_prefix_by_width(text: &str, width: usize) -> (String, String) {
     }
 }
 
+fn runtime_health_status(state: &AppState<'_>) -> HealthStatus {
+    crate::compat::run_runtime_healthcheck(crate::compat::current(), state.image_protocol_enabled)
+        .into_iter()
+        .map(|result| result.status)
+        .chain(
+            crate::health::reported_health_issues()
+                .into_iter()
+                .map(|issue| issue.result.status),
+        )
+        .max()
+        .unwrap_or(HealthStatus::Healthy)
+}
+
+fn health_status_symbol(status: HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Healthy => "●",
+        HealthStatus::Warning => "▲",
+        HealthStatus::Fail => "✖",
+    }
+}
+
+fn health_status_style(status: HealthStatus) -> Style {
+    match status {
+        HealthStatus::Healthy => Style::default()
+            .fg(configure::themed_color(|colors| colors.toast.info))
+            .bold(),
+        HealthStatus::Warning => Style::default()
+            .fg(configure::themed_color(|colors| colors.toast.warning))
+            .bold(),
+        HealthStatus::Fail => Style::default()
+            .fg(configure::themed_color(|colors| colors.text.error))
+            .bold(),
+    }
+}
+
 fn help_scrollbar_track_style() -> Style {
     Style::default()
         .fg(configure::themed_color(|colors| colors.help.muted))
@@ -570,7 +699,7 @@ fn help_scrollbar_thumb_style() -> Style {
 }
 
 fn cached_panel(key: HelpPanelCacheKey) -> (String, Vec<Line<'static>>) {
-    let generation = configure::current_config_generation();
+    let generation = help_panel_generation();
     let guard = match HELP_PANEL_CACHE.read() {
         Ok(guard) => guard,
         Err(error) => error.into_inner(),
@@ -600,7 +729,7 @@ fn cached_panel(key: HelpPanelCacheKey) -> (String, Vec<Line<'static>>) {
 }
 
 fn warm_help_panel_cache() {
-    let generation = configure::current_config_generation();
+    let generation = help_panel_generation();
     {
         let guard = match HELP_PANEL_CACHE.read() {
             Ok(guard) => guard,
@@ -671,18 +800,17 @@ fn warm_help_panel_cache() {
         });
     }
 
-    for (tab, title, lines) in [(
+    let (tab, title, lines) = (
         HelpTab::Heatmap,
         "Heatmap".to_string(),
         heatmap_help_lines(),
-    )] {
-        panels.push(CachedHelpPanel {
-            generation,
-            key: HelpPanelCacheKey::Guide(tab),
-            title,
-            lines,
-        });
-    }
+    );
+    panels.push(CachedHelpPanel {
+        generation,
+        key: HelpPanelCacheKey::Guide(tab),
+        title,
+        lines,
+    });
     for section in [
         HelpMultiChartSection::Overview,
         HelpMultiChartSection::Expressions,
@@ -712,4 +840,10 @@ fn warm_help_panel_cache() {
     }
     guard.clear();
     guard.extend(panels);
+}
+
+fn help_panel_generation() -> u64 {
+    configure::current_config_generation()
+        .wrapping_mul(1_000_003)
+        .wrapping_add(crate::health::reported_health_generation())
 }

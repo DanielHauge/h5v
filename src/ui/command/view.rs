@@ -10,8 +10,8 @@ use crate::configure;
 use crate::ui::state::AppState;
 
 use super::{
-    command_keybindings, command_matches, command_usage, current_command_descriptor,
-    selected_command_descriptor,
+    command_keybindings_metadata, command_matches, command_usage_metadata,
+    current_command_metadata, selected_command_metadata,
 };
 
 fn command_body_style() -> Style {
@@ -49,27 +49,27 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         ),
     ]);
 
-    let selected_descriptor = selected_command_descriptor(
+    let selected_descriptor = selected_command_metadata(
         &state.command_state.command_buffer,
         state.command_state.selected_suggestion,
     );
-    let info_descriptor =
-        current_command_descriptor(&state.command_state.command_buffer).or(selected_descriptor);
+    let info_descriptor = current_command_metadata(&state.command_state.command_buffer)
+        .or(selected_descriptor.clone());
     let info_line = info_descriptor.map(|descriptor| {
         let mut spans = vec![
             Span::styled(
-                command_usage(descriptor),
+                command_usage_metadata(&descriptor),
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.command.usage))
                     .bold(),
             ),
             Span::styled(" ", command_body_style()),
             Span::styled(
-                format!("- {}", descriptor.description),
+                format!("- {}", descriptor.summary),
                 Style::default().fg(configure::themed_color(|colors| colors.command.description)),
             ),
         ];
-        let keys = command_keybindings(descriptor);
+        let keys = command_keybindings_metadata(&descriptor);
         if !keys.is_empty() {
             spans.push(Span::styled(" ", command_body_style()));
             spans.push(Span::styled(
@@ -97,7 +97,10 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             if index > 0 {
                 spans.push(Span::styled("  ", command_body_style()));
             }
-            let is_selected = Some(descriptor.id) == selected_descriptor.map(|d| d.id);
+            let is_selected = selected_descriptor
+                .as_ref()
+                .map(|selected| selected.handle == descriptor.handle)
+                .unwrap_or(false);
             let style = if is_selected {
                 Style::default()
                     .fg(configure::themed_color(|colors| colors.accent.selection_fg))
@@ -106,7 +109,7 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             } else {
                 Style::default().fg(configure::themed_color(|colors| colors.text.primary))
             };
-            spans.push(Span::styled(descriptor.name, style));
+            spans.push(Span::styled(descriptor.name.clone(), style));
         }
         Line::from(spans)
     };
@@ -139,26 +142,6 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
             Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
         ),
         Span::styled("   ", command_body_style()),
-        Span::styled(
-            "Legacy: ",
-            Style::default().fg(configure::themed_color(|colors| {
-                colors.command.suggestion_label
-            })),
-        ),
-        Span::styled(
-            "42",
-            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
-        ),
-        Span::styled(" / ", command_body_style()),
-        Span::styled(
-            "+7",
-            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
-        ),
-        Span::styled(" / ", command_body_style()),
-        Span::styled(
-            "-3",
-            Style::default().fg(configure::themed_color(|colors| colors.command.key_hint)),
-        ),
     ]);
 
     let command_text_widget = Paragraph::new(Text::from(vec![

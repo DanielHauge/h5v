@@ -1,25 +1,73 @@
-use std::sync::mpsc::Sender;
+use std::{
+    sync::{mpsc::Sender, LazyLock, RwLock},
+    time::Instant,
+};
 
 use mlua::{Table, Value};
 
 use crate::{
-    configure::{self, SymbolThemeName, ThemeName},
-    ui::{app::AppEvent, state::ContentShowMode},
+    configure::registry::{ColorHandle, ContentModeHandle, SettingHandle, SymbolHandle},
+    configure::{self, install_registry_snapshot, RegistryBuilder, SymbolThemeName, ThemeName},
+    ui::{app::AppEvent, command::sync_command_registry_keybindings, state::ContentShowMode},
 };
 
 use super::errors::ConfigureErrors;
 mod bootstrap;
+mod commands;
+mod context;
+mod events;
 mod heatmap;
 mod keymaps;
 mod layout;
 mod mchart;
+mod plugins;
 mod themes;
+mod ui;
 use bootstrap::{default_symbol_theme_for_compatibility, execute_config_chunk, prepare_lua_config};
+use commands::register_lua_commands;
+pub use commands::with_command_lua_callback;
+pub(crate) use context::{
+    build_app_context, build_config_context, build_fs_context, build_log_context,
+    build_log_context_with_handle, build_plugin_context, build_plugin_fs_context,
+    build_process_context, build_selection_context, open_content_mode_target,
+    parse_process_json_output, run_process_spec, set_lua_toast, LuaToastLevel,
+};
+pub(crate) use events::dispatch_lua_event;
 use heatmap::parse_heatmap_config;
 pub use keymaps::with_keymap_lua_callback;
-use keymaps::{parse_keymaps_config, store_keymap_lua_runtime};
+use keymaps::{parse_keymaps_config, store_config_lua_runtime};
 use layout::parse_layout_config;
-use mchart::parse_multichart_config;
+#[cfg(test)]
+pub(crate) use mchart::reset_mchart_worker_runtime;
+use mchart::{parse_multichart_config, register_lua_mchart_functions};
+pub(crate) use mchart::{run_registered_mchart_function, LuaMchartArgValue, LuaMchartReturnValue};
+use plugins::register_lua_plugins;
+use themes::{activate_theme, parse_selected_theme, register_lua_themes};
+pub(crate) use ui::available_content_mode_handles as available_lua_content_mode_handles;
+pub use ui::with_content_mode_lua_callback;
+use ui::{register_lua_content_modes, resolve_registered_content_mode_handle};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfigLoadMetrics {
+    pub total_duration_ms: u64,
+}
+
+static CONFIG_LOAD_METRICS: LazyLock<RwLock<Option<ConfigLoadMetrics>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+pub fn last_config_load_metrics() -> Option<ConfigLoadMetrics> {
+    match CONFIG_LOAD_METRICS.read() {
+        Ok(guard) => *guard,
+        Err(error) => *error.into_inner(),
+    }
+}
+
+fn set_last_config_load_metrics(metrics: ConfigLoadMetrics) {
+    match CONFIG_LOAD_METRICS.write() {
+        Ok(mut guard) => *guard = Some(metrics),
+        Err(error) => *error.into_inner() = Some(metrics),
+    }
+}
 
 fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureErrors> {
     match h5v.get::<Value>("compatibility")? {
@@ -33,7 +81,9 @@ fn parse_compatibility_override(h5v: &Table) -> Result<Option<bool>, ConfigureEr
     }
 }
 
-fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>, ConfigureErrors> {
+fn parse_content_mode_order(
+    h5v: &Table,
+) -> Result<Option<Vec<ContentModeHandle>>, ConfigureErrors> {
     match h5v.get::<Value>("content_mode_order")? {
         Value::Nil => Ok(None),
         Value::Table(values) => {
@@ -47,13 +97,20 @@ fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>,
                     .into());
                 };
                 let value = value.to_str()?;
-                let mode = ContentShowMode::parse(value.as_ref()).ok_or_else(|| {
-                    mlua::Error::runtime(format!(
-                        "Unknown content mode '{value}'. Available modes: preview, matrix, heatmap"
+                let handle = if let Some(mode) = ContentShowMode::parse_handle(value.as_ref()) {
+                    mode.handle()
+                } else if let Some(handle) =
+                    resolve_registered_content_mode_handle(h5v, value.as_ref())?
+                {
+                    handle
+                } else {
+                    return Err(mlua::Error::runtime(format!(
+                        "Unknown content mode '{value}'. Use a builtin mode name/handle or a registered custom content mode"
                     ))
-                })?;
-                if !order.contains(&mode) {
-                    order.push(mode);
+                    .into());
+                };
+                if !order.contains(&handle) {
+                    order.push(handle);
                 }
             }
             if order.is_empty() {
@@ -75,12 +132,29 @@ fn parse_content_mode_order(h5v: &Table) -> Result<Option<Vec<ContentShowMode>>,
 pub fn load_config_compatibility(
     default_compatibility: bool,
 ) -> Result<Option<bool>, ConfigureErrors> {
+    let prepare_started = Instant::now();
     let prepared = prepare_lua_config(None, default_compatibility)?;
+    tracing::info!(
+        kind = "config",
+        phase = "compatibility_prepare",
+        duration_ms = prepare_started.elapsed().as_millis() as u64,
+        chunk_name = prepared.chunk_name.as_str(),
+        message = "prepared compatibility config load"
+    );
+    let _registry_builder = prepared.registry_builder;
     let lua = prepared.lua;
     let h5v = prepared.h5v;
     let chunk_name = prepared.chunk_name;
     let config = prepared.config;
+    let execute_started = Instant::now();
     execute_config_chunk(&lua, &chunk_name, &config)?;
+    tracing::info!(
+        kind = "config",
+        phase = "compatibility_execute",
+        duration_ms = execute_started.elapsed().as_millis() as u64,
+        chunk_name = chunk_name.as_str(),
+        message = "executed compatibility config chunk"
+    );
     parse_compatibility_override(&h5v)
 }
 
@@ -88,7 +162,26 @@ pub fn run_lua_engine(
     events: Sender<AppEvent>,
     default_compatibility: bool,
 ) -> Result<(), ConfigureErrors> {
-    let prepared = prepare_lua_config(Some(events), default_compatibility)?;
+    crate::health::clear_reported_health_issues();
+    let prepare_started = Instant::now();
+    let prepared = match prepare_lua_config(Some(events), default_compatibility) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            crate::health::push_reported_health_issue(crate::health::ReportedHealthIssue::new(
+                "configuration",
+                crate::health::HealthcheckResult::fail(error.to_string()),
+            ));
+            return Err(error);
+        }
+    };
+    tracing::info!(
+        kind = "config",
+        phase = "prepare",
+        duration_ms = prepare_started.elapsed().as_millis() as u64,
+        chunk_name = prepared.chunk_name.as_str(),
+        message = "prepared Lua config runtime"
+    );
+    let mut registry_builder = prepared.registry_builder;
     let lua = prepared.lua;
     let h5v = prepared.h5v;
     let chunk_name = prepared.chunk_name;
@@ -96,108 +189,287 @@ pub fn run_lua_engine(
     let previous_config = configure::snapshot_config();
 
     configure::reset_config(ThemeName::Dark);
+    let apply_started = Instant::now();
     let result = (|| -> Result<(), ConfigureErrors> {
+        let execute_started = Instant::now();
         execute_config_chunk(&lua, &chunk_name, &config)?;
-        apply_lua_config(&h5v)?;
+        tracing::info!(
+            kind = "config",
+            phase = "execute",
+            duration_ms = execute_started.elapsed().as_millis() as u64,
+            chunk_name = chunk_name.as_str(),
+            message = "executed Lua config chunk"
+        );
+        let register_started = Instant::now();
+        register_lua_config(&mut registry_builder, &h5v)?;
+        let registry_snapshot = registry_builder
+            .freeze()
+            .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+        tracing::info!(
+            kind = "config",
+            phase = "register",
+            duration_ms = register_started.elapsed().as_millis() as u64,
+            message = "registered and froze Lua config registry"
+        );
+        let apply_state_started = Instant::now();
+        apply_lua_config_with_snapshot(&registry_snapshot, &h5v)?;
+        install_registry_snapshot(registry_snapshot);
+        sync_command_registry_keybindings(&configure::current_keymaps());
+        store_config_lua_runtime(lua);
+        tracing::info!(
+            kind = "config",
+            phase = "apply",
+            duration_ms = apply_state_started.elapsed().as_millis() as u64,
+            total_duration_ms = apply_started.elapsed().as_millis() as u64,
+            message = "applied Lua config runtime"
+        );
         Ok(())
     })();
     if result.is_err() {
         configure::restore_config(previous_config);
-    } else {
-        store_keymap_lua_runtime(lua);
+        if let Err(error) = &result {
+            if crate::health::reported_health_issues().is_empty() {
+                crate::health::push_reported_health_issue(crate::health::ReportedHealthIssue::new(
+                    "configuration",
+                    crate::health::HealthcheckResult::fail(error.to_string()),
+                ));
+            }
+            tracing::error!(
+                kind = "config",
+                phase = "apply",
+                total_duration_ms = apply_started.elapsed().as_millis() as u64,
+                error = %error,
+                message = "Lua config runtime failed"
+            );
+        }
     }
+    set_last_config_load_metrics(ConfigLoadMetrics {
+        total_duration_ms: apply_started.elapsed().as_millis() as u64,
+    });
     result
 }
 
-fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
+fn register_lua_config(builder: &mut RegistryBuilder, h5v: &Table) -> Result<(), ConfigureErrors> {
     let compatibility_override = parse_compatibility_override(h5v)?;
-    let content_mode_order = parse_content_mode_order(h5v)?;
     let heatmap_config = parse_heatmap_config(h5v)?;
-    let layout_config = parse_layout_config(h5v)?;
     let multichart_config = parse_multichart_config(h5v)?;
-    let keymap_config = parse_keymaps_config(h5v)?;
-    let selected_theme = match h5v.get::<Value>("theme")? {
-        Value::Nil => ThemeName::Dark,
-        Value::String(value) => {
-            let value = value.to_str()?;
-            ThemeName::parse(value.as_ref()).ok_or_else(|| {
-                mlua::Error::runtime(format!(
-                    "Unknown theme '{value}'. Available themes: {}",
-                    configure::available_theme_names().join(", ")
-                ))
-            })?
-        }
+
+    register_lua_plugins(builder, h5v)?;
+    register_lua_themes(builder, h5v)?;
+    register_lua_content_modes(builder, h5v)?;
+    register_lua_mchart_functions(builder, h5v)?;
+    let selected_theme = parse_selected_theme(h5v)?;
+    let selected_symbol_theme = parse_selected_symbol_theme(h5v, compatibility_override)?;
+    let content_mode_order = parse_content_mode_order(h5v)?;
+
+    set_registry_setting(
+        builder,
+        "builtin.setting.compatibility",
+        compatibility_override.unwrap_or(false).to_string(),
+    )?;
+    set_registry_setting(
+        builder,
+        "builtin.setting.theme",
+        selected_theme.as_str().to_string(),
+    )?;
+    set_registry_setting(
+        builder,
+        "builtin.setting.symbol_theme",
+        selected_symbol_theme.as_str().to_string(),
+    )?;
+    if let Some(order) = content_mode_order {
+        set_registry_setting(
+            builder,
+            "builtin.setting.content_mode_order",
+            order
+                .iter()
+                .map(|mode| mode.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        )?;
+    }
+
+    activate_theme(builder, h5v, &selected_theme)?;
+
+    if let Some((_, default_settings)) = heatmap_config {
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_range",
+            default_settings.range.label(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_colormap",
+            default_settings.colormap.as_str().to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_normalization",
+            default_settings.normalization.as_str().to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_invert_x",
+            default_settings.invert_x.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_invert_y",
+            default_settings.invert_y.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.heatmap.default_invert_c",
+            default_settings.invert_c.to_string(),
+        )?;
+    }
+
+    if let Some(settings) = multichart_config {
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.overview_max_samples",
+            settings.overview_max_samples.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.detail_enabled",
+            settings.detail_enabled.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.detail_samples_per_column",
+            settings.detail_samples_per_column.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.detail_min_samples",
+            settings.detail_min_samples.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.detail_max_samples",
+            settings.detail_max_samples.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.detail_padding_ratio",
+            settings.detail_padding_ratio.to_string(),
+        )?;
+        set_registry_setting(
+            builder,
+            "builtin.setting.multichart.derived_detail_enabled",
+            settings.derived_detail_enabled.to_string(),
+        )?;
+    }
+
+    match h5v.get::<Value>("colors")? {
+        Value::Nil => {}
+        Value::Table(table) => register_color_overrides(builder, &table, None)?,
         other => {
             return Err(mlua::Error::runtime(format!(
-                "h5v.theme must be a string, got {}",
+                "h5v.colors must be a table, got {}",
                 other.type_name()
             ))
-            .into());
+            .into())
         }
-    };
-    configure::reset_config(selected_theme);
-    if let Some(order) = content_mode_order {
-        configure::set_content_mode_order(&order);
     }
+
+    match h5v.get::<Value>("symbols")? {
+        Value::Nil => {}
+        Value::Table(table) => register_symbol_overrides(builder, &table, None)?,
+        other => {
+            return Err(mlua::Error::runtime(format!(
+                "h5v.symbols must be a table, got {}",
+                other.type_name()
+            ))
+            .into())
+        }
+    }
+
+    register_lua_commands(builder, h5v)?;
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn apply_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
+    let mut builder = configure::builtin_registry_builder()
+        .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+    register_lua_config(&mut builder, h5v)?;
+    let registry_snapshot = builder
+        .freeze()
+        .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+    apply_lua_config_with_snapshot(&registry_snapshot, h5v)
+}
+
+fn apply_lua_config_with_snapshot(
+    registry_snapshot: &configure::RegistrySnapshot,
+    h5v: &Table,
+) -> Result<(), ConfigureErrors> {
+    configure::apply_registry_snapshot(registry_snapshot).map_err(mlua::Error::runtime)?;
+    apply_non_registry_lua_config(h5v)
+}
+
+fn apply_non_registry_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
+    let heatmap_config = parse_heatmap_config(h5v)?;
+    let layout_config = parse_layout_config(h5v)?;
+    let keymap_config = parse_keymaps_config(h5v)?;
     if let Some(layout_settings) = layout_config {
         configure::set_auto_layout_settings(&layout_settings);
     }
     if let Some((range_modes, default_settings)) = heatmap_config {
         configure::set_heatmap_ranges(&range_modes, &default_settings.range);
-        configure::set_heatmap_default_settings(&default_settings);
-    }
-    if let Some(multichart_settings) = multichart_config {
-        configure::set_multichart_settings(&multichart_settings);
     }
     if let Some(keymap_config) = keymap_config {
         configure::set_keymap_config(&keymap_config).map_err(mlua::Error::runtime)?;
     }
+    Ok(())
+}
 
-    let selected_symbol_theme = match h5v.get::<Value>("symbol_theme")? {
-        Value::Nil => compatibility_override
+fn parse_selected_symbol_theme(
+    h5v: &Table,
+    compatibility_override: Option<bool>,
+) -> Result<SymbolThemeName, ConfigureErrors> {
+    match h5v.get::<Value>("symbol_theme")? {
+        Value::Nil => Ok(compatibility_override
             .map(default_symbol_theme_for_compatibility)
-            .unwrap_or_else(configure::current_symbol_theme_name),
+            .unwrap_or_else(configure::current_symbol_theme_name)),
         Value::String(value) => {
             let value = value.to_str()?;
-            SymbolThemeName::parse(value.as_ref()).ok_or_else(|| {
-                mlua::Error::runtime(format!(
-                    "Unknown symbol theme '{value}'. Available symbol themes: {}",
-                    configure::available_symbol_theme_names().join(", ")
-                ))
-            })?
+            SymbolThemeName::parse(value.as_ref())
+                .ok_or_else(|| {
+                    mlua::Error::runtime(format!(
+                        "Unknown symbol theme '{value}'. Available symbol themes: {}",
+                        configure::available_symbol_theme_names().join(", ")
+                    ))
+                })
+                .map_err(Into::into)
         }
-        other => {
-            return Err(mlua::Error::runtime(format!(
-                "h5v.symbol_theme must be a string, got {}",
-                other.type_name()
-            ))
-            .into());
-        }
-    };
-    configure::reset_symbol_theme(selected_symbol_theme);
-
-    match h5v.get::<Value>("colors")? {
-        Value::Nil => Ok(()),
-        Value::Table(table) => apply_color_overrides(&table, None),
         other => Err(mlua::Error::runtime(format!(
-            "h5v.colors must be a table, got {}",
-            other.type_name()
-        ))
-        .into()),
-    }?;
-
-    match h5v.get::<Value>("symbols")? {
-        Value::Nil => Ok(()),
-        Value::Table(table) => apply_symbol_overrides(&table, None),
-        other => Err(mlua::Error::runtime(format!(
-            "h5v.symbols must be a table, got {}",
+            "h5v.symbol_theme must be a string, got {}",
             other.type_name()
         ))
         .into()),
     }
 }
 
-fn apply_color_overrides(table: &Table, prefix: Option<&str>) -> Result<(), ConfigureErrors> {
+fn set_registry_setting(
+    builder: &mut RegistryBuilder,
+    handle: &str,
+    value: String,
+) -> Result<(), ConfigureErrors> {
+    builder
+        .update_setting(&SettingHandle::new(handle), move |metadata| {
+            metadata.current_value = Some(value);
+        })
+        .map_err(|error| mlua::Error::runtime(error.to_string()).into())
+}
+
+fn register_color_overrides(
+    builder: &mut RegistryBuilder,
+    table: &Table,
+    prefix: Option<&str>,
+) -> Result<(), ConfigureErrors> {
     for pair in table.pairs::<Value, Value>() {
         let (key, value) = pair?;
         let key = match key {
@@ -210,23 +482,26 @@ fn apply_color_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Conf
                 .into());
             }
         };
-
         let full_name = match prefix {
             Some(prefix) => format!("{prefix}.{key}"),
             None => key,
         };
-
+        if prefix.is_none() && full_name == "themes" {
+            continue;
+        }
         match value {
             Value::String(value) => {
-                let value = value.to_str()?;
-                let color = configure::parse_color(value.as_ref()).ok_or_else(|| {
-                    mlua::Error::runtime(format!(
-                        "Invalid color '{value}' for '{full_name}'. Use #RRGGBB or a named color."
-                    ))
-                })?;
-                configure::set_color_override(&full_name, color).map_err(mlua::Error::runtime)?;
+                let override_value = value.to_str()?.to_string();
+                builder
+                    .update_color(
+                        &ColorHandle::new(format!("builtin.color.{full_name}")),
+                        move |metadata| {
+                            metadata.override_value = Some(override_value);
+                        },
+                    )
+                    .map_err(|error| mlua::Error::runtime(error.to_string()))?;
             }
-            Value::Table(child) => apply_color_overrides(&child, Some(&full_name))?,
+            Value::Table(child) => register_color_overrides(builder, &child, Some(&full_name))?,
             other => {
                 return Err(mlua::Error::runtime(format!(
                     "h5v.colors.{full_name} must be a string or table, got {}",
@@ -239,7 +514,11 @@ fn apply_color_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Conf
     Ok(())
 }
 
-fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), ConfigureErrors> {
+fn register_symbol_overrides(
+    builder: &mut RegistryBuilder,
+    table: &Table,
+    prefix: Option<&str>,
+) -> Result<(), ConfigureErrors> {
     for pair in table.pairs::<Value, Value>() {
         let (key, value) = pair?;
         let key = match key {
@@ -252,19 +531,23 @@ fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Con
                 .into());
             }
         };
-
         let full_name = match prefix {
             Some(prefix) => format!("{prefix}.{key}"),
             None => key,
         };
-
         match value {
             Value::String(value) => {
-                let value = value.to_str()?;
-                configure::set_symbol_override(&full_name, value.as_ref())
-                    .map_err(mlua::Error::runtime)?;
+                let override_value = value.to_str()?.to_string();
+                builder
+                    .update_symbol(
+                        &SymbolHandle::new(format!("builtin.symbol.{full_name}")),
+                        move |metadata| {
+                            metadata.override_value = Some(override_value);
+                        },
+                    )
+                    .map_err(|error| mlua::Error::runtime(error.to_string()))?;
             }
-            Value::Table(child) => apply_symbol_overrides(&child, Some(&full_name))?,
+            Value::Table(child) => register_symbol_overrides(builder, &child, Some(&full_name))?,
             other => {
                 return Err(mlua::Error::runtime(format!(
                     "h5v.symbols.{full_name} must be a string or table, got {}",
@@ -281,18 +564,25 @@ fn apply_symbol_overrides(table: &Table, prefix: Option<&str>) -> Result<(), Con
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::sync::MutexGuard;
+
     use super::{
         apply_lua_config,
         bootstrap::{build_h5v_table, execute_config_chunk},
         heatmap::parse_heatmap_config,
         layout::parse_layout_config,
-        parse_compatibility_override, parse_content_mode_order,
+        parse_compatibility_override, parse_content_mode_order, register_lua_config,
         themes::{build_symbol_theme_table, build_theme_table},
+    };
+    use crate::configure::registry::{
+        ColorHandle, CommandArgValueKind, CommandHandle, ContentModeHandle, MchartFunctionHandle,
+        SettingHandle, SymbolHandle, ThemeHandle,
     };
     use crate::configure::{
         self, configured_symbol, current_auto_layout_settings, current_content_mode_order,
-        current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
-        themed_color, AutoLayoutSettings, LayoutSize, PanelLayoutSizes, SymbolThemeName, ThemeName,
+        current_content_mode_order_handles, current_heatmap_default_settings,
+        current_heatmap_range_modes, current_keymaps, themed_color, AutoLayoutSettings, LayoutSize,
+        PanelLayoutSizes, SymbolThemeName, ThemeName,
     };
     use crate::ui::input::keymap::{
         global_action, heatmap_action, BoundAction, ContentAction, GlobalAction,
@@ -305,8 +595,13 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::Color;
 
+    fn test_guard() -> MutexGuard<'static, ()> {
+        crate::test_support::serial_test_guard()
+    }
+
     #[test]
     fn applies_nested_lua_config_overrides() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         h5v.set("theme", ThemeName::Light.as_str())
@@ -366,18 +661,42 @@ mod tests {
 
     #[test]
     fn applies_keymap_configuration() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(
             r#"
-            bind(h5v.modes.Global, "ctrl+h", h5v.actions.ShowHelp, "Show help")
-            bind_commands(h5v.modes.Global, "ctrl+k", { "down 2", "up 1" }, "Run commands")
-            unbind(h5v.modes.Heatmap, "v")
-            bind(h5v.modes.Heatmap, "ctrl+z", h5v.actions.HeatmapZoomIn)
-            bind_lua(h5v.modes.Heatmap, "ctrl+l", function(ctx)
-              ctx.command("help reload")
-            end, "Run lua")
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+h",
+              target = h5v.actions.ShowHelp,
+              description = "Show help",
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+k",
+              commands = { "down 2", "up 1" },
+              description = "Run commands",
+            })
+            h5v.keys.unbind({
+              mode = h5v.ids.keymap_modes.heatmap,
+              key = "v",
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.heatmap,
+              key = "ctrl+z",
+              target = h5v.actions.HeatmapZoomIn,
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.heatmap,
+              key = "ctrl+l",
+              lua = function(ctx)
+                ctx.command("help reload")
+              end,
+              description = "Run lua",
+            })
         "#,
         )
         .exec()
@@ -419,7 +738,260 @@ mod tests {
     }
 
     #[test]
+    fn bind_accepts_registered_command_handles() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            local refresh = h5v.commands.register({
+              id = "analysis.refresh",
+              run = function(ctx)
+                ctx.command("help reload")
+              end,
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+r",
+              target = refresh,
+              description = "Refresh analysis",
+            })
+        "#,
+        )
+        .exec()
+        .expect("register command handle binding");
+
+        let keymaps = super::keymaps::parse_keymaps_config(&h5v)
+            .expect("parse keymaps")
+            .expect("keymaps config");
+        assert!(matches!(
+            keymaps.global.bind.first().map(|binding| &binding.target),
+            Some(BoundAction::Command(command)) if command == "config.command.analysis.refresh"
+        ));
+    }
+
+    #[test]
+    fn declarative_keys_bind_accepts_command_targets() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            local refresh = h5v.commands.register({
+              id = "analysis.refresh",
+              run = function(ctx)
+                ctx.command("help reload")
+              end,
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+r",
+              target = refresh,
+              description = "Refresh analysis",
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.heatmap,
+              key = "ctrl+z",
+              target = h5v.actions.HeatmapZoomIn,
+            })
+        "#,
+        )
+        .exec()
+        .expect("register declarative key bindings");
+
+        let keymaps = super::keymaps::parse_keymaps_config(&h5v)
+            .expect("parse keymaps")
+            .expect("keymaps config");
+        assert!(matches!(
+            keymaps.global.bind.first().map(|binding| &binding.target),
+            Some(BoundAction::Command(command)) if command == "config.command.analysis.refresh"
+        ));
+        assert!(matches!(
+            keymaps.heatmap.bind.first().map(|binding| &binding.target),
+            Some(BoundAction::Action(ContentAction::HeatmapZoomIn))
+        ));
+    }
+
+    #[test]
+    fn builtin_command_ids_are_exposed_under_h5v_ids_commands() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+h",
+              target = h5v.ids.commands.help,
+            })
+            h5v.keys.bind({
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+r",
+              target = h5v.ids.commands.reload,
+            })
+        "#,
+        )
+        .exec()
+        .expect("bind builtin command ids");
+
+        let keymaps = super::keymaps::parse_keymaps_config(&h5v)
+            .expect("parse keymaps")
+            .expect("keymaps config");
+        assert!(matches!(
+            keymaps.global.bind.first().map(|binding| &binding.target),
+            Some(BoundAction::Command(command)) if command == "builtin.command.help"
+        ));
+        assert!(matches!(
+            keymaps.global.bind.get(1).map(|binding| &binding.target),
+            Some(BoundAction::Command(command)) if command == "builtin.command.reload"
+        ));
+    }
+
+    #[test]
+    fn builtin_registry_ids_are_exposed_under_h5v_ids() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        let ids: Table = h5v.get("ids").expect("get ids");
+        let settings: Table = ids.get("settings").expect("get settings");
+        let themes: Table = ids.get("themes").expect("get themes");
+        let components: Table = ids.get("components").expect("get components");
+        let symbol_themes: Table = ids.get("symbol_themes").expect("get symbol themes");
+        let content_modes: Table = ids.get("content_modes").expect("get content modes");
+        let events: Table = ids.get("events").expect("get events");
+        let colors: Table = ids.get("colors").expect("get colors");
+        let surface_colors: Table = colors.get("surface").expect("get colors.surface");
+        let symbols: Table = ids.get("symbols").expect("get symbols");
+        let tree_symbols: Table = symbols.get("tree").expect("get symbols.tree");
+        let heatmap_settings: Table = settings.get("heatmap").expect("get settings.heatmap");
+        let multichart_settings: Table =
+            settings.get("multichart").expect("get settings.multichart");
+        let value_kinds: Table = ids.get("value_kinds").expect("get value kinds");
+
+        assert_eq!(
+            settings.get::<String>("theme").expect("settings.theme"),
+            "builtin.setting.theme"
+        );
+        assert_eq!(
+            heatmap_settings
+                .get::<String>("default_colormap")
+                .expect("settings.heatmap.default_colormap"),
+            "builtin.setting.heatmap.default_colormap"
+        );
+        assert_eq!(
+            multichart_settings
+                .get::<String>("detail_enabled")
+                .expect("settings.multichart.detail_enabled"),
+            "builtin.setting.multichart.detail_enabled"
+        );
+        assert_eq!(
+            themes.get::<String>("dark").expect("themes.dark"),
+            "builtin.theme.dark"
+        );
+        assert_eq!(
+            components
+                .get::<String>("heatmap")
+                .expect("components.heatmap"),
+            "heatmap"
+        );
+        assert_eq!(
+            symbol_themes
+                .get::<String>("compatibility")
+                .expect("symbol_themes.compatibility"),
+            "builtin.symbol_theme.compatibility"
+        );
+        assert_eq!(
+            content_modes
+                .get::<String>("heatmap")
+                .expect("content_modes.heatmap"),
+            "builtin.content_mode.heatmap"
+        );
+        assert_eq!(
+            events
+                .get::<String>("file_opened")
+                .expect("events.file_opened"),
+            "builtin.event.file_opened"
+        );
+        assert_eq!(
+            surface_colors
+                .get::<String>("panel_border")
+                .expect("colors.surface.panel_border"),
+            "builtin.color.surface.panel_border"
+        );
+        assert_eq!(
+            tree_symbols
+                .get::<String>("root_file_icon")
+                .expect("symbols.tree.root_file_icon"),
+            "builtin.symbol.tree.root_file_icon"
+        );
+        assert_eq!(
+            value_kinds
+                .get::<String>("series")
+                .expect("value_kinds.series"),
+            "series"
+        );
+    }
+
+    #[test]
+    fn events_on_registers_handlers_for_builtin_event_ids() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.events.on(h5v.ids.events.file_opened, function(ctx, ev)
+              ctx.toast.info(ev.path)
+            end)
+        "#,
+        )
+        .exec()
+        .expect("register file_opened handler");
+
+        let events: Table = h5v.get("events").expect("get events");
+        let handlers: Table = events.get("__handlers").expect("get handlers");
+        let file_opened: Table = handlers
+            .get("builtin.event.file_opened")
+            .expect("get file_opened handlers");
+        assert_eq!(file_opened.raw_len(), 1);
+    }
+
+    #[test]
+    fn declarative_keys_unbind_accepts_table_form() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        lua.load(
+            r#"
+            h5v.keys.unbind({
+              mode = h5v.ids.keymap_modes.heatmap,
+              key = "v",
+            })
+        "#,
+        )
+        .exec()
+        .expect("register declarative key unbind");
+
+        let keymaps = super::keymaps::parse_keymaps_config(&h5v)
+            .expect("parse keymaps")
+            .expect("keymaps config");
+        assert_eq!(keymaps.heatmap.unbind.len(), 1);
+        assert_eq!(keymaps.heatmap.unbind[0].to_string(), "v");
+    }
+
+    #[test]
     fn parses_layout_configuration() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         let layout = lua.create_table().expect("create layout table");
@@ -459,9 +1031,958 @@ mod tests {
     }
 
     #[test]
-    fn applies_layout_configuration() {
+    fn lua_registration_populates_registry_snapshot() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        h5v.set("theme", ThemeName::Light.as_str())
+            .expect("set theme");
+        h5v.set("symbol_theme", SymbolThemeName::Compatibility.as_str())
+            .expect("set symbol theme");
+        h5v.set("compatibility", true).expect("set compatibility");
+
+        let order = lua.create_table().expect("create order table");
+        order.set(1, "matrix").expect("set order");
+        order.set(2, "preview").expect("set order");
+        h5v.set("content_mode_order", order)
+            .expect("set content mode order");
+
+        let colors: Table = h5v.get("colors").expect("get colors");
+        let content: Table = colors.get("content").expect("get colors.content");
+        content
+            .set("app_brand", "#010203")
+            .expect("set content.app_brand");
+
+        let symbols: Table = h5v.get("symbols").expect("get symbols");
+        let tree: Table = symbols.get("tree").expect("get symbols.tree");
+        tree.set("root_file_icon", "FILE ")
+            .expect("set tree.root_file_icon");
+
+        let heatmap: Table = h5v.get("heatmap").expect("get heatmap");
+        heatmap
+            .set("default_colormap", "inferno")
+            .expect("set heatmap default colormap");
+        heatmap
+            .set("default_invert_x", true)
+            .expect("set heatmap invert x");
+
+        let multichart: Table = h5v.get("multichart").expect("get multichart");
+        multichart
+            .set("detail_max_samples", 8192)
+            .expect("set multichart detail max samples");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+
+        assert_eq!(
+            snapshot
+                .setting(&SettingHandle::new("builtin.setting.theme"))
+                .and_then(|metadata| metadata.current_value.clone()),
+            Some("builtin.theme.light".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .setting(&SettingHandle::new("builtin.setting.symbol_theme"))
+                .and_then(|metadata| metadata.current_value.clone()),
+            Some("compatibility".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .setting(&SettingHandle::new("builtin.setting.compatibility"))
+                .and_then(|metadata| metadata.current_value.clone()),
+            Some("true".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .setting(&SettingHandle::new(
+                    "builtin.setting.heatmap.default_colormap"
+                ))
+                .and_then(|metadata| metadata.current_value.clone()),
+            Some("inferno".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .setting(&SettingHandle::new(
+                    "builtin.setting.multichart.detail_max_samples",
+                ))
+                .and_then(|metadata| metadata.current_value.clone()),
+            Some("8192".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .theme(&ThemeHandle::new("builtin.theme.light"))
+                .map(|metadata| metadata.is_active),
+            Some(true)
+        );
+        assert_eq!(
+            snapshot
+                .color(&ColorHandle::new("builtin.color.content.app_brand"))
+                .and_then(|metadata| metadata.override_value.clone()),
+            Some("#010203".to_string())
+        );
+        assert_eq!(
+            snapshot
+                .symbol(&SymbolHandle::new("builtin.symbol.tree.root_file_icon"))
+                .and_then(|metadata| metadata.override_value.clone()),
+            Some("FILE ".to_string())
+        );
+    }
+
+    #[test]
+    fn registry_snapshot_applies_runtime_visual_and_setting_state() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        h5v.set("theme", ThemeName::Light.as_str())
+            .expect("set theme");
+        h5v.set("symbol_theme", SymbolThemeName::Compatibility.as_str())
+            .expect("set symbol theme");
+
+        let order = lua.create_table().expect("create order table");
+        order.set(1, "matrix").expect("set order");
+        h5v.set("content_mode_order", order)
+            .expect("set content mode order");
+
+        let colors: Table = h5v.get("colors").expect("get colors");
+        let content: Table = colors.get("content").expect("get colors.content");
+        content
+            .set("app_brand", "#010203")
+            .expect("set content.app_brand");
+
+        let symbols: Table = h5v.get("symbols").expect("get symbols");
+        let tree: Table = symbols.get("tree").expect("get symbols.tree");
+        tree.set("root_file_icon", "FILE ")
+            .expect("set tree.root_file_icon");
+
+        let heatmap: Table = h5v.get("heatmap").expect("get heatmap");
+        heatmap
+            .set("default_colormap", "inferno")
+            .expect("set heatmap default colormap");
+        heatmap
+            .set("default_invert_x", true)
+            .expect("set heatmap invert x");
+
+        let multichart: Table = h5v.get("multichart").expect("get multichart");
+        multichart
+            .set("detail_max_samples", 8192)
+            .expect("set multichart detail max samples");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        configure::apply_registry_snapshot(&snapshot).expect("apply registry snapshot");
+
+        assert_eq!(configure::current_theme_name(), ThemeName::Light);
+        assert_eq!(
+            configure::current_symbol_theme_name(),
+            SymbolThemeName::Compatibility
+        );
+        assert_eq!(
+            themed_color(|colors| colors.content.app_brand),
+            Color::Rgb(1, 2, 3)
+        );
+        assert_eq!(
+            configured_symbol(|symbols| symbols.tree.root_file_icon),
+            "FILE "
+        );
+        assert_eq!(
+            current_content_mode_order(),
+            vec![
+                ContentShowMode::Matrix,
+                ContentShowMode::Preview,
+                ContentShowMode::Heatmap
+            ]
+        );
+        assert_eq!(
+            current_heatmap_default_settings().colormap,
+            HeatmapColormap::Inferno
+        );
+        assert!(current_heatmap_default_settings().invert_x);
+        assert_eq!(
+            configure::current_multichart_settings().detail_max_samples,
+            8192
+        );
+
+        configure::reset_config(ThemeName::Dark);
+    }
+
+    #[test]
+    fn custom_theme_registration_applies_theme_bundles() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(
+            r##"
+            local theme = h5v.colors.themes.register({
+              id = "config.theme.demo",
+              title = "Demo",
+              variant = "light",
+              colors = {
+                [h5v.ids.colors.content.app_brand] = "#010203",
+              },
+              symbols = {
+                [h5v.ids.symbols.tree.root_file_icon] = "FILE ",
+              },
+            })
+            h5v.theme = theme
+        "##,
+        )
+        .exec()
+        .expect("register custom theme");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        configure::apply_registry_snapshot(&snapshot).expect("apply registry snapshot");
+
+        let metadata = snapshot
+            .theme(&ThemeHandle::new("config.theme.demo"))
+            .expect("custom theme metadata");
+        assert!(metadata.is_active);
+        assert_eq!(metadata.variant.as_deref(), Some("light"));
+        assert_eq!(configure::current_theme_handle(), "config.theme.demo");
+        assert_eq!(configure::current_theme_name(), ThemeName::Light);
+        assert_eq!(
+            themed_color(|colors| colors.content.app_brand),
+            Color::Rgb(1, 2, 3)
+        );
+        assert_eq!(
+            configured_symbol(|symbols| symbols.tree.root_file_icon),
+            "FILE "
+        );
+    }
+
+    #[test]
+    fn lua_registration_registers_custom_commands() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(
+            r#"
+            h5v.commands.register({
+              id = "analysis.refresh",
+              title = "Refresh analysis",
+              summary = "Refresh generated analysis output",
+              args = {
+                { name = "count", kind = "uint", required = true, help = "Refresh count" },
+              },
+              examples = { "analysis.refresh 2" },
+              run = function(ctx)
+                ctx.command("help reload")
+              end,
+            })
+        "#,
+        )
+        .exec()
+        .expect("register custom command");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let command = snapshot
+            .command(&CommandHandle::new("config.command.analysis.refresh"))
+            .expect("custom command metadata");
+
+        assert_eq!(command.name, "analysis.refresh");
+        assert_eq!(command.summary, "Refresh generated analysis output");
+        assert_eq!(command.callback_id.as_deref(), Some("command-1"));
+        assert_eq!(command.examples, vec!["analysis.refresh 2".to_string()]);
+        assert_eq!(command.args.len(), 1);
+        assert_eq!(command.args[0].kind, CommandArgValueKind::UnsignedInt);
+    }
+
+    #[test]
+    fn lua_registration_registers_custom_mchart_functions() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(
+            r#"
+            h5v.mchart.functions.register({
+              id = "analysis.signal_to_noise",
+              name = "signal_to_noise",
+              summary = "Return a weighted sum for test coverage",
+              params = {
+                { name = "series", kind = h5v.ids.value_kinds.series, detail = "Input series" },
+                { name = "scale", kind = h5v.ids.value_kinds.scalar, detail = "Scale factor" },
+              },
+              returns = h5v.ids.value_kinds.scalar,
+              eval = function(series, scale)
+                local total = 0
+                for _, value in ipairs(series.to_array()) do
+                  total = total + value
+                end
+                return total * scale
+              end,
+            })
+        "#,
+        )
+        .exec()
+        .expect("register custom multichart function");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let function = snapshot
+            .mchart_function(&MchartFunctionHandle::new(
+                "config.mchart_function.analysis.signal_to_noise",
+            ))
+            .expect("custom multichart function metadata");
+
+        assert_eq!(function.name, "signal_to_noise");
+        assert_eq!(
+            function.return_kind,
+            crate::configure::registry::RegistryValueKind::Scalar
+        );
+        assert_eq!(function.callback_id.as_deref(), Some("mchart-function-1"));
+        assert_eq!(function.params.len(), 2);
+        assert_eq!(
+            function.params[0].value_kind,
+            crate::configure::registry::RegistryValueKind::Series
+        );
+        assert_eq!(
+            function.params[1].value_kind,
+            crate::configure::registry::RegistryValueKind::Scalar
+        );
+    }
+
+    #[test]
+    fn custom_mchart_worker_runtime_executes_registered_functions_without_ctx_arg() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("init.lua");
+        std::fs::write(
+            &config_path,
+            r#"
+h5v.mchart.functions.register({
+  id = "analysis.signal_to_noise",
+  name = "signal_to_noise",
+  params = {
+    { name = "series", kind = h5v.ids.value_kinds.series },
+    { name = "scale", kind = h5v.ids.value_kinds.scalar },
+  },
+  returns = h5v.ids.value_kinds.scalar,
+  eval = function(series, scale)
+    local total = 0
+    for _, value in ipairs(series.to_array()) do
+      total = total + value
+    end
+    return total * scale
+  end,
+})
+"#,
+        )
+        .expect("write config");
+        let previous_override =
+            configure::set_config_path_override(Some(config_path)).expect("override config");
+        configure::reset_mchart_worker_runtime();
+
+        let result = crate::configure::run_registered_mchart_function(
+            "mchart-function-1",
+            &[
+                crate::configure::LuaMchartArgValue::Series(vec![
+                    (0.0, 2.0),
+                    (1.0, 4.0),
+                    (2.0, 6.0),
+                ]),
+                crate::configure::LuaMchartArgValue::Scalar(0.5),
+            ],
+            crate::configure::registry::RegistryValueKind::Scalar,
+        )
+        .expect("run custom mchart function");
+
+        assert_eq!(result, crate::configure::LuaMchartReturnValue::Scalar(6.0));
+
+        configure::set_config_path_override(previous_override).expect("restore config path");
+        configure::reset_mchart_worker_runtime();
+    }
+
+    #[test]
+    fn custom_mchart_worker_runtime_supports_process_backed_scalar_and_series_results() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("init.lua");
+        std::fs::write(
+            &config_path,
+            r#"
+h5v.mchart.functions.register({
+  id = "analysis.process_scalar",
+  name = "process_scalar",
+  params = {
+    { name = "value", kind = h5v.ids.value_kinds.scalar },
+  },
+  returns = h5v.ids.value_kinds.scalar,
+  eval = function(value)
+    local result = h5v.mchart.functions.process.run({
+      command = {"cat"},
+      stdin = tostring(value),
+    })
+    return h5v.mchart.functions.process.parse_scalar(result)
+  end,
+})
+
+h5v.mchart.functions.register({
+  id = "analysis.process_series",
+  name = "process_series",
+  params = {
+    { name = "series", kind = h5v.ids.value_kinds.series },
+  },
+  returns = h5v.ids.value_kinds.series,
+  eval = function(series)
+    local result = h5v.mchart.functions.process.run({
+      command = {"cat"},
+      stdin = series.to_lines(),
+    })
+    return h5v.mchart.functions.process.parse_series(result)
+  end,
+})
+"#,
+        )
+        .expect("write config");
+        let previous_override =
+            configure::set_config_path_override(Some(config_path)).expect("override config");
+        configure::reset_mchart_worker_runtime();
+
+        let scalar_result = crate::configure::run_registered_mchart_function(
+            "mchart-function-1",
+            &[crate::configure::LuaMchartArgValue::Scalar(3.5)],
+            crate::configure::registry::RegistryValueKind::Scalar,
+        )
+        .expect("run process-backed scalar function");
+        assert_eq!(
+            scalar_result,
+            crate::configure::LuaMchartReturnValue::Scalar(3.5)
+        );
+
+        let series_result = crate::configure::run_registered_mchart_function(
+            "mchart-function-2",
+            &[crate::configure::LuaMchartArgValue::Series(vec![
+                (0.0, 2.0),
+                (1.0, 4.0),
+                (2.0, 6.0),
+            ])],
+            crate::configure::registry::RegistryValueKind::Series,
+        )
+        .expect("run process-backed series function");
+        assert_eq!(
+            series_result,
+            crate::configure::LuaMchartReturnValue::Series(vec![2.0, 4.0, 6.0])
+        );
+
+        configure::set_config_path_override(previous_override).expect("restore config path");
+        configure::reset_mchart_worker_runtime();
+    }
+
+    #[test]
+    fn process_context_parse_json_converts_stdout_into_lua_tables() {
+        let lua = Lua::new();
+        let process = crate::configure::build_lua_process_context(&lua).expect("build process");
+        let parse_json: mlua::Function = process.get("parse_json").expect("parse_json");
+        let parsed: mlua::Table = parse_json
+            .call(r#"{"ok":true,"items":[1,2,3],"nested":{"name":"demo"}}"#)
+            .expect("parse json");
+        assert!(parsed.get::<bool>("ok").expect("ok"));
+        let items: mlua::Table = parsed.get("items").expect("items");
+        assert_eq!(items.get::<i64>(1).expect("item1"), 1);
+        assert_eq!(items.get::<i64>(3).expect("item3"), 3);
+        let nested: mlua::Table = parsed.get("nested").expect("nested");
+        assert_eq!(nested.get::<String>("name").expect("name"), "demo");
+    }
+
+    #[test]
+    fn plugins_use_loads_local_plugin_and_registers_metadata() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("lua")).expect("create plugin lua dir");
+        std::fs::write(
+            temp.path().join("h5v-plugin.toml"),
+            r#"
+id = "demo.analysis"
+name = "Demo analysis"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/analysis.lua"
+"#,
+        )
+        .expect("write plugin manifest");
+        std::fs::write(
+            temp.path().join("lua/analysis.lua"),
+            r#"
+return {
+  health = function(ctx)
+    return {
+      status = ctx.health.healthy,
+      summary = "ready",
+      message = ctx.ui.build(function(ui)
+        ui.block({ title = "Plugin health" }, function(ui)
+          ui.badge("ok")
+          ui.text("ready")
+        end)
+      end),
+    }
+  end,
+  init = function(h5v)
+    h5v.commands.register({
+      id = "analysis.refresh",
+      title = "Refresh analysis",
+      summary = "Refresh plugin-provided analysis",
+      run = function(ctx)
+        ctx.command("help reload")
+      end,
+    })
+  end,
+}
+"#,
+        )
+        .expect("write plugin entry");
+
+        let plugin_path = temp.path().display().to_string().replace('\\', "\\\\");
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(format!(r#"loaded = h5v.plugins.use("{plugin_path}")"#))
+            .exec()
+            .expect("load local plugin");
+
+        let loaded: String = lua.globals().get("loaded").expect("plugin handle");
+        assert_eq!(loaded, "plugin.demo.analysis");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let plugin = snapshot
+            .plugins()
+            .find(|plugin| plugin.handle.as_str() == "plugin.demo.analysis")
+            .expect("plugin metadata");
+        assert_eq!(plugin.name, "Demo analysis");
+        assert_eq!(plugin.version.as_deref(), Some("0.1.0"));
+        assert_eq!(plugin.source.as_deref(), Some(plugin_path.as_str()));
+        assert_eq!(plugin.resolved_commit.as_deref(), Some("local"));
+        assert!(plugin.auto_pull);
+        assert_eq!(plugin.health_status, crate::health::HealthStatus::Healthy);
+        assert_eq!(plugin.health_message.as_deref(), Some("ready"));
+        assert!(plugin.health_ui_document.is_some());
+
+        let command = snapshot
+            .command(&CommandHandle::new(
+                "plugin.demo.analysis.command.analysis.refresh",
+            ))
+            .expect("plugin command metadata");
+        assert_eq!(
+            command.owner,
+            crate::configure::registry::RegistryOwner::Plugin(
+                crate::configure::registry::PluginHandle::new("plugin.demo.analysis")
+            )
+        );
+    }
+
+    #[test]
+    fn run_lua_engine_records_configuration_failures_as_health_issues() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("init.lua");
+        std::fs::write(&config_path, "this is not valid lua").expect("write config");
+        let previous_override =
+            configure::set_config_path_override(Some(config_path)).expect("override config");
+        crate::health::clear_reported_health_issues();
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let error = configure::run_lua_engine(tx, false).expect_err("config should fail");
+        let issues = crate::health::reported_health_issues();
+
+        assert!(error.to_string().contains("Lua error"));
+        assert!(issues.iter().any(|issue| {
+            issue.source == "configuration"
+                && issue.result.status == crate::health::HealthStatus::Fail
+                && issue.result.message.contains("Lua error")
+        }));
+
+        configure::set_config_path_override(previous_override).expect("restore config path");
+        crate::health::clear_reported_health_issues();
+    }
+
+    #[test]
+    fn run_lua_engine_records_plugin_load_failures_as_health_issues() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("init.lua");
+        std::fs::write(
+            &config_path,
+            r#"
+h5v.plugins.use("/definitely/missing/h5v-plugin")
+"#,
+        )
+        .expect("write config");
+        let previous_override =
+            configure::set_config_path_override(Some(config_path)).expect("override config");
+        crate::health::clear_reported_health_issues();
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let error = configure::run_lua_engine(tx, false).expect_err("plugin load should fail");
+        let issues = crate::health::reported_health_issues();
+
+        assert!(error.to_string().contains("Failed to resolve plugin path"));
+        assert!(issues.iter().any(|issue| {
+            issue
+                .source
+                .contains("plugin /definitely/missing/h5v-plugin")
+                && issue.result.status == crate::health::HealthStatus::Fail
+                && issue.result.message.contains("Failed to load plugin")
+        }));
+
+        configure::set_config_path_override(previous_override).expect("restore config path");
+        crate::health::clear_reported_health_issues();
+    }
+
+    #[test]
+    fn failing_plugin_healthcheck_disables_plugin_registrations_and_keymaps() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("lua")).expect("create plugin lua dir");
+        std::fs::write(
+            temp.path().join("h5v-plugin.toml"),
+            r#"
+id = "demo.unhealthy"
+name = "Demo unhealthy"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/init.lua"
+"#,
+        )
+        .expect("write plugin manifest");
+        std::fs::write(
+            temp.path().join("lua/init.lua"),
+            r#"
+return {
+  health = function(ctx)
+    return {
+      status = ctx.health.fail,
+      message = "tool 'cat' not found",
+    }
+  end,
+  init = function(h5v)
+    local refresh = h5v.commands.register({
+      id = "analysis.refresh",
+      run = function(ctx)
+        ctx.toast.info("refreshed")
+      end,
+    })
+
+    h5v.keys.bind({
+      mode = h5v.ids.keymap_modes.global,
+      key = "ctrl+r",
+      target = refresh,
+      description = "Refresh unhealthy plugin output",
+    })
+  end,
+}
+"#,
+        )
+        .expect("write plugin entry");
+
+        let plugin_path = temp.path().display().to_string().replace('\\', "\\\\");
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(format!(r#"h5v.plugins.use("{plugin_path}")"#))
+            .exec()
+            .expect("load unhealthy plugin");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        configure::apply_registry_snapshot(&snapshot).expect("apply registry snapshot");
+        super::apply_non_registry_lua_config(&h5v).expect("apply non-registry config");
+
+        let plugin = snapshot
+            .plugins()
+            .find(|plugin| plugin.handle.as_str() == "plugin.demo.unhealthy")
+            .expect("plugin metadata");
+        assert_eq!(plugin.health_status, crate::health::HealthStatus::Fail);
+        assert_eq!(
+            plugin.health_message.as_deref(),
+            Some("tool 'cat' not found")
+        );
+        assert!(snapshot
+            .command(&CommandHandle::new(
+                "plugin.demo.unhealthy.command.analysis.refresh"
+            ))
+            .is_none());
+        assert!(current_keymaps().global.iter().all(
+            |binding| binding.description.as_deref() != Some("Refresh unhealthy plugin output")
+        ));
+    }
+
+    #[test]
+    fn plugin_missing_health_function_is_modeled_as_unhealthy_plugin() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("lua")).expect("create plugin lua dir");
+        std::fs::write(
+            temp.path().join("h5v-plugin.toml"),
+            r#"
+id = "demo.missing-health"
+name = "Demo missing health"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/init.lua"
+"#,
+        )
+        .expect("write plugin manifest");
+        std::fs::write(
+            temp.path().join("lua/init.lua"),
+            r#"
+return {
+  init = function(h5v, ctx)
+    ctx.toast.info("loaded")
+  end,
+}
+"#,
+        )
+        .expect("write plugin entry");
+
+        let plugin_path = temp.path().display().to_string().replace('\\', "\\\\");
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+        crate::health::clear_reported_health_issues();
+
+        lua.load(format!(r#"h5v.plugins.use("{plugin_path}")"#))
+            .exec()
+            .expect("load plugin with missing health");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let plugin = snapshot
+            .plugins()
+            .find(|plugin| plugin.handle.as_str() == "plugin.demo.missing-health")
+            .expect("plugin metadata");
+
+        assert_eq!(plugin.health_status, crate::health::HealthStatus::Fail);
+        assert!(plugin
+            .health_message
+            .as_deref()
+            .expect("health message")
+            .contains("must return a 'health' function"));
+        assert!(crate::health::reported_health_issues().is_empty());
+        crate::health::clear_reported_health_issues();
+    }
+
+    #[test]
+    fn plugin_init_failure_marks_plugin_unhealthy_without_h5v_issue() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("lua")).expect("create plugin lua dir");
+        std::fs::write(
+            temp.path().join("h5v-plugin.toml"),
+            r#"
+id = "demo.init-fail"
+name = "Demo init fail"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/init.lua"
+"#,
+        )
+        .expect("write plugin manifest");
+        std::fs::write(
+            temp.path().join("lua/init.lua"),
+            r#"
+return {
+  health = function(ctx)
+    return {
+      status = ctx.health.healthy,
+      message = "ready",
+    }
+  end,
+  init = function(h5v, ctx)
+    error("boom")
+  end,
+}
+"#,
+        )
+        .expect("write plugin entry");
+
+        let plugin_path = temp.path().display().to_string().replace('\\', "\\\\");
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+        crate::health::clear_reported_health_issues();
+
+        lua.load(format!(r#"h5v.plugins.use("{plugin_path}")"#))
+            .exec()
+            .expect("load plugin with init failure");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let plugin = snapshot
+            .plugins()
+            .find(|plugin| plugin.handle.as_str() == "plugin.demo.init-fail")
+            .expect("plugin metadata");
+
+        assert_eq!(plugin.health_status, crate::health::HealthStatus::Fail);
+        assert!(plugin
+            .health_message
+            .as_deref()
+            .expect("health message")
+            .contains("Plugin init failed"));
+        assert!(crate::health::reported_health_issues().is_empty());
+        crate::health::clear_reported_health_issues();
+    }
+
+    #[test]
+    fn acceptance_plugin_command_keymap_event_and_content_order_work_together() {
+        let _guard = test_guard();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("lua")).expect("create plugin lua dir");
+        std::fs::write(
+            temp.path().join("h5v-plugin.toml"),
+            r#"
+id = "demo.acceptance"
+name = "Demo acceptance"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/init.lua"
+"#,
+        )
+        .expect("write plugin manifest");
+        std::fs::write(
+            temp.path().join("lua/init.lua"),
+            r#"
+return {
+  health = function(ctx)
+    return {
+      status = ctx.health.healthy,
+      message = "ready",
+    }
+  end,
+  init = function(h5v)
+    local refresh = h5v.commands.register({
+      id = "analysis.refresh",
+      title = "Refresh analysis",
+      summary = "Refresh plugin analysis output",
+      run = function(ctx)
+        ctx.toast.info("refreshed")
+      end,
+    })
+
+    h5v.__test_plugin_command = refresh
+  end,
+}
+"#,
+        )
+        .expect("write plugin entry");
+
+        let plugin_path = temp.path().display().to_string().replace('\\', "\\\\");
+        let lua = Lua::new();
+        let bootstrap_registry = configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &bootstrap_registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(format!(
+            r#"
+            h5v.plugins.use("{plugin_path}")
+            h5v.theme = "light"
+            h5v.symbol_theme = "compatibility"
+            h5v.content_mode_order = {{ "heatmap", "preview" }}
+            h5v.keys.bind({{
+              mode = h5v.ids.keymap_modes.global,
+              key = "ctrl+r",
+              target = h5v.__test_plugin_command,
+              description = "Refresh plugin analysis",
+            }})
+            h5v.events.on(h5v.ids.events.file_opened, function(ctx, ev)
+              ctx.toast.info(ev.path)
+            end)
+        "#
+        ))
+        .exec()
+        .expect("configure plugin-backed acceptance flow");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        configure::apply_registry_snapshot(&snapshot).expect("apply registry snapshot");
+        super::apply_non_registry_lua_config(&h5v).expect("apply non-registry config");
+        configure::install_registry_snapshot(snapshot);
+        crate::ui::command::sync_command_registry_keybindings(&current_keymaps());
+
+        let registry = configure::current_registry_snapshot();
+        let command = registry
+            .command(&CommandHandle::new(
+                "plugin.demo.acceptance.command.analysis.refresh",
+            ))
+            .expect("plugin command metadata");
+        assert_eq!(command.name, "analysis.refresh");
+        assert_eq!(
+            command.owner,
+            crate::configure::registry::RegistryOwner::Plugin(
+                crate::configure::registry::PluginHandle::new("plugin.demo.acceptance")
+            )
+        );
+        assert!(command.keybindings.contains(&"Ctrl+r".to_string()));
+        assert_eq!(configure::current_theme_name(), ThemeName::Light);
+        assert_eq!(
+            configure::current_symbol_theme_name(),
+            SymbolThemeName::Compatibility
+        );
+        assert_eq!(
+            current_content_mode_order(),
+            vec![
+                ContentShowMode::Heatmap,
+                ContentShowMode::Preview,
+                ContentShowMode::Matrix
+            ]
+        );
+        assert_eq!(
+            current_content_mode_order_handles(),
+            vec![
+                ContentShowMode::Heatmap.handle(),
+                ContentShowMode::Preview.handle(),
+                ContentShowMode::Matrix.handle()
+            ]
+        );
+
+        let events: Table = h5v.get("events").expect("get events");
+        let handlers: Table = events.get("__handlers").expect("get handlers");
+        let file_opened: Table = handlers
+            .get("builtin.event.file_opened")
+            .expect("get file_opened handlers");
+        assert_eq!(file_opened.raw_len(), 1);
+
+        configure::install_registry_snapshot(
+            configure::builtin_registry_snapshot().expect("restore builtin registry"),
+        );
+        configure::reset_config(ThemeName::Dark);
+    }
+
+    #[test]
+    fn applies_layout_configuration() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(
             r#"
@@ -490,8 +2011,10 @@ mod tests {
 
     #[test]
     fn applies_max_layout_constraint_configuration() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(
             r#"
@@ -511,8 +2034,10 @@ mod tests {
 
     #[test]
     fn layout_configuration_rejects_invalid_pairing() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(
             r#"
@@ -532,6 +2057,7 @@ mod tests {
 
     #[test]
     fn named_config_chunk_reports_lua_path_and_line() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let error = execute_config_chunk(&lua, "@/tmp/init.lua", "h5v.theme =\n")
             .expect_err("invalid Lua should error");
@@ -543,8 +2069,14 @@ mod tests {
 
     #[test]
     fn exports_nested_theme_tables() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let themes = build_theme_table(&lua).expect("build themes");
+        let h5v = lua.create_table().expect("create h5v");
+        let colors = lua.create_table().expect("create colors");
+        h5v.set("colors", colors).expect("set colors");
+        let plugins = lua.create_table().expect("create plugins");
+        h5v.set("plugins", plugins).expect("set plugins");
+        let themes = build_theme_table(&lua, &h5v).expect("build themes");
         let dark: Table = themes.get("dark").expect("get dark theme");
         let content: Table = dark.get("content").expect("get dark content table");
         let surface: Table = dark.get("surface").expect("get dark surface table");
@@ -580,6 +2112,7 @@ mod tests {
 
     #[test]
     fn compatibility_override_drives_default_symbol_theme() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         h5v.set("compatibility", true).expect("set compatibility");
@@ -601,6 +2134,7 @@ mod tests {
 
     #[test]
     fn compatibility_override_requires_boolean() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         h5v.set(
@@ -617,6 +2151,7 @@ mod tests {
 
     #[test]
     fn content_mode_order_requires_known_modes() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         let order = lua.create_table().expect("create order");
@@ -628,9 +2163,82 @@ mod tests {
     }
 
     #[test]
-    fn direct_nested_color_assignment_works_without_manual_table_setup() {
+    fn registers_custom_content_mode_metadata() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+        let mut builder = configure::builtin_registry_builder().expect("build registry builder");
+
+        lua.load(
+            r#"
+            h5v.ui.content_modes.register({
+              id = "analysis.results",
+              title = "Analysis",
+              summary = "Show analysis results",
+              render = function(ctx, ui)
+                ui.text(ctx.file.path)
+              end,
+            })
+        "#,
+        )
+        .exec()
+        .expect("register custom content mode");
+
+        register_lua_config(&mut builder, &h5v).expect("register lua config");
+        let snapshot = builder.freeze().expect("freeze registry");
+        let content_mode = snapshot
+            .content_mode(&ContentModeHandle::new(
+                "config.content_mode.analysis.results",
+            ))
+            .expect("content mode metadata");
+        assert_eq!(content_mode.title, "Analysis");
+        assert_eq!(content_mode.summary, "Show analysis results");
+        assert!(content_mode.callback_id.is_some());
+    }
+
+    #[test]
+    fn content_mode_order_accepts_registered_custom_mode_handles() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
+        lua.globals().set("h5v", h5v.clone()).expect("set h5v");
+
+        lua.load(
+            r#"
+            local analysis = h5v.ui.content_modes.register({
+              id = "analysis.results",
+              title = "Analysis",
+              render = function(ctx, ui)
+                ui.text("ok")
+              end,
+            })
+            h5v.content_mode_order = {
+              analysis,
+              h5v.ids.content_modes.preview,
+            }
+        "#,
+        )
+        .exec()
+        .expect("configure custom content mode order");
+
+        assert_eq!(
+            parse_content_mode_order(&h5v).expect("parse order"),
+            Some(vec![
+                ContentModeHandle::new("config.content_mode.analysis.results"),
+                ContentShowMode::Preview.handle(),
+            ])
+        );
+    }
+
+    #[test]
+    fn direct_nested_color_assignment_works_without_manual_table_setup() {
+        let _guard = test_guard();
+        let lua = Lua::new();
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(r#"h5v.colors.accent.selection_bg = "green""#)
             .exec()
@@ -646,6 +2254,7 @@ mod tests {
 
     #[test]
     fn parses_heatmap_range_configuration() {
+        let _guard = test_guard();
         let lua = Lua::new();
         let h5v = lua.create_table().expect("create h5v table");
         let heatmap = lua.create_table().expect("create heatmap table");
@@ -698,8 +2307,10 @@ mod tests {
 
     #[test]
     fn applies_heatmap_range_configuration() {
+        let _guard = test_guard();
         let lua = Lua::new();
-        let h5v = build_h5v_table(&lua, None, false).expect("build h5v");
+        let registry = crate::configure::builtin_registry_snapshot().expect("build registry");
+        let h5v = build_h5v_table(&lua, &registry, None, false).expect("build h5v");
         lua.globals().set("h5v", h5v.clone()).expect("set h5v");
         lua.load(
             r#"

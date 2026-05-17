@@ -817,10 +817,12 @@ fn render_matrix_with_reader<T: Display>(
             &areas_split[0],
             node,
             &attr.shape,
-            true,
-            None,
-            "Slice selection",
-            None,
+            super::dims::RenderDimSelectorOptions {
+                row_columns: true,
+                page_info: None,
+                panel_title: "Slice selection",
+                detail_lines: None,
+            },
         )?;
         areas_split[1].inner(ratatui::layout::Margin {
             horizontal: 0,
@@ -1034,8 +1036,16 @@ mod tests {
     #[test]
     fn enum_renderer_includes_symbol_and_name() {
         let renderer = EnumRenderer::new(sample_enum());
-        assert_eq!(renderer.render_as_line(&1).to_string(), "● Red");
-        assert_eq!(renderer.render_as_span(&2).content, "■ Green");
+        let first_symbol = crate::configure::configured_symbol(|symbols| symbols.chart.r#enum[0]);
+        let second_symbol = crate::configure::configured_symbol(|symbols| symbols.chart.r#enum[1]);
+        assert_eq!(
+            renderer.render_as_line(&1).to_string(),
+            format!("{first_symbol} Red")
+        );
+        assert_eq!(
+            renderer.render_as_span(&2).content,
+            format!("{second_symbol} Green")
+        );
     }
 
     #[test]
@@ -1045,8 +1055,12 @@ mod tests {
             symbols: vec![Some("✓".to_string()), None],
         };
         let renderer = EnumRenderer::with_overrides(sample_enum(), Some(&overrides));
+        let second_symbol = crate::configure::configured_symbol(|symbols| symbols.chart.r#enum[1]);
         assert_eq!(renderer.render_as_line(&1).to_string(), "✓ Red");
-        assert_eq!(renderer.render_as_span(&2).content, "■ Green");
+        assert_eq!(
+            renderer.render_as_span(&2).content,
+            format!("{second_symbol} Green")
+        );
     }
 
     #[test]

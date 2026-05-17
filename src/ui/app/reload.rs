@@ -1,9 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
+    configure::registry::ContentModeHandle,
     error::AppError,
     h5f::{self, HasPath, Node},
-    ui::state::{self, AppState, AttributeCursor, ContentShowMode, Focus, MatrixViewState},
+    ui::state::{self, AppState, AttributeCursor, Focus, MatrixViewState},
 };
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -29,7 +30,7 @@ struct ReloadSnapshot {
     selected_node: Option<SelectedNodeSnapshot>,
     focus: Focus,
     show_tree_view: bool,
-    content_mode: ContentShowMode,
+    content_mode: ContentModeHandle,
     page_state: state::PageState,
     matrix_view_state: MatrixViewState,
     img_idx_to_load: i32,
@@ -83,7 +84,7 @@ fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
         selected_node: snapshot_selected_node(state),
         focus: state.focus.clone(),
         show_tree_view: state.show_tree_view,
-        content_mode: state.content_mode,
+        content_mode: state.content_mode.clone(),
         page_state: state.page_state.clone(),
         matrix_view_state: state.matrix_view_state.clone(),
         img_idx_to_load: state.img_state.idx_to_load,
@@ -265,7 +266,7 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
             state.readonly = !previous_write;
             state.focus = snapshot.focus.clone();
             state.show_tree_view = snapshot.show_tree_view;
-            state.content_mode = snapshot.content_mode;
+            state.content_mode = snapshot.content_mode.clone();
             for path in &snapshot.expanded_paths {
                 let relative = normalized_node_path(path);
                 if relative.is_empty() {
@@ -293,7 +294,7 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     state.readonly = !write;
     state.focus = snapshot.focus.clone();
     state.show_tree_view = snapshot.show_tree_view;
-    state.content_mode = snapshot.content_mode;
+    state.content_mode = snapshot.content_mode.clone();
 
     for path in &snapshot.expanded_paths {
         let relative = normalized_node_path(path);
@@ -309,6 +310,15 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     state.compute_tree_view();
     restore_tree_selection(state, &snapshot);
     state.sync_file_watch();
+
+    let reloaded_path = state.file_watch.path.clone();
+    let readonly = state.readonly;
+    crate::configure::dispatch_lua_event(state, "builtin.event.file_reloaded", |lua| {
+        let event = lua.create_table()?;
+        event.set("path", reloaded_path.clone())?;
+        event.set("readonly", readonly)?;
+        Ok(event)
+    })?;
 
     Ok(if write {
         "Reloaded file in write mode".to_string()

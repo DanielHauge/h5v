@@ -22,6 +22,8 @@ use crate::{
     configure,
     data::DatasetPlotingData,
     error::{log_error, AppError},
+    h5f::{HasPath, Node},
+    health::HealthStatus,
     ui::{heatmap::HEATMAP_CACHE_CAPACITY, input::EventResult, state::AppToast},
     GIT_VERSION,
 };
@@ -40,10 +42,12 @@ use self::lifecycle::{
 use self::reload::reload_current_file;
 use self::update::check_for_available_update;
 use super::state::{ChartPreviewKey, HeatmapLoadedPage, HeatmapRenderKey, ImageLoadKey};
+use super::toast::apply_app_toast;
 use super::{
     command::{execute_command, parse_command_text, render_command_dialog, StartupCommand},
     help::render_help,
     input::handle_input_event,
+    logs::render_logs,
     main_display::render_main_display,
     mchart::{MultiChartExpressionRefreshResult, MultiChartLoadKind, MultiChartLoadResult},
     preview::image::{ImageResizeResult, IMAGE_CACHE_CAPACITY},
@@ -61,6 +65,19 @@ mod events;
 mod lifecycle;
 mod reload;
 mod update;
+
+fn combine_event_results(primary: EventResult, secondary: EventResult) -> EventResult {
+    match secondary {
+        EventResult::Continue => primary,
+        other => other,
+    }
+}
+
+fn selected_dataset_path(state: &AppState<'_>) -> Option<String> {
+    let item = state.treeview.get(state.tree_view_cursor)?;
+    let node = item.node.borrow();
+    matches!(&node.node, Node::Dataset(_, _)).then(|| node.node.path())
+}
 
 pub(super) fn primary_text_style() -> Style {
     let mut style = Style::default().fg(configure::themed_color(|colors| colors.text.primary));
@@ -231,6 +248,11 @@ fn main_recover_loop(
             render_toast_overlay(frame, state, command_area);
             return;
         }
+        if let Mode::Logs = state.mode {
+            render_logs(frame, content_area, state);
+            render_toast_overlay(frame, state, command_area);
+            return;
+        }
         if matches!(state.mode, Mode::MultiChart) || command_over_multichart {
             state.multi_chart.render(frame, content_area);
             if matches!(state.mode, Mode::Command) {
@@ -277,6 +299,7 @@ fn main_recover_loop(
                 }
             }
             Mode::Help => {}       // already handled above,
+            Mode::Logs => {}       // already handled above,
             Mode::MultiChart => {} // already handled above,
         }
 
@@ -343,7 +366,10 @@ fn main_recover_loop(
             }
             AppEvent::TermEvent(event) => {
                 let selected_before = state.selected_tree_path();
-                let event_result = handle_input_event(&mut state, event)
+                let content_mode_before = state.active_content_mode_handle();
+                let help_open_before = matches!(state.mode, Mode::Help);
+                let multichart_open_before = matches!(state.mode, Mode::MultiChart);
+                let mut event_result = handle_input_event(&mut state, event)
                     .unwrap_or_else(|e| EventResult::Toast(AppToast::Error(e.to_string()), false));
                 state
                     .multi_chart
@@ -352,7 +378,7 @@ fn main_recover_loop(
                     .multi_chart
                     .queue_expression_detail_refresh(state.file.as_ref())
                 {
-                    state.toast = AppToast::Error(error);
+                    apply_app_toast(&mut state, AppToast::Error(error));
                 }
                 let selected_after = state.selected_tree_path();
                 if selected_before != selected_after {
@@ -362,18 +388,143 @@ fn main_recover_loop(
                     } else {
                         state.clear_preview_debounce();
                     }
+                    if let Some(dataset_path) = selected_dataset_path(&state) {
+                        let opened_path = dataset_path.clone();
+                        let callback_result = configure::dispatch_lua_event(
+                            &mut state,
+                            "builtin.event.dataset_opened",
+                            |lua| {
+                                let event = lua.create_table()?;
+                                event.set("path", opened_path.clone())?;
+                                Ok(event)
+                            },
+                        )
+                        .unwrap_or_else(|error| {
+                            EventResult::Toast(AppToast::Warning(error.to_string()), false)
+                        });
+                        event_result = combine_event_results(event_result, callback_result);
+                    }
+                }
+                if !multichart_open_before && matches!(state.mode, Mode::MultiChart) {
+                    let selected_path = state.selected_tree_path();
+                    let callback_result = configure::dispatch_lua_event(
+                        &mut state,
+                        "builtin.event.multichart_opened",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            if let Some(path) = &selected_path {
+                                event.set("path", path.clone())?;
+                            }
+                            Ok(event)
+                        },
+                    )
+                    .unwrap_or_else(|error| {
+                        EventResult::Toast(AppToast::Warning(error.to_string()), false)
+                    });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                let content_mode_after = state.active_content_mode_handle();
+                if content_mode_before != content_mode_after {
+                    let selected_path = state.selected_tree_path();
+                    let callback_result = configure::dispatch_lua_event(
+                        &mut state,
+                        "builtin.event.content_mode_changed",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            let mode = crate::ui::state::ContentShowMode::parse_handle(
+                                content_mode_after.as_str(),
+                            )
+                            .map(|mode| mode.as_str().to_string())
+                            .unwrap_or_else(|| content_mode_after.as_str().to_string());
+                            event.set("mode", mode)?;
+                            if let Some(path) = &selected_path {
+                                event.set("path", path.clone())?;
+                            }
+                            Ok(event)
+                        },
+                    )
+                    .unwrap_or_else(|error| {
+                        EventResult::Toast(AppToast::Warning(error.to_string()), false)
+                    });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if !help_open_before && matches!(state.mode, Mode::Help) {
+                    let return_mode = match &state.help_return_mode {
+                        Mode::Normal => "normal",
+                        Mode::Search => "search",
+                        Mode::Help => "help",
+                        Mode::Logs => "logs",
+                        Mode::Command => "command",
+                        Mode::MultiChart => "mchart",
+                        Mode::AttributeCreateDialog => "attribute-create-dialog",
+                        Mode::AttributeDeleteDialog => "attribute-delete-dialog",
+                        Mode::FixedStringOverflowDialog => "fixed-string-overflow-dialog",
+                        Mode::FixedStringResizeDialog => "fixed-string-resize-dialog",
+                    };
+                    let callback_result = configure::dispatch_lua_event(
+                        &mut state,
+                        "builtin.event.help_opened",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            event.set("return_mode", return_mode)?;
+                            Ok(event)
+                        },
+                    )
+                    .unwrap_or_else(|error| {
+                        EventResult::Toast(AppToast::Warning(error.to_string()), false)
+                    });
+                    event_result = combine_event_results(event_result, callback_result);
                 }
                 match event_result {
-                    EventResult::Quit => break,
+                    EventResult::Quit => {
+                        let closing_path = state.file_watch.path.clone();
+                        let readonly = state.readonly;
+                        let callback_result = configure::dispatch_lua_event(
+                            &mut state,
+                            "builtin.event.app_shutting_down",
+                            |lua| {
+                                let event = lua.create_table()?;
+                                event.set("path", closing_path.clone())?;
+                                event.set("readonly", readonly)?;
+                                Ok(event)
+                            },
+                        )
+                        .unwrap_or_else(|error| {
+                            EventResult::Toast(AppToast::Warning(error.to_string()), false)
+                        });
+                        if !matches!(callback_result, EventResult::Continue) {
+                            match callback_result {
+                                EventResult::Quit => {}
+                                EventResult::Redraw => {
+                                    apply_app_toast(&mut state, AppToast::Empty);
+                                    terminal.draw(|f| {
+                                        draw_closure(f, &mut state);
+                                    })?;
+                                }
+                                EventResult::Copying => {
+                                    apply_app_toast(&mut state, AppToast::Empty);
+                                    terminal.draw(|f| {
+                                        draw_closure(f, &mut state);
+                                    })?;
+                                }
+                                EventResult::ReloadFile { .. }
+                                | EventResult::Configure { .. }
+                                | EventResult::Error(_)
+                                | EventResult::Toast(_, _) => {}
+                                EventResult::Continue => {}
+                            }
+                        }
+                        break;
+                    }
                     EventResult::Continue => {}
                     EventResult::Redraw => {
-                        state.toast = AppToast::Empty;
+                        apply_app_toast(&mut state, AppToast::Empty);
                         terminal.draw(|f| {
                             draw_closure(f, &mut state);
                         })?;
                     }
                     EventResult::Copying => {
-                        state.toast = AppToast::Empty;
+                        apply_app_toast(&mut state, AppToast::Empty);
                         state.copying = true;
                         terminal.draw(|f| {
                             draw_closure(f, &mut state);
@@ -389,10 +540,10 @@ fn main_recover_loop(
                             Ok(message) => {
                                 terminal.clear()?;
                                 terminal.flush()?;
-                                state.toast = AppToast::Info(message);
+                                apply_app_toast(&mut state, AppToast::Info(message));
                             }
                             Err(error) => {
-                                state.toast = AppToast::Error(error.to_string());
+                                apply_app_toast(&mut state, AppToast::Error(error.to_string()));
                             }
                         }
                         terminal.draw(|f| {
@@ -404,10 +555,10 @@ fn main_recover_loop(
                             Ok(toast) => {
                                 terminal.clear()?;
                                 terminal.flush()?;
-                                state.toast = toast;
+                                apply_app_toast(&mut state, toast);
                             }
                             Err(error) => {
-                                state.toast = AppToast::Error(error.to_string());
+                                apply_app_toast(&mut state, AppToast::Error(error.to_string()));
                             }
                         }
                         terminal.draw(|f| {
@@ -429,7 +580,7 @@ fn main_recover_loop(
                             terminal.clear()?;
                             terminal.flush()?;
                         }
-                        state.toast = toast;
+                        apply_app_toast(&mut state, toast);
                         terminal.draw(|f| {
                             draw_closure(f, &mut state);
                         })?;
@@ -616,8 +767,10 @@ fn main_recover_loop(
                 HeatmapLoadedResult::Failure { key, message } => {
                     state.heatmap_render.pending_keys.remove(&key);
                     if state.heatmap_render.current_key.as_ref() == Some(&key) {
-                        state.toast =
-                            AppToast::Error(format!("Heatmap prefetch failed: {message}"));
+                        apply_app_toast(
+                            &mut state,
+                            AppToast::Error(format!("Heatmap prefetch failed: {message}")),
+                        );
                         terminal.draw(|f| {
                             draw_closure(f, &mut state);
                         })?;
@@ -644,7 +797,7 @@ fn main_recover_loop(
                             .multi_chart
                             .apply_loaded_item(item_id, kind, points, source_len)
                         {
-                            state.toast = AppToast::Error(error);
+                            apply_app_toast(&mut state, AppToast::Error(error));
                         } else if should_refresh_dependents {
                             if let Err(error) =
                                 state.multi_chart.refresh_expression_dependents_for_item(
@@ -652,7 +805,7 @@ fn main_recover_loop(
                                     state.file.as_ref(),
                                 )
                             {
-                                state.toast = AppToast::Error(error);
+                                apply_app_toast(&mut state, AppToast::Error(error));
                             }
                         }
                     }
@@ -668,7 +821,7 @@ fn main_recover_loop(
                     .multi_chart
                     .queue_expression_detail_refresh(state.file.as_ref())
                 {
-                    state.toast = AppToast::Error(error);
+                    apply_app_toast(&mut state, AppToast::Error(error));
                 }
                 terminal.draw(|f| {
                     draw_closure(f, &mut state);
@@ -676,7 +829,7 @@ fn main_recover_loop(
             }
             AppEvent::MultiChartExpressionRefresh(result) => {
                 if let Err(error) = state.multi_chart.apply_expression_refresh_result(result) {
-                    state.toast = AppToast::Error(error);
+                    apply_app_toast(&mut state, AppToast::Error(error));
                 }
                 terminal.draw(|f| {
                     draw_closure(f, &mut state);
@@ -697,7 +850,7 @@ fn main_recover_loop(
             }
             AppEvent::FileChanged => {
                 if let Some(toast) = state.register_file_watch_change() {
-                    state.toast = toast;
+                    apply_app_toast(&mut state, toast);
                     terminal.draw(|f| {
                         draw_closure(f, &mut state);
                     })?;
@@ -717,26 +870,29 @@ fn apply_startup_event_result(state: &mut AppState<'_>, event_result: EventResul
         EventResult::Continue | EventResult::Redraw | EventResult::Copying => Ok(false),
         EventResult::ReloadFile { write } => {
             match reload_current_file(state, write) {
-                Ok(message) => state.toast = AppToast::Info(message),
-                Err(error) => state.toast = AppToast::Error(error.to_string()),
+                Ok(message) => apply_app_toast(state, AppToast::Info(message)),
+                Err(error) => apply_app_toast(state, AppToast::Error(error.to_string())),
             }
             Ok(false)
         }
         EventResult::Configure { .. } => {
-            state.toast = AppToast::Info(
-                "The configure command is only available after startup completes".to_string(),
+            apply_app_toast(
+                state,
+                AppToast::Info(
+                    "The configure command is only available after startup completes".to_string(),
+                ),
             );
             Ok(false)
         }
         EventResult::Error(error) => {
-            state.toast = AppToast::Error(error);
+            apply_app_toast(state, AppToast::Error(error));
             Ok(false)
         }
         EventResult::Toast(toast, full_redraw) => {
             if full_redraw {
                 state.compute_tree_view();
             }
-            state.toast = toast;
+            apply_app_toast(state, toast);
             Ok(false)
         }
     }
@@ -955,6 +1111,15 @@ fn render_header(
             Style::default().fg(configure::themed_color(|colors| colors.content.help_hint)),
         ),
     ]);
+    let health_badge = health_badge_spans(state);
+    let right = if health_badge.is_empty() {
+        right
+    } else {
+        let mut spans = right.spans;
+        spans.push(Span::raw(" "));
+        spans.extend(health_badge);
+        Line::from(spans)
+    };
     let right_width = right.width() as u16;
     let mchart_width = Line::from(mchart_label.as_str()).width() as u16;
     let right_start_x = columns[2]
@@ -979,11 +1144,69 @@ fn render_header(
     body_area
 }
 
+fn health_badge_spans(state: &AppState<'_>) -> Vec<Span<'static>> {
+    let (warning_count, fail_count) = health_issue_counts(state);
+    let mut spans = Vec::new();
+    if warning_count > 0 {
+        spans.push(Span::styled(
+            format!(
+                "{warning_count}{}",
+                health_status_symbol(HealthStatus::Warning)
+            ),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.toast.warning))
+                .bold(),
+        ));
+    }
+    if fail_count > 0 {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            format!("{fail_count}{}", health_status_symbol(HealthStatus::Fail)),
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.text.error))
+                .bold(),
+        ));
+    }
+    spans
+}
+
+fn health_issue_counts(state: &AppState<'_>) -> (usize, usize) {
+    let runtime = crate::compat::run_runtime_healthcheck(
+        crate::compat::current(),
+        state.image_protocol_enabled,
+    );
+    let snapshot = configure::current_registry_snapshot();
+    let plugin_statuses = snapshot.plugins().map(|plugin| plugin.health_status);
+    let reported_statuses = crate::health::reported_health_issues()
+        .into_iter()
+        .map(|issue| issue.result.status);
+    runtime
+        .into_iter()
+        .map(|result| result.status)
+        .chain(plugin_statuses)
+        .chain(reported_statuses)
+        .fold((0usize, 0usize), |(warning, fail), status| match status {
+            HealthStatus::Healthy => (warning, fail),
+            HealthStatus::Warning => (warning + 1, fail),
+            HealthStatus::Fail => (warning, fail + 1),
+        })
+}
+
+fn health_status_symbol(status: HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Healthy => "●",
+        HealthStatus::Warning => "▲",
+        HealthStatus::Fail => "✖",
+    }
+}
+
 fn command_modal_area(area: Rect) -> Rect {
     if area.width == 0 || area.height == 0 {
         return Rect::new(0, 0, 0, 0);
     }
-    let width = area.width.min(96).max(24).min(area.width);
+    let width = area.width.clamp(24, 96);
     let height = area.height.min(COMMAND_BAR_HEIGHT.max(6));
     let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
     let y = area
@@ -1049,7 +1272,7 @@ fn toast_parts(toast: &AppToast) -> Option<(&'static str, &str, ratatui::style::
             configure::themed_color(|colors| colors.toast.info),
         )),
         AppToast::Warning(message) => Some((
-            "WARN",
+            "WARNING",
             message.as_str(),
             configure::themed_color(|colors| colors.toast.warning),
         )),

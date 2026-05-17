@@ -2,7 +2,9 @@ use clap::Parser;
 use ratatui::crossterm::style::{Attribute, Color, Stylize};
 use std::{
     ffi::OsString,
+    fs,
     io::{self, IsTerminal, Read, Write},
+    path::PathBuf,
 };
 
 use crate::{
@@ -48,6 +50,14 @@ pub(crate) struct Args {
     /// Disable terminal graphics probing without enabling other compatibility fallbacks.
     #[clap(long = "no-terminal-graphics")]
     pub(crate) no_terminal_graphics: bool,
+
+    /// Use this Lua config path instead of the default config directory path.
+    #[clap(long = "config", value_name = "PATH")]
+    pub(crate) config: Option<PathBuf>,
+
+    /// Initialize a new h5v plugin scaffold at PATH and exit.
+    #[clap(long = "init-plugin", value_name = "PATH")]
+    pub(crate) init_plugin: Option<PathBuf>,
 }
 
 pub(crate) struct CollectedStartupCommands {
@@ -58,7 +68,7 @@ pub(crate) struct CollectedStartupCommands {
 struct ScriptTestSummary {
     origin: String,
     command: String,
-    action: &'static str,
+    action: String,
 }
 
 struct ScriptTestTheme {
@@ -151,6 +161,126 @@ pub(crate) fn run_script_test(startup_commands: &[StartupCommand]) -> Result<(),
     Ok(())
 }
 
+pub(crate) fn init_plugin_scaffold(path: &std::path::Path) -> Result<String, AppError> {
+    let plugin_root = path;
+    let plugin_name = plugin_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            AppError::FileError(format!(
+                "Plugin path '{}' must end with a directory name",
+                plugin_root.display()
+            ))
+        })?;
+    if plugin_root.exists() {
+        if !plugin_root.is_dir() {
+            return Err(AppError::FileError(format!(
+                "Plugin path '{}' already exists and is not a directory",
+                plugin_root.display()
+            )));
+        }
+    }
+
+    fs::create_dir_all(plugin_root.join("lua"))?;
+    let manifest_path = plugin_root.join("h5v-plugin.toml");
+    let entry_path = plugin_root.join("lua").join("init.lua");
+    let plugin_id = sanitize_plugin_id(plugin_name);
+    let display_name = humanize_plugin_name(plugin_name);
+    if !manifest_path.exists() {
+        fs::write(
+            &manifest_path,
+            format!(
+                "id = \"{plugin_id}\"\nname = \"{display_name}\"\nversion = \"0.1.0\"\napi_version = \"2\"\nentry = \"lua/init.lua\"\n"
+            ),
+        )?;
+    }
+    if !entry_path.exists() {
+        fs::write(&entry_path, plugin_lua_template())?;
+    }
+    configure::refresh_plugin_lua_ls_support_files(plugin_root)?;
+
+    Ok(format!(
+        "Initialized plugin scaffold at {}\n- {}\n- {}",
+        plugin_root.display(),
+        manifest_path.display(),
+        entry_path.display()
+    ))
+}
+
+fn sanitize_plugin_id(name: &str) -> String {
+    let mut id = String::new();
+    let mut last_was_separator = false;
+    for ch in name.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else {
+            '.'
+        };
+        if mapped == '.' {
+            if !last_was_separator && !id.is_empty() {
+                id.push('.');
+            }
+            last_was_separator = true;
+        } else {
+            id.push(mapped);
+            last_was_separator = false;
+        }
+    }
+    let trimmed = id.trim_matches('.');
+    if trimmed.is_empty() {
+        "example.plugin".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn humanize_plugin_name(name: &str) -> String {
+    let words = name
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    if words.is_empty() {
+        "Example Plugin".to_string()
+    } else {
+        words.join(" ")
+    }
+}
+
+fn plugin_lua_template() -> &'static str {
+    r#"---@type H5vPluginModule
+return {
+  ---@param ctx H5vPluginHealthcheckContext
+  health = function(ctx)
+    return {
+      status = ctx.health.healthy,
+      message = ctx.ui.build(function(ui)
+        ui.text("🟢 successfully loaded plugin")
+      end),
+    }
+  end,
+
+  ---@param h5v H5vConfig
+  ---@param ctx H5vPluginInitContext
+  init = function(h5v, ctx)
+    ctx.toast.info("success :D")
+  end,
+}
+"#
+}
+
 fn build_script_test_summaries(
     startup_commands: &[StartupCommand],
 ) -> Result<Vec<ScriptTestSummary>, AppError> {
@@ -162,7 +292,7 @@ fn build_script_test_summaries(
         summaries.push(ScriptTestSummary {
             origin: startup_command.origin.clone(),
             command: format_command_invocation(&invocation),
-            action: describe_command_invocation(&invocation).unwrap_or("No-op"),
+            action: describe_command_invocation(&invocation).unwrap_or_else(|| "No-op".to_string()),
         });
     }
     Ok(summaries)
@@ -212,7 +342,7 @@ fn format_script_test_report(summaries: &[ScriptTestSummary], theme: ScriptTestT
         lines.push(format!(
             "   {} {}",
             theme.label("action "),
-            theme.action(summary.action)
+            theme.action(&summary.action)
         ));
         if idx + 1 != summaries.len() {
             lines.push(theme.rule(rule_width));
@@ -285,11 +415,11 @@ impl ScriptTestTheme {
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
 
     use super::{
         build_script_test_summaries, collect_startup_commands_from_inputs,
-        format_script_test_report, normalize_cli_args, Args, ScriptTestTheme,
+        format_script_test_report, init_plugin_scaffold, normalize_cli_args, Args, ScriptTestTheme,
     };
     use crate::GIT_VERSION;
 
@@ -302,6 +432,8 @@ mod tests {
             script_test: false,
             compatibility: false,
             no_terminal_graphics: false,
+            config: None,
+            init_plugin: None,
         }
     }
 
@@ -375,5 +507,80 @@ mod tests {
         let help = String::from_utf8(help).expect("utf8 help");
         assert!(help.contains(&format!("Version: {GIT_VERSION}")));
         assert!(help.contains("--compatibility"));
+        assert!(help.contains("--config"));
+    }
+
+    #[test]
+    fn parses_custom_config_path_argument() {
+        let args = Args::parse_from(["h5v", "--config", "/tmp/h5v/init.lua", "file.h5"]);
+        assert_eq!(args.config, Some("/tmp/h5v/init.lua".into()));
+    }
+
+    #[test]
+    fn parses_init_plugin_argument() {
+        let args = Args::parse_from(["h5v", "--init-plugin", "/tmp/demo-plugin"]);
+        assert_eq!(args.init_plugin, Some("/tmp/demo-plugin".into()));
+    }
+
+    #[test]
+    fn initializes_plugin_scaffold_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let plugin_root = temp.path().join("demo-analysis");
+
+        let message = init_plugin_scaffold(&plugin_root).expect("init plugin");
+        assert!(message.contains("Initialized plugin scaffold"));
+
+        let manifest =
+            std::fs::read_to_string(plugin_root.join("h5v-plugin.toml")).expect("read manifest");
+        assert!(manifest.contains("id = \"demo.analysis\""));
+        assert!(manifest.contains("entry = \"lua/init.lua\""));
+
+        let entry =
+            std::fs::read_to_string(plugin_root.join("lua/init.lua")).expect("read entry lua");
+        let lua_rc = std::fs::read_to_string(plugin_root.join(".luarc.json")).expect("read lua rc");
+        let stub =
+            std::fs::read_to_string(plugin_root.join(".h5v-luals/h5v.lua")).expect("read lua stub");
+        assert!(lua_rc.contains("\"mode\": \"plugin\""));
+        assert!(stub.contains("---@class H5vPluginModule"));
+        assert!(entry.contains("health = function(ctx)"));
+        assert!(entry.contains("ctx.health.healthy"));
+        assert!(entry.contains("ctx.ui.build(function(ui)"));
+        assert!(entry.contains("successfully loaded plugin"));
+        assert!(entry.contains("success :D"));
+        assert!(entry.contains("---@param h5v H5vConfig"));
+        assert!(entry.contains("---@param ctx H5vPluginInitContext"));
+    }
+
+    #[test]
+    fn preserves_existing_plugin_files_but_refreshes_luals_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let plugin_root = temp.path().join("demo-analysis");
+        std::fs::create_dir_all(plugin_root.join("lua")).expect("create plugin lua dir");
+        std::fs::write(plugin_root.join("h5v-plugin.toml"), "custom manifest\n")
+            .expect("write custom manifest");
+        std::fs::write(plugin_root.join("lua/init.lua"), "-- keep me\n")
+            .expect("write custom init");
+        std::fs::create_dir_all(plugin_root.join(".h5v-luals")).expect("create luals dir");
+        std::fs::write(plugin_root.join(".luarc.json"), "{\"stale\":true}\n")
+            .expect("write stale luarc");
+        std::fs::write(plugin_root.join(".h5v-luals/h5v.lua"), "-- stale\n")
+            .expect("write stale stub");
+
+        init_plugin_scaffold(&plugin_root).expect("refresh plugin scaffold");
+
+        assert_eq!(
+            std::fs::read_to_string(plugin_root.join("h5v-plugin.toml")).expect("read manifest"),
+            "custom manifest\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(plugin_root.join("lua/init.lua")).expect("read init"),
+            "-- keep me\n"
+        );
+        let lua_rc = std::fs::read_to_string(plugin_root.join(".luarc.json")).expect("read luarc");
+        let stub =
+            std::fs::read_to_string(plugin_root.join(".h5v-luals/h5v.lua")).expect("read stub");
+        assert!(lua_rc.contains("\"mode\": \"plugin\""));
+        assert!(stub.contains("---@class H5vPluginModule"));
+        assert_ne!(stub, "-- stale\n");
     }
 }

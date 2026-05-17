@@ -4,12 +4,12 @@ use hdf5_metno::File;
 
 use crate::{
     configure,
+    configure::registry::MchartFunctionMetadata,
     search::{full_traversal, fuzzy_highlight_spans, fuzzy_match_score},
 };
 
 use super::eval::normalize_absolute_object_path;
 use super::expression::{parse_expression_item_ref, parse_expression_load_ref};
-use super::functions::mchart_functions;
 use super::*;
 
 pub(super) const EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS: usize = 4;
@@ -1224,19 +1224,20 @@ fn expression_item_ref_suggestions(
 }
 
 fn expression_function_suggestions(fragment: &str) -> Vec<ExpressionPromptSuggestion> {
-    let mut suggestions = mchart_functions()
-        .iter()
+    let registry = configure::current_registry_snapshot();
+    let mut suggestions = registry
+        .mchart_functions()
         .filter_map(|function| {
-            let score = expression_suggestion_score(function.name, fragment, None)?;
+            let score = expression_suggestion_score(&function.name, fragment, None)?;
             Some((
                 score,
                 ExpressionPromptSuggestion {
                     symbol: "fx".to_string(),
-                    insert_text: function.completion_insert.to_string(),
-                    label: function.signature(),
-                    detail: function.summary.to_string(),
+                    insert_text: function.completion_insert.clone(),
+                    label: mchart_function_signature(function),
+                    detail: function.summary.clone(),
                     kind: ExpressionPromptSuggestionKind::Function,
-                    highlight_spans: fuzzy_highlight_spans(function.name, fragment),
+                    highlight_spans: fuzzy_highlight_spans(&function.name, fragment),
                 },
             ))
         })
@@ -1251,6 +1252,16 @@ fn expression_function_suggestions(fragment: &str) -> Vec<ExpressionPromptSugges
         .take(EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS)
         .map(|(_, suggestion)| suggestion)
         .collect()
+}
+
+fn mchart_function_signature(function: &MchartFunctionMetadata) -> String {
+    let args = function
+        .params
+        .iter()
+        .map(|arg| arg.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{}({args})", function.name)
 }
 
 pub(super) fn expression_suggestion_score(

@@ -4,15 +4,17 @@ pub enum HelpTab {
     Commands,
     MultiChart,
     Heatmap,
+    Health,
     Configuration,
 }
 
 impl HelpTab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Keymap,
         Self::Commands,
         Self::MultiChart,
         Self::Heatmap,
+        Self::Health,
         Self::Configuration,
     ];
 
@@ -154,6 +156,7 @@ pub struct HelpViewState {
     pub command_section: HelpCommandSection,
     pub customization_section: HelpCustomizationSection,
     pub multichart_section: HelpMultiChartSection,
+    pub health_section: usize,
     pub scroll_offset: usize,
 }
 
@@ -165,6 +168,7 @@ impl Default for HelpViewState {
             command_section: HelpCommandSection::Navigation,
             customization_section: HelpCustomizationSection::Configuration,
             multichart_section: HelpMultiChartSection::Overview,
+            health_section: 0,
             scroll_offset: 0,
         }
     }

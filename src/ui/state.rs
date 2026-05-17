@@ -11,6 +11,7 @@ use hdf5_metno::File;
 
 use crate::{
     configure,
+    configure::registry::ContentModeHandle,
     data::{PreviewSelection, SliceSelection},
     error::AppError,
     h5f::{H5FNode, HasPath, Node},
@@ -38,7 +39,7 @@ pub use core::{
     AppToast, AttributeCreateDialogState, AttributeCreateField, AttributeCursor,
     AttributeDeleteDialogState, AttributeEditRequest, AttributeViewSelection, ContentShowMode,
     FileWatchState, FixedStringOverflowChoice, FixedStringOverflowDialogState, Focus, LastFocused,
-    MatrixViewState, Mode, PendingChord,
+    LogLevelFilter, LogsFilterFocus, LogsViewState, MatrixViewState, Mode, PendingChord,
 };
 #[allow(unused_imports)]
 use heatmap::heatmap_anchor_fraction;
@@ -66,8 +67,8 @@ pub use preview::{
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,
-    HelpSidebarHitbox, HelpSidebarTarget, HelpTabHitbox, MatrixCellHitbox, MatrixRowHitbox,
-    MetadataCellHitbox, TreeHitbox, UiLayoutState,
+    HelpSidebarHitbox, HelpSidebarTarget, HelpTabHitbox, LogsFilterHitbox, LogsFilterTarget,
+    MatrixCellHitbox, MatrixRowHitbox, MetadataCellHitbox, TreeHitbox, UiLayoutState,
 };
 
 pub struct AppState<'a> {
@@ -90,8 +91,10 @@ pub struct AppState<'a> {
     pub mode: Mode,
     pub command_return_mode: Mode,
     pub help_return_mode: Mode,
+    pub logs_return_mode: Mode,
     pub searcher: Option<Searcher>,
     pub help: HelpViewState,
+    pub logs: LogsViewState,
     pub pending_chord: Option<PendingChord>,
     pub binding_command_depth: usize,
     pub show_tree_view: bool,
@@ -101,7 +104,7 @@ pub struct AppState<'a> {
     pub preview_debounce_generation: u64,
     pub preview_debounce_until: Option<Instant>,
     pub preview_debounce_path: Option<String>,
-    pub content_mode: ContentShowMode,
+    pub content_mode: ContentModeHandle,
     pub img_state: ImgState,
     pub matrix_view_state: MatrixViewState,
     pub heatmap_viewport_region: Option<HeatmapRegionSelection>,
@@ -245,7 +248,7 @@ impl AppState<'_> {
     pub fn selected_tree_path(&self) -> Option<String> {
         self.treeview
             .get(self.tree_view_cursor)
-            .map(|item| item.node.borrow().node.path())
+            .and_then(|item| item.node.try_borrow().ok().map(|node| node.node.path()))
     }
 
     pub fn select_tree_node_by_path(&mut self, path: &str) -> Result<()> {
@@ -438,6 +441,16 @@ impl AppState<'_> {
                 self.help.scroll_offset = 0;
                 true
             }
+            HelpTab::Health => {
+                let last = self.health_section_count().saturating_sub(1);
+                if self.help.health_section >= last {
+                    false
+                } else {
+                    self.help.health_section += 1;
+                    self.help.scroll_offset = 0;
+                    true
+                }
+            }
             _ => false,
         }
     }
@@ -480,6 +493,15 @@ impl AppState<'_> {
                 self.help.scroll_offset = 0;
                 true
             }
+            HelpTab::Health => {
+                if self.help.health_section == 0 {
+                    false
+                } else {
+                    self.help.health_section -= 1;
+                    self.help.scroll_offset = 0;
+                    true
+                }
+            }
             _ => false,
         }
     }
@@ -518,6 +540,15 @@ impl AppState<'_> {
                     false
                 } else {
                     self.help.multichart_section = HelpMultiChartSection::Overview;
+                    self.help.scroll_offset = 0;
+                    true
+                }
+            }
+            HelpTab::Health => {
+                if self.help.health_section == 0 {
+                    false
+                } else {
+                    self.help.health_section = 0;
                     self.help.scroll_offset = 0;
                     true
                 }
@@ -564,6 +595,16 @@ impl AppState<'_> {
                     true
                 }
             }
+            HelpTab::Health => {
+                let last = self.health_section_count().saturating_sub(1);
+                if self.help.health_section == last {
+                    false
+                } else {
+                    self.help.health_section = last;
+                    self.help.scroll_offset = 0;
+                    true
+                }
+            }
             _ => false,
         }
     }
@@ -588,6 +629,54 @@ impl AppState<'_> {
         }
         self.help.scroll_offset = next;
         true
+    }
+
+    fn health_section_count(&self) -> usize {
+        1 + configure::current_registry_snapshot().plugins().count()
+    }
+
+    pub fn logs_max_scroll(&self) -> usize {
+        self.logs
+            .content_lines
+            .saturating_sub(self.logs.viewport_lines.max(1))
+    }
+
+    pub fn logs_scroll_by(&mut self, delta: isize) -> bool {
+        let next = self
+            .logs
+            .scroll_offset
+            .saturating_add_signed(delta)
+            .min(self.logs_max_scroll());
+        if next == self.logs.scroll_offset {
+            return false;
+        }
+        self.logs.scroll_offset = next;
+        true
+    }
+
+    pub fn logs_set_scroll(&mut self, offset: usize) -> bool {
+        let next = offset.min(self.logs_max_scroll());
+        if next == self.logs.scroll_offset {
+            return false;
+        }
+        self.logs.scroll_offset = next;
+        true
+    }
+
+    pub fn logs_next_filter_focus(&mut self) {
+        self.logs.filter_focus = match self.logs.filter_focus {
+            LogsFilterFocus::Scope => LogsFilterFocus::Level,
+            LogsFilterFocus::Level => LogsFilterFocus::Handle,
+            LogsFilterFocus::Handle => LogsFilterFocus::Scope,
+        };
+    }
+
+    pub fn logs_prev_filter_focus(&mut self) {
+        self.logs.filter_focus = match self.logs.filter_focus {
+            LogsFilterFocus::Scope => LogsFilterFocus::Handle,
+            LogsFilterFocus::Level => LogsFilterFocus::Scope,
+            LogsFilterFocus::Handle => LogsFilterFocus::Level,
+        };
     }
 
     pub fn focus_left(&mut self) {
@@ -677,29 +766,76 @@ impl AppState<'_> {
     }
 
     pub fn swap_content_show_mode(&mut self, available: Vec<ContentShowMode>) {
-        let available = self.filter_runtime_content_modes(available);
-        let ordered = crate::configure::ordered_content_modes(&available);
+        self.swap_content_mode_handle(self.available_content_mode_handles(available));
+    }
+
+    pub fn swap_content_mode_handle(&mut self, available: Vec<ContentModeHandle>) {
+        let ordered = crate::configure::ordered_content_mode_handles(&available);
         if ordered.is_empty() {
             return;
         }
         let current_index = ordered
             .iter()
-            .position(|mode| *mode == self.content_mode)
+            .position(|handle| *handle == self.content_mode)
             .unwrap_or(0);
-        self.set_content_mode(ordered[(current_index + 1) % ordered.len()]);
+        self.set_content_mode_handle(ordered[(current_index + 1) % ordered.len()].clone());
     }
 
     pub fn set_content_mode(&mut self, mode: ContentShowMode) {
-        if self.content_mode == ContentShowMode::Heatmap && mode != ContentShowMode::Heatmap {
+        if self.content_mode == ContentShowMode::Heatmap.handle()
+            && mode != ContentShowMode::Heatmap
+        {
             self.end_heatmap_drag();
         }
-        self.content_mode = mode;
+        self.content_mode = mode.handle();
+    }
+
+    pub fn set_content_mode_handle(&mut self, handle: ContentModeHandle) {
+        if self.content_mode == ContentShowMode::Heatmap.handle()
+            && handle != ContentShowMode::Heatmap.handle()
+        {
+            self.end_heatmap_drag();
+        }
+        self.content_mode = handle;
+    }
+
+    pub fn content_mode_handle_eval(&self, available: Vec<ContentModeHandle>) -> ContentModeHandle {
+        if let Some(handle) = available
+            .iter()
+            .find(|handle| **handle == self.content_mode)
+            .cloned()
+        {
+            handle
+        } else {
+            crate::configure::ordered_content_mode_handles(&available)
+                .first()
+                .cloned()
+                .unwrap_or_else(|| ContentShowMode::Preview.handle())
+        }
+    }
+
+    pub fn active_content_mode_handle(&self) -> ContentModeHandle {
+        let available = self
+            .treeview
+            .get(self.tree_view_cursor)
+            .and_then(|item| {
+                item.node
+                    .try_borrow()
+                    .ok()
+                    .map(|node| self.available_content_mode_handles(node.content_show_modes()))
+            })
+            .unwrap_or_else(|| vec![self.content_mode.clone()]);
+        self.content_mode_handle_eval(available)
     }
 
     pub fn content_show_mode_eval(&self, available: Vec<ContentShowMode>) -> ContentShowMode {
         let available = self.filter_runtime_content_modes(available);
-        if available.contains(&self.content_mode) {
-            self.content_mode
+        if let Some(mode) = available
+            .iter()
+            .copied()
+            .find(|mode| mode.handle() == self.content_mode)
+        {
+            mode
         } else {
             crate::configure::ordered_content_modes(&available)
                 .first()
@@ -709,6 +845,11 @@ impl AppState<'_> {
     }
 
     pub fn active_content_mode(&self) -> ContentShowMode {
+        if let Some(mode) =
+            ContentShowMode::parse_handle(self.active_content_mode_handle().as_str())
+        {
+            return mode;
+        }
         let available = self
             .treeview
             .get(self.tree_view_cursor)
@@ -718,8 +859,40 @@ impl AppState<'_> {
                     .ok()
                     .map(|node| node.content_show_modes())
             })
-            .unwrap_or_else(|| vec![self.content_mode]);
+            .unwrap_or_else(|| {
+                vec![ContentShowMode::parse_handle(self.content_mode.as_str())
+                    .unwrap_or(ContentShowMode::Preview)]
+            });
         self.content_show_mode_eval(available)
+    }
+
+    pub fn available_content_mode_handles(
+        &self,
+        available: Vec<ContentShowMode>,
+    ) -> Vec<ContentModeHandle> {
+        let mut handles = self
+            .filter_runtime_content_modes(available)
+            .into_iter()
+            .map(ContentShowMode::handle)
+            .collect::<Vec<_>>();
+        if let Ok(custom_handles) = crate::configure::available_lua_content_mode_handles(self) {
+            for handle in custom_handles {
+                if !handles.contains(&handle) {
+                    handles.push(handle);
+                }
+            }
+            return handles;
+        }
+        let registry = crate::configure::current_registry_snapshot();
+        for metadata in registry.content_modes() {
+            if ContentShowMode::parse_handle(metadata.handle.as_str()).is_none()
+                && metadata.callback_id.is_some()
+                && !handles.contains(&metadata.handle)
+            {
+                handles.push(metadata.handle.clone());
+            }
+        }
+        handles
     }
 
     pub fn filter_runtime_content_modes(
@@ -927,10 +1100,8 @@ impl AppState<'_> {
                     } else {
                         next_next as usize
                     };
-                    if (is_compound_root_matrix && next_next != node.selected_row)
-                        || (!is_compound_root_matrix
-                            && next_next != node.selected_col
-                            && next_next != node.selected_row)
+                    if next_next != node.selected_row
+                        && (is_compound_root_matrix || next_next != node.selected_col)
                     {
                         node.selected_dim = next_next.clamp(0, current_shape_len as usize);
                     } else {

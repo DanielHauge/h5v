@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use ratatui::{
     style::Style,
     symbols::border,
@@ -5,18 +7,18 @@ use ratatui::{
 };
 
 use crate::{
+    compat::run_runtime_healthcheck,
     configure,
+    health::HealthStatus,
     ui::{
-        command::{
-            command_catalog, CommandArgKind, CommandArgSpec, CommandCategory, CommandDescriptor,
-        },
+        command::{command_keybindings_metadata, command_usage_metadata},
         input::keymap::{
             AttributesAction, BoundAction, ContentAction, Direction, EffectiveKeymaps,
             GlobalAction, KeyBinding, MultiChartAction, NormalAction, TreeAction, WindowAction,
         },
-        mchart::functions::{mchart_functions, MchartFunctionCategory, MchartFunctionDefinition},
         state::{
-            HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection,
+            AppState, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
+            HelpMultiChartSection,
         },
         std_comp_render::highlighted_lines,
     },
@@ -96,13 +98,13 @@ pub(super) fn keymap_panel_text(
 
 pub(super) fn command_panel_text(section: HelpCommandSection) -> (String, Vec<Line<'static>>) {
     let (title, category) = match section {
-        HelpCommandSection::Navigation => ("Navigation commands", CommandCategory::Navigation),
-        HelpCommandSection::View => ("View commands", CommandCategory::View),
-        HelpCommandSection::Selection => ("Selection commands", CommandCategory::Selection),
-        HelpCommandSection::Attributes => ("Attribute commands", CommandCategory::Attributes),
-        HelpCommandSection::App => ("App commands", CommandCategory::App),
-        HelpCommandSection::MultiChart => ("Multichart commands", CommandCategory::MultiChart),
-        HelpCommandSection::Input => ("Input commands", CommandCategory::Input),
+        HelpCommandSection::Navigation => ("Navigation commands", "Navigation"),
+        HelpCommandSection::View => ("View commands", "View"),
+        HelpCommandSection::Selection => ("Selection commands", "Selection"),
+        HelpCommandSection::Attributes => ("Attribute commands", "Attributes"),
+        HelpCommandSection::App => ("App commands", "App"),
+        HelpCommandSection::MultiChart => ("Multichart commands", "MultiChart"),
+        HelpCommandSection::Input => ("Input commands", "Input"),
     };
 
     let mut lines = vec![
@@ -112,43 +114,231 @@ pub(super) fn command_panel_text(section: HelpCommandSection) -> (String, Vec<Li
         )),
         Line::raw(""),
     ];
-    let descriptors = command_catalog()
-        .iter()
-        .filter(|descriptor| descriptor.category == category)
+    let snapshot = configure::current_registry_snapshot();
+    let commands = snapshot
+        .commands()
+        .filter(|metadata| {
+            metadata.visibility == configure::registry::CommandVisibility::Visible
+                && metadata.category.eq_ignore_ascii_case(category)
+        })
+        .cloned()
         .collect::<Vec<_>>();
-    for (idx, descriptor) in descriptors.iter().enumerate() {
-        lines.extend(command_descriptor_lines(descriptor));
-        if idx + 1 != descriptors.len() {
+    for (idx, metadata) in commands.iter().enumerate() {
+        lines.extend(command_metadata_lines(metadata));
+        if idx + 1 != commands.len() {
             lines.push(Line::raw(""));
         }
     }
     (title.to_string(), lines)
 }
 
-fn command_descriptor_lines(descriptor: &CommandDescriptor) -> Vec<Line<'static>> {
+pub(super) fn health_panel_text(
+    state: &AppState<'_>,
+    section: usize,
+) -> (String, Vec<Line<'static>>) {
+    if section == 0 {
+        return runtime_health_panel_text(state);
+    }
+    let plugins = configure::current_registry_snapshot()
+        .plugins()
+        .cloned()
+        .collect::<Vec<_>>();
+    let Some(plugin) = plugins.get(section.saturating_sub(1)) else {
+        return (
+            "Health".to_string(),
+            vec![paragraph_line("Health section unavailable.")],
+        );
+    };
+    plugin_health_panel_text(plugin)
+}
+
+fn runtime_health_panel_text(state: &AppState<'_>) -> (String, Vec<Line<'static>>) {
+    let runtime = crate::compat::current();
+    let runtime_results = run_runtime_healthcheck(runtime, state.image_protocol_enabled);
+    let reported_issues = crate::health::reported_health_issues();
+    let status = runtime_results
+        .iter()
+        .map(|result| result.status)
+        .chain(reported_issues.iter().map(|issue| issue.result.status))
+        .max()
+        .unwrap_or(HealthStatus::Healthy);
+    let config_path = configure::config_path()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unavailable".to_string());
+    let config_dir = std::path::Path::new(&config_path)
+        .parent()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unavailable".to_string());
+    let config_load_time = configure::last_config_load_metrics()
+        .map(|metrics| format!("{} ms", metrics.total_duration_ms))
+        .unwrap_or_else(|| "unavailable".to_string());
+    let stdout_is_tty = yes_no(std::io::stdout().is_terminal());
+    let shell = env_value("SHELL");
+    let editor = env_value("EDITOR");
+    let visual = env_value("VISUAL");
+    let term = env_value("TERM");
+    let colorterm = env_value("COLORTERM");
+    let graphics_capable = yes_no(runtime.terminal_graphics && state.image_protocol_enabled);
+
     let mut lines = vec![
-        command_signature_line(descriptor),
-        paragraph_line(descriptor.description),
+        health_status_line(
+            status,
+            "h5v",
+            Some("Built-in runtime and terminal health overview"),
+        ),
+        Line::raw(""),
+        section_title_line("Runtime"),
+        metadata_line("config path", config_path),
+        metadata_line("config dir", config_dir),
+        metadata_line("config load time", config_load_time),
+        metadata_line(
+            "compatibility mode",
+            yes_no(runtime.compatibility_mode).to_string(),
+        ),
+        metadata_line("stdout is tty", stdout_is_tty.to_string()),
+        metadata_line(
+            "graphics enabled",
+            yes_no(runtime.terminal_graphics).to_string(),
+        ),
+        metadata_line("graphics capable", graphics_capable.to_string()),
+        metadata_line("shell", shell),
+        metadata_line("editor", editor),
+        metadata_line("visual", visual),
+        metadata_line("TERM", term),
+        metadata_line("COLORTERM", colorterm),
+        Line::raw(""),
+        section_title_line("Checks"),
     ];
-    if !descriptor.aliases.is_empty() {
-        lines.push(metadata_line("aliases", descriptor.aliases.join(", ")));
+    let check_lines = runtime_results
+        .into_iter()
+        .map(|result| {
+            health_status_line(
+                result.status,
+                "runtime check",
+                Some(result.message.as_str()),
+            )
+        })
+        .collect::<Vec<_>>();
+    lines.extend(check_lines);
+    if !reported_issues.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section_title_line("Configuration and plugin load issues"));
+        lines.extend(reported_issues.into_iter().map(|issue| {
+            health_status_line(
+                issue.result.status,
+                issue.source.as_str(),
+                Some(issue.result.message.as_str()),
+            )
+        }));
     }
-    if !descriptor.keybindings.is_empty() {
-        lines.push(metadata_line("keys", descriptor.keybindings.join(", ")));
+    ("Health: h5v".to_string(), lines)
+}
+
+fn plugin_health_panel_text(
+    plugin: &configure::registry::PluginMetadata,
+) -> (String, Vec<Line<'static>>) {
+    let version = plugin
+        .version
+        .as_ref()
+        .map(|version| format!(" v{version}"))
+        .unwrap_or_default();
+    let title = format!("Health: {}{}", plugin.name, version);
+    let mut lines = vec![
+        health_status_line(
+            plugin.health_status,
+            &format!("{}{}", plugin.name, version),
+            Some("Plugin health result"),
+        ),
+        Line::raw(""),
+        section_title_line("Plugin"),
+        metadata_line("handle", plugin.handle.as_str().to_string()),
+    ];
+    if let Some(source) = plugin.source.as_deref() {
+        lines.push(metadata_line("source", source.to_string()));
     }
-    for (index, arg) in descriptor.args.iter().enumerate() {
+    if let Some(requested_ref) = plugin.requested_ref.as_deref() {
+        lines.push(metadata_line("requested ref", requested_ref.to_string()));
+    }
+    if let Some(commit) = plugin.resolved_commit.as_deref() {
+        lines.push(metadata_line("resolved commit", commit.to_string()));
+    }
+    lines.push(metadata_line(
+        "auto pull",
+        yes_no(plugin.auto_pull).to_string(),
+    ));
+    lines.push(Line::raw(""));
+    lines.push(section_title_line("Message"));
+    if let Some(document) = plugin.health_ui_document.as_deref() {
+        match crate::ui::custom_content::render_serialized_ui_document(document, 72) {
+            Ok(rendered) => lines.extend(framed_example_lines(Some("health"), rendered)),
+            Err(error) => lines.extend(framed_example_lines(
+                Some("health"),
+                vec![Line::from(vec![
+                    Span::styled(
+                        "Failed to render health UI: ".to_string(),
+                        help_muted_style(),
+                    ),
+                    Span::styled(error, help_desc_style()),
+                ])],
+            )),
+        }
+    } else {
+        let message = plugin
+            .health_message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or("No details provided.");
+        lines.extend(framed_example_lines(
+            Some("health"),
+            message.lines().map(paragraph_line).collect(),
+        ));
+    }
+    (title, lines)
+}
+
+fn env_value(name: &str) -> String {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "unset".to_string())
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn command_metadata_lines(metadata: &configure::registry::CommandMetadata) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        command_signature_line(metadata),
+        paragraph_line(&metadata.summary),
+    ];
+    if !metadata.aliases.is_empty() {
+        lines.push(metadata_line("aliases", metadata.aliases.join(", ")));
+    }
+    let keybindings = command_keybindings_metadata(metadata);
+    if !keybindings.is_empty() {
+        lines.push(metadata_line("keys", keybindings));
+    }
+    for (index, arg) in metadata.args.iter().enumerate() {
         lines.extend(command_arg_lines(arg, index));
     }
-    lines.extend(command_example_block(descriptor));
+    lines.extend(command_example_block(metadata));
     lines
 }
 
-fn command_signature_line(descriptor: &CommandDescriptor) -> Line<'static> {
+fn command_signature_line(metadata: &configure::registry::CommandMetadata) -> Line<'static> {
+    let usage = command_usage_metadata(metadata);
+    let mut parts = usage.split_whitespace();
     let mut spans = vec![Span::styled(
-        descriptor.name.to_string(),
+        parts.next().unwrap_or_default().to_string(),
         help_function_name_style(),
     )];
-    for (index, arg) in descriptor.args.iter().enumerate() {
+    for (index, arg) in metadata.args.iter().enumerate() {
         spans.push(Span::raw(" "));
         let open = if arg.required { "<" } else { "[" };
         let close = if arg.required { ">" } else { "]" };
@@ -164,10 +354,10 @@ fn command_signature_line(descriptor: &CommandDescriptor) -> Line<'static> {
     Line::from(spans)
 }
 
-fn command_arg_kind_label(kind: CommandArgKind) -> &'static str {
+fn command_arg_kind_label(kind: configure::registry::CommandArgValueKind) -> &'static str {
     match kind {
-        CommandArgKind::UnsignedInt => "uint",
-        CommandArgKind::Word => "word",
+        configure::registry::CommandArgValueKind::UnsignedInt => "uint",
+        configure::registry::CommandArgValueKind::Word => "word",
     }
 }
 
@@ -178,7 +368,10 @@ fn metadata_line(label: &str, value: String) -> Line<'static> {
     ])
 }
 
-fn command_arg_lines(arg: &CommandArgSpec, index: usize) -> Vec<Line<'static>> {
+fn command_arg_lines(
+    arg: &configure::registry::CommandArgMetadata,
+    index: usize,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("  ", help_muted_style()),
         Span::styled(format!("{}: ", arg.name), help_arg_style(index)),
@@ -193,8 +386,19 @@ fn command_arg_lines(arg: &CommandArgSpec, index: usize) -> Vec<Line<'static>> {
     lines
 }
 
-fn command_example_block(descriptor: &CommandDescriptor) -> Vec<Line<'static>> {
-    framed_example_lines(Some("h5v"), vec![command_example_line(descriptor.example)])
+fn command_example_block(metadata: &configure::registry::CommandMetadata) -> Vec<Line<'static>> {
+    if metadata.examples.is_empty() {
+        Vec::new()
+    } else {
+        framed_example_lines(
+            Some("h5v"),
+            metadata
+                .examples
+                .iter()
+                .map(|example| command_example_line(example))
+                .collect(),
+        )
+    }
 }
 
 fn command_example_line(example: &str) -> Line<'static> {
@@ -404,7 +608,9 @@ fn describe_bound_action<T, S: Into<String>>(
 ) -> String {
     match target {
         BoundAction::Action(action) => describe_action(action).into(),
-        BoundAction::Command(command) => format!("Run command: {command}"),
+        BoundAction::Command(command) => crate::ui::command::command_metadata(command)
+            .map(|metadata| format!("Run command: {}", command_usage_metadata(&metadata)))
+            .unwrap_or_else(|| format!("Run command: {command}")),
         BoundAction::Script(script) => {
             let first = script.lines().next().unwrap_or_default().trim();
             if first.is_empty() {
@@ -530,7 +736,7 @@ fn multichart_function_reducers_panel() -> (String, Vec<Line<'static>>) {
     multichart_function_panel(
         "Functions · reducers",
         "Reducers collapse a whole series to one scalar value. They are useful for labels, normalization, thresholds, and scalar-only derived items.",
-        MchartFunctionCategory::Reducer,
+        configure::registry::MchartFunctionCategory::Reducer,
     )
 }
 
@@ -538,7 +744,7 @@ fn multichart_function_math_panel() -> (String, Vec<Line<'static>>) {
     multichart_function_panel(
         "Functions · math",
         "These helpers preserve shape: series stay series, scalars stay scalars. Use them for cleanup, scaling, and nonlinear transforms.",
-        MchartFunctionCategory::Math,
+        configure::registry::MchartFunctionCategory::Math,
     )
 }
 
@@ -546,7 +752,7 @@ fn multichart_function_transforms_panel() -> (String, Vec<Line<'static>>) {
     multichart_function_panel(
         "Functions · transforms",
         "Transforms build new series from existing ones. rolling_* helpers work anywhere; interp(...) and slice(...) must stay at the top level of the expression.",
-        MchartFunctionCategory::Transform,
+        configure::registry::MchartFunctionCategory::Transform,
     )
 }
 
@@ -714,10 +920,10 @@ fn customization_symbols_panel() -> (String, Vec<Line<'static>>) {
 fn customization_keymaps_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
         paragraph_line(
-            "Keymaps are configured in Lua with helpers like bind, bind_command, bind_commands, bind_script, bind_lua, and unbind. Use h5v.modes.* and h5v.actions.* constants so LuaLS autocomplete can help you.",
+            "Keymaps are configured in Lua with h5v.keys.bind({ ... }) and h5v.keys.unbind({ ... }). Use h5v.ids.keymap_modes.*, h5v.ids.commands.*, and h5v.actions.* constants so LuaLS autocomplete can help you.",
         ),
         paragraph_line(
-            "Use bind for built-in actions, bind_command for a single command, bind_commands or bind_script for repeatable command sequences, and bind_lua when you want a callback.",
+            "Each binding declares one target: a command handle, built-in action, single command string, command list, script, or Lua callback.",
         ),
         Line::raw(""),
         section_title_line("Examples"),
@@ -725,7 +931,7 @@ fn customization_keymaps_panel() -> (String, Vec<Line<'static>>) {
     lines.extend(highlighted_code_block(
         "lua",
         "lua",
-        "bind(h5v.modes.Global, \"ctrl+h\", h5v.actions.ShowHelp, \"Show help\")\nunbind(h5v.modes.Heatmap, \"v\")\n\nbind_command(\n  h5v.modes.Heatmap,\n  \"ctrl+alt+r\",\n  \"heatmap range use \\\"Clip 1-99%\\\"\",\n  \"Use clipped range\"\n)\n\nbind_commands(\n  h5v.modes.Global,\n  \"ctrl+k\",\n  { \"down 2\", \"up 1\" },\n  \"Run a short command sequence\"\n)\n\nbind_script(\n  h5v.modes.Global,\n  \"ctrl+s\",\n  \"goto /group/data\\nmode heatmap\\nheatmap range use \\\"Clip 1-99%\\\"\",\n  \"Open a saved view\"\n)\n\nbind_lua(h5v.modes.Global, \"ctrl+l\", function(ctx)\n  ctx.command(\"help reload\")\nend, \"Reload help\")",
+        "h5v.keys.bind({\n  mode = h5v.ids.keymap_modes.global,\n  key = \"ctrl+h\",\n  target = h5v.actions.ShowHelp,\n  description = \"Show help\",\n})\n\nh5v.keys.unbind({\n  mode = h5v.ids.keymap_modes.heatmap,\n  key = \"v\",\n})\n\nh5v.keys.bind({\n  mode = h5v.ids.keymap_modes.heatmap,\n  key = \"ctrl+alt+r\",\n  command = \"heatmap range use \\\"Clip 1-99%\\\"\",\n  description = \"Use clipped range\",\n})\n\nh5v.keys.bind({\n  mode = h5v.ids.keymap_modes.global,\n  key = \"ctrl+k\",\n  commands = { \"down 2\", \"up 1\" },\n  description = \"Run a short command sequence\",\n})\n\nh5v.keys.bind({\n  mode = h5v.ids.keymap_modes.global,\n  key = \"ctrl+l\",\n  lua = function(ctx)\n    ctx.command(\"help reload\")\n  end,\n  description = \"Reload help\",\n})",
     ));
     ("Keymaps".to_string(), lines)
 }
@@ -770,7 +976,7 @@ fn customization_scripting_panel() -> (String, Vec<Line<'static>>) {
     lines.extend(highlighted_code_block(
         "lua",
         "lua",
-        "bind_lua(h5v.modes.Global, \"ctrl+l\", function(ctx)\n  ctx.commands({\n    \"goto /group/image\",\n    \"mode heatmap\",\n    \"heatmap range use \\\"Clip 1-99%\\\"\",\n  })\nend, \"Open the default heatmap workflow\")",
+        "h5v.keys.bind({\n  mode = h5v.ids.keymap_modes.global,\n  key = \"ctrl+l\",\n  lua = function(ctx)\n    ctx.commands({\n      \"goto /group/image\",\n      \"mode heatmap\",\n      \"heatmap range use \\\"Clip 1-99%\\\"\",\n    })\n  end,\n  description = \"Open the default heatmap workflow\",\n})",
     ));
     ("Scripting".to_string(), lines)
 }
@@ -799,6 +1005,39 @@ fn section_title_line(title: &str) -> Line<'static> {
     Line::from(Span::styled(title.to_string(), help_section_style()))
 }
 
+fn health_status_line(status: HealthStatus, label: &str, message: Option<&str>) -> Line<'static> {
+    let (symbol, style) = match status {
+        HealthStatus::Healthy => (
+            "●",
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.toast.info))
+                .bold(),
+        ),
+        HealthStatus::Warning => (
+            "▲",
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.toast.warning))
+                .bold(),
+        ),
+        HealthStatus::Fail => (
+            "✖",
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.text.error))
+                .bold(),
+        ),
+    };
+    let mut spans = vec![
+        Span::styled(format!("{symbol} "), style),
+        Span::styled(label.to_string(), help_function_name_style()),
+        Span::styled(format!(" ({})", status.as_str()), help_muted_style()),
+    ];
+    if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
+        spans.push(Span::styled(": ".to_string(), help_muted_style()));
+        spans.push(Span::styled(message.to_string(), help_desc_style()));
+    }
+    Line::from(spans)
+}
+
 pub(super) fn paragraph_line(text: &str) -> Line<'static> {
     Line::from(Span::styled(text.to_string(), help_desc_style()))
 }
@@ -818,9 +1057,9 @@ fn expression_editor_example(
     lines
 }
 
-fn function_card(function: &MchartFunctionDefinition) -> Vec<Line<'static>> {
+fn function_card(function: &configure::registry::MchartFunctionMetadata) -> Vec<Line<'static>> {
     let mut lines = vec![function_signature_line(function)];
-    lines.push(paragraph_line(function.summary));
+    lines.push(paragraph_line(&function.summary));
     for (index, arg) in function.params.iter().enumerate() {
         lines.push(Line::from(vec![
             Span::styled("  ", help_muted_style()),
@@ -831,13 +1070,15 @@ fn function_card(function: &MchartFunctionDefinition) -> Vec<Line<'static>> {
     lines.extend(multichart_prompt_example(
         7,
         &format!("{}-demo", function.name),
-        function.example,
+        &function.example,
         "prompt",
     ));
     lines
 }
 
-fn function_signature_line(function: &MchartFunctionDefinition) -> Line<'static> {
+fn function_signature_line(
+    function: &configure::registry::MchartFunctionMetadata,
+) -> Line<'static> {
     let mut spans = vec![
         Span::styled(function.name.to_string(), help_function_name_style()),
         Span::styled("(".to_string(), help_muted_style()),
@@ -853,7 +1094,20 @@ fn function_signature_line(function: &MchartFunctionDefinition) -> Line<'static>
     spans.push(Span::styled(")".to_string(), help_muted_style()));
     spans.push(Span::styled(" -> ".to_string(), help_muted_style()));
     spans.push(Span::styled(
-        function.return_label.to_string(),
+        match function.return_kind {
+            configure::registry::RegistryValueKind::Scalar => "scalar".to_string(),
+            configure::registry::RegistryValueKind::Series => "series".to_string(),
+            configure::registry::RegistryValueKind::Unknown => "unknown".to_string(),
+            configure::registry::RegistryValueKind::Theme => "theme".to_string(),
+            configure::registry::RegistryValueKind::SymbolTheme => "symbol-theme".to_string(),
+            configure::registry::RegistryValueKind::Boolean => "boolean".to_string(),
+            configure::registry::RegistryValueKind::Color => "color".to_string(),
+            configure::registry::RegistryValueKind::Symbol => "symbol".to_string(),
+            configure::registry::RegistryValueKind::ContentMode => "content-mode".to_string(),
+            configure::registry::RegistryValueKind::String => "string".to_string(),
+            configure::registry::RegistryValueKind::UnsignedInt => "uint".to_string(),
+            configure::registry::RegistryValueKind::Float => "float".to_string(),
+        },
         help_return_style(),
     ));
     Line::from(spans)
@@ -862,11 +1116,12 @@ fn function_signature_line(function: &MchartFunctionDefinition) -> Line<'static>
 fn multichart_function_panel(
     title: &str,
     intro: &str,
-    category: MchartFunctionCategory,
+    category: configure::registry::MchartFunctionCategory,
 ) -> (String, Vec<Line<'static>>) {
     let mut lines = vec![paragraph_line(intro)];
-    let functions = mchart_functions()
-        .iter()
+    let snapshot = configure::current_registry_snapshot();
+    let functions = snapshot
+        .mchart_functions()
         .filter(|function| function.category == category)
         .collect::<Vec<_>>();
     for (index, function) in functions.iter().enumerate() {

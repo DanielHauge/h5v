@@ -7,7 +7,7 @@ use crate::{
     error::AppError,
     ui::{
         attributes::navigate_metadata_grid,
-        state::{AttributeViewSelection, ContentShowMode, Focus, Mode},
+        state::{AttributeViewSelection, ContentShowMode, Focus, HelpTab, Mode},
     },
 };
 
@@ -41,11 +41,30 @@ pub(super) fn handle_global_mouse_event(
                     state.mode = state.help_return_mode.clone();
                 } else {
                     state.help_return_mode = state.mode.clone();
+                    if has_header_health_issues(state) {
+                        state.help.selected_tab = HelpTab::Health;
+                        state.help.health_section = 0;
+                    }
                     state.help.scroll_offset = 0;
                     state.mode = Mode::Help;
                 }
                 state.pending_chord = None;
                 return Ok(Some(EventResult::Redraw));
+            }
+
+            fn has_header_health_issues(state: &AppState<'_>) -> bool {
+                crate::compat::run_runtime_healthcheck(
+                    crate::compat::current(),
+                    state.image_protocol_enabled,
+                )
+                .into_iter()
+                .any(|result| result.status != crate::health::HealthStatus::Healthy)
+                    || crate::health::reported_health_issues()
+                        .into_iter()
+                        .any(|issue| issue.result.status != crate::health::HealthStatus::Healthy)
+                    || crate::configure::current_registry_snapshot()
+                        .plugins()
+                        .any(|plugin| plugin.health_status != crate::health::HealthStatus::Healthy)
             }
             Ok(None)
         }
@@ -229,9 +248,95 @@ pub(super) fn handle_help_mouse_event(
                 state.help.selected_tab = super::super::state::HelpTab::MultiChart;
                 state.help.multichart_section = section;
             }
+            super::super::state::HelpSidebarTarget::Health(section) => {
+                state.help.selected_tab = super::super::state::HelpTab::Health;
+                state.help.health_section = section;
+            }
         }
         state.help.scroll_offset = 0;
         return Ok(EventResult::Redraw);
+    }
+
+    Ok(EventResult::Continue)
+}
+
+pub(super) fn handle_logs_mouse_event(
+    state: &mut AppState<'_>,
+    mouse_event: MouseEvent,
+) -> Result<EventResult, AppError> {
+    state.pending_chord = None;
+    let column = mouse_event.column;
+    let row = mouse_event.row;
+    match mouse_event.kind {
+        MouseEventKind::ScrollUp => {
+            if state.logs_scroll_by(-3) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+        MouseEventKind::ScrollDown => {
+            if state.logs_scroll_by(3) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {}
+        _ => return Ok(EventResult::Continue),
+    }
+
+    if let Some(scrollbar) = state.ui_layout.logs_scrollbar {
+        if point_in_rect(scrollbar.area, column, row)
+            && scrollbar.area.height > 0
+            && scrollbar.content_lines > scrollbar.viewport_lines
+        {
+            let max_scroll = scrollbar
+                .content_lines
+                .saturating_sub(scrollbar.viewport_lines);
+            let row_offset = row.saturating_sub(scrollbar.area.y) as usize;
+            let track_len = scrollbar.area.height.saturating_sub(1) as usize;
+            let target = if track_len == 0 {
+                0
+            } else {
+                row_offset.saturating_mul(max_scroll) / track_len
+            };
+            if state.logs_set_scroll(target) {
+                return Ok(EventResult::Redraw);
+            }
+            return Ok(EventResult::Continue);
+        }
+    }
+
+    if state
+        .ui_layout
+        .logs_top_bar
+        .is_some_and(|rect| point_in_rect(rect, column, row))
+    {
+        state.mode = state.logs_return_mode.clone();
+        return Ok(EventResult::Redraw);
+    }
+
+    if let Some(hitbox) = state
+        .ui_layout
+        .logs_filters
+        .iter()
+        .find(|item| point_in_rect(item.area, column, row))
+        .copied()
+    {
+        state.logs.filter_focus = match hitbox.target {
+            super::super::state::LogsFilterTarget::Scope => {
+                super::super::state::LogsFilterFocus::Scope
+            }
+            super::super::state::LogsFilterTarget::Level => {
+                super::super::state::LogsFilterFocus::Level
+            }
+            super::super::state::LogsFilterTarget::Handle => {
+                super::super::state::LogsFilterFocus::Handle
+            }
+        };
+        if crate::ui::logs::cycle_logs_filter(state, hitbox.target, 1) {
+            return Ok(EventResult::Redraw);
+        }
+        return Ok(EventResult::Continue);
     }
 
     Ok(EventResult::Continue)
@@ -255,9 +360,9 @@ fn handle_left_click(
         .content_tabs
         .iter()
         .find(|tab| point_in_rect(tab.area, column, row))
-        .copied()
+        .cloned()
     {
-        state.set_content_mode(tab_hitbox.mode);
+        state.set_content_mode_handle(tab_hitbox.mode);
         state.focus = Focus::Content;
         return Ok(EventResult::Redraw);
     }

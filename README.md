@@ -106,9 +106,27 @@ On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and ad
 
 On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
 
-## Configuration
+## Configuration and plugins
 
-Configuration lives in `init.lua`. Use `:configure` to edit it and `:configure reset` to regenerate the default scaffold.
+Configuration lives in `init.lua`.
+
+```text
+:configure
+:configure reset
+```
+
+- `:configure` opens the config file and reloads it on exit.
+- `:configure reset` writes a fresh scaffold.
+- `--config <PATH>` uses a different config file.
+- `--init-plugin <PATH>` creates a plugin scaffold with LuaLS support files.
+
+Plugins are loaded from `init.lua` with `h5v.plugins.use(...)` and can come from:
+
+- a local path
+- `owner/repo`
+- a git URL
+
+Use the in-app help as the source of truth for commands, keymaps, actions, health, and plugin status.
 
 ![Light theme configuration example](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/themes.png)
 
@@ -116,12 +134,13 @@ Configuration lives in `init.lua`. Use `:configure` to edit it and `:configure r
 
 The manual is published at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
 
-- Inside `h5v`, press `?` for keybindings, commands, multichart, heatmap, and customization help.
+- Inside `h5v`, press `?` for keybindings, commands, multichart, heatmap, health, and customization help.
 - The in-app help is the primary reference for controls and command behavior.
 
 - [Overview](https://danielhauge.github.io/h5v/book/)
 - [Quick start](https://danielhauge.github.io/h5v/book/quick-start.html)
 - [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)
+- [Plugins](https://danielhauge.github.io/h5v/book/plugins.html)
 - [Heatmap](https://danielhauge.github.io/h5v/book/heatmap.html)
 - [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)
 

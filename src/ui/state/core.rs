@@ -20,6 +20,7 @@ pub enum Mode {
     Normal,
     Search,
     Help,
+    Logs,
     Command,
     MultiChart,
     AttributeCreateDialog,
@@ -56,6 +57,21 @@ impl ContentShowMode {
             Self::Matrix => "matrix",
             Self::Heatmap => "heatmap",
         }
+    }
+
+    pub fn handle(self) -> crate::configure::registry::ContentModeHandle {
+        crate::configure::registry::ContentModeHandle::new(format!(
+            "builtin.content_mode.{}",
+            self.as_str()
+        ))
+    }
+
+    pub fn parse_handle(value: &str) -> Option<Self> {
+        value
+            .trim()
+            .strip_prefix("builtin.content_mode.")
+            .and_then(Self::parse)
+            .or_else(|| Self::parse(value))
     }
 }
 
@@ -143,6 +159,61 @@ pub enum AppToast {
     Info(String),
     Warning(String),
     Error(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogsFilterFocus {
+    Scope,
+    Level,
+    Handle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevelFilter {
+    All,
+    Error,
+    Warning,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevelFilter {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogsViewState {
+    pub session_only: bool,
+    pub filter_focus: LogsFilterFocus,
+    pub level_filter: LogLevelFilter,
+    pub handle_filter: usize,
+    pub scroll_offset: usize,
+    pub content_lines: usize,
+    pub viewport_lines: usize,
+}
+
+impl Default for LogsViewState {
+    fn default() -> Self {
+        Self {
+            session_only: true,
+            filter_focus: LogsFilterFocus::Scope,
+            level_filter: LogLevelFilter::All,
+            handle_filter: 0,
+            scroll_offset: 0,
+            content_lines: 0,
+            viewport_lines: 0,
+        }
+    }
 }
 
 pub struct FileWatchState {
