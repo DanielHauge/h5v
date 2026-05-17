@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" id="oranda" class="hacker">
+  <head>
+    <title>h5v</title>
+    
+    
+      <link rel="icon" href="/h5v/favicon.ico" />
+    
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+      <meta name="description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+      <meta property="og:description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+    
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="h5v" />
+    
+    
+    
+    <meta http-equiv="Permissions-Policy" content="interest-cohort=()" />
+    <link rel="stylesheet" href="/h5v/oranda-v0.6.1.css" />
+    
+    
+  </head>
+  <body>
+    <div class="container">
+      <div class="page-body">
+        
+          <div class="repo_banner">
+            <a href="https://github.com/DanielHauge/h5v">
+              <div class="github-icon" aria-hidden="true"></div>
+              Check out our GitHub!
+            </a>
+          </div>
+        
+
+        <main>
+          <header>
+            
+            <h1 class="title">h5v</h1>
+            
+  <nav class="nav">
+    <ul>
+      <li><a href="/h5v/">Home</a></li>
+
+      
+
+      
+        <li><a href="/h5v/artifacts/">Install</a></li>
+      
+
+      
+        <li><a href="/h5v/book/">Docs</a></li>
+      
+
+      
+
+      
+        <li><a href="/h5v/changelog/">Changelog</a></li>
+      
+    </ul>
+  </nav>
+
+          </header>
+
+          
+  <div>
+    <h1>Release 0.2.5</h1>
+    <div class="releases-body">
+      
+      
+      <section class="release pre-release ">
+  
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.2.5
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        Apr 18 2026 at 13:35 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added jumpto and inc dec commands</li>
+<li>Added support for big ds with segmentatio</li>
+<li>Added support for controling segment via cmd</li>
+<li>Added structure for compounds/tables</li>
+<li>Added support for scalar ds + cleanup</li>
+<li>Enabled support for compressed data</li>
+<li>Added escape to close command</li>
+<li>Added changing x in preview</li>
+<li>Added dim selection</li>
+<li>Scoped row/col/x selection per node</li>
+<li>Added image chart preview support</li>
+<li>Added changing selected dim</li>
+<li>Added softlink eval</li>
+<li>Added support for changing dimension selector</li>
+<li>Added support for highlighted strings</li>
+<li>Added scroll on previews</li>
+<li>Initial rhai structure</li>
+<li>Added initial rhai types</li>
+<li>Added operation evaluation</li>
+<li>Added selection for script engine op eval</li>
+<li>Added initial multichart feature</li>
+<li>Added simple legend</li>
+<li>Added link icon</li>
+<li>Added clear multi chart selections</li>
+<li>Improved searching draft</li>
+<li>Added grayscale 12bit support</li>
+<li>Added column scroll on text preview</li>
+<li>Added mchart hint in treeview</li>
+<li>Added zoom in multichart</li>
+<li>Updated segment scroll to the sided</li>
+<li>Updated tree view rendering on small areas</li>
+<li>Added image preview counts</li>
+<li>Added attributes browsing</li>
+<li>Merged attribute improvements</li>
+<li>Improved robustness</li>
+<li>Temporary dir</li>
+<li>Improved link root file name</li>
+<li>Added selection and yank of content</li>
+<li>Edit feature</li>
+<li>Edit attributes</li>
+<li>Added toast feature</li>
+<li>Added extra matrix navigation</li>
+<li>Fixed attribute view</li>
+<li>Rubustified for no unwraps</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed git tag version into -v flag</li>
+<li>Fixed string preview regression</li>
+<li>Fixed overflow sub on pgdown matrix</li>
+<li>Fixed dimension selector.</li>
+<li>Fixed issue with showing matrix</li>
+<li>Added exe perm to make scripts</li>
+<li>Fixed render columns for line number</li>
+<li>Improved size for y labels</li>
+<li>Fixed link icon</li>
+<li>Fixed issue with loading more on search</li>
+<li>Fixed search issues</li>
+<li>Fixed dep on git versioning for building</li>
+<li>Fixed out of bounds</li>
+<li>Bumped yanked dependency version</li>
+<li>Fixed clipboard problems</li>
+<li>Fixed deadlock on full NaN ds</li>
+<li>Fixed broken link name</li>
+<li>Fixed issue with matrix selection</li>
+<li>Fixed editing deadlock</li>
+<li>Fixed attribute view</li>
+<li>Fixed issue with renaming attributes</li>
+<li>Fixed issue with editors adding newline on edit</li>
+<li>Fixed image pgdn and pgup</li>
+<li>Fixed scroll past available img</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Clippy fix</li>
+<li>Bumped versin</li>
+<li>Updated deps</li>
+<li>Bumped version</li>
+<li>Bumped path version</li>
+<li>Progress editing attr name</li>
+<li>Updated depencies</li>
+<li>Removed chafa dep</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Moved std components and preview chart</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added readme docs for commands</li>
+<li>Added a roadmap</li>
+<li>Added todo</li>
+<li>Updated readme roadmap</li>
+<li>Updated doc</li>
+<li>Removed a completed roadmap item</li>
+<li>Updated readme</li>
+<li>Updated readmes</li>
+<li>Updated readme</li>
+<li>Updated README</li>
+<li>Updated readme3</li>
+<li>Removed some todos that was already done</li>
+<li>Updated readme</li>
+<li>Updated readme roadmap</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Clippy - renamed enum</li>
+<li>Cleanedup unused imports</li>
+<li>Imporved style removed old commented code</li>
+<li>Removed unneccesary comment</li>
+<li>Clippy fix</li>
+</ul>
+<h3>🧪 Testing</h3>
+<ul>
+<li>Added high dim h5 py</li>
+<li>Testing new fuzzy searching</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Added author</li>
+<li>Added create big file script</li>
+<li>Updated lock</li>
+</ul>
+
+  </div>
+</section>
+    </div>
+  </div>
+
+        </main>
+      </div>
+
+      <footer>
+        
+          <a href="https://github.com/DanielHauge/h5v"><div class="github-icon" aria-hidden="true"></div></a>
+        
+        <span>
+          h5v, Apache-2.0
+        </span>
+      </footer>
+    </div>
+
+    
+    
+
+    
+  </body>
+</html>

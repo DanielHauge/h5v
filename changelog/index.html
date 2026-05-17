@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en" id="oranda" class="hacker">
+  <head>
+    <title>h5v</title>
+    
+    
+      <link rel="icon" href="/h5v/favicon.ico" />
+    
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+      <meta name="description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+      <meta property="og:description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+    
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="h5v" />
+    
+    
+    
+    <meta http-equiv="Permissions-Policy" content="interest-cohort=()" />
+    <link rel="stylesheet" href="/h5v/oranda-v0.6.1.css" />
+    
+    
+  </head>
+  <body>
+    <div class="container">
+      <div class="page-body">
+        
+          <div class="repo_banner">
+            <a href="https://github.com/DanielHauge/h5v">
+              <div class="github-icon" aria-hidden="true"></div>
+              Check out our GitHub!
+            </a>
+          </div>
+        
+
+        <main>
+          <header>
+            
+            <h1 class="title">h5v</h1>
+            
+  <nav class="nav">
+    <ul>
+      <li><a href="/h5v/">Home</a></li>
+
+      
+
+      
+        <li><a href="/h5v/artifacts/">Install</a></li>
+      
+
+      
+        <li><a href="/h5v/book/">Docs</a></li>
+      
+
+      
+
+      
+        <li><a href="/h5v/changelog/">Changelog</a></li>
+      
+    </ul>
+  </nav>
+
+          </header>
+
+          
+  <div>
+    <h1>
+      Releases
+      
+        <a href="/h5v/changelog.rss" class="inline-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+  <path d="M3.75 3a.75.75 0 00-.75.75v.5c0 .414.336.75.75.75H4c6.075 0 11 4.925 11 11v.25c0 .414.336.75.75.75h.5a.75.75 0 00.75-.75V16C17 8.82 11.18 3 4 3h-.25z" />
+  <path d="M3 8.75A.75.75 0 013.75 8H4a8 8 0 018 8v.25a.75.75 0 01-.75.75h-.5a.75.75 0 01-.75-.75V16a6 6 0 00-6-6h-.25A.75.75 0 013 9.25v-.5zM7 15a2 2 0 11-4 0 2 2 0 014 0z" />
+</svg></a>
+      
+    </h1>
+    <div class="releases-wrapper">
+      <nav class="releases-nav">
+        
+          <div class="prereleases-toggle">
+            <div class="flex h-6 items-center">
+              <input type="checkbox" id="show-prereleases" />
+            </div>
+            <div class="ml-3">
+              <label for="show-prereleases">Show prereleases</label>
+            </div>
+          </div>
+        
+
+        
+        <ul>
+          
+            <li class="">
+              <a href="v0.11.0/">v0.11.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.10.0/">v0.10.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.9.0/">v0.9.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.8.2/">v0.8.2</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.8.0/">v0.8.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.7.1/">v0.7.1</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.7.0/">v0.7.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.6.0/">v0.6.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.5.3/">v0.5.3</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.5.2/">v0.5.2</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.5.1/">v0.5.1</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.5.0/">v0.5.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.4.4/">v0.4.4</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.4.3/">v0.4.3</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.4.2/">v0.4.2</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.4.1/">v0.4.1</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.4.0/">v0.4.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.3.0/">v0.3.0</a>
+            </li>
+          
+            <li class="">
+              <a href="v0.2.6/">v0.2.6</a>
+            </li>
+          
+            <li class="pre-release hidden">
+              <a href="v0.2.5/">v0.2.5</a>
+            </li>
+          
+        </ul>
+      </nav>
+
+      <div class="releases-list">
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.11.0">
+    <a href="v0.11.0/">
+      
+        Release v0.11.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.11.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May 17 2026 at 21:02 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Revamped lua engine</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Clarification on overwrite rules for --init-plugin</li>
+<li>Added yet another clarification to overwrite rule in README.md</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Added icons</li>
+<li>Added new banner</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.10.0</li>
+<li>Added gitigore</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.10.0">
+    <a href="v0.10.0/">
+      
+        Release v0.10.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.10.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May 16 2026 at 17:46 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Revamped toast</li>
+<li>Added compound matrix mode</li>
+<li>Added dynamic layout</li>
+<li>Revamped multichart expressions</li>
+<li>Added support for named derived series in multichart</li>
+<li>Added clickable multichart</li>
+<li>Added additional math ops to multichart</li>
+<li>Added rolling stats funcs to multichart</li>
+<li>Added top level transform functions to mchart</li>
+<li>Added seek-page command</li>
+<li>Added chart preview interaction</li>
+<li>Added Chart interactivity UX</li>
+<li>Added boxplot viewmode to multichart</li>
+<li>Added reorder actions for multichart</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed potential UTF8 issues and alignment of scatter points in mchart</li>
+<li>Consolidated commands and help registry</li>
+<li>Fixed seek command for matrix with mutli dims</li>
+<li>Fixed multichart dependency resolution</li>
+<li>Added missign colors and adjusted light mode colosr</li>
+<li>Fixed panning on preview charts</li>
+<li>Fixed scrolling of attributes view</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Cleaned up some old code</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Improved structure of mchart</li>
+<li>Put mchart functions into registry resolution</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added updated help section for mchart</li>
+<li>Updated docs</li>
+</ul>
+<h3>⚡ Performance</h3>
+<ul>
+<li>Added drainage and coalscing of big dataset refinement and rednering in multichart mode</li>
+<li>Backgrounded all heavy chart rendering work</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Changed mchart styling to be more alligned with main view</li>
+<li>Upgraded help styling</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.9.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.9.0">
+    <a href="v0.9.0/">
+      
+        Release v0.9.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.9.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May 14 2026 at 22:28 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added heatmap</li>
+<li>Added configurability for heatmap</li>
+<li>Added keymaps configurability</li>
+<li>Revamped multichart internals and expressions</li>
+<li>Added profile plot to heatmap</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed potential issue for windows compilation</li>
+<li>Fixed issues related to NaN values</li>
+<li>Fixed update checker</li>
+<li>Fixed mchart expression suggestion highlighting</li>
+<li>Fixed issue with mchart dependency resolution when used in (x,y) series</li>
+<li>Cargo clippy</li>
+<li>Fixed plot UX on multichart</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Added multichart configurations</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Restructured and extracted code</li>
+<li>Further improvements to structure and code extraction</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Updated homebrew install doc</li>
+<li>Updated docs with heatmap and more</li>
+<li>Updated keymaps docs</li>
+<li>Updated customization docs</li>
+<li>Updated multi chart docs</li>
+<li>Added note about editing of series in mchart</li>
+<li>Added docs about fixed multichart ux</li>
+<li>Added better help panel for heatmap and multichart</li>
+</ul>
+<h3>⚡ Performance</h3>
+<ul>
+<li>Improved image rendering performance</li>
+<li>Rendering of enormous datasets in multichart</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Added unix uid-gid name resolution</li>
+<li>Updated help section</li>
+<li>Clippy fix</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.8.2</li>
+<li>Made python scripts executable</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.8.2">
+    <a href="v0.8.2/">
+      
+        Release v0.8.2
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.8.2
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May 12 2026 at 22:04 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed issue with loading bash profiles on edits</li>
+<li><em>(cicd)</em> Reinit the rustup</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.8.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.8.0">
+    <a href="v0.8.0/">
+      
+        Release v0.8.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.8.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May 11 2026 at 23:01 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added configuration with colors via lua</li>
+<li>Added symbols configuration</li>
+<li>Added configurable order of display modes</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed search and seek issue</li>
+<li>Fixed issue with mid query removes</li>
+<li>Update LuaLS support strategy</li>
+<li>Fixed highlighted issue when not in focus</li>
+<li>Added a few missing color styled texts</li>
+<li><em>(cicd)</em> Fixed macro crate publish issues</li>
+<li><em>(cicd)</em> Fixed issue with sed replacement</li>
+<li><em>(cicd)</em> Fixed windows wix issues</li>
+<li><em>(docs)</em> Fixed wrong link for oranda</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Improved code structure</li>
+<li>Improved commands and mchart structure</li>
+<li>Improved color resolution structure</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added documentation about configuration and configs</li>
+<li>Updated docs</li>
+<li>Added light mode to docs</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Fixed clippy</li>
+<li>Cargo clippy fix</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.7.1</li>
+<li>Update package manager manifests for v0.8.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.7.1">
+    <a href="v0.7.1/">
+      
+        Release v0.7.1
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.7.1
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  7 2026 at 20:50 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed issue with crates.io publish</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Updated docs</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.7.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.7.0">
+    <a href="v0.7.0/">
+      
+        Release v0.7.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.7.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  7 2026 at 19:00 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added support for opaque types</li>
+<li>Added compatibility mode</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed versioning in released binaries</li>
+<li>Fixed rendering issues for varlen strings in compound types</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Changed symbols</li>
+<li>Added matrix symbol</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.6.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.6.0">
+    <a href="v0.6.0/">
+      
+        Release v0.6.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.6.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  6 2026 at 23:27 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added enum symbol and color overrides</li>
+<li>Seperated meta info into Properties and Attributes</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added download example file in readme</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.5.3</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.5.3">
+    <a href="v0.5.3/">
+      
+        Release v0.5.3
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.5.3
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  5 2026 at 21:04 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Added compatibility mode on non-real tty terminals</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.5.2</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.5.2">
+    <a href="v0.5.2/">
+      
+        Release v0.5.2
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.5.2
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  5 2026 at 20:36 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed changelogs resolution for docs</li>
+<li>Fixed installer script for windows</li>
+<li>Fixed installers not to use first path</li>
+<li>Fixed image capabilities on windows terminal</li>
+<li>Deduplicated windows tab keypress</li>
+<li>Fixed cursor blinks on windows terminal</li>
+<li>Soften clipboard initialization failures</li>
+<li>Added better support for non-graphical terminfos</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added description and image of the parametric multi plot option</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.5.1</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.5.1">
+    <a href="v0.5.1/">
+      
+        Release v0.5.1
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.5.1
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  5 2026 at 15:20 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li><em>(cicd)</em> Fixed web deploy</li>
+<li>Made tmp link files unique</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.5.0</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.5.0">
+    <a href="v0.5.0/">
+      
+        Release v0.5.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.5.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  4 2026 at 23:43 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added mchart as group preview</li>
+<li>Added file content preview</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed rendering issues on less common dataset tupes</li>
+<li>Fixed command mode not appearing in multichart</li>
+<li>Fixed scalar vs. series evalation in multichart</li>
+<li>Fixed double click to expand groups</li>
+<li>Fixed copying of system attributes</li>
+<li>Removed previw option from array of strings</li>
+<li>Fixed install script for better compatibility</li>
+<li><em>(cicd)</em> Fixed docs deploy to gh-pages</li>
+<li><em>(cicd)</em> Fixed msi installer issue</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Added msi installer artifact</li>
+<li>Added example data</li>
+<li>Removed output file</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added oranda docs</li>
+<li>Updated banner</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Improved rendering of empty groups</li>
+<li>Improved radargram viewport</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update package manager manifests for v0.4.4</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.4.4">
+    <a href="v0.4.4/">
+      
+        Release v0.4.4
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.4.4
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  4 2026 at 18:22 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed release commit race condition</li>
+<li>Improved no file given error msg</li>
+<li><em>(cicd)</em> Introduced cargo-dist as distribution tool</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Added wxs for windows ini</li>
+<li>Fixed oranda builds</li>
+<li>Improvements to deploy</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added initial docs site</li>
+<li>Alligned prefered install</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Update Scoop manifest for v0.4.3</li>
+<li>Added docs artifacts to gitignore</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.4.3">
+    <a href="v0.4.3/">
+      
+        Release v0.4.3
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.4.3
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  2 2026 at 19:39 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li><em>(cicd)</em> Removed macos x86_x64 artifact</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.4.2">
+    <a href="v0.4.2/">
+      
+        Release v0.4.2
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.4.2
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  2 2026 at 19:30 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li><em>(cicd)</em> Removed old macos</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.4.1">
+    <a href="v0.4.1/">
+      
+        Release v0.4.1
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.4.1
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  1 2026 at 18:20 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li><em>(cicd)</em> Added AUR distribution</li>
+<li><em>(cicd)</em> Fixed release.yml</li>
+<li><em>(cicd)</em> Moved secrets usage to step stage</li>
+<li><em>(cicd)</em> Removed secrets check</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Updated readme</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Added installers</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.4.0">
+    <a href="v0.4.0/">
+      
+        Release v0.4.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.4.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        May  1 2026 at 16:59 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added simple mouse interactivity</li>
+<li>Added clickable content rows</li>
+<li>Added edit dataset content</li>
+<li>Revamped commands feature</li>
+<li>Improved multichart feature</li>
+<li>Added custom derived series from expressions to multichart</li>
+<li>Added absolute path multichart expression</li>
+<li>Added commands for multichart</li>
+<li>Added press command for escape hatch scripting</li>
+<li>Added mouse interactivity to multichart</li>
+<li>Added attribute actions</li>
+<li>Added compound schema definition view</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Added enum attribute editing</li>
+<li>Fixed edit fixed string attributes</li>
+<li>Fixed rendering of compound attributes</li>
+<li>Fixed rendering of compound arrays and references</li>
+<li>Fixed jump to reference on click</li>
+<li>Updated keymaps with Ctrl-U/D</li>
+<li>Fixed bug related to goto on missing path</li>
+<li>Fixed cross compatibility issues</li>
+<li><em>(cicd)</em> Fixed issue related to linux build</li>
+<li>Hardened panic paths</li>
+<li>Fixed issues related to big datasets</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Avoided sh command execution</li>
+<li>Updated release and packing</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added multichart and commands readme</li>
+<li>Cleaned up docs</li>
+<li>Updated docs</li>
+</ul>
+<h3>⚡ Performance</h3>
+<ul>
+<li>Improved edit flow</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Added hyperlink styling on reference attributes</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.3.0">
+    <a href="v0.3.0/">
+      
+        Release v0.3.0
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.3.0
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        Apr 29 2026 at 22:15 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added toast warning</li>
+<li>Added multi threaded image chart previews</li>
+<li>Added enum support</li>
+<li>Added support for compounds</li>
+<li>Added more keymaps to help</li>
+<li>Added windowing of large aspect ratio images</li>
+<li>Added reload on file write</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed expand_toggle issue</li>
+<li>Fixed edit on fixed string length attribute</li>
+<li>Fixed attribute highlighting</li>
+<li>Fixed error on empty dataset</li>
+<li>Fixed navigation when stacked layout</li>
+<li>Fixed issue with string render of one line</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Removed old scripting code</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Refactored sprint attributes</li>
+<li>Split h5f</li>
+<li>Added codec abstraction</li>
+<li>Keymaps + help</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Updated docs for nav</li>
+<li>Added reload keymap to README</li>
+</ul>
+<h3>⚡ Performance</h3>
+<ul>
+<li>Swapped out potential panic calls</li>
+<li>Added debounce on previews</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Cargo clippy fix</li>
+</ul>
+<h3>🧪 Testing</h3>
+<ul>
+<li>Updated script for code python script</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release ">
+  <h2 id="tag-v0.2.6">
+    <a href="v0.2.6/">
+      
+        Release v0.2.6
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.2.6
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        Apr 21 2026 at 15:34 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🐛 Bug Fixes</h3>
+<ul>
+<li><em>(cicd)</em> Fixed dispatch script</li>
+<li><em>(cicd)</em> Fixed tag push permissions</li>
+<li><em>(cicd)</em> Fixed git tag push</li>
+<li><em>(cicd)</em> Fixed missing deps</li>
+<li><em>(cicd)</em> Slimmed syntect features</li>
+<li><em>(cicd)</em> Added fontconfig build deps</li>
+<li>Reintroduced font fancy-default features</li>
+<li><em>(cicd)</em> Added unreleased changelogs flag</li>
+<li><em>(cicd)</em> Readded windows runner for cicd</li>
+<li>Fixed cargo.toml typy</li>
+<li><em>(cicd)</em> Added build-test verify step</li>
+<li><em>(cicd)</em> Removed locked from cicd</li>
+<li><em>(cicd)</em> Changed windows archie to zip</li>
+<li><em>(cicd)</em> Removed archiving</li>
+<li><em>(cicd)</em> Readded sha release</li>
+<li>Updated cargo.lock</li>
+<li><em>(cicd)</em> Added version to crates.io publish</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li><em>(cicd)</em> Add deployment workflow</li>
+</ul>
+
+  </div>
+</section>
+        
+          
+          <section class="release pre-release hidden">
+  <h2 id="tag-v0.2.5">
+    <a href="v0.2.5/">
+      
+        Release 0.2.5
+      
+    </a>
+  </h2>
+  <div class="release-info">
+    <span class="flex items-center gap-2">
+      <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'>
+    <path stroke-linecap='round' stroke-linejoin='round' d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z' />
+    <path stroke-linecap='round' stroke-linejoin='round' d='M6 6h.008v.008H6V6z' /></svg>
+      v0.2.5
+    </span>
+    <span class="flex items-center gap-2">
+      
+        <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='currentColor' class='w-6 h-6'><path stroke-linecap='round' stroke-linejoin='round' d='M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5' /></svg>
+        Apr 18 2026 at 13:35 UTC
+      
+    </span>
+  </div>
+  <div class="release-body">
+    <h3>🚀 Features</h3>
+<ul>
+<li>Added jumpto and inc dec commands</li>
+<li>Added support for big ds with segmentatio</li>
+<li>Added support for controling segment via cmd</li>
+<li>Added structure for compounds/tables</li>
+<li>Added support for scalar ds + cleanup</li>
+<li>Enabled support for compressed data</li>
+<li>Added escape to close command</li>
+<li>Added changing x in preview</li>
+<li>Added dim selection</li>
+<li>Scoped row/col/x selection per node</li>
+<li>Added image chart preview support</li>
+<li>Added changing selected dim</li>
+<li>Added softlink eval</li>
+<li>Added support for changing dimension selector</li>
+<li>Added support for highlighted strings</li>
+<li>Added scroll on previews</li>
+<li>Initial rhai structure</li>
+<li>Added initial rhai types</li>
+<li>Added operation evaluation</li>
+<li>Added selection for script engine op eval</li>
+<li>Added initial multichart feature</li>
+<li>Added simple legend</li>
+<li>Added link icon</li>
+<li>Added clear multi chart selections</li>
+<li>Improved searching draft</li>
+<li>Added grayscale 12bit support</li>
+<li>Added column scroll on text preview</li>
+<li>Added mchart hint in treeview</li>
+<li>Added zoom in multichart</li>
+<li>Updated segment scroll to the sided</li>
+<li>Updated tree view rendering on small areas</li>
+<li>Added image preview counts</li>
+<li>Added attributes browsing</li>
+<li>Merged attribute improvements</li>
+<li>Improved robustness</li>
+<li>Temporary dir</li>
+<li>Improved link root file name</li>
+<li>Added selection and yank of content</li>
+<li>Edit feature</li>
+<li>Edit attributes</li>
+<li>Added toast feature</li>
+<li>Added extra matrix navigation</li>
+<li>Fixed attribute view</li>
+<li>Rubustified for no unwraps</li>
+</ul>
+<h3>🐛 Bug Fixes</h3>
+<ul>
+<li>Fixed git tag version into -v flag</li>
+<li>Fixed string preview regression</li>
+<li>Fixed overflow sub on pgdown matrix</li>
+<li>Fixed dimension selector.</li>
+<li>Fixed issue with showing matrix</li>
+<li>Added exe perm to make scripts</li>
+<li>Fixed render columns for line number</li>
+<li>Improved size for y labels</li>
+<li>Fixed link icon</li>
+<li>Fixed issue with loading more on search</li>
+<li>Fixed search issues</li>
+<li>Fixed dep on git versioning for building</li>
+<li>Fixed out of bounds</li>
+<li>Bumped yanked dependency version</li>
+<li>Fixed clipboard problems</li>
+<li>Fixed deadlock on full NaN ds</li>
+<li>Fixed broken link name</li>
+<li>Fixed issue with matrix selection</li>
+<li>Fixed editing deadlock</li>
+<li>Fixed attribute view</li>
+<li>Fixed issue with renaming attributes</li>
+<li>Fixed issue with editors adding newline on edit</li>
+<li>Fixed image pgdn and pgup</li>
+<li>Fixed scroll past available img</li>
+</ul>
+<h3>💼 Other</h3>
+<ul>
+<li>Clippy fix</li>
+<li>Bumped versin</li>
+<li>Updated deps</li>
+<li>Bumped version</li>
+<li>Bumped path version</li>
+<li>Progress editing attr name</li>
+<li>Updated depencies</li>
+<li>Removed chafa dep</li>
+</ul>
+<h3>🚜 Refactor</h3>
+<ul>
+<li>Moved std components and preview chart</li>
+</ul>
+<h3>📚 Documentation</h3>
+<ul>
+<li>Added readme docs for commands</li>
+<li>Added a roadmap</li>
+<li>Added todo</li>
+<li>Updated readme roadmap</li>
+<li>Updated doc</li>
+<li>Removed a completed roadmap item</li>
+<li>Updated readme</li>
+<li>Updated readmes</li>
+<li>Updated readme</li>
+<li>Updated README</li>
+<li>Updated readme3</li>
+<li>Removed some todos that was already done</li>
+<li>Updated readme</li>
+<li>Updated readme roadmap</li>
+</ul>
+<h3>🎨 Styling</h3>
+<ul>
+<li>Clippy - renamed enum</li>
+<li>Cleanedup unused imports</li>
+<li>Imporved style removed old commented code</li>
+<li>Removed unneccesary comment</li>
+<li>Clippy fix</li>
+</ul>
+<h3>🧪 Testing</h3>
+<ul>
+<li>Added high dim h5 py</li>
+<li>Testing new fuzzy searching</li>
+</ul>
+<h3>⚙️ Miscellaneous Tasks</h3>
+<ul>
+<li>Added author</li>
+<li>Added create big file script</li>
+<li>Updated lock</li>
+</ul>
+
+  </div>
+</section>
+        
+      </div>
+    </div>
+  </div>
+
+        </main>
+      </div>
+
+      <footer>
+        
+          <a href="https://github.com/DanielHauge/h5v"><div class="github-icon" aria-hidden="true"></div></a>
+        
+        <span>
+          h5v, Apache-2.0
+        </span>
+      </footer>
+    </div>
+
+    
+    
+
+    
+  <script src="/h5v/artifacts.js"></script>
+
+  </body>
+</html>

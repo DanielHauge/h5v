@@ -1,0 +1,1418 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js oranda-dark">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>h5v documentation</title>
+        <meta name="robots" content="noindex" />
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="oranda-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "oranda-dark" : "oranda-dark";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('orandamdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('orandamdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('orandamdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('oranda-dark')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="quick-start.html"><strong aria-hidden="true">3.</strong> Quick start</a></li><li class="chapter-item expanded "><a href="navigation.html"><strong aria-hidden="true">4.</strong> Navigation and layout</a></li><li class="chapter-item expanded "><a href="controls.html"><strong aria-hidden="true">5.</strong> Controls reference</a></li><li class="chapter-item expanded "><a href="hdf5-support.html"><strong aria-hidden="true">6.</strong> HDF5 feature support</a></li><li class="chapter-item expanded "><a href="previews.html"><strong aria-hidden="true">7.</strong> Preview types</a></li><li class="chapter-item expanded "><a href="matrix.html"><strong aria-hidden="true">8.</strong> Matrix views</a></li><li class="chapter-item expanded "><a href="heatmap.html"><strong aria-hidden="true">9.</strong> Heatmap</a></li><li class="chapter-item expanded "><a href="images.html"><strong aria-hidden="true">10.</strong> Images</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="image-conventions.html"><strong aria-hidden="true">10.1.</strong> Image conventions</a></li></ol></li><li class="chapter-item expanded "><a href="compound-datasets.html"><strong aria-hidden="true">11.</strong> Compound datasets</a></li><li class="chapter-item expanded "><a href="commands.html"><strong aria-hidden="true">12.</strong> Commands</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="command-reference.html"><strong aria-hidden="true">12.1.</strong> Command help in app</a></li><li class="chapter-item expanded "><a href="startup-scripting.html"><strong aria-hidden="true">12.2.</strong> Startup scripting</a></li></ol></li><li class="chapter-item expanded "><a href="configuration.html"><strong aria-hidden="true">13.</strong> Configuration and theming</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="configuration-reference.html"><strong aria-hidden="true">13.1.</strong> Configuration reference</a></li><li class="chapter-item expanded "><a href="plugins.html"><strong aria-hidden="true">13.2.</strong> Plugins</a></li></ol></li><li class="chapter-item expanded "><a href="multichart.html"><strong aria-hidden="true">14.</strong> Multichart</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="multichart-expressions.html"><strong aria-hidden="true">14.1.</strong> Multichart expressions</a></li></ol></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">15.</strong> Troubleshooting and limits</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="oranda-dark">Hacker</button></li>
+
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">h5v documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p>h5v is a terminal HDF5 viewer and editor.</p>
+<p><img src="./assets/help.png" alt="h5v interface overview" /></p>
+<p>It provides:</p>
+<ul>
+<li>tree navigation for groups, datasets, links, and projected compound fields</li>
+<li>preview, matrix, heatmap, image, and schema views</li>
+<li>attribute inspection and editing</li>
+<li>command and startup-script automation</li>
+<li>multichart comparison</li>
+</ul>
+<p>Start with <a href="./installation.html">Installation</a> and <a href="./quick-start.html">Quick start</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<h2 id="recommended-shell-installer"><a class="header" href="#recommended-shell-installer">Recommended: shell installer</a></h2>
+<p>Linux and macOS can install the latest release directly from GitHub:</p>
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
+</code></pre>
+<p>The shell installer also works in Git Bash, MSYS2, and Cygwin on Windows. It prefers conventional install locations: <code>/usr/local/bin</code> when writable, <code>~/.local/bin</code> on Unix-like systems without a writable system prefix, and <code>%LOCALAPPDATA%\Programs\h5v\bin</code> on Windows shells.</p>
+<p>Options:</p>
+<pre><code class="language-bash">install.sh --version VERSION --install-dir PATH --repo OWNER/REPO --dry-run
+</code></pre>
+<h2 id="other-install-paths"><a class="header" href="#other-install-paths">Other install paths</a></h2>
+<h3 id="powershell"><a class="header" href="#powershell">PowerShell</a></h3>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex
+</code></pre>
+<h3 id="homebrew"><a class="header" href="#homebrew">Homebrew</a></h3>
+<pre><code class="language-bash">brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git
+brew install h5v
+</code></pre>
+<h3 id="scoop"><a class="header" href="#scoop">Scoop</a></h3>
+<pre><code class="language-powershell">scoop bucket add h5v https://github.com/DanielHauge/h5v
+scoop install h5v/h5v
+</code></pre>
+<h3 id="prebuilt-binaries-with-cargo-binstall"><a class="header" href="#prebuilt-binaries-with-cargo-binstall">Prebuilt binaries with cargo-binstall</a></h3>
+<pre><code class="language-bash">cargo binstall h5v
+</code></pre>
+<h3 id="build-from-source"><a class="header" href="#build-from-source">Build from source</a></h3>
+<pre><code class="language-bash">cargo install h5v
+</code></pre>
+<p>On Linux, source builds may require native packages such as <code>cmake</code>, <code>pkg-config</code>, <code>libfontconfig</code>, <code>freetype</code>, and <code>expat</code> development headers.</p>
+<h2 id="terminal-graphics"><a class="header" href="#terminal-graphics">Terminal graphics</a></h2>
+<p>h5v works in plain terminals, but image and chart previews look best with a real graphics protocol such as Kitty.</p>
+<p>Links:</p>
+<ul>
+<li>Kitty graphics protocol: <a href="https://sw.kovidgoyal.net/kitty/graphics-protocol/">https://sw.kovidgoyal.net/kitty/graphics-protocol/</a></li>
+<li>ratatui-image: <a href="https://github.com/ratatui/ratatui-image">https://github.com/ratatui/ratatui-image</a></li>
+<li>terminal support gallery: <a href="https://benjajaja.github.io/ratatui-image-screenshots/">https://benjajaja.github.io/ratatui-image-screenshots/</a></li>
+</ul>
+<p>If graphics probing causes trouble:</p>
+<pre><code class="language-bash">h5v --no-terminal-graphics path/to/file.h5
+</code></pre>
+<p>That disables graphics probing and uses the safer text-only path.</p>
+<h2 id="compatibility-mode"><a class="header" href="#compatibility-mode">Compatibility mode</a></h2>
+<p>If your terminal also struggles with icons or line drawing:</p>
+<pre><code class="language-bash">h5v --compatibility path/to/file.h5
+</code></pre>
+<p>This switches to simpler symbols and disables terminal graphics probing.</p>
+<p>You can also enable it with <code>H5V_COMPATIBILITY_MODE</code> or <code>h5v.compatibility = true</code>.</p>
+<pre><code class="language-bash">H5V_COMPATIBILITY_MODE=true h5v path/to/file.h5
+H5V_COMPATIBILITY_MODE=off h5v path/to/file.h5
+</code></pre>
+<p>Precedence:</p>
+<ol>
+<li><code>--compatibility</code></li>
+<li><code>h5v.compatibility</code></li>
+<li><code>H5V_COMPATIBILITY_MODE</code></li>
+<li>default <code>false</code></li>
+</ol>
+<p>For config details, see <a href="./configuration.html">Configuration and theming</a>. For display problems, see <a href="./troubleshooting.html">Troubleshooting and limits</a>.</p>
+<p>To make the environment variable permanent:</p>
+<pre><code class="language-bash"># ~/.bashrc or ~/.zshrc
+export H5V_COMPATIBILITY_MODE=true
+</code></pre>
+<pre><code class="language-fish"># ~/.config/fish/config.fish
+set -gx H5V_COMPATIBILITY_MODE true
+</code></pre>
+<p>Invalid values are rejected.</p>
+<h2 id="write-mode"><a class="header" href="#write-mode">Write mode</a></h2>
+<p>h5v opens files read-only unless you pass <code>-w</code>:</p>
+<pre><code class="language-bash">h5v -w path/to/file.h5
+</code></pre>
+<p>Without <code>-w</code>, edit actions report that the file must be reopened in write mode.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="quick-start"><a class="header" href="#quick-start">Quick start</a></h1>
+<p>Open a file:</p>
+<pre><code class="language-bash">h5v path/to/file.h5
+h5v -w path/to/file.h5
+</code></pre>
+<p>Press <code>?</code> to open the in-app help.</p>
+<p><img src="./assets/help.png" alt="h5v quick layout overview" /></p>
+<h2 id="try-the-bundled-example"><a class="header" href="#try-the-bundled-example">Try the bundled example</a></h2>
+<pre><code class="language-bash">h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
+</code></pre>
+<p>Regenerate the example file if needed:</p>
+<pre><code class="language-bash">python scripts/generate_example_h5.py
+</code></pre>
+<h2 id="default-workflow"><a class="header" href="#default-workflow">Default workflow</a></h2>
+<ol>
+<li>Move around the tree on the left.</li>
+<li>Inspect the selected node in the content pane.</li>
+<li>Inspect or edit metadata in the attributes pane.</li>
+</ol>
+<p>Useful keys:</p>
+<ul>
+<li><code>?</code> opens the in-app help</li>
+<li><code>Tab</code> switches between preview and matrix when both exist</li>
+<li><code>:</code> opens the command minibuffer</li>
+<li><code>m</code> adds the current preview to multichart, including group previews driven by <code>H5V_PREVIEW_EXPR</code></li>
+<li><code>M</code> opens or closes multichart mode</li>
+</ul>
+<h2 id="help"><a class="header" href="#help">Help</a></h2>
+<p>Press <code>?</code>. The in-app help is the reference for keys and commands.</p>
+<p>The help view has six tabs:</p>
+<ul>
+<li><code>Keymap</code></li>
+<li><code>Commands</code></li>
+<li><code>Multichart</code></li>
+<li><code>Heatmap</code></li>
+<li><code>Health</code></li>
+<li><code>Customization</code></li>
+</ul>
+<p>Use <code>Tab</code> / <code>Shift+Tab</code> or <code>h</code> / <code>l</code> to switch tabs.</p>
+<p>In <code>Keymap</code>, <code>Commands</code>, and <code>Customization</code>, use <code>j</code> / <code>k</code>, arrow keys, <code>Home</code>, <code>End</code>, <code>g</code>, and <code>G</code> to move through the left-hand list.</p>
+<p>Example paths:</p>
+<div class="table-wrapper"><table><thead><tr><th>Path</th><th>What to look at</th></tr></thead><tbody>
+<tr><td><code>/signals/sine_wave</code></td><td>Basic numeric chart preview</td></tr>
+<tr><td><code>/matrices/cube</code></td><td>Matrix mode with dimension selectors</td></tr>
+<tr><td><code>/images/truecolor_rgb</code></td><td>Inline truecolor image</td></tr>
+<tr><td><code>/images/wide_grayscale</code></td><td>Wide pannable image window</td></tr>
+<tr><td><code>/images/varlen_png_frames</code></td><td>Variable-length encoded image frames</td></tr>
+<tr><td><code>/compound/nested_records</code></td><td>Recursive compound schema view</td></tr>
+<tr><td><code>/compound/nested_records/window</code></td><td>Projected fixed-array field with matrix editing</td></tr>
+<tr><td><code>/metadata/attributes_demo</code></td><td>Mixed attribute types and references</td></tr>
+<tr><td><code>/group_preview</code></td><td>Group-level chart preview driven by <code>H5V_PREVIEW_EXPR</code></td></tr>
+</tbody></table>
+</div>
+<h2 id="first-commands"><a class="header" href="#first-commands">First commands</a></h2>
+<pre><code class="language-text">:goto /signals/sine_wave
+:goto /group_preview
+:mode matrix
+:help mchart
+</code></pre>
+<h2 id="script-a-startup"><a class="header" href="#script-a-startup">Script a startup</a></h2>
+<p>Inline commands:</p>
+<pre><code class="language-bash">h5v examples/h5v-example.h5 \
+  -c "goto /signals/sine_wave" \
+  -c "mchart add" \
+  -c "goto /signals/cosine_wave" \
+  -c "mchart add" \
+  -c "mchart show"
+</code></pre>
+<p>Script file:</p>
+<pre><code class="language-bash">h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
+</code></pre>
+<p>Dry-run:</p>
+<pre><code class="language-bash">h5v --script-test --script examples/h5v-example.h5v
+</code></pre>
+<p>See <a href="./multichart.html">Multichart</a>, <a href="./configuration.html">Configuration</a>, and <a href="./startup-scripting.html">Startup scripting</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="navigation-and-layout"><a class="header" href="#navigation-and-layout">Navigation and layout</a></h1>
+<h2 id="pane-model"><a class="header" href="#pane-model">Pane model</a></h2>
+<p>h5v has three panes:</p>
+<ul>
+<li>the tree pane for HDF5 structure and selection</li>
+<li>the content pane for preview, matrix, schema, image, and multichart views</li>
+<li>the attributes pane for metadata inspection and editing</li>
+</ul>
+<p>Wide terminals use a side-by-side layout. Narrow terminals stack the panes. Search takes over the working area.</p>
+<h2 id="moving-focus"><a class="header" href="#moving-focus">Moving focus</a></h2>
+<ul>
+<li><code>Shift</code> + arrow keys to move between panes directly</li>
+<li><code>Ctrl+W</code>, then <code>h/j/k/l</code> for vim-style pane navigation</li>
+</ul>
+<p>The sidebar can be toggled with <code>s</code> or <code>Ctrl+W o</code>.</p>
+<h2 id="tree-navigation"><a class="header" href="#tree-navigation">Tree navigation</a></h2>
+<ul>
+<li><code>j</code> / <code>k</code> or arrow keys move the selection</li>
+<li><code>h</code> and <code>l</code> collapse or expand nodes</li>
+<li><code>Enter</code> or <code>Space</code> toggles the current node</li>
+<li><code>g</code> / <code>G</code> jump to the top or bottom</li>
+<li><code>u</code> / <code>Ctrl+U</code> and <code>Ctrl+D</code> move by larger chunks</li>
+</ul>
+<p>When the current selection is previewable, <code>m</code> adds it to the multichart workspace.</p>
+<p>Mouse support:</p>
+<ul>
+<li>a click selects the row under the cursor</li>
+<li>clicking the already selected group or compound container toggles it</li>
+<li>repeated clicks on <code>Load more</code> keep expanding long child lists</li>
+</ul>
+<h2 id="content-modes"><a class="header" href="#content-modes">Content modes</a></h2>
+<p>The content pane changes with the selected node:</p>
+<ul>
+<li>numeric datasets prefer chart-style preview</li>
+<li>matrixable datasets can switch to matrix mode</li>
+<li>numeric datasets with at least two non-singleton dimensions can switch to heatmap mode</li>
+<li>scalar and string data render as text</li>
+<li>HDF5 image datasets render inline as images</li>
+<li>compound container nodes show a recursive schema view</li>
+<li>file nodes show filesystem metadata</li>
+<li>groups stay previewable even when they only show an empty-state card</li>
+</ul>
+<p>Use <code>Tab</code> to switch modes when more than one is available.</p>
+<h2 id="search-and-help"><a class="header" href="#search-and-help">Search and help</a></h2>
+<ul>
+<li><code>/</code> enters search mode</li>
+<li><code>:</code> opens the command minibuffer</li>
+<li><code>?</code> opens the built-in help</li>
+<li><code>.</code> repeats the last successful command</li>
+</ul>
+<p>The help view has tabs for <code>Keymap</code>, <code>Commands</code>, <code>Multichart</code>, <code>Heatmap</code>, and <code>Customization</code>. Tabs with a left-hand list use the normal list navigation keys.</p>
+<p>See <a href="./controls.html">Controls reference</a> and <a href="./commands.html">Commands</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="controls"><a class="header" href="#controls">Controls</a></h1>
+<p>Press <code>?</code> inside <code>h5v</code>.</p>
+<p>The in-app <code>Keymap</code> tab is the source of truth for controls. It reflects the shipped defaults and any <code>h5v.keymaps</code> Lua overrides.</p>
+<p>Start with these:</p>
+<ul>
+<li><code>?</code> opens help</li>
+<li><code>:</code> opens the command minibuffer</li>
+<li><code>Tab</code> switches preview, matrix, and heatmap when more than one is available</li>
+<li><code>Shift</code> + arrows or <code>Ctrl+W</code> then <code>h/j/k/l</code> moves focus between panes</li>
+<li><code>m</code> adds the current previewable selection to multichart</li>
+<li><code>M</code> enters multichart</li>
+</ul>
+<p>Use the matching help tabs for view-specific controls:</p>
+<ul>
+<li><code>Keymap</code> for active bindings</li>
+<li><code>Commands</code> for minibuffer commands</li>
+<li><code>Multichart</code> for chart workspace behavior</li>
+<li><code>Heatmap</code> for viewport and ROI behavior</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="hdf5-feature-support"><a class="header" href="#hdf5-feature-support">HDF5 feature support</a></h1>
+<p>h5v can browse groups, datasets, links, broken links, and synthetic nodes created for projected compound fields.</p>
+<h2 id="matrixable-and-previewable-data-types"><a class="header" href="#matrixable-and-previewable-data-types">Matrixable and previewable data types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type family</th><th>Preview</th><th>Matrix</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Signed integers</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Unsigned integers</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Floating point</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Boolean</td><td>Yes</td><td>Yes</td><td>Routed through unsigned rendering</td></tr>
+<tr><td>Enum</td><td>Yes</td><td>Yes</td><td>Uses colored symbols and labels, with optional dataset-defined overrides</td></tr>
+<tr><td>Fixed strings</td><td>Text</td><td>Yes</td><td>Fixed strings are read with a 32768-byte limit</td></tr>
+<tr><td>Variable strings</td><td>Text</td><td>Yes</td><td>Good for inline string inspection</td></tr>
+<tr><td>Compound</td><td>Schema or projected preview</td><td>Projected fields and compound roots</td><td>Root compound matrix mode uses one selected dataset dimension for rows and direct fields for columns</td></tr>
+<tr><td>Fixed arrays</td><td>Limited</td><td>No</td><td>Standalone fixed arrays are not matrixable through the main renderer</td></tr>
+<tr><td>Variable arrays</td><td>Limited</td><td>No</td><td>Not matrixable through the main matrix renderer</td></tr>
+<tr><td>References</td><td>Limited</td><td>No</td><td>Attribute navigation follows object and dataset-region references; no dedicated matrix renderer</td></tr>
+</tbody></table>
+</div>
+<p>Matrix mode is only available when a dataset is matrixable and its shape has at least one dimension larger than <code>1</code>. Single-value datasets stay in scalar preview mode.</p>
+<h2 id="strings-and-highlighting"><a class="header" href="#strings-and-highlighting">Strings and highlighting</a></h2>
+<p>String datasets can carry a <code>HIGHLIGHT</code> attribute with an extension hint such as <code>json</code>, <code>py</code>, or <code>yml</code>. If it is absent, h5v falls back to the dataset name extension.</p>
+<h2 id="enum-styling-overrides"><a class="header" href="#enum-styling-overrides">Enum styling overrides</a></h2>
+<p>Enum datasets can override the default symbol and color cycle with:</p>
+<ul>
+<li><code>SYMBOLS</code>: a 1D string attribute, aligned with ascending numeric enum value order</li>
+<li><code>COLORS</code>: a 1D string attribute, aligned with ascending numeric enum value order</li>
+</ul>
+<p>Color values accept named colors and <code>#RRGGBB</code>. See <a href="./configuration-reference.html">Configuration reference</a>.</p>
+<h2 id="group-preview-expressions"><a class="header" href="#group-preview-expressions">Group preview expressions</a></h2>
+<p>Groups can opt into preview rendering with a variable-length string attribute named <code>H5V_PREVIEW_EXPR</code>. The value uses the same expression syntax as multichart.</p>
+<h2 id="image-metadata-handling"><a class="header" href="#image-metadata-handling">Image metadata handling</a></h2>
+<p>Datasets that follow the HDF5 image convention are rendered inline as images. See <a href="./images.html">Images</a> and <a href="./image-conventions.html">Image conventions</a>.</p>
+<h2 id="properties-vs-attributes"><a class="header" href="#properties-vs-attributes">Properties vs attributes</a></h2>
+<p><code>type</code>, <code>size</code>, <code>shape</code>, <code>chunk</code>, <code>link</code>, and <code>path</code> are properties shown in the Properties section. They are not HDF5 attributes.</p>
+<p>Those built-in properties include:</p>
+<ul>
+<li><code>type</code></li>
+<li><code>size</code></li>
+<li><code>shape</code></li>
+<li><code>chunk</code></li>
+<li><code>link</code></li>
+<li><code>path</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="preview-types"><a class="header" href="#preview-types">Preview types</a></h1>
+<h2 id="numeric-chart-preview"><a class="header" href="#numeric-chart-preview">Numeric chart preview</a></h2>
+<p><img src="./assets/chart.png" alt="Chart preview" /></p>
+<p>h5v renders numeric datasets as a line plot over a selected one-dimensional slice.</p>
+<ul>
+<li>active x-axis dimension</li>
+<li>fixed indices for the other dimensions</li>
+<li>visible slice when the data is segmented</li>
+</ul>
+<p>Use <code>x</code> / <code>X</code>, <code>[</code> / <code>]</code>, and the index controls to move through higher-dimensional data.</p>
+<p>Large previews are segmented at <code>250000</code> elements. <code>PageUp</code> / <code>PageDown</code> move between segments.</p>
+<p>If a slice contains only invalid numeric values such as <code>NaN</code> or infinity, h5v reports that bounds cannot be computed.</p>
+<h2 id="scalar-and-string-preview"><a class="header" href="#scalar-and-string-preview">Scalar and string preview</a></h2>
+<p>Scalar datasets render as text. This covers:</p>
+<ul>
+<li>floating-point scalars</li>
+<li>signed and unsigned integer scalars</li>
+<li>fixed and variable strings</li>
+</ul>
+<p>Scalar enums use the enum renderer, including optional <code>SYMBOLS</code> and <code>COLORS</code> overrides.</p>
+<p>String datasets can carry syntax-highlighting hints. Resolution order:</p>
+<ul>
+<li><code>HIGHLIGHT</code> attribute on the dataset</li>
+<li>dataset name extension such as <code>.py</code> or <code>.yml</code></li>
+</ul>
+<h2 id="file-preview"><a class="header" href="#file-preview">File preview</a></h2>
+<p>Selecting the root file node shows filesystem metadata such as path, size, timestamps, permissions, and open mode.</p>
+<h2 id="schema-preview-for-compounds"><a class="header" href="#schema-preview-for-compounds">Schema preview for compounds</a></h2>
+<p>Selecting the root of a compound dataset shows a recursive schema preview.</p>
+<p>Projected compound leaves follow their field type:</p>
+<ul>
+<li><code>/compound/nested_records/gain</code> previews like a numeric field</li>
+<li><code>/compound/nested_records/window</code> is matrixable and editable as one value per line</li>
+<li>projected enum leaves can inherit custom symbol/color styling from dataset metadata</li>
+<li>projected multi-value string arrays stay matrix-only instead of attempting chart preview</li>
+</ul>
+<h2 id="group-preview"><a class="header" href="#group-preview">Group preview</a></h2>
+<p>If a group has a variable-length string attribute named <code>H5V_PREVIEW_EXPR</code>, h5v evaluates it with the same syntax as multichart and renders the result in the preview pane.</p>
+<p>The bundled example includes <code>/group_preview</code>:</p>
+<pre><code class="language-text">(!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)
+</code></pre>
+<p>Press <code>m</code> on that group to add the same expression to multichart.</p>
+<h2 id="image-preview"><a class="header" href="#image-preview">Image preview</a></h2>
+<p>Datasets recognized as HDF5 images render inline in the content pane. See <a href="./images.html">Images</a> for behavior and <a href="./image-conventions.html">Image conventions</a> for the required metadata.</p>
+<p><img src="./assets/images.png" alt="Images" /></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="matrix-views"><a class="header" href="#matrix-views">Matrix views</a></h1>
+<p><img src="./assets/matrix.png" alt="Matrix" /></p>
+<h2 id="when-matrix-mode-is-available"><a class="header" href="#when-matrix-mode-is-available">When matrix mode is available</a></h2>
+<p>Matrix mode appears when the current dataset or projected compound field is matrixable and has more than one effective element. Use <code>Tab</code> to move between preview and matrix mode when both are available.</p>
+<h2 id="dimension-selection"><a class="header" href="#dimension-selection">Dimension selection</a></h2>
+<p>For datasets with more than two dimensions, h5v exposes selectors for:</p>
+<ul>
+<li>the row axis</li>
+<li>the column axis</li>
+<li>the currently selected extra dimension</li>
+<li>the active index value for fixed dimensions</li>
+</ul>
+<p>Dimensions with size <code>1</code> are forced to index <code>0</code>. The row and column axes must stay distinct, and the selected-dimension controls let you walk a higher-dimensional array one slice at a time.</p>
+<h2 id="rendering-behavior"><a class="header" href="#rendering-behavior">Rendering behavior</a></h2>
+<h3 id="numeric-values"><a class="header" href="#numeric-values">Numeric values</a></h3>
+<p>Numeric datasets render as dense tables with one line per row. Column widths are sized for readable values and a minimum width of <code>24</code> characters.</p>
+<h3 id="enums"><a class="header" href="#enums">Enums</a></h3>
+<p>Enums render with symbol and color mapping so repeated categories are easier to scan visually.</p>
+<h3 id="strings"><a class="header" href="#strings">Strings</a></h3>
+<p>String matrices render inline with widths adjusted to the visible content.</p>
+<h3 id="compound-fields"><a class="header" href="#compound-fields">Compound fields</a></h3>
+<p>Compound container roots can render in matrix mode as a read-only table with one row along the selected record dimension and one column per direct field. Horizontal scrolling moves across fields, while any additional dataset dimensions remain fixed to the currently selected indices. Individual projected leaf fields can also render in matrix mode once you drill down to a matrixable field.</p>
+<h2 id="practical-workflow"><a class="header" href="#practical-workflow">Practical workflow</a></h2>
+<p>Use matrix mode when:</p>
+<ul>
+<li>the shape is dense enough that spatial layout matters more than trend shape</li>
+<li>you need to compare neighboring values directly</li>
+<li>a chart preview hides too much structure in a higher-dimensional slice</li>
+</ul>
+<p>Switch back to preview mode when trend shape matters more than cell-by-cell inspection.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="heatmap"><a class="header" href="#heatmap">Heatmap</a></h1>
+<p>Heatmap is the image-style view for numeric datasets with at least two non-singleton dimensions.</p>
+<p><img src="./assets/heatmap.png" alt="Heatmap view" /></p>
+<p>It is available only when:</p>
+<ul>
+<li>compatibility mode is off</li>
+<li>terminal image rendering is available</li>
+</ul>
+<h2 id="what-it-shows"><a class="header" href="#what-it-shows">What it shows</a></h2>
+<ul>
+<li>a rendered 2D slice</li>
+<li>slice/page context</li>
+<li>settings</li>
+<li>viewport stats</li>
+<li>optional selection stats</li>
+<li>legend and histogram</li>
+</ul>
+<h2 id="settings"><a class="header" href="#settings">Settings</a></h2>
+<p>The settings panel controls:</p>
+<ul>
+<li>colormap</li>
+<li>range mode</li>
+<li>invert x</li>
+<li>invert y</li>
+<li>invert colors</li>
+<li>normalization</li>
+</ul>
+<p>Built-in range modes include <code>Auto</code>, <code>MIN/MAX</code>, <code>Clip 1-99%</code>, <code>Sigma +-2sigma</code>, and <code>Winsor 2-98%</code>.</p>
+<p>Use <code>Up</code> / <code>Down</code> to move between settings and <code>Left</code> / <code>Right</code> to change the selected value. Click a settings row to focus it directly.</p>
+<h2 id="selection-and-viewport"><a class="header" href="#selection-and-viewport">Selection and viewport</a></h2>
+<ul>
+<li>no explicit selection means the active region is the current viewport</li>
+<li>one left click selects one terminal-cell region</li>
+<li>a second left click expands that to a rectangle</li>
+<li>another left click after a rectangle clears the explicit selection</li>
+</ul>
+<p>The region panel shows both:</p>
+<ul>
+<li>viewport <code>x/y/w/h</code>, <code>mean</code>, <code>std</code></li>
+<li>selection <code>x/y/w/h</code>, <code>mean</code>, <code>std</code></li>
+</ul>
+<h2 id="zoom-and-pan"><a class="header" href="#zoom-and-pan">Zoom and pan</a></h2>
+<ul>
+<li><code>z</code> zoom in</li>
+<li><code>Z</code> zoom out</li>
+<li><code>0</code> reset viewport</li>
+<li><code>v</code> clear explicit selection</li>
+<li><code>H</code> / <code>J</code> / <code>K</code> / <code>L</code> pan the zoomed viewport</li>
+<li><code>PageUp</code> / <code>PageDown</code> move through segmented heatmap pages</li>
+</ul>
+<h2 id="mouse"><a class="header" href="#mouse">Mouse</a></h2>
+<ul>
+<li>left click selects a region</li>
+<li>wheel zoom is anchored to the hovered cell</li>
+<li>right click on an explicit selection zooms into that selection</li>
+<li>right-click drag pans the viewport</li>
+</ul>
+<h2 id="commands-and-scripts"><a class="header" href="#commands-and-scripts">Commands and scripts</a></h2>
+<p>Heatmap uses the existing movement commands:</p>
+<ul>
+<li><code>up</code> / <code>down</code></li>
+<li><code>left</code> / <code>right</code></li>
+<li><code>page-up</code> / <code>page-down</code></li>
+</ul>
+<p>Dedicated heatmap range commands:</p>
+<ul>
+<li><code>heatmap range list</code></li>
+<li><code>heatmap range use "Clip 1-99%"</code></li>
+<li><code>heatmap range add 5% 80% "5-80%"</code></li>
+<li><code>heatmap range add 2.5 5.5 "2.5..5.5"</code></li>
+</ul>
+<p>Zoom, reset, clear selection, and viewport pan are key-driven. In scripts, use <code>press</code>:</p>
+<ul>
+<li><code>press z</code></li>
+<li><code>press Z</code></li>
+<li><code>press 0</code></li>
+<li><code>press v</code></li>
+<li><code>press H</code></li>
+</ul>
+<h2 id="copy"><a class="header" href="#copy">Copy</a></h2>
+<p><code>y</code> copies the active heatmap summary:</p>
+<ul>
+<li>selection summary when a region is selected</li>
+<li>viewport summary otherwise</li>
+</ul>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>Heatmap configuration:</p>
+<ul>
+<li>include <code>heatmap</code> in <code>h5v.content_mode_order</code></li>
+<li>style shared panel/title colors through <code>h5v.colors</code></li>
+<li>style shared symbols through <code>h5v.symbols</code></li>
+<li>set <code>h5v.heatmap.default_range</code></li>
+<li>set <code>h5v.heatmap.default_colormap</code></li>
+<li>set <code>h5v.heatmap.default_normalization</code></li>
+<li>set <code>h5v.heatmap.default_invert_x</code></li>
+<li>set <code>h5v.heatmap.default_invert_y</code></li>
+<li>set <code>h5v.heatmap.default_invert_c</code></li>
+<li>add <code>h5v.heatmap.range_modes</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="images"><a class="header" href="#images">Images</a></h1>
+<p><img src="./assets/images.png" alt="Image preview modes" /></p>
+<p>h5v renders datasets inline as images when they match the HDF5 image convention.</p>
+<p>For the full subclass and shape rules, see <a href="./image-conventions.html">Image conventions</a>.</p>
+<h2 id="terminal-support"><a class="header" href="#terminal-support">Terminal support</a></h2>
+<p>Image previews work best in terminals with a full graphics protocol. Kitty is the strongest target.</p>
+<ul>
+<li>Kitty graphics protocol: <a href="https://sw.kovidgoyal.net/kitty/graphics-protocol/">https://sw.kovidgoyal.net/kitty/graphics-protocol/</a></li>
+<li>ratatui-image backend support: <a href="https://github.com/ratatui/ratatui-image">https://github.com/ratatui/ratatui-image</a></li>
+<li>ratatui-image terminal screenshot matrix: <a href="https://benjajaja.github.io/ratatui-image-screenshots/">https://benjajaja.github.io/ratatui-image-screenshots/</a></li>
+</ul>
+<h2 id="raw-jpeg-and-png-payloads"><a class="header" href="#raw-jpeg-and-png-payloads">Raw JPEG and PNG payloads</a></h2>
+<p>h5v supports raw encoded image payloads stored as:</p>
+<ul>
+<li><code>u8</code> byte streams</li>
+<li>variable-length arrays of <code>u8</code></li>
+</ul>
+<h2 id="multi-frame-image-datasets"><a class="header" href="#multi-frame-image-datasets">Multi-frame image datasets</a></h2>
+<p>Image navigation works for multi-frame data as well:</p>
+<ul>
+<li>grayscale and truecolor image stacks can use the leading dimension as a frame axis</li>
+<li>raw JPEG and PNG payloads can be stored as variable-length byte arrays</li>
+<li>frame movement is clamped to the available range</li>
+</ul>
+<h2 id="viewport-behavior"><a class="header" href="#viewport-behavior">Viewport behavior</a></h2>
+<p>For very wide or tall datasets, h5v switches to a windowed viewport. The HUD shows:</p>
+<ul>
+<li>the currently visible row or column range</li>
+<li>total coverage percentage</li>
+<li>how many rows or columns are visible</li>
+<li>how far each arrow-key press pans the viewport</li>
+</ul>
+<p>Try <code>/images/truecolor_rgb</code> and <code>/images/wide_grayscale</code> in the bundled example file.</p>
+<h2 id="related-chapters"><a class="header" href="#related-chapters">Related chapters</a></h2>
+<ul>
+<li><a href="./image-conventions.html">Image conventions</a></li>
+<li><a href="./previews.html">Preview types</a></li>
+<li><a href="./troubleshooting.html">Troubleshooting and limits</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="image-conventions"><a class="header" href="#image-conventions">Image conventions</a></h1>
+<h2 id="required-attributes"><a class="header" href="#required-attributes">Required attributes</a></h2>
+<p>h5v follows the standard HDF5 image convention. A dataset must have:</p>
+<ol>
+<li><code>CLASS = "IMAGE"</code></li>
+<li><code>IMAGE_SUBCLASS = ...</code></li>
+</ol>
+<p>Supported <code>IMAGE_SUBCLASS</code> values are:</p>
+<ul>
+<li><code>IMAGE_GRAYSCALE</code></li>
+<li><code>IMAGE_TRUECOLOR</code></li>
+<li><code>IMAGE_BITMAP</code></li>
+<li><code>IMAGE_INDEXED</code></li>
+<li><code>IMAGE_JPEG</code></li>
+<li><code>IMAGE_PNG</code></li>
+</ul>
+<h2 id="interlace-mode"><a class="header" href="#interlace-mode">Interlace mode</a></h2>
+<p>Truecolor and indexed images also need:</p>
+<ul>
+<li><code>INTERLACE_MODE = "INTERLACE_PIXEL"</code> or</li>
+<li><code>INTERLACE_MODE = "INTERLACE_PLANE"</code></li>
+</ul>
+<p>If that attribute is missing for formats that require it, h5v will not treat the dataset as an inline image.</p>
+<h2 id="shape-expectations"><a class="header" href="#shape-expectations">Shape expectations</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Image kind</th><th>Expected shapes</th></tr></thead><tbody>
+<tr><td>Grayscale</td><td><code>[height, width]</code> or frame-first variants such as <code>[frames, height, width]</code></td></tr>
+<tr><td>Bitmap</td><td><code>[height, width]</code></td></tr>
+<tr><td>Truecolor, pixel interlace</td><td><code>[height, width, channels]</code> or <code>[frames, height, width, channels]</code></td></tr>
+<tr><td>Truecolor, plane interlace</td><td><code>[channels, height, width]</code> or <code>[frames, channels, height, width]</code></td></tr>
+</tbody></table>
+</div>
+<p>The exact dataset interpretation depends on the subclass plus the interlace mode.</p>
+<h2 id="pannable-wide-or-tall-images"><a class="header" href="#pannable-wide-or-tall-images">Pannable wide or tall images</a></h2>
+<p>When an image would be clipped heavily by the current terminal aspect ratio, h5v switches from a simple fit-to-area preview to a windowed image view. The image chrome then shows which row or column range is currently visible, and the hidden portion can be explored like a pannable image slice.</p>
+<p>In practice this works especially well for unusually wide or tall datasets. The bundled example path <code>/images/wide_grayscale</code> is intended to demonstrate that behavior.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="compound-datasets"><a class="header" href="#compound-datasets">Compound datasets</a></h1>
+<h2 id="synthetic-child-nodes"><a class="header" href="#synthetic-child-nodes">Synthetic child nodes</a></h2>
+<p>The bundled example file includes <code>/compound/records</code> and <code>/compound/nested_records</code> so you can test both simple and nested compound browsing immediately.</p>
+<p>Compound datasets are not treated as opaque blobs. h5v creates synthetic tree nodes for their fields so you can navigate the compound structure directly from the main tree.</p>
+<h2 id="root-level-schema-preview"><a class="header" href="#root-level-schema-preview">Root-level schema preview</a></h2>
+<p>When the focused node is the root of a compound dataset, the preview pane shows a recursive schema view rather than an empty content area. The schema includes:</p>
+<ul>
+<li>field names</li>
+<li>field types</li>
+<li>byte offsets</li>
+<li>nested compounds and compound arrays</li>
+</ul>
+<p>For compound datasets with at least one non-singleton record axis, Matrix mode is also available as a first-pass table view:</p>
+<ul>
+<li>one row per compound record along the selected record dimension</li>
+<li>one column per direct field</li>
+<li>horizontal scrolling moves through fields when there are more fields than the viewport can show</li>
+<li>additional dataset dimensions stay fixed to the currently selected indices</li>
+<li>nested compounds and array-valued fields rendered inline as summarized cell text</li>
+<li>read-only for now; editing still happens through projected leaves</li>
+</ul>
+<h2 id="recursion-handling"><a class="header" href="#recursion-handling">Recursion handling</a></h2>
+<p>Schema rendering has a hard recursion limit of <code>32</code> nested levels and explicitly omits recursive loops once they are detected. That keeps pathological or self-referential layouts from hanging the preview.</p>
+<h2 id="projected-field-workflows"><a class="header" href="#projected-field-workflows">Projected field workflows</a></h2>
+<p>Once you drill down to a concrete leaf field, that projected field behaves like an ordinary dataset slice:</p>
+<ul>
+<li>numeric fields can preview as charts</li>
+<li>matrixable fields can render in matrix mode</li>
+<li>scalar string fields render as text</li>
+<li>multi-value string arrays stay matrix-only</li>
+</ul>
+<p>The bundled example is a good regression harness here:</p>
+<ul>
+<li><code>/compound/records/label</code> shows projected string handling</li>
+<li><code>/compound/nested_records/window</code> shows a projected fixed array that can be edited from matrix mode</li>
+</ul>
+<p>Projected enum leaves use the same enum renderer as normal enum datasets. They can inherit dataset-wide <code>SYMBOLS</code> and <code>COLORS</code> overrides, and they also check field-scoped variants first by prefixing the projected field path in uppercase with underscores. For example, a projected field like <code>status/evaluation</code> looks for <code>STATUS_EVALUATION_SYMBOLS</code> and <code>STATUS_EVALUATION_COLORS</code> before falling back to plain <code>SYMBOLS</code> and <code>COLORS</code>.</p>
+<p>This makes compound-heavy files much easier to inspect without exporting fields into standalone datasets first.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="commands"><a class="header" href="#commands">Commands</a></h1>
+<p>Press <code>:</code> to open the command minibuffer.</p>
+<p><img src="./assets/cmd.png" alt="Command minibuffer" /></p>
+<p>Minibuffer behavior:</p>
+<ul>
+<li><code>Tab</code> cycles matching completions</li>
+<li><code>Shift+Tab</code> and arrow keys move through suggestions</li>
+<li><code>Ctrl+P</code> / <code>Ctrl+N</code> browse command history</li>
+<li><code>help</code> or <code>help &lt;command&gt;</code> shows command help</li>
+<li><code>.</code> repeats the last successful command</li>
+</ul>
+<p>Use the in-app <code>Commands</code> help tab for the current command list and examples.</p>
+<h2 id="common-commands"><a class="header" href="#common-commands">Common commands</a></h2>
+<pre><code class="language-text">goto /signals/sine_wave
+mode preview
+mchart add !/signals/sine_wave
+mchart open
+mchart fit all
+configure
+</code></pre>
+<h2 id="numeric-shorthand"><a class="header" href="#numeric-shorthand">Numeric shorthand</a></h2>
+<pre><code class="language-text">:5
+:+3
+:-2
+</code></pre>
+<ul>
+<li><code>:5</code> -&gt; <code>seek 5</code></li>
+<li><code>:+3</code> -&gt; <code>down 3</code></li>
+<li><code>:-2</code> -&gt; <code>up 2</code></li>
+</ul>
+<h2 id="quoting"><a class="header" href="#quoting">Quoting</a></h2>
+<p>Use quoted strings for values with spaces, expression tuples, and <code>press ...</code> sequences.</p>
+<pre><code class="language-text">press ctrl+w o
+press M j enter
+</code></pre>
+<p><code>press</code> uses the effective keymaps after config load.</p>
+<p>See <a href="./startup-scripting.html">Startup scripting</a> for script files and automation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="command-help-in-app"><a class="header" href="#command-help-in-app">Command help in app</a></h1>
+<p>Use the in-app help instead of this book for the full command list.</p>
+<ul>
+<li>Press <code>?</code>, open the <code>Commands</code> tab, and pick a command from the sidebar.</li>
+<li>Run <code>help</code> or <code>help &lt;command&gt;</code> in the minibuffer for command-specific help.</li>
+<li>Use <a href="./startup-scripting.html">Startup scripting</a> for script files and <code>press ...</code> automation.</li>
+</ul>
+<p>This keeps commands and help in one place.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="startup-scripting"><a class="header" href="#startup-scripting">Startup scripting</a></h1>
+<p><img src="./assets/code.png" alt="Bundled scripting and code-style datasets" /></p>
+<h2 id="sources"><a class="header" href="#sources">Sources</a></h2>
+<ol>
+<li><code>--script &lt;PATH&gt;</code></li>
+<li><code>--script -</code></li>
+<li>piped stdin</li>
+<li>repeated <code>--command</code> / <code>-c</code></li>
+</ol>
+<p>Order: scripts first, then stdin, then inline commands.</p>
+<p>Startup scripts use the same command parser as the minibuffer. That includes:</p>
+<ul>
+<li>navigation commands</li>
+<li>view and focus commands</li>
+<li>attribute commands</li>
+<li>heatmap range commands</li>
+<li>multichart commands</li>
+<li><code>press &lt;keys&gt;</code> sequences</li>
+</ul>
+<p>Heatmap can be scripted with generic movement commands, <code>heatmap range ...</code> commands, and <code>press</code> for zoom, reset, clear selection, and viewport pan.</p>
+<p><code>press</code> uses the effective keymaps after config load, so startup scripts follow any configured key remaps.</p>
+<h2 id="validation-mode"><a class="header" href="#validation-mode">Validation mode</a></h2>
+<p>Use <code>--script-test</code> or <code>-ct</code> to validate a script without launching the UI:</p>
+<pre><code class="language-bash">h5v file.h5 --script-test --script setup.h5v
+</code></pre>
+<h2 id="bundled-example-script"><a class="header" href="#bundled-example-script">Bundled example script</a></h2>
+<pre><code class="language-bash">h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
+</code></pre>
+<p>Regenerate the example file if needed:</p>
+<pre><code class="language-bash">python scripts/generate_example_h5.py
+</code></pre>
+<h2 id="script-format"><a class="header" href="#script-format">Script format</a></h2>
+<ul>
+<li>newline-separated commands</li>
+<li>semicolon-separated commands</li>
+<li>blank lines</li>
+<li>comment lines beginning with <code>#</code></li>
+</ul>
+<p>Examples:</p>
+<pre><code class="language-bash">h5v file.h5 -c "focus content" -c "mode matrix"
+h5v file.h5 --script setup.h5v
+printf 'toggle-tree; mode preview\nreload\n' | h5v file.h5
+</code></pre>
+<p>Example <code>setup.h5v</code>:</p>
+<pre><code class="language-text"># open with a clean content layout
+toggle-tree
+focus content
+mode preview
+mchart add !/group/dataset[..,0]
+</code></pre>
+<p>Example heatmap script fragment:</p>
+<pre><code class="language-text">focus content
+mode heatmap
+heatmap range add 5% 80% "5-80%"
+page-down
+press z
+press L
+press v
+</code></pre>
+<p>Bundled <code>examples/h5v-example.h5v</code>:</p>
+<pre><code class="language-text">goto /signals/sine_wave
+focus content
+mchart add
+goto /signals/cosine_wave
+mchart add
+mchart open
+mchart select prev
+mchart visible
+mchart select next
+mchart prompt
+mchart expr "$1 - $2"
+mchart zoom in 20
+</code></pre>
+<p>Use the in-app <code>Commands</code> help tab for the current command list and examples.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h1>
+<p><code>h5v</code> loads one Lua file: <code>init.lua</code>.</p>
+<h2 id="file-location"><a class="header" href="#file-location">File location</a></h2>
+<ul>
+<li>Linux: <code>~/.config/h5v/init.lua</code></li>
+<li>macOS: <code>~/Library/Application Support/h5v/init.lua</code></li>
+<li>Windows: <code>%AppData%\\h5v\\init.lua</code></li>
+</ul>
+<p>Commands:</p>
+<pre><code class="language-text">:configure
+:configure reset
+h5v --config /path/to/init.lua file.h5
+</code></pre>
+<p>LuaLS support files live next to the config under <code>.h5v-luals/</code>.</p>
+<h2 id="start-with-this-shape"><a class="header" href="#start-with-this-shape">Start with this shape</a></h2>
+<pre><code class="language-lua">h5v.theme = "dark"
+h5v.symbol_theme = "rich"
+h5v.compatibility = false
+h5v.content_mode_order = { "preview", "matrix" }
+
+h5v.heatmap.default_colormap = "inferno"
+h5v.layout.tree.focused = "28%"
+
+h5v.colors.accent.selection_bg = "#005f87"
+h5v.symbols.title.help = " Help "
+
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+h",
+  target = h5v.actions.ShowHelp,
+  description = "Show help",
+})
+</code></pre>
+<h2 id="main-pieces"><a class="header" href="#main-pieces">Main pieces</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Lua entry</th><th>Use it for</th></tr></thead><tbody>
+<tr><td><code>h5v.theme</code>, <code>h5v.symbol_theme</code></td><td>shipped themes</td></tr>
+<tr><td><code>h5v.colors.*</code>, <code>h5v.symbols.*</code></td><td>targeted overrides</td></tr>
+<tr><td><code>h5v.content_mode_order</code></td><td>preferred preview/matrix/heatmap order</td></tr>
+<tr><td><code>h5v.compatibility</code></td><td>compatibility mode default</td></tr>
+<tr><td><code>h5v.layout.*</code></td><td>tree / attributes / content sizing</td></tr>
+<tr><td><code>h5v.heatmap.*</code></td><td>heatmap defaults and custom ranges</td></tr>
+<tr><td><code>h5v.multichart.*</code></td><td>multichart sampling defaults</td></tr>
+<tr><td><code>h5v.keys.*</code></td><td>keybindings</td></tr>
+<tr><td><code>h5v.commands.register(...)</code></td><td>custom commands</td></tr>
+<tr><td><code>h5v.events.on(...)</code></td><td>autocommands</td></tr>
+<tr><td><code>h5v.mchart.functions.register(...)</code></td><td>custom multichart functions</td></tr>
+<tr><td><code>h5v.plugins.use(...)</code></td><td>plugins</td></tr>
+<tr><td><code>h5v.logs.*</code></td><td>log from Lua</td></tr>
+</tbody></table>
+</div>
+<h2 id="use-constants-not-magic-strings"><a class="header" href="#use-constants-not-magic-strings">Use constants, not magic strings</a></h2>
+<p>Prefer the generated constants and action ids:</p>
+<pre><code class="language-lua">h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+l",
+  target = h5v.actions.ReloadFile,
+})
+</code></pre>
+<p>Use the in-app help for the current command list, action names, keymaps, multichart functions, and health details.</p>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="keybinding"><a class="header" href="#keybinding">Keybinding</a></h3>
+<pre><code class="language-lua">h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.heatmap,
+  key = "ctrl+alt+r",
+  command = "heatmap range use \"Clip 1-99%\"",
+  description = "Use clipped range",
+})
+</code></pre>
+<h3 id="custom-command"><a class="header" href="#custom-command">Custom command</a></h3>
+<pre><code class="language-lua">h5v.commands.register({
+  id = "analysis.refresh",
+  title = "Refresh analysis",
+  summary = "Refresh plugin output",
+  run = function(ctx)
+    ctx.toast.info("refreshing")
+    ctx.command("logs")
+  end,
+})
+</code></pre>
+<h3 id="event-hook"><a class="header" href="#event-hook">Event hook</a></h3>
+<pre><code class="language-lua">h5v.events.on({
+  event = h5v.ids.events.file_opened,
+  run = function(ctx)
+    ctx.log.info("file opened: " .. ctx.event.path)
+  end,
+})
+</code></pre>
+<h3 id="plugin-from-config"><a class="header" href="#plugin-from-config">Plugin from config</a></h3>
+<pre><code class="language-lua">h5v.plugins.use("~/dev/h5v-demo-plugin")
+h5v.plugins.use("owner/example-plugin")
+h5v.plugins.use("owner/example-plugin@main")
+h5v.plugins.use("owner/example-plugin", { auto_pull = false })
+</code></pre>
+<h2 id="health-and-logs"><a class="header" href="#health-and-logs">Health and logs</a></h2>
+<ul>
+<li>Bad config loads show up in the header and in <code>Help -&gt; Health</code>.</li>
+<li>Plugin problems show up on the plugin health page when the plugin has a valid manifest.</li>
+<li><code>:logs</code> opens the log panel.</li>
+</ul>
+<p>For plugin authoring, see <a href="./plugins.html">Plugins</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration-reference"><a class="header" href="#configuration-reference">Configuration reference</a></h1>
+<p>Use <a href="./configuration.html">Configuration</a> for the normal setup flow. Use this page when you need the exact entry points.</p>
+<h2 id="top-level-config-fields"><a class="header" href="#top-level-config-fields">Top-level config fields</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th></tr></thead><tbody>
+<tr><td><code>h5v.theme</code></td><td>string</td></tr>
+<tr><td><code>h5v.symbol_theme</code></td><td>string</td></tr>
+<tr><td><code>h5v.compatibility</code></td><td>boolean</td></tr>
+<tr><td><code>h5v.content_mode_order</code></td><td>string[]</td></tr>
+<tr><td><code>h5v.layout.*</code></td><td>integer, <code>"NN%"</code>, or <code>"*"</code></td></tr>
+<tr><td><code>h5v.heatmap.*</code></td><td>table</td></tr>
+<tr><td><code>h5v.multichart.*</code></td><td>table</td></tr>
+<tr><td><code>h5v.colors.*</code></td><td>string</td></tr>
+<tr><td><code>h5v.symbols.*</code></td><td>string</td></tr>
+</tbody></table>
+</div>
+<h2 id="helper-namespaces"><a class="header" href="#helper-namespaces">Helper namespaces</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Namespace</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>h5v.keys</code></td><td>bind and unbind keymaps</td></tr>
+<tr><td><code>h5v.commands</code></td><td>register commands</td></tr>
+<tr><td><code>h5v.events</code></td><td>register event handlers</td></tr>
+<tr><td><code>h5v.mchart.functions</code></td><td>register multichart functions</td></tr>
+<tr><td><code>h5v.plugins</code></td><td>load plugins</td></tr>
+<tr><td><code>h5v.logs</code> / <code>h5v.log</code></td><td>write logs from Lua</td></tr>
+<tr><td><code>h5v.ids.*</code></td><td>generated ids and constants</td></tr>
+<tr><td><code>h5v.actions.*</code></td><td>generated built-in action ids</td></tr>
+</tbody></table>
+</div>
+<h2 id="keymaps"><a class="header" href="#keymaps">Keymaps</a></h2>
+<pre><code class="language-lua">h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+h",
+  target = h5v.actions.ShowHelp,
+  description = "Show help",
+})
+
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+l",
+  command = "logs",
+  description = "Open logs",
+})
+
+h5v.keys.unbind({
+  mode = h5v.ids.keymap_modes.heatmap,
+  key = "v",
+})
+</code></pre>
+<h2 id="commands-1"><a class="header" href="#commands-1">Commands</a></h2>
+<pre><code class="language-lua">h5v.commands.register({
+  id = "analysis.refresh",
+  title = "Refresh analysis",
+  summary = "Refresh the current analysis",
+  run = function(ctx)
+    ctx.commands({
+      "logs",
+      "help health",
+    })
+  end,
+})
+</code></pre>
+<h2 id="events"><a class="header" href="#events">Events</a></h2>
+<pre><code class="language-lua">h5v.events.on({
+  event = h5v.ids.events.file_opened,
+  run = function(ctx)
+    ctx.log.info("opened " .. ctx.event.path)
+  end,
+})
+</code></pre>
+<h2 id="multichart-functions"><a class="header" href="#multichart-functions">Multichart functions</a></h2>
+<pre><code class="language-lua">h5v.mchart.functions.register({
+  id = "analysis.scale",
+  name = "scale",
+  params = {
+    { name = "series", kind = h5v.ids.value_kinds.series },
+    { name = "factor", kind = h5v.ids.value_kinds.scalar },
+  },
+  returns = h5v.ids.value_kinds.series,
+  eval = function(series, factor)
+    return series * factor
+  end,
+})
+</code></pre>
+<h2 id="plugins"><a class="header" href="#plugins">Plugins</a></h2>
+<pre><code class="language-lua">h5v.plugins.use("~/dev/h5v-demo-plugin")
+h5v.plugins.use("owner/example-plugin")
+h5v.plugins.use("owner/example-plugin@main")
+h5v.plugins.use("https://github.com/owner/example-plugin.git@v0.1.0")
+</code></pre>
+<p><code>auto_pull</code> defaults to <code>true</code> for git sources:</p>
+<pre><code class="language-lua">h5v.plugins.use("owner/example-plugin", { auto_pull = false })
+</code></pre>
+<h2 id="runtime-helpers-available-in-lua-callbacks"><a class="header" href="#runtime-helpers-available-in-lua-callbacks">Runtime helpers available in Lua callbacks</a></h2>
+<p>Common callback helpers:</p>
+<pre><code class="language-lua">ctx.command("logs")
+ctx.commands({ "goto /signals/sine_wave", "mode preview" })
+ctx.toast.info("done")
+ctx.log.warning("slow path")
+ctx.process.run({ command = { "git", "status" } })
+ctx.process.parse_json("{\"ok\":true}")
+</code></pre>
+<h2 id="healthcheck-result-shape"><a class="header" href="#healthcheck-result-shape">Healthcheck result shape</a></h2>
+<pre><code class="language-lua">return {
+  status = ctx.health.healthy,
+  summary = "ready",
+  message = ctx.ui.build(function(ui)
+    ui.block({ title = "Plugin health" }, function(ui)
+      ui.text("🟢 successfully loaded plugin")
+    end)
+  end),
+}
+</code></pre>
+<p><code>message</code> may be a plain string or a built UI document. <code>summary</code> is the short text used when the detailed message is structured UI.</p>
+<h2 id="ui-builder-quick-reference"><a class="header" href="#ui-builder-quick-reference">UI builder quick reference</a></h2>
+<pre><code class="language-lua">ctx.ui.build(function(ui)
+  ui.text("plain text")
+  ui.code("return 1 + 2", "lua")
+  ui.badge("ok")
+  ui.kv("theme", h5v.theme)
+  ui.separator({ label = "details" })
+  ui.split({ direction = "horizontal", ratio = 0.4 }, function(ui)
+    ui.text("left")
+  end, function(ui)
+    ui.text("right")
+  end)
+  ui.table({
+    { "key", "value" },
+    { "theme", h5v.theme },
+  })
+  ui.block({ title = "status" }, function(ui)
+    ui.text("ready")
+  end)
+end)
+</code></pre>
+<h2 id="built-in-themes"><a class="header" href="#built-in-themes">Built-in themes</a></h2>
+<ul>
+<li><code>dark</code></li>
+<li><code>light</code></li>
+</ul>
+<h2 id="built-in-symbol-themes"><a class="header" href="#built-in-symbol-themes">Built-in symbol themes</a></h2>
+<ul>
+<li><code>rich</code></li>
+<li><code>compatibility</code></li>
+</ul>
+<h2 id="heatmap-values"><a class="header" href="#heatmap-values">Heatmap values</a></h2>
+<ul>
+<li><code>default_colormap</code>: <code>turbo</code>, <code>grayscale</code>, <code>inferno</code></li>
+<li><code>default_normalization</code>: <code>linear</code>, <code>log</code>, <code>sqrt</code></li>
+</ul>
+<h2 id="accepted-color-values"><a class="header" href="#accepted-color-values">Accepted color values</a></h2>
+<ul>
+<li><code>#RRGGBB</code></li>
+<li>named colors such as <code>red</code>, <code>green</code>, <code>yellow</code>, <code>blue</code>, <code>magenta</code>, <code>cyan</code>, <code>gray</code>, <code>white</code></li>
+<li>extra names: <code>amber</code>, <code>orange</code></li>
+</ul>
+<h2 id="color-groups"><a class="header" href="#color-groups">Color groups</a></h2>
+<ul>
+<li><code>accent</code></li>
+<li><code>text</code></li>
+<li><code>content</code></li>
+<li><code>command</code></li>
+<li><code>help</code></li>
+<li><code>metadata</code></li>
+<li><code>file</code></li>
+<li><code>mchart</code></li>
+<li><code>surface</code></li>
+<li><code>tree</code></li>
+<li><code>chart</code></li>
+<li><code>status</code></li>
+<li><code>toast</code></li>
+</ul>
+<h2 id="symbol-groups"><a class="header" href="#symbol-groups">Symbol groups</a></h2>
+<ul>
+<li><code>tree</code></li>
+<li><code>section</code></li>
+<li><code>title</code></li>
+<li><code>badge</code></li>
+<li><code>chart</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="plugins-1"><a class="header" href="#plugins-1">Plugins</a></h1>
+<p>Plugins are normal Lua modules with a small manifest.</p>
+<h2 id="scaffold"><a class="header" href="#scaffold">Scaffold</a></h2>
+<pre><code class="language-bash">h5v --init-plugin path/to/my-plugin
+</code></pre>
+<p>This creates:</p>
+<ul>
+<li><code>h5v-plugin.toml</code></li>
+<li><code>lua/init.lua</code></li>
+<li><code>.luarc.json</code></li>
+<li><code>.h5v-luals/h5v.lua</code></li>
+</ul>
+<p>Overwrite rules:</p>
+<ul>
+<li><code>.luarc.json</code> is <strong>always rewritten</strong></li>
+<li><code>.h5v-luals/h5v.lua</code> is <strong>always rewritten</strong></li>
+<li><code>h5v-plugin.toml</code> is created <strong>only if missing</strong></li>
+<li><code>lua/init.lua</code> is created <strong>only if missing</strong></li>
+</ul>
+<p>That means you can rerun <code>--init-plugin</code> to refresh LuaLS support without overwriting the plugin manifest or your Lua code.</p>
+<h2 id="load-a-plugin"><a class="header" href="#load-a-plugin">Load a plugin</a></h2>
+<p>From <code>init.lua</code>:</p>
+<pre><code class="language-lua">h5v.plugins.use("~/dev/my-plugin")
+h5v.plugins.use("owner/example-plugin")
+h5v.plugins.use("owner/example-plugin@main")
+h5v.plugins.use("https://github.com/owner/example-plugin.git@v0.1.0")
+</code></pre>
+<p>Git sources support:</p>
+<pre><code class="language-lua">h5v.plugins.use("owner/example-plugin", { auto_pull = false })
+</code></pre>
+<p>Local paths do not support <code>@ref</code>.</p>
+<h2 id="manifest"><a class="header" href="#manifest">Manifest</a></h2>
+<pre><code class="language-toml">id = "demo.analysis"
+name = "Demo analysis"
+version = "0.1.0"
+api_version = "2"
+entry = "lua/init.lua"
+</code></pre>
+<p>If the manifest cannot be resolved, that is an <code>h5v</code> health issue. Once the manifest is valid, the plugin is modeled as a plugin and any later load/health/init failure belongs to that plugin.</p>
+<h2 id="module-contract"><a class="header" href="#module-contract">Module contract</a></h2>
+<pre><code class="language-lua">---@type H5vPluginModule
+return {
+  health = function(ctx)
+    return {
+      status = ctx.health.healthy,
+      summary = "ready",
+      message = ctx.ui.build(function(ui)
+        ui.text("🟢 successfully loaded plugin")
+      end),
+    }
+  end,
+
+  init = function(h5v, ctx)
+    ctx.toast.info("success :D")
+  end,
+}
+</code></pre>
+<h2 id="what-plugins-can-register"><a class="header" href="#what-plugins-can-register">What plugins can register</a></h2>
+<p>Examples:</p>
+<pre><code class="language-lua">h5v.commands.register({
+  id = "analysis.refresh",
+  title = "Refresh analysis",
+  summary = "Refresh plugin output",
+  run = function(ctx)
+    ctx.toast.info("refreshing")
+  end,
+})
+
+h5v.events.on({
+  event = h5v.ids.events.file_opened,
+  run = function(ctx)
+    ctx.log.info("opened " .. ctx.event.path)
+  end,
+})
+
+h5v.mchart.functions.register({
+  id = "analysis.scale",
+  name = "scale",
+  params = {
+    { name = "series", kind = h5v.ids.value_kinds.series },
+    { name = "factor", kind = h5v.ids.value_kinds.scalar },
+  },
+  returns = h5v.ids.value_kinds.series,
+  eval = function(series, factor)
+    return series * factor
+  end,
+})
+</code></pre>
+<p>Plugins can also use:</p>
+<ul>
+<li><code>ctx.process.run(...)</code></li>
+<li><code>ctx.process.parse_json(...)</code></li>
+<li><code>ctx.toast.*(...)</code></li>
+<li><code>ctx.log.*(...)</code></li>
+<li><code>ctx.ui.build(...)</code></li>
+</ul>
+<h2 id="health-and-logs-1"><a class="header" href="#health-and-logs-1">Health and logs</a></h2>
+<ul>
+<li>Plugin health is shown in <code>Help -&gt; Health</code>.</li>
+<li>Plugin logs are tagged with the plugin handle and show up in <code>:logs</code>.</li>
+<li>If <code>health</code> or <code>init</code> fails, the plugin is marked unhealthy instead of becoming an <code>h5v</code> health issue.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multichart"><a class="header" href="#multichart">Multichart</a></h1>
+<p><img src="./assets/multi-chart.png" alt="Multichart workspace" /></p>
+<p>Multichart is the comparison workspace for previewable series.</p>
+<p>Sources:</p>
+<ul>
+<li>the currently selected previewable tree selection</li>
+<li>an explicit dataset reference</li>
+<li>an expression-defined series</li>
+</ul>
+<h2 id="basic-workflow"><a class="header" href="#basic-workflow">Basic workflow</a></h2>
+<ol>
+<li>Add a series with <code>m</code> or <code>mchart add ...</code>.</li>
+<li>Press <code>M</code> or run <code>mchart open</code> to enter the workspace.</li>
+<li>Press <code>Enter</code> to open a new expression, or <code>e</code> to edit the selected series.</li>
+<li>Build derived series with expressions such as <code>$1 - $2</code>, <code>($1, !/time[..])</code>, or <code>$1[0..256]</code>.</li>
+<li>Use zoom and pan to inspect the area of interest.</li>
+</ol>
+<p>Groups with <code>H5V_PREVIEW_EXPR</code> also work here. Pressing <code>m</code> on <code>/group_preview</code> adds the group preview expression as a chart item.</p>
+<h2 id="expression-editor"><a class="header" href="#expression-editor">Expression editor</a></h2>
+<ul>
+<li><code>Enter</code> opens a new expression without changing the chart viewport</li>
+<li><code>e</code> edits the selected series in place</li>
+<li><code>Enter</code> submits the current expression</li>
+<li><code>Tab</code> completes the selected suggestion</li>
+<li><code>Up</code> and <code>Down</code> move through suggestions while editing</li>
+<li><code>Esc</code> closes the editor</li>
+</ul>
+<p>The editor validates expressions live and suggests chart item ids, dataset paths, and attribute references.</p>
+<p>Raw dataset references such as <code>!/big_dataset[..]</code> are queued and loaded in the background when submitted.
+Zoomed dataset-backed views can request a denser viewport sample in the background while the coarse overview stays visible.
+Derived series can also refine to viewport detail when their referenced chart-item inputs share the same loaded detail window.</p>
+<h2 id="config"><a class="header" href="#config">Config</a></h2>
+<p>Use <code>h5v.multichart = { ... }</code> in Lua to tune large-series behavior.</p>
+<ul>
+<li><code>overview_max_samples</code> limits the initial background overview sample</li>
+<li><code>detail_enabled</code> turns viewport-driven detail refinement on or off</li>
+<li><code>detail_samples_per_column</code> scales viewport detail against chart width</li>
+<li><code>detail_min_samples</code> and <code>detail_max_samples</code> clamp viewport detail size</li>
+<li><code>detail_padding_ratio</code> loads extra x-range around the visible viewport</li>
+<li><code>derived_detail_enabled</code> lets derived series refine when inputs share the same detail window</li>
+</ul>
+<h2 id="visibility-and-organization"><a class="header" href="#visibility-and-organization">Visibility and organization</a></h2>
+<ul>
+<li>move through chart items with <code>j</code> / <code>k</code></li>
+<li>reorder the selected item with <code>Alt+Up</code> / <code>Alt+Down</code></li>
+<li>hide or show an item with <code>Space</code> or <code>v</code></li>
+<li>remove the selected item with <code>d</code>, <code>Backspace</code>, or <code>Delete</code> when nothing depends on it</li>
+<li>clear the whole workspace with <code>C</code></li>
+<li>open multichart help with <code>?</code></li>
+</ul>
+<h2 id="views"><a class="header" href="#views">Views</a></h2>
+<ul>
+<li><code>Tab</code>, <code>Shift+Tab</code>, or <code>t</code> cycles line, histogram, box plot, and comparison scatter</li>
+<li>line focuses sampled curves</li>
+<li>histogram overlays visible-value distributions</li>
+<li>box plot summarizes visible-value quartiles, whiskers, and outliers</li>
+<li>comparison scatter aligns the selected series with the next visible series</li>
+</ul>
+<h2 id="zoom-and-pan-1"><a class="header" href="#zoom-and-pan-1">Zoom and pan</a></h2>
+<ul>
+<li><code>+</code>, <code>=</code>, or <code>Shift+Up</code> to zoom in</li>
+<li><code>-</code> or <code>Shift+Down</code> to zoom out</li>
+<li><code>h</code> / <code>Shift+Left</code> to pan left</li>
+<li><code>l</code> / <code>Shift+Right</code> to pan right</li>
+<li><code>f</code> to fit all visible series</li>
+<li><code>F</code> to fit the selected series</li>
+<li><code>c</code> to reset zoom</li>
+</ul>
+<p>Mouse interaction follows the same anchored viewport model as heatmap:</p>
+<ul>
+<li>wheel zoom over the plot anchors to the hovered point</li>
+<li>plain wheel zoom changes both x and y</li>
+<li><code>Ctrl</code> + wheel zoom changes x only</li>
+<li><code>Shift</code> + wheel zoom changes y only</li>
+<li>right-click drag snapshots on press and pans on release</li>
+</ul>
+<p>The same actions are available from the command line, including <code>mchart fit ...</code> and axis-specific zoom like <code>mchart zoom x in 20</code>.</p>
+<h2 id="expression-workflows"><a class="header" href="#expression-workflows">Expression workflows</a></h2>
+<p>See <a href="./multichart-expressions.html">Multichart expressions</a>. For commands and keys, use the in-app help.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multichart-expressions"><a class="header" href="#multichart-expressions">Multichart expressions</a></h1>
+<h2 id="supported-references"><a class="header" href="#supported-references">Supported references</a></h2>
+<p>Multichart expressions can refer to existing chart items, datasets, and attributes directly, but the reference type is always explicit.</p>
+<div class="table-wrapper"><table><thead><tr><th>Syntax</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>$1</code></td><td>Chart item series by workspace id</td></tr>
+<tr><td><code>$1[0..256]</code></td><td>Chart item series slice by sample range</td></tr>
+<tr><td><code>!/dataset</code></td><td>Dataset series</td></tr>
+<tr><td><code>!/dataset[..,0]</code></td><td>Dataset series with explicit slicing</td></tr>
+<tr><td><code>!/group:trace</code></td><td>Series-valued attribute on a group or dataset</td></tr>
+<tr><td><code>!$1:trace</code></td><td>Series-valued attribute on the dataset backing chart item <code>$1</code></td></tr>
+<tr><td><code>#/group/scalar</code></td><td>Scalar dataset value</td></tr>
+<tr><td><code>#/group/ds:BIAS</code></td><td>Scalar attribute on a group or dataset</td></tr>
+<tr><td><code>#$1:SCALE</code></td><td>Scalar attribute on the dataset backing chart item <code>$1</code></td></tr>
+</tbody></table>
+</div>
+<h2 id="y-series-and-xy-series"><a class="header" href="#y-series-and-xy-series">Y-series and x/y-series</a></h2>
+<p>An expression can produce:</p>
+<ul>
+<li>a normal y-series</li>
+<li>a tuple-based x/y series</li>
+</ul>
+<p>Examples:</p>
+<pre><code class="language-text">$1 * #$1:SCALE
+!/signals/sine_wave + #/group_preview/offset
+$1[0..512] - $2[128..640]
+($1 * #/group_preview:scale, !/group_preview/time)
+</code></pre>
+<p>The tuple form is the most important one for custom x/y plots because it gives you explicit control over both axes.</p>
+<p>The same syntax is also used by group preview expressions. In the bundled example, <code>/group_preview</code> defines:</p>
+<pre><code class="language-text">(!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)
+</code></pre>
+<p>Here is an example of a parametric x/y series using sine and cosine signals to form a circle:</p>
+<pre><code class="language-text">(!/signals/sine_wave, !/signals/cosine_wave)
+</code></pre>
+<p><img src="./assets/parametric.png" alt="Parametric plot" /></p>
+<h2 id="interactive-prompt"><a class="header" href="#interactive-prompt">Interactive prompt</a></h2>
+<p>Open the expression prompt with:</p>
+<ul>
+<li><code>Enter</code> or <code>e</code> in multichart mode, or</li>
+<li><code>mchart prompt</code></li>
+</ul>
+<p>The editor stays below the chart, so opening it does not change the plot viewport.</p>
+<p><code>Enter</code> starts a new expression. <code>e</code> loads the selected series expression so you can update it in place.</p>
+<ul>
+<li><code>Enter</code> submits</li>
+<li><code>Tab</code> applies the selected suggestion</li>
+<li><code>Up</code> and <code>Down</code> move through suggestions</li>
+<li><code>Esc</code> closes the editor</li>
+</ul>
+<p>Invalid expressions are reported inline. Suggestions include chart item ids, dataset paths, and attribute names when they can be resolved from the current file.</p>
+<h2 id="practical-tips"><a class="header" href="#practical-tips">Practical tips</a></h2>
+<ul>
+<li>add a raw dataset first so you have stable <code>$1</code>, <code>$2</code>, and <code>$3</code> references to build from</li>
+<li>use <code>$id[start..end]</code> when you want to align or compare only part of an existing chart item</li>
+<li>use <code>:ATTR</code> only when you want an explicit attribute lookup on an object or dataset-backed chart item</li>
+<li>prefer explicit dataset slicing when the same dataset can be interpreted several ways</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="troubleshooting-and-limits"><a class="header" href="#troubleshooting-and-limits">Troubleshooting and limits</a></h1>
+<h2 id="cannot-edit-in-read-only-mode"><a class="header" href="#cannot-edit-in-read-only-mode">"Cannot edit in read-only mode"</a></h2>
+<p>h5v only writes when the file is opened with <code>-w</code>:</p>
+<pre><code class="language-bash">h5v -w file.h5
+</code></pre>
+<p>If you forget <code>-w</code>, edit actions report that the file must be reopened in write mode.</p>
+<h2 id="an-image-dataset-does-not-render-as-an-image"><a class="header" href="#an-image-dataset-does-not-render-as-an-image">An image dataset does not render as an image</a></h2>
+<p>Check the image metadata:</p>
+<ul>
+<li><code>CLASS</code> must be <code>IMAGE</code></li>
+<li><code>IMAGE_SUBCLASS</code> must be a supported image subclass</li>
+<li>truecolor and indexed images also need <code>INTERLACE_MODE</code></li>
+</ul>
+<p>See <a href="./image-conventions.html">Image conventions</a>.</p>
+<h2 id="the-ui-is-blank-or-badly-garbled"><a class="header" href="#the-ui-is-blank-or-badly-garbled">The UI is blank or badly garbled</a></h2>
+<p>Try:</p>
+<pre><code class="language-bash">h5v --no-terminal-graphics file.h5
+</code></pre>
+<p>If the terminal also struggles with richer symbols or line drawing:</p>
+<pre><code class="language-bash">h5v --compatibility file.h5
+</code></pre>
+<p>Compatibility mode switches to simpler symbols and text/braille fallbacks. Multichart also falls back to a terminal-native braille plot.</p>
+<p>See <a href="./installation.html">Installation</a> for persistent compatibility settings.</p>
+<h2 id="a-compound-dataset-does-not-show-in-matrix-mode"><a class="header" href="#a-compound-dataset-does-not-show-in-matrix-mode">A compound dataset does not show in matrix mode</a></h2>
+<p>That is expected for the compound container itself. The root node shows a schema preview. Drill down to a projected leaf field for preview or matrix rendering.</p>
+<h2 id="large-fixed-strings-look-truncated"><a class="header" href="#large-fixed-strings-look-truncated">Large fixed strings look truncated</a></h2>
+<p>Fixed strings are read with a <code>32768</code> byte cap.</p>
+<h2 id="very-large-previews-are-chunked"><a class="header" href="#very-large-previews-are-chunked">Very large previews are chunked</a></h2>
+<p>Chart previews are segmented with a maximum segment size of <code>250000</code> elements. Use <code>PageUp</code> and <code>PageDown</code> to move through the data.</p>
+<h2 id="a-numeric-preview-fails-to-render-bounds"><a class="header" href="#a-numeric-preview-fails-to-render-bounds">A numeric preview fails to render bounds</a></h2>
+<p>If the current slice contains only invalid numeric values such as <code>NaN</code> or infinity, h5v cannot compute chart bounds.</p>
+<h2 id="very-wide-or-tall-images"><a class="header" href="#very-wide-or-tall-images">Very wide or tall images</a></h2>
+<p>If an image is much wider or taller than the content pane, h5v may switch to a pannable windowed view instead of shrinking it aggressively.</p>
+<p>Use <code>/images/wide_grayscale</code> from the bundled example file to test this path.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>
