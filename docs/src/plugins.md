@@ -15,7 +15,14 @@ This creates:
 - `.luarc.json`
 - `.h5v-luals/h5v.lua`
 
-`h5v.lua` is always refreshed. The other scaffold files are only created if they do not already exist.
+Overwrite rules:
+
+- `.luarc.json` is **always rewritten**
+- `.h5v-luals/h5v.lua` is **always rewritten**
+- `h5v-plugin.toml` is created **only if missing**
+- `lua/init.lua` is created **only if missing**
+
+That means you can rerun `--init-plugin` to refresh LuaLS support without overwriting the plugin manifest or your Lua code.
 
 ## Load a plugin
 
