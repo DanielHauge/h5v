@@ -28,11 +28,10 @@ mod view;
 pub use catalog::{command_catalog, find_command_descriptor};
 #[allow(unused_imports)]
 pub use parsing::{
-    command_keybindings, command_keybindings_metadata, command_matches, command_metadata,
-    command_metadata_by_handle, command_usage, command_usage_metadata, current_command_metadata,
-    describe_command_descriptor, describe_command_invocation, describe_command_metadata,
-    format_command_invocation, parse_command_text, parse_startup_commands,
-    selected_command_metadata,
+    command_keybindings_metadata, command_matches, command_metadata, command_metadata_by_handle,
+    command_usage_metadata, current_command_metadata, describe_command_invocation,
+    describe_command_metadata, format_command_invocation, parse_command_text,
+    parse_startup_commands, selected_command_metadata,
 };
 pub use view::render_command_dialog;
 

@@ -18,8 +18,11 @@ use crate::{
     configure,
     error::AppError,
     h5f::{DatasetMeta, H5FNode},
-    ui::state::{
-        AppState, HeatmapColormap, HeatmapLegendSummary, HeatmapNormalization, HeatmapRangeMode,
+    ui::{
+        chrome::rounded_panel,
+        state::{
+            AppState, HeatmapColormap, HeatmapLegendSummary, HeatmapNormalization, HeatmapRangeMode,
+        },
     },
 };
 
@@ -44,22 +47,11 @@ pub(super) fn heatmap_frame_inner(area: &Rect) -> Rect {
 }
 
 pub(super) fn render_heatmap_frame(f: &mut Frame, area: &Rect, loading: bool) -> Rect {
-    let heatmap_block = Block::default()
-        .title(if loading {
-            " # Heatmap * "
-        } else {
-            " # Heatmap "
-        })
-        .title_style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                .bold(),
-        )
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(configure::themed_color(|colors| {
-            colors.surface.panel_border
-        })));
+    let heatmap_block = rounded_panel(if loading {
+        " # Heatmap * "
+    } else {
+        " # Heatmap "
+    });
     let inner = heatmap_frame_inner(area);
     f.render_widget(heatmap_block, *area);
     inner
@@ -83,18 +75,7 @@ pub(super) fn render_heatmap_sidebar(
 }
 
 pub(super) fn render_heatmap_settings(f: &mut Frame, area: &Rect, state: &mut AppState) {
-    let block = Block::default()
-        .title(" * Settings ")
-        .title_style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                .bold(),
-        )
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(configure::themed_color(|colors| {
-            colors.surface.panel_border
-        })));
+    let block = rounded_panel(" * Settings ");
     let inner = block.inner(*area);
     f.render_widget(block, *area);
     state.ui_layout.heatmap_settings.clear();

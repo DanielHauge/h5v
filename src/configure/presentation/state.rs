@@ -11,8 +11,9 @@ use crate::ui::{
     },
 };
 
+#[cfg(test)]
+use super::catalog::available_color_names;
 use super::{
-    catalog::{available_color_names, available_symbol_names},
     palette::{SymbolThemeName, ThemeName},
     parsing::parse_color,
     types::{ConfigSnapshot, ConfigState, ThemeColors, UiSymbols},
@@ -88,15 +89,6 @@ pub fn reset_config(theme: ThemeName) {
         state.multichart_settings = super::types::MultiChartSettings::default();
         state.keymap_config = KeymapConfig::default();
         state.keymaps = EffectiveKeymaps::default();
-    });
-}
-
-#[allow(dead_code)]
-pub fn reset_symbol_theme(theme: SymbolThemeName) {
-    with_config_write(|state| {
-        state.config_generation = state.config_generation.wrapping_add(1);
-        state.active_symbol_theme = theme;
-        state.symbols = UiSymbols::for_theme(theme);
     });
 }
 
@@ -198,7 +190,7 @@ pub fn apply_registry_snapshot(snapshot: &RegistrySnapshot) -> Result<(), String
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn set_color_override(name: &str, color: Color) -> Result<(), String> {
     with_config_write(|state| {
         if state.colors.set_named_color(name, color) {
@@ -208,21 +200,6 @@ pub fn set_color_override(name: &str, color: Color) -> Result<(), String> {
             Err(format!(
                 "Unknown color '{name}'. Available colors: {}",
                 available_color_names().join(", ")
-            ))
-        }
-    })
-}
-
-#[allow(dead_code)]
-pub fn set_symbol_override(name: &str, value: &str) -> Result<(), String> {
-    with_config_write(|state| {
-        if state.symbols.set_named_symbol(name, value) {
-            state.config_generation = state.config_generation.wrapping_add(1);
-            Ok(())
-        } else {
-            Err(format!(
-                "Unknown symbol '{name}'. Available symbols: {}",
-                available_symbol_names().join(", ")
             ))
         }
     })
@@ -240,7 +217,7 @@ pub fn current_symbol_theme_name() -> SymbolThemeName {
     with_config_read(|state| state.active_symbol_theme)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn set_content_mode_order(order: &[ContentShowMode]) {
     with_config_write(|state| {
         state.config_generation = state.config_generation.wrapping_add(1);
@@ -321,28 +298,12 @@ pub fn current_heatmap_range_modes() -> Vec<HeatmapRangeMode> {
     with_config_read(|state| state.heatmap_range_modes.clone())
 }
 
-#[allow(dead_code)]
-pub fn set_heatmap_default_settings(default_settings: &HeatmapSettings) {
-    with_config_write(|state| {
-        state.config_generation = state.config_generation.wrapping_add(1);
-        state.heatmap_default_settings = default_settings.clone();
-    });
-}
-
 pub fn current_heatmap_default_settings() -> HeatmapSettings {
     with_config_read(|state| state.heatmap_default_settings.clone())
 }
 
 pub fn current_heatmap_default_range() -> HeatmapRangeMode {
     with_config_read(|state| state.heatmap_default_settings.range.clone())
-}
-
-#[allow(dead_code)]
-pub fn set_multichart_settings(settings: &super::types::MultiChartSettings) {
-    with_config_write(|state| {
-        state.config_generation = state.config_generation.wrapping_add(1);
-        state.multichart_settings = settings.clone();
-    });
 }
 
 pub fn current_multichart_settings() -> super::types::MultiChartSettings {

@@ -1,12 +1,10 @@
-use ratatui::{
-    crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
-    layout::Rect,
-};
+use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::{
     error::AppError,
     ui::{
         attributes::navigate_metadata_grid,
+        chart_math::point_in_rect,
         state::{AttributeViewSelection, ContentShowMode, Focus, HelpTab, Mode},
     },
 };
@@ -719,11 +717,4 @@ fn handle_right_mouse_up(
     } else {
         Ok(EventResult::Continue)
     }
-}
-
-fn point_in_rect(rect: Rect, column: u16, row: u16) -> bool {
-    column >= rect.x
-        && column < rect.x.saturating_add(rect.width)
-        && row >= rect.y
-        && row < rect.y.saturating_add(rect.height)
 }

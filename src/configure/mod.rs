@@ -14,11 +14,8 @@ pub(crate) use colors::themed_color;
 #[allow(unused_imports)]
 pub use colors::{
     available_color_names, available_theme_names, color_to_lua_string, current_theme_name,
-    parse_color, prefers_strong_text, rgb_channels, set_color_override, theme_named_colors,
-    ThemeName,
+    parse_color, prefers_strong_text, rgb_channels, theme_named_colors, ThemeName,
 };
-#[allow(unused_imports)]
-pub use presentation::reset_symbol_theme;
 #[allow(unused_imports)]
 pub use presentation::{
     apply_registry_snapshot, current_auto_layout_settings, current_config_generation,
@@ -26,15 +23,16 @@ pub use presentation::{
     current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
     current_multichart_settings, current_theme_handle, ordered_content_mode_handles,
     ordered_content_modes, reset_config, restore_config, set_auto_layout_settings,
-    set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges, set_keymap_config,
-    set_multichart_settings, snapshot_config, AutoLayoutSettings, ConfigSnapshot, LayoutSize,
-    MultiChartSettings, PanelLayoutSizes,
+    set_heatmap_ranges, set_keymap_config, snapshot_config, AutoLayoutSettings, ConfigSnapshot,
+    LayoutSize, MultiChartSettings, PanelLayoutSizes,
 };
+#[cfg(test)]
+pub use presentation::{set_color_override, set_content_mode_order};
 pub(crate) use symbols::configured_symbol;
 #[allow(unused_imports)]
 pub use symbols::{
     available_symbol_names, available_symbol_theme_names, current_symbol_theme_name,
-    set_symbol_override, theme_named_symbols, SymbolThemeName,
+    theme_named_symbols, SymbolThemeName,
 };
 
 pub fn ensure_config_path() -> Result<PathBuf, ConfigureErrors> {

@@ -25,10 +25,11 @@ pub use state::{
     current_heatmap_default_settings, current_heatmap_range_modes, current_keymaps,
     current_multichart_settings, current_symbol_theme_name, current_theme_handle,
     current_theme_name, ordered_content_mode_handles, ordered_content_modes, prefers_strong_text,
-    reset_config, reset_symbol_theme, restore_config, set_auto_layout_settings, set_color_override,
-    set_content_mode_order, set_heatmap_default_settings, set_heatmap_ranges, set_keymap_config,
-    set_multichart_settings, set_symbol_override, snapshot_config,
+    reset_config, restore_config, set_auto_layout_settings, set_heatmap_ranges, set_keymap_config,
+    snapshot_config,
 };
+#[cfg(test)]
+pub use state::{set_color_override, set_content_mode_order};
 #[allow(unused_imports)]
 pub use types::{
     AutoLayoutSettings, ConfigSnapshot, LayoutSize, MultiChartSettings, PanelLayoutSizes,

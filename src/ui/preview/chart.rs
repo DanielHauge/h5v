@@ -6,14 +6,13 @@ use plotters::{
 };
 
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Layout, Rect},
     style::Style,
     symbols::Marker,
-    text::{Line, Span},
-    widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType, Paragraph},
+    text::Span,
+    widgets::{Axis, Chart, Dataset, GraphType},
     Frame,
 };
-use ratatui_image::StatefulImage;
 
 use crate::{
     configure,
@@ -23,555 +22,59 @@ use crate::{
         plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
     },
     ui::{
-        chart_math::normalized_axis_bounds,
         matrix::{EnumRenderer, RenderIntercept},
-        mchart::chart_plot_area_in_rect,
-        page_scroll::{compact_count, PageDisplayInfo},
+        page_scroll::PageDisplayInfo,
         perf,
-        preview::image::thread_protocol_from_clipboard_image,
         preview::render_string_preview,
         render::MatrixRenderType,
         state::{
-            AppState, ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, Focus, Mode,
-            PageType, PreviewChartRoi, PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+            AppState, ChartPreviewKey, ChartPreviewSource, Focus, Mode, PageType, PreviewChartRoi,
+            PreviewChartViewport,
         },
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
 };
 
+mod context;
+mod protocol;
+
+pub(crate) use context::preview_chart_data_bounds;
+use context::{
+    copy_page_display_info, preview_chart_plot_area, preview_roi_range, preview_roi_x_bounds,
+    preview_stats_info, preview_view_info, preview_visible_points, preview_x_axis_max,
+    preview_x_min, render_preview_context_panel,
+};
+use protocol::{clear_active_chart_preview, queue_chart_preview_load};
+
 pub const MAX_PAGE_SIZE: usize = 2_500_000;
 const PREVIEW_POINT_MARKER_RADIUS: i32 = 5;
 const PREVIEW_SELECTED_POINT_MARKER_RADIUS: i32 = 7;
 
-fn render_chart_loading_indicator(f: &mut Frame, area: Rect) {
-    let indicator = Block::default()
-        .title(Span::styled(
-            configure::configured_symbol(|symbols| symbols.chart.loading_indicator),
-            Style::default().fg(configure::themed_color(|colors| colors.help.description)),
-        ))
-        .title_alignment(Alignment::Right);
-    f.render_widget(indicator, area);
+fn clear_chart_preview_layout(state: &mut AppState<'_>) {
+    state.chart_preview_state.set_chart_area(None);
+    state.chart_preview_state.set_plot_area(None);
 }
 
-fn clear_active_chart_preview(state: &mut AppState<'_>) {
-    state.chart_preview_state.ds_loaded = None;
-    state.chart_preview_state.protocol = None;
-    state.chart_preview_state.clipboard_image = None;
-    state.chart_preview_state.error = None;
-    state.chart_preview_state.ds_selection = None;
-    state.chart_preview_state.rendered_viewport = None;
-    state.chart_preview_state.rendered_roi = None;
-    state.chart_preview_state.pending_key = None;
-    state.chart_preview_state.reset_viewport();
-}
-
-fn preview_x_min(page_state: &crate::ui::state::PageState) -> f64 {
-    if req_matches_paged_chart(page_state) {
-        MAX_PAGE_SIZE as f64 * page_state.idx.max(0) as f64
-    } else {
-        0.0
-    }
-}
-
-fn req_matches_paged_chart(page_state: &crate::ui::state::PageState) -> bool {
-    matches!(page_state.paged, PageType::Chart) && page_state.idx > 0
-}
-
-pub(crate) fn preview_chart_data_bounds(
+fn sync_direct_chart_preview(
+    state: &mut AppState<'_>,
+    chart_area: Rect,
     data_preview: &DatasetPlotingData,
     x_min: f64,
-) -> Option<PreviewChartViewport> {
-    let (x_min, x_max) = normalized_axis_bounds(x_min, x_min + preview_x_axis_max(data_preview))?;
-    let (y_min, y_max) = normalized_axis_bounds(data_preview.min, data_preview.max)?;
-    Some(PreviewChartViewport {
-        x_min,
-        x_max,
-        y_min,
-        y_max,
-    })
-}
-
-fn preview_view_info(state: &AppState, total_items: usize) -> Option<PageDisplayInfo<'static>> {
-    if !state.chart_preview_state.has_explicit_viewport() {
-        return None;
-    }
-    let viewport = state.chart_preview_state.viewport?;
-    let range_start = viewport.x_min.floor().max(0.0) as usize;
-    let range_end = (viewport.x_max.ceil().max(viewport.x_min) as usize)
-        .saturating_add(1)
-        .min(total_items.max(1));
-    Some(PageDisplayInfo {
-        title: "View",
-        current: 0,
-        total: 1,
-        range_start,
-        range_end: range_end.max(range_start.saturating_add(1).min(total_items.max(1))),
-        total_items: total_items.max(1),
-        unit: "pts",
-    })
-}
-
-fn copy_page_display_info(info: &PageDisplayInfo<'static>) -> PageDisplayInfo<'static> {
-    PageDisplayInfo {
-        title: info.title,
-        current: info.current,
-        total: info.total,
-        range_start: info.range_start,
-        range_end: info.range_end,
-        total_items: info.total_items,
-        unit: info.unit,
-    }
-}
-
-fn preview_stats_lines(
-    label: &str,
-    slice: &[(f64, f64)],
-    precise_value: bool,
-) -> Option<Vec<Line<'static>>> {
-    if slice.is_empty() {
-        return None;
-    }
-    let label_style = Style::default().fg(configure::themed_color(|colors| colors.text.type_desc));
-    let value_style = if configure::prefers_strong_text() {
-        Style::default()
-            .fg(configure::themed_color(|colors| colors.text.primary))
-            .bold()
-    } else {
-        Style::default().fg(configure::themed_color(|colors| colors.text.primary))
-    };
-    let start_x = slice.first()?.0;
-    let end_x = slice.last()?.0;
-    if precise_value {
-        let value = slice[0].1;
-        return Some(vec![
-            Line::from(vec![
-                Span::styled(format!("{label} "), label_style),
-                Span::styled(format!("x {:.1}", start_x), value_style),
-            ]),
-            Line::from(vec![
-                Span::styled("value ", label_style),
-                Span::styled(format!("{value:.4}"), value_style),
-            ]),
-        ]);
-    }
-    let count = slice.len();
-    let mut min = f64::INFINITY;
-    let mut max = f64::NEG_INFINITY;
-    let mut sum = 0.0;
-    let mut finite = 0usize;
-    for &(_, y) in slice {
-        if y.is_finite() {
-            min = min.min(y);
-            max = max.max(y);
-            sum += y;
-            finite += 1;
-        }
-    }
-    if finite == 0 {
-        return None;
-    }
-    Some(vec![
-        Line::from(vec![
-            Span::styled(format!("{label} "), label_style),
-            Span::styled(format!("{start_x:.1}..{end_x:.1}  "), value_style),
-            Span::styled("count ", label_style),
-            Span::styled(format!("{count}"), value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("mean ", label_style),
-            Span::styled(format!("{:.4}  ", sum / finite as f64), value_style),
-            Span::styled("min/max ", label_style),
-            Span::styled(format!("{min:.4}/{max:.4}"), value_style),
-        ]),
-    ])
-}
-
-fn preview_stats_info(state: &AppState) -> Option<Vec<Line<'static>>> {
-    let data = state.chart_preview_state.current_data.as_ref()?;
-    if data.data.is_empty() {
-        return None;
-    }
-    if let Some(roi) = state.chart_preview_state.roi {
-        if roi.start < data.data.len() {
-            let end = roi
-                .end
-                .min(data.data.len().saturating_sub(1))
-                .max(roi.start);
-            return preview_stats_lines(
-                "ROI",
-                &data.data[roi.start..=end],
-                roi.selection_count == 1 && roi.precise,
-            );
-        }
-    }
-    let viewport = state.chart_preview_state.effective_viewport()?;
-    let x_min = match state
-        .chart_preview_state
-        .ds_selection
-        .as_ref()
-        .map(|selection| &selection.slice)
-    {
-        Some(SliceSelection::FromTo(start, _)) => *start as f64,
-        _ => 0.0,
-    };
-    let (start, end) = preview_visible_index_window(data, viewport, x_min)?;
-    preview_stats_lines("View", &data.data[start..=end], false)
-}
-
-fn preview_selection_lines(node: &mut H5FNode, shape: &[usize]) -> Vec<Line<'static>> {
-    let label_style = Style::default().fg(configure::themed_color(|colors| colors.text.type_desc));
-    let value_style = if configure::prefers_strong_text() {
-        Style::default()
-            .fg(configure::themed_color(|colors| colors.text.primary))
-            .bold()
-    } else {
-        Style::default().fg(configure::themed_color(|colors| colors.text.primary))
-    };
-    let separator_style =
-        Style::default().fg(configure::themed_color(|colors| colors.surface.break_line));
-
-    let mut shape_spans = vec![Span::styled("Shape ", label_style)];
-    for (index, dim) in shape.iter().enumerate() {
-        if index > 0 {
-            shape_spans.push(Span::styled(" | ", separator_style));
-        }
-        shape_spans.push(Span::styled(dim.to_string(), value_style));
-    }
-
-    let mut slice_spans = vec![Span::styled("Slice ", label_style)];
-    for (index, _) in shape.iter().enumerate() {
-        if index > 0 {
-            slice_spans.push(Span::styled(" | ", separator_style));
-        }
-        if index == node.selected_x {
-            slice_spans.push(Span::styled(
-                "X".to_string(),
-                Style::default()
-                    .fg(configure::themed_color(|colors| colors.accent.selected_dim))
-                    .bold(),
-            ));
-        } else {
-            let selected_index = node
-                .selected_indexes
-                .get(index)
-                .copied()
-                .unwrap_or_default();
-            let style = if index == node.selected_dim {
-                Style::default()
-                    .fg(configure::themed_color(|colors| colors.text.primary))
-                    .bold()
-                    .underlined()
-                    .underline_color(configure::themed_color(|colors| {
-                        colors.accent.selected_index
-                    }))
-            } else {
-                value_style
-            };
-            slice_spans.push(Span::styled(selected_index.to_string(), style));
-        }
-    }
-
-    vec![Line::from(shape_spans), Line::from(slice_spans)]
-}
-
-fn preview_view_lines(info: Option<&PageDisplayInfo<'_>>) -> Vec<Line<'static>> {
-    let label_style = Style::default().fg(configure::themed_color(|colors| colors.text.type_desc));
-    let value_style = if configure::prefers_strong_text() {
-        Style::default()
-            .fg(configure::themed_color(|colors| colors.text.primary))
-            .bold()
-    } else {
-        Style::default().fg(configure::themed_color(|colors| colors.text.primary))
-    };
-    let Some(info) = info else {
-        return vec![
-            Line::from(vec![
-                Span::styled("View ", label_style),
-                Span::styled("-", value_style),
-            ]),
-            Line::from(vec![
-                Span::styled("range ", label_style),
-                Span::styled("-", value_style),
-            ]),
-        ];
-    };
-    let size = info.range_end.saturating_sub(info.range_start);
-    vec![
-        Line::from(vec![
-            Span::styled(
-                format!(
-                    "{} {}/{}  ",
-                    info.title,
-                    info.current.saturating_add(1),
-                    info.total.max(1)
-                ),
-                value_style,
-            ),
-            Span::styled("size ", label_style),
-            Span::styled(
-                format!("{} {}", compact_count(size), info.unit),
-                value_style,
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("range ", label_style),
-            Span::styled(
-                format!(
-                    "{}..{}",
-                    compact_count(info.range_start),
-                    compact_count(info.range_end.saturating_sub(1))
-                ),
-                value_style,
-            ),
-        ]),
-    ]
-}
-
-fn render_preview_context_panel(
-    f: &mut Frame,
-    area: &Rect,
-    node: &mut H5FNode,
-    shape: &[usize],
-    view_info: Option<&PageDisplayInfo<'_>>,
-    stats_lines: Option<&[Line<'static>]>,
 ) {
-    let block = Block::default()
-        .title("View & selection")
-        .title_style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                .bold(),
-        )
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(configure::themed_color(|colors| {
-            colors.surface.panel_border
-        })));
-    f.render_widget(block, *area);
-
-    let inner = area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-    let columns = Layout::horizontal([
-        Constraint::Fill(5),
-        Constraint::Length(1),
-        Constraint::Fill(4),
-        Constraint::Length(1),
-        Constraint::Fill(5),
-    ])
-    .split(inner);
-    let separator_style =
-        Style::default().fg(configure::themed_color(|colors| colors.surface.break_line));
-    f.render_widget(Paragraph::new("│\n│").style(separator_style), columns[1]);
-    f.render_widget(Paragraph::new("│\n│").style(separator_style), columns[3]);
-    f.render_widget(
-        Paragraph::new(preview_selection_lines(node, shape)),
-        columns[0],
-    );
-    f.render_widget(Paragraph::new(preview_view_lines(view_info)), columns[2]);
-    let stats = stats_lines
-        .map(|lines| lines.to_vec())
-        .unwrap_or_else(|| vec![Line::from("Stats -"), Line::from("")]);
-    f.render_widget(Paragraph::new(stats), columns[4]);
-}
-
-fn preview_roi_range(
-    data_preview: &DatasetPlotingData,
-    roi: PreviewChartRoi,
-    x_min: f64,
-) -> Option<(usize, usize)> {
-    if data_preview.data.is_empty() || roi.start >= data_preview.data.len() {
-        return None;
-    }
-    let start = roi.start.min(data_preview.data.len().saturating_sub(1));
-    let end = roi
-        .end
-        .min(data_preview.data.len().saturating_sub(1))
-        .max(start);
-    let _ = x_min;
-    Some((start, end))
-}
-
-fn preview_roi_x_bounds(
-    data_preview: &DatasetPlotingData,
-    start: usize,
-    end: usize,
-    x_min: f64,
-) -> Option<(f64, f64)> {
-    let points = &data_preview.data;
-    if points.is_empty() || start >= points.len() || end >= points.len() || start > end {
-        return None;
-    }
-    let start_x = x_min + points[start].0;
-    let end_x = x_min + points[end].0;
-    let left_step = if start > 0 {
-        (points[start].0 - points[start - 1].0).abs()
-    } else if points.len() > 1 {
-        (points[1].0 - points[0].0).abs()
-    } else {
-        1.0
-    };
-    let right_step = if end + 1 < points.len() {
-        (points[end + 1].0 - points[end].0).abs()
-    } else if end > 0 {
-        (points[end].0 - points[end - 1].0).abs()
-    } else {
-        1.0
-    };
-    Some((start_x - (left_step / 2.0), end_x + (right_step / 2.0)))
-}
-
-fn preview_visible_index_window(
-    data_preview: &DatasetPlotingData,
-    viewport: PreviewChartViewport,
-    x_min: f64,
-) -> Option<(usize, usize)> {
-    if data_preview.data.is_empty() {
-        return None;
-    }
-    let start = (viewport.x_min - x_min).floor().max(0.0) as usize;
-    let end = (viewport.x_max - x_min)
-        .ceil()
-        .max(viewport.x_min - x_min)
-        .min(data_preview.data.len().saturating_sub(1) as f64) as usize;
-    Some((start.min(end), end.max(start.min(end))))
-}
-
-fn preview_visible_points(
-    data_preview: &DatasetPlotingData,
-    viewport: PreviewChartViewport,
-    x_min: f64,
-) -> Option<Vec<(f64, f64)>> {
-    let (start, end) = preview_visible_index_window(data_preview, viewport, x_min)?;
-    let visible = end.saturating_sub(start).saturating_add(1);
-    (visible <= PREVIEW_CHART_VISIBLE_POINT_LIMIT).then(|| {
-        data_preview.data[start..=end]
-            .iter()
-            .map(|(x, y)| (x_min + *x, *y))
-            .collect()
-    })
-}
-
-fn preview_chart_plot_area(
-    chart_area: Rect,
-    image_cell_size: (u16, u16),
-    max_value: f64,
-) -> Option<Rect> {
-    let width_px = chart_area.width as u32 * image_cell_size.0.max(1) as u32;
-    let height_px = chart_area.height as u32 * image_cell_size.1.max(1) as u32;
-    let y_label_area_size = format!("{max_value:.4}").len() as u32 * 3 + 30;
-    chart_plot_area_in_rect(
-        chart_area,
-        width_px,
-        height_px,
-        (20 + y_label_area_size as i32)..(width_px as i32 - 20),
-        20..(height_px as i32 - 50),
-    )
-}
-
-fn render_chart_protocol_state(
-    f: &mut Frame,
-    chart_area: Rect,
-    state: &mut AppState<'_>,
-    is_pending: bool,
-) -> Result<(), AppError> {
-    if let Some(ref error) = state.chart_preview_state.error {
-        render_error(
-            f,
-            &chart_area,
-            format!("Error loading chart preview: {}", error),
-        );
-        return Ok(());
-    }
-    if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-        f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
-        if is_pending {
-            render_chart_loading_indicator(f, chart_area);
-        }
-    } else if is_pending {
-        render_chart_loading_indicator(f, chart_area);
-    }
-    Ok(())
-}
-
-fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey) -> bool {
-    let Some((clipboard_image, data_bounds, data_preview)) =
-        state.chart_preview_state.touch_cached_preview(key)
-    else {
-        return false;
-    };
-    let Some(protocol) = thread_protocol_from_clipboard_image(
-        &state.multi_chart.picker,
-        &state.chart_preview_state.tx_resize_chartpreview,
-        &clipboard_image,
-    ) else {
-        state
-            .chart_preview_state
-            .cached_previews
-            .retain(|entry| entry.key != *key);
-        return false;
-    };
-    state.chart_preview_state.ds_loaded = Some(key.ds_path.clone());
-    state.chart_preview_state.ds_selection = Some(key.selection.clone());
-    state.chart_preview_state.rendered_viewport = key.viewport;
-    state.chart_preview_state.protocol = Some(protocol);
-    state.chart_preview_state.clipboard_image = Some(clipboard_image);
-    state.chart_preview_state.error = None;
-    state.chart_preview_state.rendered_roi = key.roi;
     state
         .chart_preview_state
-        .set_current_data(Some(data_preview));
+        .sync_data_bounds(preview_chart_data_bounds(data_preview, x_min));
     state
         .chart_preview_state
-        .sync_data_bounds(Some(data_bounds));
-    true
-}
-
-fn queue_chart_preview_load(
-    f: &mut Frame,
-    chart_area: Rect,
-    state: &mut AppState<'_>,
-    node: &Node,
-    current_key: ChartPreviewKey,
-    source: ChartPreviewSource,
-) -> Result<(), AppError> {
-    let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
-    let chart_loaded =
-        state.chart_preview_state.current_request_key().as_ref() == Some(&current_key);
-
-    if state.should_debounce_preview(node) {
-        perf::metrics().preview.debounce_skips.increment();
-        if !chart_loaded && !restore_cached_chart_preview(state, &current_key) {
-            clear_active_chart_preview(state);
-        }
-        return render_chart_protocol_state(f, chart_area, state, true);
-    }
-
-    if chart_loaded {
-        perf::metrics().preview.cache_hits.increment();
-        return render_chart_protocol_state(f, chart_area, state, is_pending);
-    }
-
-    if restore_cached_chart_preview(state, &current_key) {
-        perf::metrics().preview.cache_hits.increment();
-        return render_chart_protocol_state(f, chart_area, state, false);
-    }
-
-    state.chart_preview_state.begin_loading(current_key.clone());
+        .set_current_data(Some(data_preview.clone()));
+    state.chart_preview_state.set_chart_area(Some(chart_area));
     state
         .chart_preview_state
-        .tx_load_chartpreview
-        .send(ChartPreviewLoadRequest {
-            key: current_key,
-            source,
-            width: chart_area.width,
-            height: chart_area.height,
-            page_state: state.page_state.clone(),
-        })
-        .ok();
-    perf::metrics().preview.requests_queued.increment();
-    render_chart_protocol_state(f, chart_area, state, true)
+        .set_plot_area(preview_chart_plot_area(
+            chart_area,
+            state.image_cell_size,
+            data_preview.max,
+        ));
 }
 
 pub fn render_precomputed_chart_preview(
@@ -582,10 +85,7 @@ pub fn render_precomputed_chart_preview(
     data_preview: DatasetPlotingData,
 ) -> Result<(), AppError> {
     let _chart_render_timer = perf::metrics().preview.chart_render.start();
-    state.chart_preview_state.set_chart_area(None);
-    state.chart_preview_state.set_plot_area(None);
-    state.chart_preview_state.set_plot_area(None);
-    state.chart_preview_state.set_plot_area(None);
+    clear_chart_preview_layout(state);
     let chart_area = area.inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -601,20 +101,7 @@ pub fn render_precomputed_chart_preview(
     let x_min = preview_x_min(&state.page_state);
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);
-        state
-            .chart_preview_state
-            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
-        state
-            .chart_preview_state
-            .set_current_data(Some(data_preview.clone()));
-        state.chart_preview_state.set_chart_area(Some(chart_area));
-        state
-            .chart_preview_state
-            .set_plot_area(preview_chart_plot_area(
-                chart_area,
-                state.image_cell_size,
-                data_preview.max,
-            ));
+        sync_direct_chart_preview(state, chart_area, &data_preview, x_min);
         perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
         return Ok(());
@@ -651,7 +138,7 @@ pub fn render_chart_preview(
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let _chart_render_timer = perf::metrics().preview.chart_render.start();
-    state.chart_preview_state.set_chart_area(None);
+    clear_chart_preview_layout(state);
     let (ds, ds_meta) = match &node.node {
         Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
         _ => return Ok(()),
@@ -909,20 +396,7 @@ pub fn render_chart_preview(
                 return Ok(());
             }
         };
-        state
-            .chart_preview_state
-            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
-        state
-            .chart_preview_state
-            .set_current_data(Some(data_preview.clone()));
-        state.chart_preview_state.set_chart_area(Some(chart_area));
-        state
-            .chart_preview_state
-            .set_plot_area(preview_chart_plot_area(
-                chart_area,
-                state.image_cell_size,
-                data_preview.max,
-            ));
+        sync_direct_chart_preview(state, chart_area, &data_preview, x_min);
         perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
@@ -1173,20 +647,7 @@ fn render_projected_chart_preview(
                 return Ok(());
             }
         };
-        state
-            .chart_preview_state
-            .sync_data_bounds(preview_chart_data_bounds(&data_preview, x_min));
-        state
-            .chart_preview_state
-            .set_current_data(Some(data_preview.clone()));
-        state.chart_preview_state.set_chart_area(Some(chart_area));
-        state
-            .chart_preview_state
-            .set_plot_area(preview_chart_plot_area(
-                chart_area,
-                state.image_cell_size,
-                data_preview.max,
-            ));
+        sync_direct_chart_preview(state, chart_area, &data_preview, x_min);
         perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
@@ -1493,23 +954,13 @@ pub fn render_image_chart(
     Ok(())
 }
 
-fn preview_x_axis_max(data_preview: &DatasetPlotingData) -> f64 {
-    match data_preview.length {
-        0 | 1 => 1.0,
-        len => (len - 1) as f64,
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{
-        preview_chart_plot_area, preview_visible_points, preview_x_axis_max,
-        PREVIEW_CHART_VISIBLE_POINT_LIMIT,
-    };
+    use super::{preview_chart_plot_area, preview_visible_points, preview_x_axis_max};
     use crate::data::DatasetPlotingData;
-    use crate::ui::state::PreviewChartViewport;
+    use crate::ui::state::{PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT};
     use ratatui::layout::Rect;
 
     fn sample_preview(len: usize) -> DatasetPlotingData {

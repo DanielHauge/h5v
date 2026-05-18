@@ -1,6 +1,7 @@
 pub mod app;
 pub mod attributes;
 pub mod chart_math;
+pub mod chrome;
 pub mod command;
 pub mod custom_content;
 pub mod dims;

@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
-    sync::{LazyLock, RwLock},
+    path::PathBuf,
     time::Instant,
 };
 
@@ -11,60 +10,17 @@ use crate::{
 };
 use serde_json::{json, Value};
 
+mod pathing;
+mod support_files;
+
 const LUA_LS_LIBRARY_DIR: &str = ".h5v-luals";
 const LUA_LS_STUB_FILE: &str = "h5v.lua";
 const LUA_LS_CONFIG_FILE: &str = ".luarc.json";
 const LUA_LS_GENERATED_KIND: &str = "generated-luals-config";
-static CONFIG_PATH_OVERRIDE: LazyLock<RwLock<Option<PathBuf>>> =
-    LazyLock::new(|| RwLock::new(None));
-
-pub fn set_config_path_override(path: Option<PathBuf>) -> Result<Option<PathBuf>, ConfigureErrors> {
-    let normalized = path.map(normalize_config_path).transpose()?;
-    *CONFIG_PATH_OVERRIDE.write().map_err(|error| {
-        ConfigureErrors::FailureCreateDefault(std::io::Error::other(format!(
-            "Config path override lock poisoned: {error}"
-        )))
-    })? = normalized.clone();
-    Ok(normalized)
-}
-
-pub fn config_path() -> Result<PathBuf, ConfigureErrors> {
-    if let Some(path) = CONFIG_PATH_OVERRIDE
-        .read()
-        .map_err(|error| {
-            ConfigureErrors::FailureCreateDefault(std::io::Error::other(format!(
-                "Config path override lock poisoned: {error}"
-            )))
-        })?
-        .clone()
-    {
-        return Ok(path);
-    }
-    Ok(dirs::config_dir()
-        .unwrap_or(std::env::current_dir().map_err(ConfigureErrors::NoCurrentDir)?)
-        .join("h5v")
-        .join("init.lua")
-        .with_file_name("init.lua")
-        .with_extension("lua"))
-}
-
-fn normalize_config_path(path: PathBuf) -> Result<PathBuf, ConfigureErrors> {
-    let path_str = path.to_string_lossy();
-    if path_str == "~" || path_str.starts_with("~/") {
-        let home = std::env::var_os("HOME").ok_or_else(|| {
-            ConfigureErrors::FailureCreateDefault(std::io::Error::other(
-                "Cannot expand '~' without HOME set",
-            ))
-        })?;
-        let mut expanded = PathBuf::from(home);
-        if let Some(suffix) = path_str.strip_prefix("~/") {
-            expanded.push(suffix);
-        }
-        Ok(expanded)
-    } else {
-        Ok(path)
-    }
-}
+use pathing::config_parent_dir;
+pub use pathing::{config_path, set_config_path_override};
+use support_files::ensure_lua_ls_support_files;
+pub use support_files::refresh_plugin_lua_ls_support_files;
 
 pub fn load_or_create_config() -> Result<String, ConfigureErrors> {
     let config_path = ensure_config_exists()?;
@@ -1021,47 +977,6 @@ fn write_default_config(config_path: &PathBuf) -> Result<(), ConfigureErrors> {
         message = "wrote default config"
     );
     Ok(())
-}
-
-fn ensure_lua_ls_support_files(config_path: &Path) -> Result<(), ConfigureErrors> {
-    let parent_dir = config_parent_dir(config_path);
-    ensure_lua_ls_support_files_in_dir(parent_dir, &lua_ls_config_contents(), false)
-}
-
-pub fn refresh_plugin_lua_ls_support_files(plugin_root: &Path) -> Result<(), ConfigureErrors> {
-    ensure_lua_ls_support_files_in_dir(plugin_root, &lua_ls_plugin_config_contents(), true)
-}
-
-fn ensure_lua_ls_support_files_in_dir(
-    root_dir: &Path,
-    lua_rc_contents: &str,
-    force_write: bool,
-) -> Result<(), ConfigureErrors> {
-    let lua_ls_dir = root_dir.join(LUA_LS_LIBRARY_DIR);
-    std::fs::create_dir_all(&lua_ls_dir).map_err(ConfigureErrors::FailureCreateDefault)?;
-    std::fs::write(lua_ls_dir.join(LUA_LS_STUB_FILE), lua_ls_stub_contents()?)
-        .map_err(ConfigureErrors::FailureCreateDefault)?;
-
-    let lua_rc_path = root_dir.join(LUA_LS_CONFIG_FILE);
-    let should_write_config = if force_write || !lua_rc_path.exists() {
-        true
-    } else {
-        let existing =
-            std::fs::read_to_string(&lua_rc_path).map_err(ConfigureErrors::FailureCreateDefault)?;
-        should_refresh_lua_ls_config(&existing)
-    };
-    if should_write_config {
-        std::fs::write(lua_rc_path, lua_rc_contents)
-            .map_err(ConfigureErrors::FailureCreateDefault)?;
-    }
-    Ok(())
-}
-
-fn config_parent_dir(config_path: &Path) -> &Path {
-    config_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
 }
 
 #[cfg(test)]

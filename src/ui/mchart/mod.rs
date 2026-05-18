@@ -25,6 +25,7 @@ mod load;
 mod model;
 mod prompt;
 mod render;
+mod types;
 pub use background::handle_mchart_expression_refresh;
 use eval::{
     dataset_ploting_data_from_points, eval_expression_at, eval_scalar_expression,
@@ -52,174 +53,14 @@ use prompt::{
 };
 #[allow(unused_imports)]
 pub(crate) use render::chart_plot_area_in_rect;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ChartViewport {
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct MultiChartItemHitbox {
-    pub(super) area: Rect,
-    pub(super) index: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct MultiChartEditorHitbox {
-    pub(super) area: Rect,
-    pub(super) name_area: Rect,
-    pub(super) expression_area: Rect,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct MultiChartViewModeHitbox {
-    pub(super) area: Rect,
-    pub(super) mode: MultiChartViewMode,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ChartZoomMode {
-    Uniform,
-    XOnly,
-    YOnly,
-}
-
-#[derive(Debug, Clone)]
-struct ChartDragState {
-    anchor_column: u16,
-    anchor_row: u16,
-    viewport: ChartViewport,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedLineChartSeries {
-    label: String,
-    color_slot: usize,
-    points: Vec<Point>,
-    is_selected: bool,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedLineChartData {
-    plot_x_min: f64,
-    plot_x_max: f64,
-    y_min: f64,
-    y_max: f64,
-    series: Vec<PreparedLineChartSeries>,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedHistogramBin {
-    start: f64,
-    end: f64,
-    count: f64,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedHistogramSeries {
-    label: String,
-    color_slot: usize,
-    bins: Vec<PreparedHistogramBin>,
-    is_selected: bool,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedHistogramData {
-    value_min: f64,
-    value_max: f64,
-    count_max: f64,
-    bin_count: usize,
-    series: Vec<PreparedHistogramSeries>,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedBoxPlotSeries {
-    label: String,
-    color_slot: usize,
-    x_index: usize,
-    q1: f64,
-    median: f64,
-    q3: f64,
-    whisker_low: f64,
-    whisker_high: f64,
-    outliers: Vec<f64>,
-    is_selected: bool,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedBoxPlotData {
-    value_min: f64,
-    value_max: f64,
-    series: Vec<PreparedBoxPlotSeries>,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedComparisonScatterData {
-    label: String,
-    x_label: String,
-    y_label: String,
-    color_slot: usize,
-    points: Vec<Point>,
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
-    truncation_note: Option<String>,
-}
-
-pub(crate) struct ChartItemStatus {
-    pub source: ChartSource,
-    pub points: Option<Vec<Point>>,
-    pub scalar_value: Option<f64>,
-    pub source_len: usize,
-    pub load_state: MultiChartLoadState,
-    pub sampled: bool,
-}
-
-#[derive(Debug, Clone)]
-enum PreparedChartData {
-    Line(PreparedLineChartData),
-    Histogram(PreparedHistogramData),
-    BoxPlot(PreparedBoxPlotData),
-    ComparisonScatter(PreparedComparisonScatterData),
-}
-
-#[derive(Debug, Clone)]
-pub struct MultiChartRenderRequest {
-    generation: u64,
-    chart_area: Rect,
-    width: u32,
-    height: u32,
-    prepared: PreparedChartData,
-}
-
-#[derive(Debug, Clone)]
-pub enum MultiChartRenderResult {
-    Success {
-        generation: u64,
-        chart_area: Rect,
-        width: u32,
-        height: u32,
-        rgb_bytes: Vec<u8>,
-        plot_x_range: std::ops::Range<i32>,
-        plot_y_range: std::ops::Range<i32>,
-    },
-    Failure {
-        generation: u64,
-        message: String,
-    },
-}
-#[derive(Debug, Clone)]
-pub struct CapturedMultiChartItem {
-    pub source: ChartSource,
-    pub initial_points: Option<Vec<Point>>,
-    pub source_len: usize,
-    pub load_state: MultiChartLoadState,
-    pub request: Option<MultiChartLoadRequest>,
-}
+pub(crate) use types::ChartZoomMode;
+pub use types::{CapturedMultiChartItem, MultiChartRenderRequest, MultiChartRenderResult};
+use types::{
+    ChartDragState, ChartItemStatus, ChartViewport, MultiChartEditorHitbox, MultiChartItemHitbox,
+    MultiChartViewModeHitbox, PreparedBoxPlotData, PreparedBoxPlotSeries, PreparedChartData,
+    PreparedComparisonScatterData, PreparedHistogramBin, PreparedHistogramData,
+    PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
+};
 
 #[derive(Debug, Clone)]
 pub struct MultiChartLoadRequest {

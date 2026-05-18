@@ -69,8 +69,8 @@ pub fn describe_command_invocation(command: &CommandInvocation) -> Option<String
     command_metadata_by_handle(&command.handle).map(|metadata| metadata.summary)
 }
 
-#[allow(dead_code)]
-pub fn describe_command_descriptor(descriptor: &CommandDescriptor) -> String {
+#[cfg(test)]
+pub(super) fn describe_command_descriptor(descriptor: &CommandDescriptor) -> String {
     let metadata = builtin_descriptor_metadata(descriptor);
     describe_command_metadata(&metadata)
 }
@@ -207,11 +207,6 @@ pub fn current_command_metadata(buffer: &str) -> Option<CommandMetadata> {
     first_token(trimmed).and_then(command_metadata)
 }
 
-#[allow(dead_code)]
-pub fn command_usage(descriptor: &CommandDescriptor) -> String {
-    command_usage_metadata(&builtin_descriptor_metadata(descriptor))
-}
-
 pub fn command_usage_metadata(metadata: &CommandMetadata) -> String {
     let args = metadata
         .args
@@ -229,11 +224,6 @@ pub fn command_usage_metadata(metadata: &CommandMetadata) -> String {
     } else {
         format!("{} {}", metadata.name, args.join(" "))
     }
-}
-
-#[allow(dead_code)]
-pub fn command_keybindings(descriptor: &CommandDescriptor) -> String {
-    command_keybindings_metadata(&builtin_descriptor_metadata(descriptor))
 }
 
 pub fn command_keybindings_metadata(metadata: &CommandMetadata) -> String {

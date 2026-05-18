@@ -2,12 +2,14 @@ use ratatui::{
     layout::{Position, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Clear, Paragraph, Wrap},
     Frame,
 };
 
-use crate::configure;
-use crate::ui::state::AppState;
+use crate::{
+    configure,
+    ui::{chrome::rounded_panel_with_style, state::AppState},
+};
 
 use super::{
     command_keybindings_metadata, command_matches, command_usage_metadata,
@@ -23,17 +25,11 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
         Some((idx, total)) => format!("Command [{idx}/{total}]"),
         None => "Command".to_string(),
     };
-    let block = Block::default()
-        .title(title)
-        .title_style(
-            Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)),
-        )
-        .borders(Borders::ALL)
-        .style(Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)))
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(configure::themed_color(|colors| {
-            colors.surface.panel_border
-        })));
+    let block = rounded_panel_with_style(
+        title,
+        Style::default().bg(configure::themed_color(|colors| colors.surface.focus_bg)),
+    )
+    .title_style(Style::default().fg(configure::themed_color(|colors| colors.surface.panel_title)));
 
     let command_line = Line::from(vec![
         Span::styled(

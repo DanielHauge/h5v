@@ -4,10 +4,11 @@ use ratatui::{
     prelude::Stylize,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
+use crate::ui::chrome::rounded_panel;
 use crate::{configure, h5f::H5FNode};
 
 use super::{
@@ -41,18 +42,7 @@ pub fn render_dim_selector(
     let col_selection = node.selected_col;
     let selected_dim = node.selected_dim;
     let index_selection = &node.selected_indexes;
-    let block = Block::default()
-        .title(panel_title)
-        .title_style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.surface.panel_title))
-                .bold(),
-        )
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(configure::themed_color(|colors| {
-            colors.surface.panel_border
-        })));
+    let block = rounded_panel(panel_title);
     f.render_widget(block, *area);
 
     let inner_area = area.inner(Margin {

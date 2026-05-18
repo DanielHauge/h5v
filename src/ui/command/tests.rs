@@ -2,11 +2,10 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::MutexGuard;
 
 use super::handlers::parse_simulated_key;
-use super::parsing::tokenize_command_text;
+use super::parsing::{describe_command_descriptor, tokenize_command_text};
 use super::{
-    describe_command_descriptor, find_command_descriptor, format_command_invocation,
-    parse_command_text, parse_startup_commands, sync_command_registry_keybindings, CommandArgValue,
-    CommandId, CommandState,
+    find_command_descriptor, format_command_invocation, parse_command_text, parse_startup_commands,
+    sync_command_registry_keybindings, CommandArgValue, CommandId, CommandState,
 };
 use crate::configure;
 use crate::configure::registry::{
