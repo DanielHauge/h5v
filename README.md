@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | s
 
 The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin.
 
-`h5v` is a Rust TUI for inspecting HDF5 files in the terminal: browse the tree, switch between preview, matrix, and heatmap views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows.
+`h5v` is a Rust TUI for inspecting HDF5 files in the terminal: browse the tree, switch between preview, matrix, and heatmap views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows. CSV, TSV, XLSX, and Parquet files can also be opened; `h5v` imports them into cached HDF5 snapshots on launch so they work with the same tree and chart flows.
 
 <div class="oranda-hide">
 
@@ -46,6 +46,14 @@ Open a file in read-only mode:
 
 ```bash
 h5v h5v-example.h5
+```
+
+Open imported tabular files through the import pipeline:
+
+```bash
+h5v data.csv
+h5v reference.h5 experiment.tsv
+h5v workbook.xlsx metrics.parquet
 ```
 
 If your terminal renders icons, line drawing, or graphics previews badly, start in compatibility mode:

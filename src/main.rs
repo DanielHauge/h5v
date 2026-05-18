@@ -14,6 +14,7 @@ mod data;
 mod error;
 mod h5f;
 mod health;
+mod importing;
 mod linking;
 mod logging;
 mod search;
@@ -26,6 +27,7 @@ use crate::cli::{
     collect_startup_commands, init_plugin_scaffold, normalize_cli_args, run_script_test, Args,
 };
 use crate::error::{log_error, AppError};
+use crate::importing::resolve_cli_inputs;
 pub const GIT_VERSION: &str =
     git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
 // only major.minor.patch without commit hash or dirty state, for more concise display in the UI
@@ -112,7 +114,20 @@ fn main() -> Result<(), AppError> {
         linked_file_count = args.files.len(),
         message = "starting UI"
     );
-    match &args.files[..] {
+    let resolved_inputs = resolve_cli_inputs(&args.files)?;
+    let imported_count = resolved_inputs
+        .iter()
+        .filter(|input| input.imported)
+        .count();
+    if args.write && imported_count > 0 {
+        return Err(AppError::FileError(if imported_count == 1 {
+            "Write mode is only supported for native HDF5 files; imported tabular inputs are opened as read-only snapshots".to_string()
+        } else {
+            "Write mode is only supported for native HDF5 files; mixed sessions that include imported tabular inputs are read-only".to_string()
+        }));
+    }
+
+    match &resolved_inputs[..] {
         // [] => Err(AppError::FileError(String::from(
         //     "No files given.\n Usage: h5v /path/to/file.h5",
         // ))),
@@ -122,14 +137,14 @@ fn main() -> Result<(), AppError> {
             std::process::exit(1);
         }
         [single] => ui::app::init(
-            single.clone(),
+            single.hdf5_path.clone(),
             false,
             args.write,
             runtime_config,
             &startup.commands,
         ),
         multiple => ui::app::init(
-            linking::link(multiple)?,
+            linking::link_resolved(multiple)?,
             true,
             args.write,
             runtime_config,

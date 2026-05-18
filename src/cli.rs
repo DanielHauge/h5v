@@ -20,12 +20,12 @@ use crate::{
 #[derive(Parser, Debug)]
 #[clap(
     author = "Daniel F. Hauge animcuil@gmail.com",
-    about = "HDF5 Viewer - TUI for inspecting, visualizing and manipulating HDF5 files",
+    about = "HDF5 Viewer - TUI for inspecting, visualizing and manipulating HDF5 and imported tabular data",
     version = GIT_VERSION,
     help_template = "{about-with-newline}\nVersion: {version}\n\n{usage-heading} {usage}\n\n{all-args}"
 )]
 pub(crate) struct Args {
-    /// Path to the HDF5 file to open
+    /// Paths to HDF5 files or supported tabular files (.csv, .tsv, .xlsx, .parquet) to open
     pub(crate) files: Vec<String>,
 
     #[clap(short, long)]
