@@ -47,6 +47,10 @@ pub(super) fn main_recover_loop(
     startup_commands: &[StartupCommand],
     new_version: Option<&str>,
 ) -> Result<()> {
+    super::render_startup_progress(
+        "Loading configuration...",
+        Some("Preparing plugins, commands, and keymaps."),
+    );
     let super::boot::PreparedApp {
         mut state,
         tx_events,

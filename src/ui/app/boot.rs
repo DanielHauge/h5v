@@ -55,6 +55,10 @@ pub(super) fn prepare_app<'a>(
 ) -> Result<PreparedApp<'a>> {
     let (tx_events, rx_events) = channel();
     let config_started = Instant::now();
+    super::render_startup_progress(
+        "Loading configuration...",
+        Some("Executing init.lua and plugin setup."),
+    );
     let startup_config_error = run_lua_engine(tx_events.clone(), runtime_config.compatibility_mode)
         .err()
         .map(|error| {
@@ -70,6 +74,7 @@ pub(super) fn prepare_app<'a>(
         message = "startup Lua configuration finished"
     );
     let file_open_started = Instant::now();
+    super::render_startup_progress("Opening file...", Some(filename));
     let h5f = h5f::H5F::open(filename.to_string(), link, writable).map_err(|error| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",

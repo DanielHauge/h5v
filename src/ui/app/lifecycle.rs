@@ -35,6 +35,7 @@ pub(super) fn init_terminal(use_alternate_screen: bool) -> Result<AppTerminal, A
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
+    super::startup_progress::set_startup_progress_enabled(true);
     Ok(terminal)
 }
 
@@ -42,6 +43,7 @@ pub(super) fn restore_terminal(
     use_alternate_screen: bool,
     last_message: Option<String>,
 ) -> Result<(), AppError> {
+    super::startup_progress::set_startup_progress_enabled(false);
     stdout().execute(Show)?;
     stdout().execute(DisableMouseCapture)?;
     if use_alternate_screen {

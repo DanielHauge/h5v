@@ -555,6 +555,7 @@ fn split_source_ref(source: &str) -> (&str, Option<String>) {
 }
 
 fn install_plugin(source: &PluginSourceSpec, auto_pull: bool) -> Result<InstalledPlugin, String> {
+    crate::ui::app::render_startup_progress("Loading plugin...", Some(source.original.as_str()));
     let plugin_root = match &source.kind {
         PluginSourceKind::LocalPath { path } => {
             if source.requested_ref.is_some() {
@@ -629,6 +630,7 @@ fn install_git_plugin(
     })?;
     let checkout_dir = plugins_dir.join(plugin_checkout_dir_name(source_key));
     if !checkout_dir.exists() {
+        crate::ui::app::render_startup_progress("Cloning plugin...", Some(source_key));
         run_git(
             None,
             &[
@@ -641,6 +643,10 @@ fn install_git_plugin(
     }
 
     if let Some(requested_ref) = requested_ref {
+        crate::ui::app::render_startup_progress(
+            "Fetching plugin...",
+            Some(&format!("{source_key}@{requested_ref}")),
+        );
         run_git(
             Some(&checkout_dir),
             &[
@@ -650,6 +656,10 @@ fn install_git_plugin(
                 requested_ref.to_string(),
             ],
         )?;
+        crate::ui::app::render_startup_progress(
+            "Checking out plugin...",
+            Some(&format!("{source_key}@{requested_ref}")),
+        );
         run_git(
             Some(&checkout_dir),
             &[
@@ -659,6 +669,7 @@ fn install_git_plugin(
             ],
         )?;
     } else if auto_pull {
+        crate::ui::app::render_startup_progress("Updating plugin...", Some(source_key));
         run_git(
             Some(&checkout_dir),
             &[
@@ -668,6 +679,7 @@ fn install_git_plugin(
                 "main".to_string(),
             ],
         )?;
+        crate::ui::app::render_startup_progress("Checking out plugin...", Some(source_key));
         run_git(
             Some(&checkout_dir),
             &[

@@ -36,7 +36,10 @@ mod lifecycle;
 mod reload;
 mod render;
 mod runtime;
+mod startup_progress;
 mod update;
+
+pub(crate) use self::startup_progress::render_startup_progress;
 
 type Result<T> = std::result::Result<T, AppError>;
 

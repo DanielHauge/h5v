@@ -50,6 +50,10 @@ pub fn run_lua_engine(
 ) -> Result<(), ConfigureErrors> {
     crate::health::clear_reported_health_issues();
     let prepare_started = Instant::now();
+    crate::ui::app::render_startup_progress(
+        "Loading configuration...",
+        Some("Preparing Lua runtime."),
+    );
     let prepared = match prepare_lua_config(Some(events), default_compatibility) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -78,6 +82,10 @@ pub fn run_lua_engine(
     let apply_started = Instant::now();
     let result = (|| -> Result<(), ConfigureErrors> {
         let execute_started = Instant::now();
+        crate::ui::app::render_startup_progress(
+            "Loading configuration...",
+            Some("Executing init.lua."),
+        );
         execute_config_chunk(&lua, &chunk_name, &config)?;
         tracing::info!(
             kind = "config",
@@ -87,6 +95,10 @@ pub fn run_lua_engine(
             message = "executed Lua config chunk"
         );
         let register_started = Instant::now();
+        crate::ui::app::render_startup_progress(
+            "Applying configuration...",
+            Some("Registering commands, themes, and plugins."),
+        );
         register_lua_config(&mut registry_builder, &h5v)?;
         let registry_snapshot = registry_builder
             .freeze()
@@ -98,6 +110,10 @@ pub fn run_lua_engine(
             message = "registered and froze Lua config registry"
         );
         let apply_state_started = Instant::now();
+        crate::ui::app::render_startup_progress(
+            "Applying configuration...",
+            Some("Finishing startup state."),
+        );
         apply_lua_config_with_snapshot(&registry_snapshot, &h5v)?;
         install_registry_snapshot(registry_snapshot);
         sync_command_registry_keybindings(&configure::current_keymaps());
