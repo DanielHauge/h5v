@@ -98,12 +98,23 @@ def build_example_file(output_path: Path) -> None:
         mixed = (0.7 * np.sin(sample_axis) + 0.2 * np.cos(sample_axis * 2.0)).astype(
             np.float32
         )
+        demo_degrees = np.linspace(0.0, 180.0, 16, dtype=np.float32)
+        demo_radians = np.deg2rad(demo_degrees).astype(np.float32)
         signal_ds = signals.create_dataset("sine_wave", data=sine)
         signal_ds.attrs["units"] = "amplitude"
         signal_ds.attrs["SCALE"] = np.float32(1.25)
         signal_ds.attrs["OFFSET"] = np.float32(-0.10)
         signals.create_dataset("cosine_wave", data=cosine)
         signals.create_dataset("mixed_wave", data=mixed)
+        degrees_ds = signals.create_dataset("demo_degrees", data=demo_degrees)
+        degrees_ds.attrs["units"] = "degrees"
+        degrees_ds.attrs["demo_role"] = "Store this path with the demo plugin keybinding."
+        radians_ds = signals.create_dataset("demo_radians", data=demo_radians)
+        radians_ds.attrs["units"] = "radians"
+        radians_ds.attrs["H5V_DEMO_AUTOPLOT"] = np.bool_(True)
+        radians_ds.attrs["demo_role"] = (
+            "Open this dataset after storing /signals/demo_degrees to trigger the demo plugin workflow."
+        )
         signals.create_dataset(
             "parametric_xy",
             data=np.stack(
@@ -119,7 +130,7 @@ def build_example_file(output_path: Path) -> None:
         group_preview.attrs["scale"] = np.float32(1.4)
         group_preview.attrs["offset_attr"] = np.float32(0.2)
         group_preview.attrs["H5V_PREVIEW_EXPR"] = (
-            "(!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)"
+            "(load(/group_preview/time), (load(/group_preview/value) - load(/group_preview/offset)) * load(/group_preview:scale))"
         )
         group_preview.create_dataset(
             "time", data=np.linspace(0.0, 6.0, 48, dtype=np.float32)

@@ -374,9 +374,55 @@ fn seed_builtin_events(builder: &mut RegistryBuilder) -> Result<(), RegistryErro
             Some("{ mode: string, path?: string }"),
         ),
         (
+            "selection_changed",
+            "Selection changed",
+            Some(
+                "{ path?: string, previous_path?: string, kind?: string, previous_kind?: string }",
+            ),
+        ),
+        (
+            "focus_changed",
+            "Focus changed",
+            Some("{ focus: string, previous_focus: string }"),
+        ),
+        (
+            "mode_changed",
+            "Mode changed",
+            Some("{ mode: string, previous_mode: string }"),
+        ),
+        (
             "help_opened",
             "Help opened",
             Some("{ return_mode: string }"),
+        ),
+        ("help_closed", "Help closed", Some("{ mode: string }")),
+        (
+            "logs_opened",
+            "Logs opened",
+            Some("{ return_mode: string }"),
+        ),
+        ("logs_closed", "Logs closed", Some("{ mode: string }")),
+        (
+            "command_opened",
+            "Command opened",
+            Some("{ return_mode: string }"),
+        ),
+        ("command_closed", "Command closed", Some("{ mode: string }")),
+        (
+            "search_opened",
+            "Search opened",
+            Some("{ previous_mode: string }"),
+        ),
+        ("search_closed", "Search closed", Some("{ mode: string }")),
+        (
+            "multichart_closed",
+            "Multichart closed",
+            Some("{ selected_path?: string }"),
+        ),
+        (
+            "tree_view_toggled",
+            "Tree view toggled",
+            Some("{ visible: boolean }"),
         ),
         (
             "app_started",

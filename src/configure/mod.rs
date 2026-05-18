@@ -58,18 +58,17 @@ pub fn refresh_plugin_lua_ls_support_files(path: &std::path::Path) -> Result<(),
 #[cfg(test)]
 pub(crate) use lua::reset_mchart_worker_runtime;
 pub(crate) use lua::{
-    available_lua_content_mode_handles, build_app_context as build_lua_app_context,
-    build_config_context as build_lua_config_context, build_fs_context as build_lua_fs_context,
-    build_log_context as build_lua_log_context,
+    available_lua_content_mode_handles, available_lua_content_mode_handles_for_item,
+    build_app_context as build_lua_app_context, build_config_context as build_lua_config_context,
+    build_fs_context as build_lua_fs_context, build_log_context as build_lua_log_context,
     build_log_context_with_handle as build_lua_log_context_with_handle,
     build_plugin_context as build_lua_plugin_context,
     build_plugin_fs_context as build_lua_plugin_fs_context,
     build_process_context as build_lua_process_context,
     build_selection_context as build_lua_selection_context, dispatch_lua_event,
     open_content_mode_target as open_lua_content_mode_target,
-    parse_process_json_output as parse_lua_process_json, run_process_spec as run_lua_process_spec,
-    run_registered_mchart_function, set_lua_toast, LuaMchartArgValue, LuaMchartReturnValue,
-    LuaToastLevel,
+    parse_process_json_output as parse_lua_process_json, run_registered_mchart_function,
+    set_lua_toast, LuaMchartArgValue, LuaMchartReturnValue, LuaToastLevel,
 };
 pub use lua::{
     last_config_load_metrics, load_config_compatibility, run_lua_engine, with_command_lua_callback,

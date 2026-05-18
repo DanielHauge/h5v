@@ -2,20 +2,20 @@ use std::time::SystemTime;
 
 use crate::{error::FixedStringOverflow, h5f::AttributeCreateType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LastFocused {
     Attributes,
     Content,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Focus {
     Tree(LastFocused),
     Attributes,
     Content,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Normal,
     Search,

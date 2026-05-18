@@ -1,4 +1,5 @@
 use std::{
+    sync::mpsc::RecvTimeoutError,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -75,14 +76,32 @@ pub(super) fn main_recover_loop(
     );
 
     loop {
-        let event = match rx_events.recv() {
-            Ok(event) => event,
-            Err(error) => {
-                log_error(error);
-                return Err(AppError::ChannelError(format!(
-                    "Failed to receive event from channel: {error}"
-                )));
-            }
+        let event = match state
+            .toast_expires_at
+            .map(|expires_at| expires_at.saturating_duration_since(std::time::Instant::now()))
+        {
+            Some(timeout) => match rx_events.recv_timeout(timeout) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => {
+                    apply_app_toast(&mut state, AppToast::Empty);
+                    redraw(terminal, &mut state, new_version)?;
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(AppError::ChannelError(
+                        "Failed to receive event from channel: channel disconnected".to_string(),
+                    ));
+                }
+            },
+            None => match rx_events.recv() {
+                Ok(event) => event,
+                Err(error) => {
+                    log_error(error);
+                    return Err(AppError::ChannelError(format!(
+                        "Failed to receive event from channel: {error}"
+                    )));
+                }
+            },
         };
         if state.editing {
             continue;
@@ -90,14 +109,21 @@ pub(super) fn main_recover_loop(
 
         match event {
             AppEvent::Toast(toast) => {
-                state.toast = toast;
+                apply_app_toast(&mut state, toast);
                 redraw(terminal, &mut state, new_version)?;
             }
             AppEvent::TermEvent(event) => {
                 let selected_before = state.selected_tree_path();
+                let selected_kind_before = selected_item_kind(&state).map(str::to_string);
                 let content_mode_before = state.active_content_mode_handle();
+                let focus_before = state.focus.clone();
+                let mode_before = state.mode.clone();
                 let help_open_before = matches!(state.mode, state::Mode::Help);
+                let logs_open_before = matches!(state.mode, state::Mode::Logs);
+                let command_open_before = matches!(state.mode, state::Mode::Command);
+                let search_open_before = matches!(state.mode, state::Mode::Search);
                 let multichart_open_before = matches!(state.mode, state::Mode::MultiChart);
+                let show_tree_view_before = state.show_tree_view;
                 let mut event_result =
                     handle_input_event(&mut state, event).unwrap_or_else(|error| {
                         EventResult::Toast(AppToast::Error(error.to_string()), false)
@@ -113,7 +139,8 @@ pub(super) fn main_recover_loop(
                 }
                 let selected_after = state.selected_tree_path();
                 if selected_before != selected_after {
-                    if let Some(path) = selected_after {
+                    if let Some(path) = &selected_after {
+                        let path = path.clone();
                         let generation = state.begin_preview_debounce(path);
                         schedule_preview_debounce(tx_events.clone(), generation);
                     } else {
@@ -135,10 +162,57 @@ pub(super) fn main_recover_loop(
                         });
                         event_result = combine_event_results(event_result, callback_result);
                     }
+                    let selected_kind_after = selected_item_kind(&state).map(str::to_string);
+                    let callback_result = dispatch_runtime_event(
+                        &mut state,
+                        "builtin.event.selection_changed",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            if let Some(path) = &selected_before {
+                                event.set("previous_path", path.clone())?;
+                            }
+                            if let Some(kind) = &selected_kind_before {
+                                event.set("previous_kind", kind.clone())?;
+                            }
+                            if let Some(path) = &selected_after {
+                                event.set("path", path.clone())?;
+                            }
+                            if let Some(kind) = &selected_kind_after {
+                                event.set("kind", kind.clone())?;
+                            }
+                            Ok(event)
+                        },
+                    );
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if focus_before != state.focus {
+                    let previous_focus = focus_label(&focus_before);
+                    let focus = focus_label(&state.focus);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.focus_changed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("previous_focus", previous_focus)?;
+                            event.set("focus", focus)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if show_tree_view_before != state.show_tree_view {
+                    let visible = state.show_tree_view;
+                    let callback_result = dispatch_runtime_event(
+                        &mut state,
+                        "builtin.event.tree_view_toggled",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            event.set("visible", visible)?;
+                            Ok(event)
+                        },
+                    );
+                    event_result = combine_event_results(event_result, callback_result);
                 }
                 if !multichart_open_before && matches!(state.mode, state::Mode::MultiChart) {
                     let selected_path = state.selected_tree_path();
-                    let callback_result = configure::dispatch_lua_event(
+                    let callback_result = dispatch_runtime_event(
                         &mut state,
                         "builtin.event.multichart_opened",
                         |lua| {
@@ -148,10 +222,22 @@ pub(super) fn main_recover_loop(
                             }
                             Ok(event)
                         },
-                    )
-                    .unwrap_or_else(|error| {
-                        EventResult::Toast(AppToast::Warning(error.to_string()), false)
-                    });
+                    );
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if multichart_open_before && !matches!(state.mode, state::Mode::MultiChart) {
+                    let selected_path = state.selected_tree_path();
+                    let callback_result = dispatch_runtime_event(
+                        &mut state,
+                        "builtin.event.multichart_closed",
+                        |lua| {
+                            let event = lua.create_table()?;
+                            if let Some(path) = &selected_path {
+                                event.set("selected_path", path.clone())?;
+                            }
+                            Ok(event)
+                        },
+                    );
                     event_result = combine_event_results(event_result, callback_result);
                 }
                 let content_mode_after = state.active_content_mode_handle();
@@ -177,31 +263,98 @@ pub(super) fn main_recover_loop(
                     });
                     event_result = combine_event_results(event_result, callback_result);
                 }
+                if mode_before != state.mode {
+                    let previous_mode = mode_label(&mode_before);
+                    let mode = mode_label(&state.mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.mode_changed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("previous_mode", previous_mode)?;
+                            event.set("mode", mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
                 if !help_open_before && matches!(state.mode, state::Mode::Help) {
                     let return_mode = match &state.help_return_mode {
-                        state::Mode::Normal => "normal",
-                        state::Mode::Search => "search",
-                        state::Mode::Help => "help",
-                        state::Mode::Logs => "logs",
-                        state::Mode::Command => "command",
-                        state::Mode::MultiChart => "mchart",
-                        state::Mode::AttributeCreateDialog => "attribute-create-dialog",
-                        state::Mode::AttributeDeleteDialog => "attribute-delete-dialog",
-                        state::Mode::FixedStringOverflowDialog => "fixed-string-overflow-dialog",
-                        state::Mode::FixedStringResizeDialog => "fixed-string-resize-dialog",
+                        mode => mode_label(mode),
                     };
-                    let callback_result = configure::dispatch_lua_event(
-                        &mut state,
-                        "builtin.event.help_opened",
-                        |lua| {
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.help_opened", |lua| {
                             let event = lua.create_table()?;
                             event.set("return_mode", return_mode)?;
                             Ok(event)
-                        },
-                    )
-                    .unwrap_or_else(|error| {
-                        EventResult::Toast(AppToast::Warning(error.to_string()), false)
-                    });
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if help_open_before && !matches!(state.mode, state::Mode::Help) {
+                    let mode = mode_label(&state.mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.help_closed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("mode", mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if !logs_open_before && matches!(state.mode, state::Mode::Logs) {
+                    let return_mode = mode_label(&state.logs_return_mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.logs_opened", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("return_mode", return_mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if logs_open_before && !matches!(state.mode, state::Mode::Logs) {
+                    let mode = mode_label(&state.mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.logs_closed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("mode", mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if !command_open_before && matches!(state.mode, state::Mode::Command) {
+                    let return_mode = mode_label(&state.command_return_mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.command_opened", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("return_mode", return_mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if command_open_before && !matches!(state.mode, state::Mode::Command) {
+                    let mode = mode_label(&state.mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.command_closed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("mode", mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if !search_open_before && matches!(state.mode, state::Mode::Search) {
+                    let previous_mode = mode_label(&mode_before);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.search_opened", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("previous_mode", previous_mode)?;
+                            Ok(event)
+                        });
+                    event_result = combine_event_results(event_result, callback_result);
+                }
+                if search_open_before && !matches!(state.mode, state::Mode::Search) {
+                    let mode = mode_label(&state.mode);
+                    let callback_result =
+                        dispatch_runtime_event(&mut state, "builtin.event.search_closed", |lua| {
+                            let event = lua.create_table()?;
+                            event.set("mode", mode)?;
+                            Ok(event)
+                        });
                     event_result = combine_event_results(event_result, callback_result);
                 }
                 match event_result {
@@ -225,7 +378,6 @@ pub(super) fn main_recover_loop(
                             match callback_result {
                                 EventResult::Quit => {}
                                 EventResult::Redraw | EventResult::Copying => {
-                                    apply_app_toast(&mut state, AppToast::Empty);
                                     redraw(terminal, &mut state, new_version)?;
                                 }
                                 EventResult::ReloadFile { .. }
@@ -239,11 +391,9 @@ pub(super) fn main_recover_loop(
                     }
                     EventResult::Continue => {}
                     EventResult::Redraw => {
-                        apply_app_toast(&mut state, AppToast::Empty);
                         redraw(terminal, &mut state, new_version)?;
                     }
                     EventResult::Copying => {
-                        apply_app_toast(&mut state, AppToast::Empty);
                         state.copying = true;
                         redraw(terminal, &mut state, new_version)?;
                         state.copying = false;
@@ -554,6 +704,49 @@ fn combine_event_results(primary: EventResult, secondary: EventResult) -> EventR
         EventResult::Continue => primary,
         other => other,
     }
+}
+
+fn dispatch_runtime_event(
+    state: &mut AppState<'_>,
+    handle: &str,
+    payload: impl FnOnce(&mlua::Lua) -> std::result::Result<mlua::Table, mlua::Error>,
+) -> EventResult {
+    configure::dispatch_lua_event(state, handle, payload)
+        .unwrap_or_else(|error| EventResult::Toast(AppToast::Warning(error.to_string()), false))
+}
+
+fn mode_label(mode: &state::Mode) -> &'static str {
+    match mode {
+        state::Mode::Normal => "normal",
+        state::Mode::Search => "search",
+        state::Mode::Help => "help",
+        state::Mode::Logs => "logs",
+        state::Mode::Command => "command",
+        state::Mode::MultiChart => "mchart",
+        state::Mode::AttributeCreateDialog => "attribute-create-dialog",
+        state::Mode::AttributeDeleteDialog => "attribute-delete-dialog",
+        state::Mode::FixedStringOverflowDialog => "fixed-string-overflow-dialog",
+        state::Mode::FixedStringResizeDialog => "fixed-string-resize-dialog",
+    }
+}
+
+fn focus_label(focus: &state::Focus) -> &'static str {
+    match focus {
+        state::Focus::Tree(_) => "tree",
+        state::Focus::Attributes => "attributes",
+        state::Focus::Content => "content",
+    }
+}
+
+fn selected_item_kind(state: &AppState<'_>) -> Option<&'static str> {
+    let item = state.treeview.get(state.tree_view_cursor)?;
+    let node = item.node.try_borrow().ok()?;
+    Some(match &node.node {
+        Node::File(_) => "file",
+        Node::Group(_, _) => "group",
+        Node::Dataset(_, _) => "dataset",
+        Node::Broken(_) => "broken",
+    })
 }
 
 fn selected_dataset_path(state: &AppState<'_>) -> Option<String> {

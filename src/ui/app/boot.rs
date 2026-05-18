@@ -236,6 +236,7 @@ pub(super) fn prepare_app<'a>(
         stacked_tree_layout: false,
         image_protocol_enabled: picker.protocol_type() != ProtocolType::Halfblocks,
         image_cell_size,
+        toast_expires_at: None,
         preview_debounce_generation: 0,
         preview_debounce_until: None,
         preview_debounce_path: None,

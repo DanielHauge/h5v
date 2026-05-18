@@ -453,6 +453,7 @@ fn lua_ls_stub_contents() -> Result<String, ConfigureErrors> {
         "---@field run fun(spec: H5vProcessSpec): H5vProcessResult".to_string(),
         "---@field spawn fun(spec: H5vProcessSpec): H5vProcessResult".to_string(),
         "---@field parse_json fun(result: H5vProcessResult|string): any".to_string(),
+        "---@field command_path fun(command: string): string|nil".to_string(),
         "---@class H5vMchartProcessContext: H5vProcessContext".to_string(),
         "---@field parse_scalar fun(result: H5vProcessResult|string): number".to_string(),
         "---@field parse_series fun(result: H5vProcessResult|string): number[]".to_string(),
@@ -466,6 +467,9 @@ fn lua_ls_stub_contents() -> Result<String, ConfigureErrors> {
         "---@field cwd? string".to_string(),
         "---@class H5vSelectionContext".to_string(),
         "---@field path? string".to_string(),
+        "---@field kind? \"file\"|\"group\"|\"dataset\"|\"broken\"".to_string(),
+        "---@field attribute_names string[]".to_string(),
+        "---@field has_attribute fun(name: string): boolean".to_string(),
         "---@field content_mode H5vContentModeHandle".to_string(),
         "---@class H5vConfigContext".to_string(),
         "---@field theme H5vThemeName".to_string(),
@@ -750,6 +754,7 @@ fn lua_ls_stub_contents() -> Result<String, ConfigureErrors> {
             color_group_class_name(group)
         ));
     }
+    lines.push("---@alias H5vColorOverrideMap table<string, string>".to_string());
     lines.push("---@class H5vActions".to_string());
     for action in crate::ui::input::keymap::exported_action_codes() {
         lines.push(format!("---@field {} \"{}\"", action.symbol, action.code));
@@ -762,13 +767,23 @@ fn lua_ls_stub_contents() -> Result<String, ConfigureErrors> {
             symbol_group_class_name(group)
         ));
     }
+    lines.push("---@alias H5vSymbolOverrideMap table<string, string>".to_string());
     lines.push("---@class H5vThemeCatalog".to_string());
+    lines
+        .push("---@field register fun(definition: H5vThemeDefinition): H5vThemeHandle".to_string());
     for theme_name in &theme_names {
         lines.push(format!(
             "---@field {} H5vColorOverrides",
             lua_id_symbol(theme_name)
         ));
     }
+    lines.push("---@class H5vThemeDefinition".to_string());
+    lines.push("---@field id string".to_string());
+    lines.push("---@field title? string".to_string());
+    lines.push("---@field summary? string".to_string());
+    lines.push("---@field variant? H5vThemeName".to_string());
+    lines.push("---@field colors? H5vColorOverrideMap".to_string());
+    lines.push("---@field symbols? H5vSymbolOverrideMap".to_string());
     lines.push("---@class H5vSymbolThemeCatalog".to_string());
     for theme_name in configure::available_symbol_theme_names() {
         lines.push(format!(
@@ -1045,6 +1060,7 @@ mod tests {
         assert!(stub.contains("---@field stdin? string|(string|number)[]"));
         assert!(stub.contains("---@field to_lines fun(): string"));
         assert!(stub.contains("---@field parse_json fun(result: H5vProcessResult|string): any"));
+        assert!(stub.contains("---@field command_path fun(command: string): string|nil"));
         assert!(stub.contains("---@class H5vUiDocumentBuilder"));
         assert!(stub.contains("---@field message string|H5vUiDocument"));
         assert!(stub.contains("---@field ui H5vUiDocumentBuilder"));
@@ -1066,6 +1082,9 @@ mod tests {
         assert!(stub.contains("---@field logs H5vLogContext"));
         assert!(stub.contains("---@field log H5vLogContext"));
         assert!(stub.contains("---@field selection H5vSelectionContext"));
+        assert!(stub.contains("---@field kind? \"file\"|\"group\"|\"dataset\"|\"broken\""));
+        assert!(stub.contains("---@field attribute_names string[]"));
+        assert!(stub.contains("---@field has_attribute fun(name: string): boolean"));
         assert!(stub.contains("---@field content H5vContentContext"));
         assert!(stub.contains("---@field mchart H5vMchartContext"));
         assert!(stub.contains("---@field plugin H5vPluginContext"));
@@ -1078,6 +1097,10 @@ mod tests {
         );
         assert!(stub.contains("---@field split fun(options: H5vContentUiSplitOptions|H5vContentUiSplitDirection|nil, left: fun(ui: H5vContentUi), right: fun(ui: H5vContentUi))"));
         assert!(stub.contains("---@field badge fun(text: string)"));
+        assert!(
+            stub.contains("---@field register fun(definition: H5vThemeDefinition): H5vThemeHandle")
+        );
+        assert!(stub.contains("---@class H5vThemeDefinition"));
         assert!(stub.contains("h5v = h5v"));
     }
 

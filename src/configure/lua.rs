@@ -18,7 +18,7 @@ pub(crate) use context::{
     build_app_context, build_config_context, build_fs_context, build_log_context,
     build_log_context_with_handle, build_plugin_context, build_plugin_fs_context,
     build_process_context, build_selection_context, open_content_mode_target,
-    parse_process_json_output, run_process_spec, set_lua_toast, LuaToastLevel,
+    parse_process_json_output, set_lua_toast, LuaToastLevel,
 };
 pub(crate) use events::dispatch_lua_event;
 pub use keymaps::with_keymap_lua_callback;
@@ -31,8 +31,11 @@ use registration::{
     apply_lua_config, apply_non_registry_lua_config, parse_compatibility_override,
     parse_content_mode_order, register_lua_config,
 };
-pub(crate) use ui::available_content_mode_handles as available_lua_content_mode_handles;
 pub use ui::with_content_mode_lua_callback;
+pub(crate) use ui::{
+    available_content_mode_handles as available_lua_content_mode_handles,
+    available_content_mode_handles_for_item as available_lua_content_mode_handles_for_item,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigLoadMetrics {
@@ -414,6 +417,18 @@ mod tests {
                 .get::<String>("file_opened")
                 .expect("events.file_opened"),
             "builtin.event.file_opened"
+        );
+        assert_eq!(
+            events
+                .get::<String>("selection_changed")
+                .expect("events.selection_changed"),
+            "builtin.event.selection_changed"
+        );
+        assert_eq!(
+            events
+                .get::<String>("mode_changed")
+                .expect("events.mode_changed"),
+            "builtin.event.mode_changed"
         );
         assert_eq!(
             surface_colors
@@ -997,6 +1012,21 @@ h5v.mchart.functions.register({
         assert_eq!(items.get::<i64>(3).expect("item3"), 3);
         let nested: mlua::Table = parsed.get("nested").expect("nested");
         assert_eq!(nested.get::<String>("name").expect("name"), "demo");
+    }
+
+    #[test]
+    fn process_context_command_path_resolves_shell_command() {
+        let lua = Lua::new();
+        let process = crate::configure::build_lua_process_context(&lua).expect("build process");
+        let command_path: mlua::Function = process.get("command_path").expect("command_path");
+        let resolved = command_path
+            .call::<Option<String>>("sh")
+            .expect("resolve command path");
+        assert!(resolved.is_some());
+        assert!(command_path
+            .call::<Option<String>>("h5v-command-that-should-not-exist")
+            .expect("missing command")
+            .is_none());
     }
 
     #[test]

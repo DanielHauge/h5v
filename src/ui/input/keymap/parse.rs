@@ -133,6 +133,9 @@ fn normalize_key_parts(code: KeyCode, modifiers: KeyModifiers) -> (KeyCode, KeyM
             KeyCode::BackTab
         }
         KeyCode::Tab if modifiers.contains(KeyModifiers::SHIFT) => KeyCode::BackTab,
+        KeyCode::Char(ch) if modifiers.contains(KeyModifiers::SHIFT) && ch.is_ascii_lowercase() => {
+            KeyCode::Char(ch.to_ascii_uppercase())
+        }
         other => other,
     };
     (code, modifiers)
@@ -157,5 +160,23 @@ fn key_code_name(code: KeyCode) -> String {
         KeyCode::Char(' ') => "Space".to_string(),
         KeyCode::Char(c) => c.to_string(),
         _ => "Key".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_shifted_character_as_uppercase() {
+        let key = parse_key_pattern("shift+d").expect("parse shifted char");
+        assert_eq!(key.code, KeyCode::Char('D'));
+        assert!(key.modifiers.contains(KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn shifted_character_binding_matches_shifted_key_event() {
+        let key = parse_key_pattern("shift+d").expect("parse shifted char");
+        assert!(key.matches(&KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)));
     }
 }

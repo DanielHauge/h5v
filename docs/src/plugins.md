@@ -43,6 +43,8 @@ h5v.plugins.use("owner/example-plugin", { auto_pull = false })
 
 Local paths do not support `@ref`.
 
+The repository includes a full demo plugin at `h5v-demo/`. Use it as the end-to-end example for health checks, commands, keymaps, autocommands, custom content modes, themes, plugin store usage, and custom multichart functions.
+
 ## Manifest
 
 ```toml
@@ -90,12 +92,38 @@ h5v.commands.register({
   end,
 })
 
-h5v.events.on({
-  event = h5v.ids.events.file_opened,
-  run = function(ctx)
-    ctx.log.info("opened " .. ctx.event.path)
+h5v.events.on(h5v.ids.events.file_opened, function(ctx, event)
+  ctx.log.info("opened " .. event.path)
+end)
+
+h5v.ui.content_modes.register({
+  id = "analysis.results",
+  title = "Analysis",
+  render = function(ctx, ui)
+    ui.block({ title = "Analysis" }, function(ui)
+      ui.kv("selected", ctx.selection.path or "/")
+    end)
   end,
 })
+
+h5v.themes.register({
+  id = "analysis.theme",
+  title = "Analysis theme",
+  variant = "dark",
+  colors = {
+    [h5v.ids.colors.content.app_brand] = "#7dd3fc",
+  },
+})
+
+h5v.events.on(h5v.ids.events.file_opened, function(ctx, event)
+  local exe = ctx.process.command_path("h5v") or "h5v"
+  local help = ctx.process.run({ command = { exe, "--help" } })
+  if help.success then
+    ctx.plugin.store.set("help_text", help.stdout or "")
+  else
+    ctx.log.warning("failed to capture help for " .. event.path)
+  end
+end)
 
 h5v.mchart.functions.register({
   id = "analysis.scale",
@@ -111,13 +139,29 @@ h5v.mchart.functions.register({
 })
 ```
 
-Plugins can also use:
+Built-in events cover file lifecycle plus runtime transitions such as selection changes, mode/focus changes, tree visibility changes, and help/logs/search/command/mchart open-close hooks. Use `h5v.ids.events.*` and the in-app help for the current event list.
+
+## Plugin contexts
+
+Plugins can use:
 
 - `ctx.process.run(...)`
+- `ctx.process.spawn(...)`
 - `ctx.process.parse_json(...)`
+- `ctx.process.command_path(...)`
 - `ctx.toast.*(...)`
 - `ctx.log.*(...)`
 - `ctx.ui.build(...)`
+- `ctx.plugin.store.get/set/delete(...)`
+
+Selection-aware command, keymap, event, and content-mode callbacks also receive:
+
+```lua
+ctx.selection.path
+ctx.selection.kind
+ctx.selection.attribute_names
+ctx.selection.has_attribute("ATTR_NAME")
+```
 
 ## Health and logs
 

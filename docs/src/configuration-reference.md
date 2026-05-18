@@ -71,11 +71,8 @@ h5v.commands.register({
 ## Events
 
 ```lua
-h5v.events.on({
-  event = h5v.ids.events.file_opened,
-  run = function(ctx)
-    ctx.log.info("opened " .. ctx.event.path)
-  end,
+h5v.events.on(h5v.ids.events.file_opened, function(ctx, event)
+  ctx.log.info("opened " .. event.path)
 })
 ```
 

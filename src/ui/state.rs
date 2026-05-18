@@ -87,6 +87,7 @@ pub struct AppState<'a> {
     pub clipboard_init_error: Option<String>,
     pub copying: bool,
     pub toast: AppToast,
+    pub toast_expires_at: Option<Instant>,
     pub configuration_warning: Option<String>,
     pub file_watch: FileWatchState,
     pub compatibility_mode: bool,

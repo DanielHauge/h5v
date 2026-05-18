@@ -66,7 +66,7 @@ Example `setup.h5v`:
 toggle-tree
 focus content
 mode preview
-mchart add !/group/dataset[..,0]
+mchart add load(/group/dataset)[..,0]
 ```
 
 Example heatmap script fragment:

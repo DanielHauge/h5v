@@ -19,7 +19,7 @@ Use the in-app `Commands` help tab for the current command list and examples.
 ```text
 goto /signals/sine_wave
 mode preview
-mchart add !/signals/sine_wave
+mchart add load(/signals/sine_wave)
 mchart open
 mchart fit all
 configure

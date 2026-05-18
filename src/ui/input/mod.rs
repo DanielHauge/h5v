@@ -20,7 +20,7 @@ use tree::handle_normal_tree_event;
 use crate::{
     configure,
     error::AppError,
-    h5f::Node,
+    h5f::{HasAttributes, HasPath, Node},
     search::{full_traversal, Searcher},
     ui::command::{execute_command, parse_command_text, parse_startup_commands},
     ui::state::AppToast,
@@ -171,12 +171,6 @@ pub(crate) fn execute_bound_lua_callback(
                 }
                 Ok(())
             })?;
-            let process_run_fn = scope.create_function_mut(|lua, spec: mlua::Table| {
-                configure::run_lua_process_spec(lua, spec, false)
-            })?;
-            let process_spawn_fn = scope.create_function_mut(|lua, spec: mlua::Table| {
-                configure::run_lua_process_spec(lua, spec, true)
-            })?;
             let content_open_fn = scope.create_function_mut(|lua, target: String| {
                 let mut state = state_cell.borrow_mut();
                 configure::open_lua_content_mode_target(lua, *state, &target)?;
@@ -187,11 +181,23 @@ pub(crate) fn execute_bound_lua_callback(
             })?;
             let content_toggle_fn = scope.create_function_mut(|_, ()| {
                 let mut state = state_cell.borrow_mut();
-                let available = state.treeview[state.tree_view_cursor]
-                    .node
-                    .borrow_mut()
-                    .content_show_modes();
-                let available = state.available_content_mode_handles(available);
+                let available = {
+                    let node = state.treeview[state.tree_view_cursor].node.borrow_mut();
+                    let selected_path = node.node.path();
+                    let selected_kind = match &node.node {
+                        crate::h5f::Node::File(_) => "file",
+                        crate::h5f::Node::Group(_, _) => "group",
+                        crate::h5f::Node::Dataset(_, _) => "dataset",
+                        crate::h5f::Node::Broken(_) => "broken",
+                    };
+                    let attribute_names = node.node.attribute_names().unwrap_or_default();
+                    state.available_content_mode_handles_for_item(
+                        node.content_show_modes(),
+                        &selected_path,
+                        selected_kind,
+                        &attribute_names,
+                    )
+                };
                 state.swap_content_mode_handle(available);
                 if matches!(*callback_result.borrow(), EventResult::Continue) {
                     *callback_result.borrow_mut() = EventResult::Redraw;
@@ -234,9 +240,6 @@ pub(crate) fn execute_bound_lua_callback(
             toast.set("warning", toast_warn_fn.clone())?;
             toast.set("warn", toast_warn_fn)?;
             toast.set("error", toast_error_fn)?;
-            let process = lua.create_table()?;
-            process.set("run", process_run_fn)?;
-            process.set("spawn", process_spawn_fn)?;
             let content = lua.create_table()?;
             content.set("open", content_open_fn)?;
             content.set("toggle", content_toggle_fn)?;
@@ -248,7 +251,7 @@ pub(crate) fn execute_bound_lua_callback(
             ctx.set("commands", commands_fn)?;
             ctx.set("script", script_fn)?;
             ctx.set("toast", toast)?;
-            ctx.set("process", process)?;
+            ctx.set("process", configure::build_lua_process_context(lua)?)?;
             ctx.set("content", content)?;
             ctx.set("mchart", mchart)?;
             {
@@ -269,7 +272,17 @@ pub(crate) fn execute_bound_lua_callback(
         Ok(callback_result.into_inner())
     });
     state.binding_command_depth = state.binding_command_depth.saturating_sub(1);
-    result
+    match result {
+        Ok(event) => Ok(event),
+        Err(error) => {
+            configure::set_lua_toast(
+                state,
+                configure::LuaToastLevel::Error,
+                format!("Lua keybinding failed: {error}"),
+            );
+            Ok(EventResult::Redraw)
+        }
+    }
 }
 
 fn handle_global_action(

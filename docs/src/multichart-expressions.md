@@ -8,12 +8,12 @@ Multichart expressions can refer to existing chart items, datasets, and attribut
 | --- | --- |
 | `$1` | Chart item series by workspace id |
 | `$1[0..256]` | Chart item series slice by sample range |
-| `!/dataset` | Dataset series |
-| `!/dataset[..,0]` | Dataset series with explicit slicing |
-| `!/group:trace` | Series-valued attribute on a group or dataset |
+| `load(/dataset)` | Dataset series |
+| `load(/dataset)[..,0]` | Dataset series with explicit slicing |
+| `load(/group:trace)` | Series-valued attribute on a group or dataset |
 | `!$1:trace` | Series-valued attribute on the dataset backing chart item `$1` |
-| `#/group/scalar` | Scalar dataset value |
-| `#/group/ds:BIAS` | Scalar attribute on a group or dataset |
+| `load(/group/scalar)` | Scalar dataset value |
+| `load(/group/ds:BIAS)` | Scalar attribute on a group or dataset |
 | `#$1:SCALE` | Scalar attribute on the dataset backing chart item `$1` |
 
 ## Y-series and x/y-series
@@ -27,9 +27,9 @@ Examples:
 
 ```text
 $1 * #$1:SCALE
-!/signals/sine_wave + #/group_preview/offset
+load(/signals/sine_wave) + load(/group_preview/offset)
 $1[0..512] - $2[128..640]
-($1 * #/group_preview:scale, !/group_preview/time)
+(load(/group_preview/time), $1 * load(/group_preview:scale))
 ```
 
 The tuple form is the most important one for custom x/y plots because it gives you explicit control over both axes.
@@ -37,13 +37,13 @@ The tuple form is the most important one for custom x/y plots because it gives y
 The same syntax is also used by group preview expressions. In the bundled example, `/group_preview` defines:
 
 ```text
-(!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)
+(load(/group_preview/time), (load(/group_preview/value) - load(/group_preview/offset)) * load(/group_preview:scale))
 ```
 
 Here is an example of a parametric x/y series using sine and cosine signals to form a circle:
 
 ```text
-(!/signals/sine_wave, !/signals/cosine_wave)
+(load(/signals/sine_wave), load(/signals/cosine_wave))
 ```
 
 ![Parametric plot](./assets/parametric.png)
@@ -70,5 +70,5 @@ Invalid expressions are reported inline. Suggestions include chart item ids, dat
 
 - add a raw dataset first so you have stable `$1`, `$2`, and `$3` references to build from
 - use `$id[start..end]` when you want to align or compare only part of an existing chart item
-- use `:ATTR` only when you want an explicit attribute lookup on an object or dataset-backed chart item
+- use `load(/path:ATTR)` when you want an explicit attribute lookup on an object or dataset
 - prefer explicit dataset slicing when the same dataset can be interpreted several ways

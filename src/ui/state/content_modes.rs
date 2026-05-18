@@ -108,12 +108,32 @@ impl AppState<'_> {
         &self,
         available: Vec<ContentShowMode>,
     ) -> Vec<ContentModeHandle> {
+        self.available_content_mode_handles_for_item(available, "", "broken", &[])
+    }
+
+    pub fn available_content_mode_handles_for_item(
+        &self,
+        available: Vec<ContentShowMode>,
+        selected_path: &str,
+        kind: &str,
+        attribute_names: &[String],
+    ) -> Vec<ContentModeHandle> {
         let mut handles = self
             .filter_runtime_content_modes(available)
             .into_iter()
             .map(ContentShowMode::handle)
             .collect::<Vec<_>>();
-        if let Ok(custom_handles) = configure::available_lua_content_mode_handles(self) {
+        let custom_handles =
+            if selected_path.is_empty() && kind == "broken" && attribute_names.is_empty() {
+                configure::available_lua_content_mode_handles(self)
+            } else {
+                configure::available_lua_content_mode_handles_for_item(
+                    selected_path,
+                    kind,
+                    attribute_names,
+                )
+            };
+        if let Ok(custom_handles) = custom_handles {
             for handle in custom_handles {
                 if !handles.contains(&handle) {
                     handles.push(handle);

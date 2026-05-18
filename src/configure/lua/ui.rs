@@ -98,6 +98,33 @@ pub fn with_content_mode_lua_callback<R>(
 pub(crate) fn available_content_mode_handles(
     state: &AppState<'_>,
 ) -> Result<Vec<ContentModeHandle>, AppError> {
+    let (selected_path, kind, attribute_names) = state
+        .treeview
+        .get(state.tree_view_cursor)
+        .and_then(|item| {
+            item.node.try_borrow().ok().map(|node| {
+                (
+                    node.node.path(),
+                    match &node.node {
+                        Node::File(_) => "file",
+                        Node::Group(_, _) => "group",
+                        Node::Dataset(_, _) => "dataset",
+                        Node::Broken(_) => "broken",
+                    }
+                    .to_string(),
+                    node.node.attribute_names().unwrap_or_default(),
+                )
+            })
+        })
+        .unwrap_or_else(|| (String::new(), "broken".to_string(), Vec::new()));
+    available_content_mode_handles_for_item(&selected_path, &kind, &attribute_names)
+}
+
+pub(crate) fn available_content_mode_handles_for_item(
+    selected_path: &str,
+    kind: &str,
+    attribute_names: &[String],
+) -> Result<Vec<ContentModeHandle>, AppError> {
     with_config_lua_runtime(|lua| {
         let h5v: Table = lua
             .globals()
@@ -114,29 +141,7 @@ pub(crate) fn available_content_mode_handles(
         let attachments: Table = content_modes
             .get(CONTENT_MODES_ATTACHMENTS_FIELD)
             .map_err(|error| AppError::InvalidCommand(error.to_string()))?;
-
-        let (selected_path, kind, attribute_names) = state
-            .treeview
-            .get(state.tree_view_cursor)
-            .and_then(|item| {
-                item.node.try_borrow().ok().map(|node| {
-                    let kind = match &node.node {
-                        Node::File(_) => "file",
-                        Node::Group(_, _) => "group",
-                        Node::Dataset(_, _) => "dataset",
-                        Node::Broken(_) => "broken",
-                    }
-                    .to_string();
-                    let attribute_names = node.node.attribute_names().unwrap_or_default();
-                    (
-                        normalize_content_mode_path(&node.node.path()),
-                        kind,
-                        attribute_names,
-                    )
-                })
-            })
-            .unwrap_or_else(|| ("/".to_string(), "broken".to_string(), Vec::new()));
-
+        let selected_path = normalize_content_mode_path(selected_path);
         let mut handles = Vec::new();
         for pair in definitions.pairs::<String, Table>() {
             let (handle, definition) =
@@ -160,7 +165,7 @@ pub(crate) fn available_content_mode_handles(
                     .get(callback_id)
                     .map_err(|error| AppError::InvalidCommand(error.to_string()))?;
                 let item =
-                    build_content_mode_item_context(lua, &selected_path, &kind, &attribute_names)
+                    build_content_mode_item_context(lua, &selected_path, kind, attribute_names)
                         .map_err(|error| AppError::InvalidCommand(error.to_string()))?;
                 callback
                     .call::<bool>(item)

@@ -53,7 +53,7 @@ If a group has a variable-length string attribute named `H5V_PREVIEW_EXPR`, h5v 
 The bundled example includes `/group_preview`:
 
 ```text
-(!/group_preview/time, (!/group_preview/value - #/group_preview/offset) * #/group_preview:scale)
+(load(/group_preview/time), (load(/group_preview/value) - load(/group_preview/offset)) * load(/group_preview:scale))
 ```
 
 Press `m` on that group to add the same expression to multichart.

@@ -1,5 +1,6 @@
 use std::{
     io::Write,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -7,7 +8,10 @@ use mlua::{Lua, Table, Value};
 use serde_json::Value as JsonValue;
 use tracing::Level;
 
-use crate::ui::state::{AppState, AppToast, Mode};
+use crate::{
+    h5f::{HasAttributes, Node},
+    ui::state::{AppState, AppToast, Mode},
+};
 
 use super::ui::resolve_registered_content_mode_handle;
 
@@ -89,6 +93,10 @@ pub(crate) fn build_process_context(lua: &Lua) -> Result<Table, mlua::Error> {
         "parse_json",
         lua.create_function(|lua, value: Value| parse_process_json_output(lua, value))?,
     )?;
+    process.set(
+        "command_path",
+        lua.create_function(|_, command: String| Ok(resolve_command_path(&command)))?,
+    )?;
     Ok(process)
 }
 
@@ -123,14 +131,48 @@ fn populate_fs_context(fs: &Table) -> Result<(), mlua::Error> {
     Ok(())
 }
 
+fn selected_item_kind(state: &AppState<'_>) -> Option<&'static str> {
+    let item = state.treeview.get(state.tree_view_cursor)?;
+    let node = item.node.try_borrow().ok()?;
+    Some(match &node.node {
+        Node::File(_) => "file",
+        Node::Group(_, _) => "group",
+        Node::Dataset(_, _) => "dataset",
+        Node::Broken(_) => "broken",
+    })
+}
+
+fn selected_attribute_names(state: &AppState<'_>) -> Vec<String> {
+    let Some(item) = state.treeview.get(state.tree_view_cursor) else {
+        return Vec::new();
+    };
+    let Ok(node) = item.node.try_borrow() else {
+        return Vec::new();
+    };
+    node.node.attribute_names().unwrap_or_default()
+}
+
 pub(crate) fn build_selection_context(
     lua: &Lua,
     state: &AppState<'_>,
 ) -> Result<Table, mlua::Error> {
     let selection = lua.create_table()?;
+    let attribute_names = selected_attribute_names(state);
     if let Some(path) = state.selected_tree_path() {
         selection.set("path", path)?;
     }
+    if let Some(kind) = selected_item_kind(state) {
+        selection.set("kind", kind)?;
+    }
+    selection.set(
+        "attribute_names",
+        lua.create_sequence_from(attribute_names.iter().cloned())?,
+    )?;
+    let names = attribute_names.clone();
+    selection.set(
+        "has_attribute",
+        lua.create_function(move |_, name: String| Ok(names.iter().any(|entry| entry == &name)))?,
+    )?;
     selection.set("content_mode", content_mode_label(state))?;
     Ok(selection)
 }
@@ -328,6 +370,7 @@ fn parse_process_stdout_text(value: Value, context: &str) -> Result<String, mlua
                     )))
                 }
             }
+
             match table.get::<Value>("stdout")? {
                 Value::String(stdout) => Ok(stdout.to_str()?.to_string()),
                 Value::Nil => Err(mlua::Error::runtime(format!(
@@ -343,6 +386,99 @@ fn parse_process_stdout_text(value: Value, context: &str) -> Result<String, mlua
             "{context} expects either a process result table or a stdout string, got {}",
             other.type_name()
         ))),
+    }
+}
+
+fn resolve_command_path(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = Path::new(trimmed);
+    if path.components().count() > 1 || path.is_absolute() {
+        return resolve_command_candidate(path).map(|path| path.display().to_string());
+    }
+    let path_env = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_env) {
+        for candidate in command_search_candidates(trimmed) {
+            let path = dir.join(candidate);
+            if let Some(path) = resolve_command_candidate(&path) {
+                return Some(path.display().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn resolve_command_candidate(path: &Path) -> Option<PathBuf> {
+    if command_candidate_is_executable(path) {
+        return Some(path.to_path_buf());
+    }
+    #[cfg(windows)]
+    {
+        let has_extension = path.extension().is_some();
+        if !has_extension {
+            for extension in windows_path_extensions() {
+                let candidate = path.with_extension(extension.trim_start_matches('.'));
+                if command_candidate_is_executable(&candidate) {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn command_search_candidates(command: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let has_extension = Path::new(command).extension().is_some();
+        if has_extension {
+            return vec![command.to_string()];
+        }
+        let mut candidates = vec![command.to_string()];
+        for extension in windows_path_extensions() {
+            candidates.push(format!("{command}{extension}"));
+        }
+        candidates
+    }
+    #[cfg(not(windows))]
+    {
+        vec![command.to_string()]
+    }
+}
+
+#[cfg(windows)]
+fn windows_path_extensions() -> Vec<String> {
+    std::env::var("PATHEXT")
+        .ok()
+        .map(|value| {
+            value
+                .split(';')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(|entry| entry.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .filter(|entries| !entries.is_empty())
+        .unwrap_or_else(|| vec![".exe".to_string(), ".cmd".to_string(), ".bat".to_string()])
+}
+
+fn command_candidate_is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 

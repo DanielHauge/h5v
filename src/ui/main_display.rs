@@ -12,7 +12,7 @@ use ratatui::{
 use crate::{
     configure,
     error::AppError,
-    h5f::{H5FNode, Node},
+    h5f::{H5FNode, HasAttributes, HasPath, Node},
     ui::{
         self,
         custom_content::render_custom_content_mode,
@@ -127,7 +127,20 @@ pub fn render_main_display(
     state.ui_layout.matrix_rows.clear();
     state.ui_layout.matrix_cells.clear();
 
-    let available_handles = state.available_content_mode_handles(node.content_show_modes());
+    let selected_path = node.node.path();
+    let selected_kind = match &node.node {
+        Node::File(_) => "file",
+        Node::Group(_, _) => "group",
+        Node::Dataset(_, _) => "dataset",
+        Node::Broken(_) => "broken",
+    };
+    let attribute_names = node.node.attribute_names().unwrap_or_default();
+    let available_handles = state.available_content_mode_handles_for_item(
+        node.content_show_modes(),
+        &selected_path,
+        selected_kind,
+        &attribute_names,
+    );
     let supported_display_modes = configure::ordered_content_mode_handles(&available_handles);
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {

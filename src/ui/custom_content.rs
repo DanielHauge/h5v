@@ -29,6 +29,15 @@ pub(crate) fn render_custom_content_mode(
     state: &AppState<'_>,
     handle: &ContentModeHandle,
 ) -> Result<(), AppError> {
+    let body_area = ratatui::layout::Rect {
+        x: area.x,
+        y: area.y.saturating_add(1),
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+    if body_area.width == 0 || body_area.height == 0 {
+        return Ok(());
+    }
     let snapshot = configure::current_registry_snapshot();
     let metadata = snapshot.content_mode(handle).ok_or_else(|| {
         AppError::InvalidCommand(format!(
@@ -50,7 +59,7 @@ pub(crate) fn render_custom_content_mode(
             .map_err(|error| AppError::InvalidCommand(error.to_string()))
     })?;
 
-    let mut lines = render_ui_nodes(&nodes, area.width as usize);
+    let mut lines = render_ui_nodes(&nodes, body_area.width as usize);
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "No content".to_string(),
@@ -61,7 +70,7 @@ pub(crate) fn render_custom_content_mode(
         Paragraph::new(lines)
             .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg)))
             .wrap(Wrap { trim: false }),
-        *area,
+        body_area,
     );
     Ok(())
 }

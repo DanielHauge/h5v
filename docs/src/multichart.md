@@ -15,7 +15,7 @@ Sources:
 1. Add a series with `m` or `mchart add ...`.
 2. Press `M` or run `mchart open` to enter the workspace.
 3. Press `Enter` to open a new expression, or `e` to edit the selected series.
-4. Build derived series with expressions such as `$1 - $2`, `($1, !/time[..])`, or `$1[0..256]`.
+4. Build derived series with expressions such as `$1 - $2`, `(load(/time)[..], $1)`, or `$1[0..256]`.
 5. Use zoom and pan to inspect the area of interest.
 
 Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` adds the group preview expression as a chart item.
@@ -31,7 +31,7 @@ Groups with `H5V_PREVIEW_EXPR` also work here. Pressing `m` on `/group_preview` 
 
 The editor validates expressions live and suggests chart item ids, dataset paths, and attribute references.
 
-Raw dataset references such as `!/big_dataset[..]` are queued and loaded in the background when submitted.
+Raw dataset references such as `load(/big_dataset)[..]` are queued and loaded in the background when submitted.
 Zoomed dataset-backed views can request a denser viewport sample in the background while the coarse overview stays visible.
 Derived series can also refine to viewport detail when their referenced chart-item inputs share the same loaded detail window.
 
