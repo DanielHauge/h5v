@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     configure,
-    ui::{chrome::rounded_panel_with_style, state::AppState},
+    ui::{chrome::rounded_panel_with_style, cursor::set_input_cursor, state::AppState},
 };
 
 use super::{
@@ -153,5 +153,5 @@ pub fn render_command_dialog(f: &mut Frame, area: Rect, state: &mut AppState) {
     f.render_widget(Clear, area);
     f.render_widget(command_text_widget, area);
     let cursor_position = Position::new(area.x + 3 + state.command_state.cursor as u16, area.y + 1);
-    f.set_cursor_position(cursor_position);
+    set_input_cursor(f, cursor_position);
 }

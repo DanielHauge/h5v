@@ -9,6 +9,7 @@ use ratatui::{
 use crate::{
     configure,
     ui::{
+        cursor::set_input_cursor,
         help::centered_rect,
         state::{self, AppState, FixedStringOverflowChoice},
     },
@@ -148,11 +149,13 @@ pub(super) fn render_attribute_create_dialog(
     );
 
     match dialog.active_field {
-        state::AttributeCreateField::Name => frame.set_cursor_position(
+        state::AttributeCreateField::Name => set_input_cursor(
+            frame,
             ratatui::layout::Position::new(rows[1].x + 6 + dialog.name_cursor as u16, rows[1].y),
         ),
         state::AttributeCreateField::Type => {}
-        state::AttributeCreateField::Value => frame.set_cursor_position(
+        state::AttributeCreateField::Value => set_input_cursor(
+            frame,
             ratatui::layout::Position::new(rows[3].x + 7 + dialog.value_cursor as u16, rows[3].y),
         ),
     }
@@ -290,8 +293,8 @@ pub(super) fn render_fixed_string_resize_dialog(
         ),
         rows[1],
     );
-    frame.set_cursor_position(ratatui::layout::Position::new(
-        rows[1].x + 2 + dialog.size_input.len() as u16,
-        rows[1].y,
-    ));
+    set_input_cursor(
+        frame,
+        ratatui::layout::Position::new(rows[1].x + 2 + dialog.size_input.len() as u16, rows[1].y),
+    );
 }

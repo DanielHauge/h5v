@@ -11,7 +11,7 @@ use ratatui::{
 use crate::{
     configure,
     h5f::{H5FNode, HasPath},
-    ui::{mchart::MultiChartState, std_comp_render::render_error},
+    ui::{cursor::set_input_cursor, mchart::MultiChartState, std_comp_render::render_error},
 };
 
 use super::state::{AppState, Focus, Mode, TreeHitbox};
@@ -389,7 +389,7 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             f.render_widget(search_line, area);
             let mut area_pos = area.as_position();
             area_pos.x = area_pos.x + 3 + search_line_cursor as u16;
-            f.set_cursor_position(area_pos);
+            set_input_cursor(f, area_pos);
 
             let mut offset = 1;
             let visible_rows = area.height.saturating_sub(1) as usize;

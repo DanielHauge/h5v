@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::configure;
+use crate::{configure, ui::cursor::set_input_cursor};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::Style,
@@ -879,7 +879,7 @@ impl MultiChartState {
                 },
                 input_inner.y,
             );
-            f.set_cursor_position(cursor);
+            set_input_cursor(f, cursor);
         }
     }
 }

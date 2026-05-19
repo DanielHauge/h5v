@@ -14,6 +14,7 @@ use crate::{
     h5f::{HasPath, Node},
     ui::{
         command::{execute_command, parse_command_text, StartupCommand},
+        cursor::strip_blink_modifiers,
         heatmap::HEATMAP_CACHE_CAPACITY,
         input::{handle_input_event, EventResult},
         mchart::{MultiChartLoadKind, MultiChartLoadResult},
@@ -694,12 +695,18 @@ fn redraw(
     state: &mut AppState<'_>,
     new_version: Option<&str>,
 ) -> Result<()> {
-    terminal.draw(|frame| draw_app_frame(frame, state, new_version))?;
+    terminal.draw(|frame| {
+        draw_app_frame(frame, state, new_version);
+        strip_blink_modifiers(frame);
+    })?;
     Ok(())
 }
 
 fn draw_error(terminal: &mut AppTerminal, error: &str) -> Result<()> {
-    terminal.draw(|frame| render_error(frame, error))?;
+    terminal.draw(|frame| {
+        render_error(frame, error);
+        strip_blink_modifiers(frame);
+    })?;
     Ok(())
 }
 
