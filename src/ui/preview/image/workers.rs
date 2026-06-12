@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::perf;
+use ratatui_image::ResizeEncodeRender;
 
 pub(crate) fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
@@ -181,12 +182,23 @@ pub(crate) fn handle_chartpreview_load(
 
             let dyn_img = DynamicImage::ImageRgb8(image);
             let clipboard_image = clipboard_image_from_dynamic(&dyn_img);
-            let stateful_protocol = picker.new_resize_protocol(dyn_img);
-            let thread_protocol = ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol));
+            let mut stateful_protocol = picker.new_resize_protocol(dyn_img);
+            stateful_protocol.resize_encode(
+                &Resize::Scale(Some(FilterType::Triangle)),
+                Rect::new(0, 0, req.width, req.height),
+            );
+            if let Some(Err(error)) = stateful_protocol.last_encoding_result() {
+                send_chart_failure(
+                    &tx_events,
+                    req.key.clone(),
+                    format!("Failed to encode chart preview: {error}"),
+                );
+                continue;
+            }
             send_chart_success(
                 &tx_events,
                 req.key,
-                thread_protocol,
+                ThreadProtocol::new(tx_worker.clone(), Some(stateful_protocol)),
                 clipboard_image,
                 data_bounds,
                 data_preview,

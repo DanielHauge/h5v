@@ -21,17 +21,15 @@ mod search;
 #[cfg(test)]
 mod test_support;
 mod ui;
-use git_version::git_version;
 
 use crate::cli::{
     collect_startup_commands, init_plugin_scaffold, normalize_cli_args, run_script_test, Args,
 };
 use crate::error::{log_error, AppError};
 use crate::importing::resolve_cli_inputs;
-pub const GIT_VERSION: &str =
-    git_version!(args = ["--always", "--dirty=-modified", "--tags", "--abbrev=4"]);
+pub const GIT_VERSION: &str = env!("H5V_GIT_VERSION");
 // only major.minor.patch without commit hash or dirty state, for more concise display in the UI
-pub const GIT_VERSION_SHORT: &str = git_version!(args = ["--tags", "--abbrev=0"]);
+pub const GIT_VERSION_SHORT: &str = env!("H5V_GIT_VERSION_SHORT");
 
 fn main() -> Result<(), AppError> {
     let startup_started = Instant::now();

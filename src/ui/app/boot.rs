@@ -145,6 +145,7 @@ pub(super) fn prepare_app<'a>(
         ds_selection: None,
         rendered_viewport: None,
         rendered_roi: None,
+        rendered_size: None,
         pending_key: None,
         tx_resize_chartpreview: tx_chart_preview_resize,
         tx_load_chartpreview,

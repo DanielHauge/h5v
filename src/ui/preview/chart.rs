@@ -120,6 +120,8 @@ pub fn render_precomputed_chart_preview(
         selection: preview_selection.clone(),
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        width: chart_area.width,
+        height: chart_area.height,
     };
     queue_chart_preview_load(
         f,
@@ -386,6 +388,8 @@ pub fn render_chart_preview(
         selection: data_preview_selection.clone(),
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        width: chart_area.width,
+        height: chart_area.height,
     };
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);
@@ -633,6 +637,8 @@ fn render_projected_chart_preview(
         selection: data_preview_selection.clone(),
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        width: chart_area.width,
+        height: chart_area.height,
     };
     if !state.image_protocol_enabled {
         clear_active_chart_preview(state);

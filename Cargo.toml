@@ -14,7 +14,7 @@ description = "A terminal HDF5 viewer with matrix/chart/image previews, compound
 readme = "README.md"
 repository = "https://github.com/DanielHauge/h5v"
 license = "Apache-2.0"
-include = ["/src/**/*", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
+include = ["/src/**/*", "/build.rs", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }{ archive-suffix }"
@@ -38,7 +38,6 @@ macros = { package = "h5v-macros", version = "0.1.0", path = "./macros" }
 clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
 fuzzy-matcher = "0.3.7"
-git-version = "0.3.9"
 hdf5-metno = { version = "0.12.4", features = [
     "blosc-all",
     "lzf",

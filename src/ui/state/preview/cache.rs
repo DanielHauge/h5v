@@ -52,11 +52,14 @@ impl ImgState {
 
 impl ChartPreviwState {
     pub fn current_request_key(&self) -> Option<ChartPreviewKey> {
+        let (width, height) = self.rendered_size?;
         Some(ChartPreviewKey {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
             viewport: self.rendered_viewport,
             roi: self.rendered_roi,
+            width,
+            height,
         })
     }
 
@@ -101,6 +104,7 @@ impl ChartPreviwState {
         self.ds_selection = Some(key.selection.clone());
         self.rendered_viewport = key.viewport;
         self.rendered_roi = key.roi;
+        self.rendered_size = Some((key.width, key.height));
         self.protocol = None;
         self.clipboard_image = None;
         self.error = None;

@@ -38,6 +38,18 @@ Compatibility mode switches to simpler symbols and text/braille fallbacks. Multi
 
 See [Installation](./installation.md) for persistent compatibility settings.
 
+## A Linux release says `GLIBC_x.y` was not found
+
+Official Linux releases target Ubuntu 22.04 and newer.
+
+If your distro is older than that baseline, build locally instead:
+
+```bash
+cargo install h5v
+```
+
+That links against your local system libraries instead of the release builder's glibc version.
+
 ## A compound dataset does not show in matrix mode
 
 That is expected for the compound container itself. The root node shows a schema preview. Drill down to a projected leaf field for preview or matrix rendering.

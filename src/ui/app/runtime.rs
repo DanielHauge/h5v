@@ -535,6 +535,7 @@ pub(super) fn main_recover_loop(
                     state.chart_preview_state.error = None;
                     state.chart_preview_state.rendered_viewport = key.viewport;
                     state.chart_preview_state.rendered_roi = key.roi;
+                    state.chart_preview_state.rendered_size = Some((key.width, key.height));
                     state
                         .chart_preview_state
                         .set_current_data(Some(data_preview));

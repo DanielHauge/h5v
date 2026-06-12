@@ -372,22 +372,26 @@ fn copy_chart_preview(
     selection: PreviewSelection,
     data_preview: crate::data::DatasetPlotingData,
 ) -> Result<EventResult, AppError> {
-    if state.chart_preview_state.current_request_key()
-        == Some(crate::ui::state::ChartPreviewKey {
-            ds_path: ds_path.to_string(),
-            selection: selection.clone(),
-            viewport: state.chart_preview_state.rendered_viewport,
-            roi: state.chart_preview_state.rendered_roi,
-        })
-    {
-        if let Some(image) = &state.chart_preview_state.clipboard_image {
-            return copy_image_to_clipboard(
-                state,
-                image.width,
-                image.height,
-                image.bytes.clone(),
-                "Copied chart preview image to clipboard",
-            );
+    if let Some(chart_area) = state.chart_preview_state.last_chart_area {
+        if state.chart_preview_state.current_request_key()
+            == Some(crate::ui::state::ChartPreviewKey {
+                ds_path: ds_path.to_string(),
+                selection: selection.clone(),
+                viewport: state.chart_preview_state.rendered_viewport,
+                roi: state.chart_preview_state.rendered_roi,
+                width: chart_area.width,
+                height: chart_area.height,
+            })
+        {
+            if let Some(image) = &state.chart_preview_state.clipboard_image {
+                return copy_image_to_clipboard(
+                    state,
+                    image.width,
+                    image.height,
+                    image.bytes.clone(),
+                    "Copied chart preview image to clipboard",
+                );
+            }
         }
     }
 
@@ -671,6 +675,7 @@ fn apply_content_edit_request(
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.rendered_viewport = None;
+    state.chart_preview_state.rendered_size = None;
     state.chart_preview_state.pending_key = None;
     state.chart_preview_state.cached_previews.clear();
     state.chart_preview_state.reset_viewport();

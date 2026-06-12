@@ -1,11 +1,12 @@
+use image::imageops::FilterType;
 use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
     text::Span,
-    widgets::Block,
+    widgets::{Block, Clear},
     Frame,
 };
-use ratatui_image::StatefulImage;
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::{
     configure,
@@ -37,6 +38,7 @@ pub(super) fn clear_active_chart_preview(state: &mut AppState<'_>) {
     state.chart_preview_state.ds_selection = None;
     state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.rendered_roi = None;
+    state.chart_preview_state.rendered_size = None;
     state.chart_preview_state.pending_key = None;
     state.chart_preview_state.reset_viewport();
 }
@@ -56,7 +58,10 @@ pub(super) fn render_chart_protocol_state(
         return Ok(());
     }
     if let Some(ref mut protocol) = state.chart_preview_state.protocol {
-        f.render_stateful_widget(StatefulImage::default(), chart_area, protocol);
+        f.render_widget(Clear, chart_area);
+        let chart_widget =
+            StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+        f.render_stateful_widget(chart_widget, chart_area, protocol);
         if is_pending {
             render_chart_loading_indicator(f, chart_area);
         }
@@ -86,6 +91,7 @@ fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey)
     state.chart_preview_state.ds_loaded = Some(key.ds_path.clone());
     state.chart_preview_state.ds_selection = Some(key.selection.clone());
     state.chart_preview_state.rendered_viewport = key.viewport;
+    state.chart_preview_state.rendered_size = Some((key.width, key.height));
     state.chart_preview_state.protocol = Some(protocol);
     state.chart_preview_state.clipboard_image = Some(clipboard_image);
     state.chart_preview_state.error = None;

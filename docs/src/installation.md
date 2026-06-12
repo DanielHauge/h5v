@@ -44,11 +44,15 @@ scoop install h5v/h5v
 cargo binstall h5v
 ```
 
+On Linux, prebuilt release binaries are the recommended path for most users. They target a GNU libc baseline compatible with Ubuntu 22.04 and newer.
+
 ### Build from source
 
 ```bash
 cargo install h5v
 ```
+
+`cargo install h5v` builds from the published crates.io source package, so it does not require a Git checkout.
 
 On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
 

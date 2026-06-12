@@ -102,7 +102,7 @@ jobs:
       matrix:
         build:
           - NAME: linux-x64-glibc
-            OS: ubuntu-latest
+            OS: ubuntu-22.04
             TARGET: x86_64-unknown-linux-gnu
             BIN: h5v
             ARCHIVE_FORMAT: tar.gz
@@ -153,6 +153,50 @@ jobs:
 
       - name: Build
         run: cargo build --release --target ${{ matrix.build.TARGET }}
+
+      - name: Verify Linux glibc baseline
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.build.TARGET }}
+          BIN_NAME: ${{ matrix.build.BIN }}
+          MAX_GLIBC: "2.35"
+        run: |
+          python <<'PY'
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          binary_path = pathlib.Path("target") / os.environ["TARGET"] / "release" / os.environ["BIN_NAME"]
+          output = subprocess.run(
+              ["objdump", "-T", str(binary_path)],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
+          versions = sorted({
+              tuple(int(part) for part in match.groups())
+              for match in re.finditer(r"GLIBC_(\d+)\.(\d+)", output)
+          })
+          if not versions:
+              print(f"No GLIBC symbol versions found in {binary_path}")
+              sys.exit(1)
+
+          max_allowed = tuple(int(part) for part in os.environ["MAX_GLIBC"].split("."))
+          highest = versions[-1]
+          highest_text = ".".join(str(part) for part in highest)
+          if highest > max_allowed:
+              allowed_text = ".".join(str(part) for part in max_allowed)
+              print(
+                  f"{binary_path} requires GLIBC_{highest_text}, which exceeds the allowed baseline "
+                  f"GLIBC_{allowed_text}"
+              )
+              sys.exit(1)
+
+          print(f"{binary_path} maximum GLIBC requirement: GLIBC_{highest_text}")
+          PY
 
       - name: Build Windows installer
         if: runner.os == 'Windows'
