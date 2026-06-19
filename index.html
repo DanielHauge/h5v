@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en" id="oranda" class="hacker">
+  <head>
+    <title>h5v</title>
+    
+    
+      <link rel="icon" href="/h5v/favicon.ico" />
+    
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+      <meta name="description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+      <meta property="og:description" content="A terminal HDF5 viewer with matrix/chart/image previews, compound schemas, and scripting" />
+    
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="h5v" />
+    
+    
+    
+    <meta http-equiv="Permissions-Policy" content="interest-cohort=()" />
+    <link rel="stylesheet" href="/h5v/oranda-v0.6.1.css" />
+    
+    
+  </head>
+  <body>
+    <div class="container">
+      <div class="page-body">
+        
+          <div class="repo_banner">
+            <a href="https://github.com/DanielHauge/h5v">
+              <div class="github-icon" aria-hidden="true"></div>
+              Check out our GitHub!
+            </a>
+          </div>
+        
+
+        <main>
+          <header>
+            
+            <h1 class="title">h5v</h1>
+            
+  <nav class="nav">
+    <ul>
+      <li><a href="/h5v/">Home</a></li>
+
+      
+
+      
+        <li><a href="/h5v/artifacts/">Install</a></li>
+      
+
+      
+        <li><a href="/h5v/book/">Docs</a></li>
+      
+
+      
+
+      
+        <li><a href="/h5v/changelog/">Changelog</a></li>
+      
+    </ul>
+  </nav>
+
+          </header>
+
+          
+
+    
+
+
+
+<div class="artifacts" data-tag="v0.12.0">
+  <div class="artifact-header target">
+    <h4>Install v0.12.0</h4>
+    
+      <div><small class="published-date">Published on Jun 19 2026 at 02:41 UTC</small></div>
+    
+
+    <ul class="arches">
+      
+        <li class="arch hidden" data-arch="aarch64-apple-darwin">
+          
+            <ul class="tabs">
+              
+                
+                
+                <li class="install-tab" data-id="1" data-triple="aarch64-apple-darwin">
+                  binstall
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="0" data-triple="aarch64-apple-darwin">
+                  cargo
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="2" data-triple="aarch64-apple-darwin">
+                  shell
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="5" data-triple="aarch64-apple-darwin">
+                  tarball
+
+                  
+                </li>
+              
+            </ul>
+          
+
+          <ul class="contents">
+            
+              
+              <li data-id="1" data-triple="aarch64-apple-darwin" class="install-content">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo binstall h5v</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo binstall h5v">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="0" data-triple="aarch64-apple-darwin" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo install h5v</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">locked</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo install h5v --locked">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="2" data-triple="aarch64-apple-darwin" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh </span><span style="color:#89ddff;">| </span><span style="color:#82aaff;">sh</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="5" data-triple="aarch64-apple-darwin" class="install-content hidden">
+                
+
+                
+                  
+                  <div class="download-wrapper">
+                    <a href="https://github.com/DanielHauge/h5v/releases/download/v0.12.0/h5v-aarch64-apple-darwin-v0.12.0.tar.gz">
+                      <button class="button primary">
+                        <span>Download</span>
+                        <span class="button-subtitle">h5v-aarch64-apple-darwin-v0.12.0.tar.gz</span>
+                      </button>
+                    </a>
+                  </div>
+                
+              </li>
+            
+          </ul>
+        </li>
+      
+        <li class="arch hidden" data-arch="x86_64-apple-darwin">
+          
+            <ul class="tabs">
+              
+                
+                
+                <li class="install-tab" data-id="1" data-triple="x86_64-apple-darwin">
+                  binstall
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="0" data-triple="x86_64-apple-darwin">
+                  cargo
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="2" data-triple="x86_64-apple-darwin">
+                  shell
+
+                  
+                </li>
+              
+            </ul>
+          
+
+          <ul class="contents">
+            
+              
+              <li data-id="1" data-triple="x86_64-apple-darwin" class="install-content">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo binstall h5v</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo binstall h5v">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="0" data-triple="x86_64-apple-darwin" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo install h5v</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">locked</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo install h5v --locked">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="2" data-triple="x86_64-apple-darwin" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh </span><span style="color:#89ddff;">| </span><span style="color:#82aaff;">sh</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+          </ul>
+        </li>
+      
+        <li class="arch hidden" data-arch="x86_64-pc-windows-msvc">
+          
+            <ul class="tabs">
+              
+                
+                
+                <li class="install-tab" data-id="6" data-triple="x86_64-pc-windows-msvc">
+                  msi
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="1" data-triple="x86_64-pc-windows-msvc">
+                  binstall
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="0" data-triple="x86_64-pc-windows-msvc">
+                  cargo
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="2" data-triple="x86_64-pc-windows-msvc">
+                  shell
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="7" data-triple="x86_64-pc-windows-msvc">
+                  zip
+
+                  
+                </li>
+              
+            </ul>
+          
+
+          <ul class="contents">
+            
+              
+              <li data-id="6" data-triple="x86_64-pc-windows-msvc" class="install-content">
+                
+
+                
+                  
+                  <div class="download-wrapper">
+                    <a href="https://github.com/DanielHauge/h5v/releases/download/v0.12.0/h5v-x86_64-pc-windows-msvc-v0.12.0.msi">
+                      <button class="button primary">
+                        <span>Download</span>
+                        <span class="button-subtitle">h5v-x86_64-pc-windows-msvc-v0.12.0.msi</span>
+                      </button>
+                    </a>
+                  </div>
+                
+              </li>
+            
+              
+              <li data-id="1" data-triple="x86_64-pc-windows-msvc" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo binstall h5v</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo binstall h5v">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="0" data-triple="x86_64-pc-windows-msvc" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo install h5v</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">locked</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo install h5v --locked">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="2" data-triple="x86_64-pc-windows-msvc" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh </span><span style="color:#89ddff;">| </span><span style="color:#82aaff;">sh</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="7" data-triple="x86_64-pc-windows-msvc" class="install-content hidden">
+                
+
+                
+                  
+                  <div class="download-wrapper">
+                    <a href="https://github.com/DanielHauge/h5v/releases/download/v0.12.0/h5v-x86_64-pc-windows-msvc-v0.12.0.zip">
+                      <button class="button primary">
+                        <span>Download</span>
+                        <span class="button-subtitle">h5v-x86_64-pc-windows-msvc-v0.12.0.zip</span>
+                      </button>
+                    </a>
+                  </div>
+                
+              </li>
+            
+          </ul>
+        </li>
+      
+        <li class="arch hidden" data-arch="x86_64-unknown-linux-gnu">
+          
+            <ul class="tabs">
+              
+                
+                
+                <li class="install-tab" data-id="1" data-triple="x86_64-unknown-linux-gnu">
+                  binstall
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="0" data-triple="x86_64-unknown-linux-gnu">
+                  cargo
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="2" data-triple="x86_64-unknown-linux-gnu">
+                  shell
+
+                  
+                </li>
+              
+                
+                
+                <li class="install-tab" data-id="8" data-triple="x86_64-unknown-linux-gnu">
+                  tarball
+
+                  
+                </li>
+              
+            </ul>
+          
+
+          <ul class="contents">
+            
+              
+              <li data-id="1" data-triple="x86_64-unknown-linux-gnu" class="install-content">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo binstall h5v</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo binstall h5v">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="0" data-triple="x86_64-unknown-linux-gnu" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">cargo install h5v</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">locked</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="cargo install h5v --locked">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="2" data-triple="x86_64-unknown-linux-gnu" class="install-content hidden">
+                
+                  
+                  <div class="install-code-wrapper">
+  <pre style="background-color:#263238;">
+<span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh </span><span style="color:#89ddff;">| </span><span style="color:#82aaff;">sh</span></pre>
+
+  <button class="button copy-clipboard-button primary" data-copy="curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh">
+    <svg stroke='currentColor' fill='currentColor' stroke-width='0' viewBox='0 0 20 20' height='1em' width='1em' xmlns='http://www.w3.org/2000/svg'><path d='M8 2a1 1 0 000 2h2a1 1 0 100-2H8z'></path><path d='M3 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5zM15 11h2a1 1 0 110 2h-2v-2z'></path></svg>
+  </button>
+  
+  
+</div>
+                
+
+                
+              </li>
+            
+              
+              <li data-id="8" data-triple="x86_64-unknown-linux-gnu" class="install-content hidden">
+                
+
+                
+                  
+                  <div class="download-wrapper">
+                    <a href="https://github.com/DanielHauge/h5v/releases/download/v0.12.0/h5v-x86_64-unknown-linux-gnu-v0.12.0.tar.gz">
+                      <button class="button primary">
+                        <span>Download</span>
+                        <span class="button-subtitle">h5v-x86_64-unknown-linux-gnu-v0.12.0.tar.gz</span>
+                      </button>
+                    </a>
+                  </div>
+                
+              </li>
+            
+          </ul>
+        </li>
+      
+    </ul>
+  </div>
+
+  
+    <div class="no-autodetect hidden">
+      <span class="no-autodetect-details">We weren't able to detect your OS.</span>
+    </div>
+    <noscript>
+      <a href="/h5v/artifacts/">View all installation options</a>
+    </noscript>
+  
+  <div class="mac-switch hidden">This project doesn't offer Apple Silicon downloads, but you can run Intel macOS binaries via Rosetta 2.</div>
+
+  
+  
+  <div class="bottom-options ">
+    <a href="/h5v/artifacts/" class="backup-download primary">View all installation options</a>
+    
+      <div class="arch-select hidden">
+        <select id="install-arch-select">
+          <option disabled="true" selected="true" value=""></option>
+          
+            <option value="x86_64-unknown-linux-gnu">Linux x64</option>
+          
+            <option value="aarch64-apple-darwin">macOS Apple Silicon</option>
+          
+            <option value="x86_64-apple-darwin">macOS Intel</option>
+          
+            <option value="x86_64-pc-windows-msvc">Windows x64</option>
+          
+        </select>
+      </div>
+    
+  </div>
+</div>
+
+<a href="/h5v/artifacts/" class="button mobile-download primary">View all installation options</a>
+
+
+    <div class="oranda-hide">
+<p class="hide-">
+  <img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/banner.png" alt="h5v banner with logo and title">
+</p>
+</div>
+<blockquote>
+<p><strong>A terminal-first HDF5 explorer for charts, matrices, images, compound schemas, and scripted workflows.</strong></p>
+</blockquote>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh </span><span style="color:#89ddff;">| </span><span style="color:#82aaff;">sh
+</span></pre>
+
+<p>The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin.</p>
+<p><code>h5v</code> is a Rust TUI for inspecting HDF5 files in the terminal: browse the tree, switch between preview, matrix, and heatmap views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows. CSV, TSV, XLSX, and Parquet files can also be opened; <code>h5v</code> imports them into cached HDF5 snapshots on launch so they work with the same tree and chart flows.</p>
+<div class="oranda-hide">
+<h2>What it looks like</h2>
+<table>
+<thead>
+<tr>
+<th>Charts</th>
+<th>Heatmap</th>
+<th>Images</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg" alt="Chart preview"></td>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/heatmap.png" alt="Heatmap view"></td>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg" alt="Image preview"></td>
+</tr>
+<tr>
+<td>Multichart</td>
+<td>Commands</td>
+<td>Help</td>
+</tr>
+<tr>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg" alt="Multichart view"></td>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg" alt="Command mode"></td>
+<td><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg" alt="Help overlay"></td>
+</tr>
+</tbody>
+</table>
+<h2>Highlights</h2>
+<ul>
+<li>Tree browsing for datasets, groups, links, and projected compound fields.</li>
+<li>Preview, matrix, heatmap, image, and schema views from the same selection.</li>
+<li>In-place edits when the file is opened with <code>-w</code>.</li>
+<li>Startup automation with commands, scripts, and <code>press ...</code>.</li>
+<li>Derived series and comparisons in multichart.</li>
+</ul>
+</div>
+<h2>Quick start</h2>
+<p>If you do not have an h5 file, you can download an example:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">curl</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">fsSL</span><span style="color:#82aaff;"> https://raw.githubusercontent.com/DanielHauge/h5v/main/examples/h5v-example.h5</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">o</span><span style="color:#82aaff;"> h5v-example.h5
+</span></pre>
+
+<p>Open a file in read-only mode:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v h5v-example.h5
+</span></pre>
+
+<p>Open imported tabular files through the import pipeline:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v data.csv
+</span><span style="color:#82aaff;">h5v reference.h5 experiment.tsv
+</span><span style="color:#82aaff;">h5v workbook.xlsx metrics.parquet
+</span></pre>
+
+<p>If your terminal renders icons, line drawing, or graphics previews badly, start in compatibility mode:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">compatibility</span><span style="color:#82aaff;"> h5v-example.h5
+</span></pre>
+
+<p>That switches the UI to simpler symbols and disables terminal graphics previews. To make it the default, set <code>H5V_COMPATIBILITY_MODE=true</code> in your shell rc file.</p>
+<p>Open the same file in write mode so edits are allowed:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v</span><span style="color:#89ddff;"> -</span><span style="color:#f78c6c;">w</span><span style="color:#82aaff;"> h5v-example.h5
+</span></pre>
+
+<p>Themes, symbols, and heatmap defaults are configured in Lua. Inside <code>h5v</code>, run <code>:configure</code> to open <code>init.lua</code>, or <code>:configure reset</code> to regenerate the default scaffold.</p>
+<p>Start with scripted commands:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v examples/h5v-example.h5 </span><span style="color:#89ddff;">\
+</span><span style="color:#89ddff;">  -</span><span style="color:#f78c6c;">c </span><span style="color:#89ddff;">"</span><span style="color:#c3e88d;">goto /matrices/cube</span><span style="color:#89ddff;">" \
+</span><span style="color:#89ddff;">  -</span><span style="color:#f78c6c;">c </span><span style="color:#89ddff;">"</span><span style="color:#c3e88d;">focus content</span><span style="color:#89ddff;">" \
+</span><span style="color:#89ddff;">  -</span><span style="color:#f78c6c;">c </span><span style="color:#89ddff;">"</span><span style="color:#c3e88d;">mode matrix</span><span style="color:#89ddff;">"
+</span></pre>
+
+<p>Validate a startup script without launching the UI:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v path/to/file.h5</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">script-test</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">script</span><span style="color:#82aaff;"> setup.h5v
+</span></pre>
+
+<p>Try the bundled example file and walkthrough script from this repository:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">h5v examples/h5v-example.h5</span><span style="color:#89ddff;"> --</span><span style="color:#f78c6c;">script</span><span style="color:#82aaff;"> examples/h5v-example.h5v
+</span></pre>
+
+<p>Regenerate the example file after editing the generator:</p>
+<pre style="background-color:#263238;"><span style="color:#82aaff;">python scripts/generate_example_h5.py
+</span></pre>
+
+<h2>Installation</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shell installer</td>
+<td><code>curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh</code></td>
+</tr>
+<tr>
+<td>PowerShell installer</td>
+<td><code>irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 | iex</code></td>
+</tr>
+<tr>
+<td>Homebrew</td>
+<td><code>brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git &amp;&amp; brew install h5v</code></td>
+</tr>
+<tr>
+<td>Scoop</td>
+<td><code>scoop bucket add h5v https://github.com/DanielHauge/h5v &amp;&amp; scoop install h5v/h5v</code></td>
+</tr>
+<tr>
+<td>cargo-binstall</td>
+<td><code>cargo binstall h5v</code></td>
+</tr>
+<tr>
+<td>Cargo source build</td>
+<td><code>cargo install h5v</code></td>
+</tr>
+</tbody>
+</table>
+<p>On Windows, <code>install.ps1</code> installs into <code>%LOCALAPPDATA%\Programs\h5v\bin</code> and adds that directory to the user <code>PATH</code>.</p>
+<p>On Linux, source builds may require native packages such as <code>cmake</code>, <code>pkg-config</code>, <code>libfontconfig</code>, <code>freetype</code>, and <code>expat</code> development headers.</p>
+<h2>Configuration and plugins</h2>
+<p>Configuration lives in <code>init.lua</code>.</p>
+<pre style="background-color:#263238;"><span style="color:#eeffff;">:configure
+</span><span style="color:#eeffff;">:configure reset
+</span></pre>
+
+<ul>
+<li><code>:configure</code> opens the config file and reloads it on exit.</li>
+<li><code>:configure reset</code> writes a fresh scaffold.</li>
+<li><code>--config &lt;PATH&gt;</code> uses a different config file.</li>
+<li><code>--init-plugin &lt;PATH&gt;</code> creates a plugin scaffold. Rerun it to refresh <code>.luarc.json</code> and <code>.h5v-luals/h5v.lua</code> without overwriting <code>h5v-plugin.toml</code> or <code>lua/init.lua</code>.</li>
+</ul>
+<p>Plugins are loaded from <code>init.lua</code> with <code>h5v.plugins.use(...)</code> and can come from:</p>
+<ul>
+<li>a local path</li>
+<li><code>owner/repo</code></li>
+<li>a git URL</li>
+</ul>
+<p>Use the in-app help as the source of truth for commands, keymaps, actions, health, and plugin status.</p>
+<p><img src="https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/themes.png" alt="Light theme configuration example"></p>
+<h2>Documentation</h2>
+<p>The manual is published at <a href="https://danielhauge.github.io/h5v/book/" rel="noopener noreferrer">danielhauge.github.io/h5v/book</a>, and the source lives in <a href="https://github.com/DanielHauge/h5v/tree/main/docs/src" rel="noopener noreferrer"><code>docs/src</code></a>.</p>
+<ul>
+<li>
+<p>Inside <code>h5v</code>, press <code>?</code> for keybindings, commands, multichart, heatmap, health, and customization help.</p>
+</li>
+<li>
+<p>The in-app help is the primary reference for controls and command behavior.</p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/" rel="noopener noreferrer">Overview</a></p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/quick-start.html" rel="noopener noreferrer">Quick start</a></p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/configuration.html" rel="noopener noreferrer">Configuration</a></p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/plugins.html" rel="noopener noreferrer">Plugins</a></p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/heatmap.html" rel="noopener noreferrer">Heatmap</a></p>
+</li>
+<li>
+<p><a href="https://danielhauge.github.io/h5v/book/multichart.html" rel="noopener noreferrer">Multichart</a></p>
+</li>
+</ul>
+<h2>Core interaction model</h2>
+<ul>
+<li><code>Shift</code> + arrow keys or <code>Ctrl+W</code> then <code>h/j/k/l</code> move focus between panes.</li>
+<li><code>Tab</code> cycles content modes when more than one is available.</li>
+<li><code>:</code> opens the command minibuffer, <code>.</code> repeats the last command, and <code>?</code> opens the in-app help overlay.</li>
+<li><code>m</code> adds the current previewable selection to multichart and <code>M</code> opens multichart mode.</li>
+<li><code>s</code> toggles the sidebar, <code>/</code> enters search, and <code>Ctrl+R</code> reloads the file from disk.</li>
+</ul>
+
+
+
+        </main>
+      </div>
+
+      <footer>
+        
+          <a href="https://github.com/DanielHauge/h5v"><div class="github-icon" aria-hidden="true"></div></a>
+        
+        <span>
+          h5v, Apache-2.0
+        </span>
+      </footer>
+    </div>
+
+    
+    
+
+    
+
+    <script src="/h5v/artifacts.js"></script>
+
+
+  </body>
+</html>
