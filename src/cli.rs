@@ -448,8 +448,9 @@ mod tests {
     use clap::{CommandFactory, Parser};
 
     use super::{
-        build_script_test_summaries, collect_startup_commands_from_inputs, format_script_test_report,
-        init_plugin_scaffold, normalize_cli_args, Args, CliReadMode, ScriptTestTheme,
+        build_script_test_summaries, collect_startup_commands_from_inputs,
+        format_script_test_report, init_plugin_scaffold, normalize_cli_args, Args, CliReadMode,
+        ScriptTestTheme,
     };
     use crate::GIT_VERSION;
 

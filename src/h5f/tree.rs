@@ -1,10 +1,9 @@
 use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
 use hdf5_metno::{
-    OpenMode,
     plist::file_access::FileCloseDegree,
     types::{TypeDescriptor, VarLenUnicode},
-    Dataset, File, Group, LinkType,
+    Dataset, File, Group, LinkType, OpenMode,
 };
 use ratatui::style::Color;
 use tempfile::NamedTempFile;
@@ -639,9 +638,7 @@ fn default_file_builder() -> hdf5_metno::FileBuilder {
 
 fn swmr_file_builder() -> hdf5_metno::FileBuilder {
     File::with_options()
-        .with_fapl(|fapl| {
-            fapl.fclose_degree(FileCloseDegree::Strong).libver_v110()
-        })
+        .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong).libver_v110())
         .clone()
 }
 
@@ -769,8 +766,8 @@ mod tests {
 
     use super::{
         build_dataset_meta, build_dataset_node, enum_render_attr_names, highlight_hint_from_name,
-        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType, H5F,
-        LinkedDataset, ReadOpenMode, RequestedOpenMode, ResolvedOpenMode,
+        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType,
+        LinkedDataset, ReadOpenMode, RequestedOpenMode, ResolvedOpenMode, H5F,
     };
     use crate::h5f::Node;
     use crate::ui::render::MatrixRenderType;

@@ -3,12 +3,32 @@ use plotters::{
     style::{Color as _, IntoFont, RGBColor, ShapeStyle},
 };
 
-use crate::{configure, error::log_error};
+use crate::{
+    configure,
+    error::log_error,
+    ui::chart_math::{raster_chart_layout, RasterChartLayout, RasterChartLayoutHints},
+};
 
 use super::super::{
     MultiChartRenderRequest, MultiChartRenderResult, PreparedBoxPlotData, PreparedChartData,
     PreparedComparisonScatterData, PreparedHistogramData, PreparedLineChartData,
 };
+
+fn line_chart_layout(width: u32, height: u32, y_label_area_size: u32) -> RasterChartLayout {
+    raster_chart_layout(
+        width,
+        height,
+        RasterChartLayoutHints {
+            preferred_margin: 10,
+            preferred_x_label_area_size: 30,
+            preferred_y_label_area_size: y_label_area_size,
+            preferred_x_label_font_size: 18,
+            preferred_y_label_font_size: 18,
+            min_plot_width: 48,
+            min_plot_height: 40,
+        },
+    )
+}
 
 fn render_line_chart_request(
     request: &MultiChartRenderRequest,
@@ -34,11 +54,15 @@ fn render_line_chart_request(
                 message: error.to_string(),
             };
         }
-        let y_label_area_size = format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30;
+        let layout = line_chart_layout(
+            request.width,
+            request.height,
+            format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30,
+        );
         let chart = plotters::prelude::ChartBuilder::on(&root)
-            .margin(10)
-            .x_label_area_size(30)
-            .y_label_area_size(y_label_area_size)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
             .build_cartesian_2d(
                 prepared.plot_x_min..prepared.plot_x_max,
                 prepared.y_min..prepared.y_max,
@@ -61,8 +85,16 @@ fn render_line_chart_request(
             .configure_mesh()
             .x_desc("x values")
             .y_desc("value")
-            .y_label_style(("sans-serif", 18).into_font().color(&axis))
-            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .axis_style(ShapeStyle::from(&axis).stroke_width(2))
             .light_line_style(grid.mix(0.35))
             .bold_line_style(grid.mix(0.55))
@@ -101,7 +133,11 @@ fn render_line_chart_request(
             .configure_series_labels()
             .background_style(plot_bg.mix(0.85))
             .border_style(axis.mix(0.8))
-            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .label_font(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .draw()
         {
             log_error(&error);
@@ -144,11 +180,15 @@ fn render_histogram_request(
                 message: error.to_string(),
             };
         }
-        let y_label_area_size = format!("{:.0}", prepared.count_max).len() as u32 * 3 + 30;
+        let layout = line_chart_layout(
+            request.width,
+            request.height,
+            format!("{:.0}", prepared.count_max).len() as u32 * 3 + 30,
+        );
         let chart = plotters::prelude::ChartBuilder::on(&root)
-            .margin(10)
-            .x_label_area_size(30)
-            .y_label_area_size(y_label_area_size)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
             .build_cartesian_2d(
                 prepared.value_min..prepared.value_max,
                 0.0..prepared.count_max,
@@ -168,8 +208,16 @@ fn render_histogram_request(
             .configure_mesh()
             .x_desc(format!("value ({} bins)", prepared.bin_count))
             .y_desc("count")
-            .y_label_style(("sans-serif", 18).into_font().color(&axis))
-            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .axis_style(ShapeStyle::from(&axis).stroke_width(2))
             .light_line_style(grid.mix(0.35))
             .bold_line_style(grid.mix(0.55))
@@ -210,7 +258,11 @@ fn render_histogram_request(
             .configure_series_labels()
             .background_style(plot_bg.mix(0.85))
             .border_style(axis.mix(0.8))
-            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .label_font(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .draw()
         {
             log_error(&error);
@@ -253,10 +305,23 @@ fn render_box_plot_request(
             };
         }
         let x_max = prepared.series.len().max(1) as f64 + 0.5;
+        let layout = raster_chart_layout(
+            request.width,
+            request.height,
+            RasterChartLayoutHints {
+                preferred_margin: 12,
+                preferred_x_label_area_size: 60,
+                preferred_y_label_area_size: 45,
+                preferred_x_label_font_size: 16,
+                preferred_y_label_font_size: 18,
+                min_plot_width: 48,
+                min_plot_height: 40,
+            },
+        );
         let chart = plotters::prelude::ChartBuilder::on(&root)
-            .margin(12)
-            .x_label_area_size(60)
-            .y_label_area_size(45)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
             .build_cartesian_2d(0.5..x_max, prepared.value_min..prepared.value_max);
         let mut chart = match chart {
             Ok(chart) => chart,
@@ -288,8 +353,16 @@ fn render_box_plot_request(
                     labels[index as usize].clone()
                 }
             })
-            .y_label_style(("sans-serif", 18).into_font().color(&axis))
-            .x_label_style(("sans-serif", 16).into_font().color(&axis))
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .axis_style(ShapeStyle::from(&axis).stroke_width(2))
             .light_line_style(grid.mix(0.35))
             .bold_line_style(grid.mix(0.55))
@@ -434,10 +507,23 @@ fn render_comparison_scatter_request(
                 message: error.to_string(),
             };
         }
+        let layout = raster_chart_layout(
+            request.width,
+            request.height,
+            RasterChartLayoutHints {
+                preferred_margin: 10,
+                preferred_x_label_area_size: 30,
+                preferred_y_label_area_size: 45,
+                preferred_x_label_font_size: 18,
+                preferred_y_label_font_size: 18,
+                min_plot_width: 48,
+                min_plot_height: 40,
+            },
+        );
         let chart = plotters::prelude::ChartBuilder::on(&root)
-            .margin(10)
-            .x_label_area_size(30)
-            .y_label_area_size(45)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
             .build_cartesian_2d(
                 prepared.x_min..prepared.x_max,
                 prepared.y_min..prepared.y_max,
@@ -457,8 +543,16 @@ fn render_comparison_scatter_request(
             .configure_mesh()
             .x_desc(prepared.x_label.clone())
             .y_desc(prepared.y_label.clone())
-            .y_label_style(("sans-serif", 18).into_font().color(&axis))
-            .x_label_style(("sans-serif", 18).into_font().color(&axis))
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .axis_style(ShapeStyle::from(&axis).stroke_width(2))
             .light_line_style(grid.mix(0.35))
             .bold_line_style(grid.mix(0.55))
@@ -502,7 +596,11 @@ fn render_comparison_scatter_request(
             .configure_series_labels()
             .background_style(plot_bg.mix(0.85))
             .border_style(axis.mix(0.8))
-            .label_font(("sans-serif", 18).into_font().color(&axis))
+            .label_font(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
             .draw()
         {
             log_error(&error);

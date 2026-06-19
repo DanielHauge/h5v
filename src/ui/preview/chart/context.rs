@@ -11,7 +11,9 @@ use crate::{
     data::{DatasetPlotingData, SliceSelection},
     h5f::H5FNode,
     ui::{
-        chart_math::normalized_axis_bounds,
+        chart_math::{
+            normalized_axis_bounds, raster_chart_layout, RasterChartLayout, RasterChartLayoutHints,
+        },
         mchart::chart_plot_area_in_rect,
         page_scroll::{compact_count, PageDisplayInfo},
         state::{
@@ -24,6 +26,27 @@ use super::MAX_PAGE_SIZE;
 
 fn req_matches_paged_chart(page_state: &crate::ui::state::PageState) -> bool {
     matches!(page_state.paged, crate::ui::state::PageType::Chart) && page_state.idx > 0
+}
+
+pub(super) fn preview_chart_layout(
+    width_px: u32,
+    height_px: u32,
+    max_value: f64,
+) -> RasterChartLayout {
+    let y_label_area_size = format!("{max_value:.4}").len() as u32 * 3 + 30;
+    raster_chart_layout(
+        width_px,
+        height_px,
+        RasterChartLayoutHints {
+            preferred_margin: 10,
+            preferred_x_label_area_size: 30,
+            preferred_y_label_area_size: y_label_area_size,
+            preferred_x_label_font_size: 18,
+            preferred_y_label_font_size: 18,
+            min_plot_width: 48,
+            min_plot_height: 40,
+        },
+    )
 }
 
 pub(super) fn preview_x_min(page_state: &crate::ui::state::PageState) -> f64 {
@@ -420,13 +443,14 @@ pub(super) fn preview_chart_plot_area(
 ) -> Option<Rect> {
     let width_px = chart_area.width as u32 * image_cell_size.0.max(1) as u32;
     let height_px = chart_area.height as u32 * image_cell_size.1.max(1) as u32;
-    let y_label_area_size = format!("{max_value:.4}").len() as u32 * 3 + 30;
+    let layout = preview_chart_layout(width_px, height_px, max_value);
     chart_plot_area_in_rect(
         chart_area,
         width_px,
         height_px,
-        (20 + y_label_area_size as i32)..(width_px as i32 - 20),
-        20..(height_px as i32 - 50),
+        (layout.margin + layout.y_label_area_size) as i32..(width_px as i32 - layout.margin as i32),
+        layout.margin as i32
+            ..(height_px as i32 - (layout.margin + layout.x_label_area_size) as i32),
     )
 }
 

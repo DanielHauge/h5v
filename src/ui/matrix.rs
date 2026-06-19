@@ -61,10 +61,7 @@ pub trait RenderIntercept<T: Display> {
 
 pub struct DefaultMatrixResultRenderIntercept;
 
-fn refresh_dataset_for_swmr(
-    ds: &hdf5_metno::Dataset,
-    state: &AppState,
-) -> Result<(), AppError> {
+fn refresh_dataset_for_swmr(ds: &hdf5_metno::Dataset, state: &AppState) -> Result<(), AppError> {
     if state.resolved_open_mode == ResolvedOpenMode::ReadSwmr {
         ds.refresh()?;
     }

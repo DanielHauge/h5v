@@ -40,9 +40,9 @@ mod protocol;
 
 pub(crate) use context::preview_chart_data_bounds;
 use context::{
-    copy_page_display_info, preview_chart_plot_area, preview_roi_range, preview_roi_x_bounds,
-    preview_stats_info, preview_view_info, preview_visible_points, preview_x_axis_max,
-    preview_x_min, render_preview_context_panel,
+    copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_roi_range,
+    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_points,
+    preview_x_axis_max, preview_x_min, render_preview_context_panel,
 };
 use protocol::{clear_active_chart_preview, queue_chart_preview_load};
 
@@ -873,12 +873,12 @@ pub fn render_image_chart(
     root.fill(&plot_bg)
         .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
     let max = data_preview.max;
-    let y_label_area_size = format!("{max:.4}").len() as u32 * 3 + 30;
+    let layout = preview_chart_layout(width, height, max);
 
     let mut chart = ChartBuilder::on(&root)
-        .margin(10)
-        .x_label_area_size(30)
-        .y_label_area_size(y_label_area_size)
+        .margin(layout.margin)
+        .x_label_area_size(layout.x_label_area_size)
+        .y_label_area_size(layout.y_label_area_size)
         .build_cartesian_2d(
             viewport.x_min..viewport.x_max,
             viewport.y_min..viewport.y_max,
@@ -888,8 +888,16 @@ pub fn render_image_chart(
     // Draw the mesh (grid lines)
     chart
         .configure_mesh()
-        .x_label_style(("sans-serif", 18).into_font().color(&axis))
-        .y_label_style(("sans-serif", 18).into_font().color(&axis))
+        .x_label_style(
+            ("sans-serif", layout.x_label_font_size)
+                .into_font()
+                .color(&axis),
+        )
+        .y_label_style(
+            ("sans-serif", layout.y_label_font_size)
+                .into_font()
+                .color(&axis),
+        )
         .axis_style(ShapeStyle::from(&axis).stroke_width(2))
         .light_line_style(grid.mix(0.35))
         .bold_line_style(grid.mix(0.55))
@@ -1039,8 +1047,15 @@ mod tests {
         let plot_area =
             preview_chart_plot_area(Rect::new(10, 4, 40, 20), (8, 16), 1234.0).expect("plot area");
         assert!(plot_area.x > 10);
-        assert!(plot_area.y > 4);
+        assert!(plot_area.y >= 4);
         assert!(plot_area.width < 40);
         assert!(plot_area.height < 20);
+    }
+
+    #[test]
+    fn preview_chart_plot_area_keeps_multiple_rows_in_short_panels() {
+        let plot_area =
+            preview_chart_plot_area(Rect::new(0, 0, 40, 4), (8, 16), 1234.0).expect("plot area");
+        assert!(plot_area.height >= 2);
     }
 }

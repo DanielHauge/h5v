@@ -333,9 +333,7 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     Ok(match state.resolved_open_mode {
         h5f::ResolvedOpenMode::Write => "Reloaded file in write mode".to_string(),
         h5f::ResolvedOpenMode::ReadSwmr => "Reloaded file in SWMR read-only mode".to_string(),
-        h5f::ResolvedOpenMode::ReadSnapshot => {
-            "Reloaded snapshot from source file".to_string()
-        }
+        h5f::ResolvedOpenMode::ReadSnapshot => "Reloaded snapshot from source file".to_string(),
         h5f::ResolvedOpenMode::ReadOnly => "Reloaded file".to_string(),
     })
 }

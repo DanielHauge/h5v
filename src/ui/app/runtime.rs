@@ -725,8 +725,9 @@ fn redraw(
     state: &mut AppState<'_>,
     new_version: Option<&str>,
 ) -> Result<()> {
-    match panic::catch_unwind(AssertUnwindSafe(|| draw_app_terminal_frame(terminal, state, new_version)))
-    {
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        draw_app_terminal_frame(terminal, state, new_version)
+    })) {
         Ok(result) => {
             result?;
         }
@@ -734,8 +735,9 @@ fn redraw(
             let message = recovered_ui_panic_message("rendering", payload);
             log_error(&message);
             apply_app_toast(state, AppToast::Error(message.clone()));
-            match panic::catch_unwind(AssertUnwindSafe(|| draw_error_terminal_frame(terminal, &message)))
-            {
+            match panic::catch_unwind(AssertUnwindSafe(|| {
+                draw_error_terminal_frame(terminal, &message)
+            })) {
                 Ok(result) => {
                     result?;
                 }

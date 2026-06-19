@@ -19,6 +19,7 @@ use crate::{
     error::AppError,
     h5f::{DatasetMeta, H5FNode},
     ui::{
+        chart_math::{raster_chart_layout, RasterChartLayoutHints},
         chrome::rounded_panel,
         state::{
             AppState, HeatmapColormap, HeatmapLegendSummary, HeatmapNormalization, HeatmapRangeMode,
@@ -229,8 +230,16 @@ pub(super) fn render_heatmap_region_panel(
             ],
         }),
     ];
-    let row_len = attr.shape.get(node.selected_row).copied().unwrap_or_default();
-    let col_len = attr.shape.get(node.selected_col).copied().unwrap_or_default();
+    let row_len = attr
+        .shape
+        .get(node.selected_row)
+        .copied()
+        .unwrap_or_default();
+    let col_len = attr
+        .shape
+        .get(node.selected_col)
+        .copied()
+        .unwrap_or_default();
     lines.push(Line::from(vec![Span::styled(
         format!(
             "Dims Y={} X={}  slice {}x{}",
@@ -430,11 +439,24 @@ fn render_heatmap_profile_plot(
         .map_err(|e| AppError::DrawingError(format!("Error filling profile background: {e}")))?;
     let y_label_area_size =
         format!("{:.4}", style.y_max.abs().max(style.y_min.abs())).len() as u32 * 4 + 28;
+    let layout = raster_chart_layout(
+        width,
+        height,
+        RasterChartLayoutHints {
+            preferred_margin: 8,
+            preferred_x_label_area_size: 22,
+            preferred_y_label_area_size: y_label_area_size,
+            preferred_x_label_font_size: 16,
+            preferred_y_label_font_size: 16,
+            min_plot_width: 40,
+            min_plot_height: 36,
+        },
+    );
 
     let mut chart = ChartBuilder::on(&root)
-        .margin(8)
-        .x_label_area_size(22)
-        .y_label_area_size(y_label_area_size)
+        .margin(layout.margin)
+        .x_label_area_size(layout.x_label_area_size)
+        .y_label_area_size(layout.y_label_area_size)
         .build_cartesian_2d(0.0..style.x_max, style.y_min..style.y_max)
         .map_err(|e| AppError::DrawingError(format!("Error building profile chart: {e}")))?;
 
@@ -442,8 +464,16 @@ fn render_heatmap_profile_plot(
         .configure_mesh()
         .disable_x_mesh()
         .y_labels(3)
-        .x_label_style(("sans-serif", 16).into_font().color(&axis))
-        .y_label_style(("sans-serif", 16).into_font().color(&axis))
+        .x_label_style(
+            ("sans-serif", layout.x_label_font_size)
+                .into_font()
+                .color(&axis),
+        )
+        .y_label_style(
+            ("sans-serif", layout.y_label_font_size)
+                .into_font()
+                .color(&axis),
+        )
         .axis_style(ShapeStyle::from(&axis).stroke_width(2))
         .light_line_style(grid.mix(0.35))
         .bold_line_style(grid.mix(0.55))
