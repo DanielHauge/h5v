@@ -229,13 +229,12 @@ pub(super) fn render_heatmap_region_panel(
             ],
         }),
     ];
+    let row_len = attr.shape.get(node.selected_row).copied().unwrap_or_default();
+    let col_len = attr.shape.get(node.selected_col).copied().unwrap_or_default();
     lines.push(Line::from(vec![Span::styled(
         format!(
             "Dims Y={} X={}  slice {}x{}",
-            node.selected_row,
-            node.selected_col,
-            attr.shape[node.selected_row],
-            attr.shape[node.selected_col]
+            node.selected_row, node.selected_col, row_len, col_len
         ),
         Style::default()
             .fg(configure::themed_color(|colors| colors.file.label))

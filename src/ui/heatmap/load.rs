@@ -26,8 +26,20 @@ pub(super) fn build_heatmap_page(
     attr: &DatasetMeta,
     key: &HeatmapRenderKey,
 ) -> Result<HeatmapLoadedPage, AppError> {
-    let source_rows = attr.shape[key.selected_row];
-    let source_cols = attr.shape[key.selected_col];
+    let source_rows = attr.shape.get(key.selected_row).copied().ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Heatmap row axis {} is out of bounds for rank {}",
+            key.selected_row,
+            attr.shape.len()
+        ))
+    })?;
+    let source_cols = attr.shape.get(key.selected_col).copied().ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Heatmap column axis {} is out of bounds for rank {}",
+            key.selected_col,
+            attr.shape.len()
+        ))
+    })?;
     let base_viewport = key.viewport.unwrap_or(HeatmapViewport {
         row_start: 0,
         row_len: source_rows.max(1),

@@ -71,6 +71,68 @@ fn refresh_dataset_for_swmr(
     Ok(())
 }
 
+fn normalize_matrix_axes(node: &mut H5FNode, shape: &[usize]) {
+    node.sync_selection_rank(shape.len());
+    let rank = shape.len();
+    if rank == 0 {
+        node.selected_dim = 0;
+        node.selected_x = 0;
+        node.selected_row = 0;
+        node.selected_col = 0;
+        return;
+    }
+
+    let max_index = rank.saturating_sub(1);
+    node.selected_dim = node.selected_dim.min(max_index);
+    node.selected_x = node.selected_x.min(max_index);
+    node.selected_row = node.selected_row.min(max_index);
+    node.selected_col = node.selected_col.min(max_index);
+
+    if rank == 1 {
+        node.selected_dim = 0;
+        node.selected_x = 0;
+        node.selected_row = 0;
+        node.selected_col = 0;
+        return;
+    }
+
+    let selectable_dims: Vec<usize> = shape
+        .iter()
+        .enumerate()
+        .filter(|(_, len)| **len > 1)
+        .map(|(idx, _)| idx)
+        .collect();
+    let fallback_row = selectable_dims.first().copied().unwrap_or(0);
+    if !selectable_dims.contains(&node.selected_row) {
+        node.selected_row = fallback_row;
+    }
+    if !selectable_dims.contains(&node.selected_col) || node.selected_col == node.selected_row {
+        node.selected_col = selectable_dims
+            .iter()
+            .copied()
+            .find(|dim| *dim != node.selected_row)
+            .or_else(|| (0..rank).find(|dim| *dim != node.selected_row))
+            .unwrap_or(node.selected_row);
+    }
+    if node.selected_dim >= rank
+        || node.selected_dim == node.selected_row
+        || node.selected_dim == node.selected_col
+    {
+        node.selected_dim = selectable_dims
+            .iter()
+            .copied()
+            .find(|dim| *dim != node.selected_row && *dim != node.selected_col)
+            .or_else(|| {
+                (0..rank).find(|dim| *dim != node.selected_row && *dim != node.selected_col)
+            })
+            .unwrap_or(0);
+    }
+}
+
+fn has_visible_matrix_cells(shape_len: usize, selection: MatrixSelection) -> bool {
+    selection.rows > 0 && (shape_len <= 1 || selection.cols > 0)
+}
+
 impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
         let mut span = Span::styled(
@@ -799,7 +861,7 @@ fn render_matrix_with_reader<T: Display>(
         vertical: 1,
     });
     let shape_len = attr.shape.len();
-    node.sync_selection_rank(shape_len);
+    normalize_matrix_axes(node, &attr.shape);
 
     let matrix_area = if shape_len > 1 {
         let x_selectable_dims: Vec<usize> = attr
@@ -847,13 +909,28 @@ fn render_matrix_with_reader<T: Display>(
     } else {
         area_inner
     };
-    let col_ds_len = attr.shape.get(node.selected_col).copied().unwrap_or(0);
-    let row_ds_len = attr.shape.get(node.selected_row).copied().unwrap_or(0);
+    let col_ds_len = attr.shape.get(node.selected_col).copied().ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Matrix column axis {} is out of bounds for rank {}",
+            node.selected_col,
+            attr.shape.len()
+        ))
+    })?;
+    let row_ds_len = attr.shape.get(node.selected_row).copied().ok_or_else(|| {
+        AppError::DrawingError(format!(
+            "Matrix row axis {} is out of bounds for rank {}",
+            node.selected_row,
+            attr.shape.len()
+        ))
+    })?;
     let matrix_selection = visible_matrix_capacity(matrix_area, row_ds_len, col_ds_len);
     let max_cols = matrix_selection.cols;
     let max_rows = matrix_selection.rows;
     state.matrix_view_state.rows_currently_available = max_rows;
     state.matrix_view_state.cols_currently_available = max_cols;
+    if !has_visible_matrix_cells(shape_len, matrix_selection) {
+        return Ok(());
+    }
     let slice_selection = state.get_matrix_selection(node, matrix_selection, &attr.shape);
 
     let mut rows_area_constraints = Vec::with_capacity(max_rows);
@@ -1145,6 +1222,43 @@ mod tests {
         );
         assert_eq!(selection.rows, 20);
         assert_eq!(selection.cols, 5);
+    }
+
+    #[test]
+    fn invisible_matrix_layout_is_skipped_for_zero_rows_or_cols() {
+        assert!(!has_visible_matrix_cells(
+            1,
+            MatrixSelection { rows: 0, cols: 1 }
+        ));
+        assert!(!has_visible_matrix_cells(
+            2,
+            MatrixSelection { rows: 1, cols: 0 }
+        ));
+        assert!(!has_visible_matrix_cells(
+            2,
+            MatrixSelection { rows: 0, cols: 4 }
+        ));
+        assert!(has_visible_matrix_cells(
+            2,
+            MatrixSelection { rows: 1, cols: 1 }
+        ));
+    }
+
+    #[test]
+    fn normalize_matrix_axes_clamps_invalid_indices() {
+        let mut node = H5FNode::new(crate::h5f::Node::Broken("broken".to_string()));
+        node.selected_dim = 9;
+        node.selected_x = 9;
+        node.selected_row = 9;
+        node.selected_col = 9;
+        node.selected_indexes = vec![4, 5, 6];
+
+        normalize_matrix_axes(&mut node, &[3, 1, 5]);
+
+        assert_eq!(node.selected_row, 2);
+        assert_eq!(node.selected_col, 0);
+        assert_eq!(node.selected_dim, 1);
+        assert_eq!(node.selected_x, 2);
     }
 
     #[test]

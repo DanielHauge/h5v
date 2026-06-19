@@ -1,4 +1,6 @@
 use std::{
+    any::Any,
+    panic::{self, AssertUnwindSafe},
     sync::mpsc::RecvTimeoutError,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -38,6 +40,23 @@ use super::{
 };
 
 type Result<T> = std::result::Result<T, AppError>;
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+fn recovered_ui_panic_message(context: &str, payload: Box<dyn Any + Send>) -> String {
+    format!(
+        "Recovered from UI {context} panic: {}",
+        panic_payload_message(payload)
+    )
+}
 
 pub(super) fn main_recover_loop(
     terminal: &mut AppTerminal,
@@ -129,10 +148,20 @@ pub(super) fn main_recover_loop(
                 let search_open_before = matches!(state.mode, state::Mode::Search);
                 let multichart_open_before = matches!(state.mode, state::Mode::MultiChart);
                 let show_tree_view_before = state.show_tree_view;
-                let mut event_result =
-                    handle_input_event(&mut state, event).unwrap_or_else(|error| {
+                let mut event_result = match panic::catch_unwind(AssertUnwindSafe(|| {
+                    handle_input_event(&mut state, event)
+                })) {
+                    Ok(result) => result.unwrap_or_else(|error| {
                         EventResult::Toast(AppToast::Error(error.to_string()), false)
-                    });
+                    }),
+                    Err(payload) => {
+                        let message = recovered_ui_panic_message("input handling", payload);
+                        log_error(&message);
+                        apply_app_toast(&mut state, AppToast::Error(message));
+                        redraw(terminal, &mut state, new_version)?;
+                        continue;
+                    }
+                };
                 state
                     .multi_chart
                     .schedule_viewport_detail_loads(state.file.as_ref());
@@ -696,6 +725,42 @@ fn redraw(
     state: &mut AppState<'_>,
     new_version: Option<&str>,
 ) -> Result<()> {
+    match panic::catch_unwind(AssertUnwindSafe(|| draw_app_terminal_frame(terminal, state, new_version)))
+    {
+        Ok(result) => {
+            result?;
+        }
+        Err(payload) => {
+            let message = recovered_ui_panic_message("rendering", payload);
+            log_error(&message);
+            apply_app_toast(state, AppToast::Error(message.clone()));
+            match panic::catch_unwind(AssertUnwindSafe(|| draw_error_terminal_frame(terminal, &message)))
+            {
+                Ok(result) => {
+                    result?;
+                }
+                Err(fallback_payload) => {
+                    return Err(AppError::DrawingError(format!(
+                        "{message}; fallback error screen also panicked: {}",
+                        panic_payload_message(fallback_payload)
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn draw_error(terminal: &mut AppTerminal, error: &str) -> Result<()> {
+    draw_error_terminal_frame(terminal, error)?;
+    Ok(())
+}
+
+fn draw_app_terminal_frame(
+    terminal: &mut AppTerminal,
+    state: &mut AppState<'_>,
+    new_version: Option<&str>,
+) -> std::io::Result<()> {
     terminal.draw(|frame| {
         draw_app_frame(frame, state, new_version);
         strip_blink_modifiers(frame);
@@ -703,7 +768,7 @@ fn redraw(
     Ok(())
 }
 
-fn draw_error(terminal: &mut AppTerminal, error: &str) -> Result<()> {
+fn draw_error_terminal_frame(terminal: &mut AppTerminal, error: &str) -> std::io::Result<()> {
     terminal.draw(|frame| {
         render_error(frame, error);
         strip_blink_modifiers(frame);

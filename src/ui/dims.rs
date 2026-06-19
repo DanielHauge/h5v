@@ -269,6 +269,7 @@ fn render_inline_page_info(f: &mut Frame, area: &Rect, info: &PageDisplayInfo<'_
     f.render_widget(Paragraph::new(lines), split[1]);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MatrixSelection {
     pub cols: usize,
     pub rows: usize,
