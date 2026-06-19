@@ -8,13 +8,14 @@ use std::{
 
 use arboard::Clipboard;
 use hdf5_metno::File;
+use tempfile::NamedTempFile;
 
 use crate::{
     configure,
     configure::registry::ContentModeHandle,
     data::{PreviewSelection, SliceSelection},
     error::AppError,
-    h5f::{H5FNode, HasPath, Node},
+    h5f::{H5FNode, HasPath, Node, RequestedOpenMode, ResolvedOpenMode},
     search::Searcher,
     ui::mchart::{
         CapturedMultiChartItem, ChartSource, DatasetChartKind, DatasetChartSource,
@@ -80,6 +81,9 @@ pub struct AppState<'a> {
     pub root: Rc<RefCell<H5FNode>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub file: Option<File>,
+    pub requested_open_mode: RequestedOpenMode,
+    pub resolved_open_mode: ResolvedOpenMode,
+    pub snapshot_file: Option<NamedTempFile>,
     pub editing: bool,
     pub edit_pause: Arc<RwLock<()>>,
     pub tree_view_cursor: usize,

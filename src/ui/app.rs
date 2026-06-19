@@ -6,6 +6,7 @@ use crate::{
     compat::RuntimeConfig,
     data::DatasetPlotingData,
     error::AppError,
+    h5f::RequestedOpenMode,
     ui::{
         command::StartupCommand,
         mchart::{MultiChartExpressionRefreshResult, MultiChartLoadResult},
@@ -46,7 +47,7 @@ type Result<T> = std::result::Result<T, AppError>;
 pub fn init(
     filename: String,
     link: bool,
-    writable: bool,
+    requested_open_mode: RequestedOpenMode,
     runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
@@ -61,7 +62,7 @@ pub fn init(
             &mut terminal,
             filename.clone(),
             link,
-            writable,
+            requested_open_mode,
             runtime_config,
             startup_commands,
             new_ver.as_deref(),

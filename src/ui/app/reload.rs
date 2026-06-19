@@ -229,7 +229,8 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     let snapshot = snapshot_reload_state(state);
     let file_path = state.file_watch.path.clone();
     let linked = state.file_watch.linked;
-    let previous_write = !state.readonly;
+    let previous_requested_open_mode = state.requested_open_mode;
+    let target_open_mode = previous_requested_open_mode.with_write(write);
 
     clear_preview_state(state, &snapshot);
     state.treeview.clear();
@@ -238,7 +239,9 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     state.tree_view_cursor = 0;
     state.compute_tree_view();
     let old_file = state.file.take();
+    let old_snapshot_file = state.snapshot_file.take();
     drop(old_root);
+    drop(old_snapshot_file);
     if let Some(old_file) = old_file {
         old_file.close().map_err(|e| {
             AppError::Hdf5(hdf5_metno::Error::from(format!(
@@ -248,15 +251,15 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
         })?;
     }
 
-    let reopened = match h5f::H5F::open(file_path.clone(), linked, write) {
+    let reopened = match h5f::H5F::open(file_path.clone(), linked, target_open_mode) {
         Ok(reopened) => reopened,
         Err(target_error) => {
-            let fallback = h5f::H5F::open(file_path.clone(), linked, previous_write).map_err(
+            let fallback = h5f::H5F::open(file_path.clone(), linked, previous_requested_open_mode).map_err(
                 |fallback_error| {
                     AppError::Hdf5(hdf5_metno::Error::from(format!(
-                        "Failed to reopen HDF5 file '{}' in {:?} mode after reload error (reload error: {}; fallback error: {})",
+                        "Failed to reopen HDF5 file '{}' in {} mode after reload error (reload error: {}; fallback error: {})",
                         file_path,
-                        if previous_write { "write" } else { "read-only" },
+                        previous_requested_open_mode.label(),
                         target_error,
                         fallback_error
                     )))
@@ -264,7 +267,10 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
             )?;
             state.file = Some(fallback.file);
             state.root = fallback.root;
-            state.readonly = !previous_write;
+            state.readonly = fallback.resolved_open_mode.readonly();
+            state.requested_open_mode = fallback.requested_open_mode;
+            state.resolved_open_mode = fallback.resolved_open_mode;
+            state.snapshot_file = fallback.snapshot_file;
             state.focus = snapshot.focus.clone();
             state.show_tree_view = snapshot.show_tree_view;
             state.content_mode = snapshot.content_mode.clone();
@@ -284,7 +290,7 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
             return Err(AppError::Hdf5(hdf5_metno::Error::from(format!(
                 "Failed to reopen HDF5 file '{}' in {} mode: {}",
                 file_path,
-                if write { "write" } else { "read-only" },
+                target_open_mode.label(),
                 target_error
             ))));
         }
@@ -292,7 +298,10 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
 
     state.file = Some(reopened.file);
     state.root = reopened.root;
-    state.readonly = !write;
+    state.readonly = reopened.resolved_open_mode.readonly();
+    state.requested_open_mode = reopened.requested_open_mode;
+    state.resolved_open_mode = reopened.resolved_open_mode;
+    state.snapshot_file = reopened.snapshot_file;
     state.focus = snapshot.focus.clone();
     state.show_tree_view = snapshot.show_tree_view;
     state.content_mode = snapshot.content_mode.clone();
@@ -321,9 +330,12 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
         Ok(event)
     })?;
 
-    Ok(if write {
-        "Reloaded file in write mode".to_string()
-    } else {
-        "Reloaded file".to_string()
+    Ok(match state.resolved_open_mode {
+        h5f::ResolvedOpenMode::Write => "Reloaded file in write mode".to_string(),
+        h5f::ResolvedOpenMode::ReadSwmr => "Reloaded file in SWMR read-only mode".to_string(),
+        h5f::ResolvedOpenMode::ReadSnapshot => {
+            "Reloaded snapshot from source file".to_string()
+        }
+        h5f::ResolvedOpenMode::ReadOnly => "Reloaded file".to_string(),
     })
 }

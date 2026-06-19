@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ratatui::crossterm::style::{Attribute, Color, Stylize};
 use std::{
     ffi::OsString,
@@ -10,12 +10,38 @@ use std::{
 use crate::{
     compat, configure,
     error::AppError,
+    h5f::ReadOpenMode,
     ui::command::{
         describe_command_invocation, format_command_invocation, parse_command_text,
         parse_startup_commands, StartupCommand,
     },
     GIT_VERSION,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum CliReadMode {
+    Standard,
+    Swmr,
+    Snapshot,
+    Auto,
+}
+
+impl Default for CliReadMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl From<CliReadMode> for ReadOpenMode {
+    fn from(value: CliReadMode) -> Self {
+        match value {
+            CliReadMode::Standard => ReadOpenMode::Standard,
+            CliReadMode::Swmr => ReadOpenMode::Swmr,
+            CliReadMode::Snapshot => ReadOpenMode::Snapshot,
+            CliReadMode::Auto => ReadOpenMode::Auto,
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -30,6 +56,10 @@ pub(crate) struct Args {
 
     #[clap(short, long)]
     pub(crate) write: bool,
+
+    /// Read-only open strategy for native HDF5 files.
+    #[clap(long = "read-mode", value_enum, default_value_t = CliReadMode::Auto)]
+    pub(crate) read_mode: CliReadMode,
 
     /// Execute a command at startup. Can be repeated.
     #[clap(short = 'c', long = "command", value_name = "COMMAND")]
@@ -418,8 +448,8 @@ mod tests {
     use clap::{CommandFactory, Parser};
 
     use super::{
-        build_script_test_summaries, collect_startup_commands_from_inputs,
-        format_script_test_report, init_plugin_scaffold, normalize_cli_args, Args, ScriptTestTheme,
+        build_script_test_summaries, collect_startup_commands_from_inputs, format_script_test_report,
+        init_plugin_scaffold, normalize_cli_args, Args, CliReadMode, ScriptTestTheme,
     };
     use crate::GIT_VERSION;
 
@@ -427,6 +457,7 @@ mod tests {
         Args {
             files: vec!["file.h5".to_string()],
             write: false,
+            read_mode: CliReadMode::Auto,
             commands: Vec::new(),
             scripts: Vec::new(),
             script_test: false,
@@ -508,12 +539,19 @@ mod tests {
         assert!(help.contains(&format!("Version: {GIT_VERSION}")));
         assert!(help.contains("--compatibility"));
         assert!(help.contains("--config"));
+        assert!(help.contains("--read-mode"));
     }
 
     #[test]
     fn parses_custom_config_path_argument() {
         let args = Args::parse_from(["h5v", "--config", "/tmp/h5v/init.lua", "file.h5"]);
         assert_eq!(args.config, Some("/tmp/h5v/init.lua".into()));
+    }
+
+    #[test]
+    fn parses_read_mode_argument() {
+        let args = Args::parse_from(["h5v", "--read-mode", "swmr", "file.h5"]);
+        assert_eq!(args.read_mode, CliReadMode::Swmr);
     }
 
     #[test]

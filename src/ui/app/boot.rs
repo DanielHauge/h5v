@@ -13,7 +13,7 @@ use crate::{
     configure,
     configure::run_lua_engine,
     error::AppError,
-    h5f,
+    h5f::{self, RequestedOpenMode},
     ui::command::CommandState,
     ui::{
         heatmap::handle_heatmap_load,
@@ -50,7 +50,7 @@ pub(super) struct PreparedApp<'a> {
 pub(super) fn prepare_app<'a>(
     filename: &str,
     link: bool,
-    writable: bool,
+    requested_open_mode: RequestedOpenMode,
     runtime_config: RuntimeConfig,
 ) -> Result<PreparedApp<'a>> {
     let (tx_events, rx_events) = channel();
@@ -75,7 +75,7 @@ pub(super) fn prepare_app<'a>(
     );
     let file_open_started = Instant::now();
     super::render_startup_progress("Opening file...", Some(filename));
-    let h5f = h5f::H5F::open(filename.to_string(), link, writable).map_err(|error| {
+    let h5f = h5f::H5F::open(filename.to_string(), link, requested_open_mode).map_err(|error| {
         AppError::Hdf5(hdf5_metno::Error::from(format!(
             "Failed to open HDF5 file: {}",
             error
@@ -86,7 +86,8 @@ pub(super) fn prepare_app<'a>(
         phase = "open_file",
         file_path = filename,
         linked = link,
-        writable,
+        requested_open_mode = requested_open_mode.label(),
+        resolved_open_mode = h5f.resolved_open_mode.label(),
         duration_ms = file_open_started.elapsed().as_millis() as u64,
         message = "opened HDF5 file"
     );
@@ -198,10 +199,13 @@ pub(super) fn prepare_app<'a>(
 
     let root_node = h5f.root.clone();
     let mut state = AppState {
-        readonly: !writable,
+        readonly: h5f.resolved_open_mode.readonly(),
         root: root_node,
         editing: false,
         file: Some(h5f.file),
+        requested_open_mode: h5f.requested_open_mode,
+        resolved_open_mode: h5f.resolved_open_mode,
+        snapshot_file: h5f.snapshot_file,
         toast: AppToast::Empty,
         configuration_warning: startup_config_error.clone(),
         file_watch: FileWatchState {

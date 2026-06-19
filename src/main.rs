@@ -24,8 +24,10 @@ mod ui;
 
 use crate::cli::{
     collect_startup_commands, init_plugin_scaffold, normalize_cli_args, run_script_test, Args,
+    CliReadMode,
 };
 use crate::error::{log_error, AppError};
+use crate::h5f::RequestedOpenMode;
 use crate::importing::resolve_cli_inputs;
 pub const GIT_VERSION: &str = env!("H5V_GIT_VERSION");
 // only major.minor.patch without commit hash or dirty state, for more concise display in the UI
@@ -88,6 +90,12 @@ fn main() -> Result<(), AppError> {
     compat::install_runtime_config(runtime_config)?;
     let startup = collect_startup_commands(&args)?;
 
+    if args.write && args.read_mode != CliReadMode::Auto {
+        return Err(AppError::FileError(
+            "--read-mode can only be used for read-only sessions".to_string(),
+        ));
+    }
+
     for warning in &startup.warnings {
         eprintln!("Warning: {warning}");
     }
@@ -125,6 +133,12 @@ fn main() -> Result<(), AppError> {
         }));
     }
 
+    let requested_open_mode = if args.write {
+        RequestedOpenMode::Write
+    } else {
+        RequestedOpenMode::Read(args.read_mode.into())
+    };
+
     match &resolved_inputs[..] {
         // [] => Err(AppError::FileError(String::from(
         //     "No files given.\n Usage: h5v /path/to/file.h5",
@@ -137,14 +151,14 @@ fn main() -> Result<(), AppError> {
         [single] => ui::app::init(
             single.hdf5_path.clone(),
             false,
-            args.write,
+            requested_open_mode,
             runtime_config,
             &startup.commands,
         ),
         multiple => ui::app::init(
             linking::link_resolved(multiple)?,
             true,
-            args.write,
+            requested_open_mode,
             runtime_config,
             &startup.commands,
         ),

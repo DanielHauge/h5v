@@ -8,6 +8,7 @@ use hdf5_metno::File;
 
 use crate::{
     data::DatasetPlotingData,
+    h5f::ResolvedOpenMode,
     ui::{app::AppEvent, perf},
 };
 
@@ -579,15 +580,26 @@ impl ExpressionEvalSnapshot {
     }
 }
 
-fn open_worker_file(file_path: Option<&str>) -> Result<Option<File>, String> {
+fn open_worker_file(
+    file_path: Option<&str>,
+    open_mode: ResolvedOpenMode,
+) -> Result<Option<File>, String> {
     match file_path {
-        Some(file_path) => File::with_options()
-            .with_fapl(|fapl| {
-                fapl.fclose_degree(hdf5_metno::plist::file_access::FileCloseDegree::Strong)
-            })
-            .open(file_path)
-            .map(Some)
-            .map_err(|error| format!("Failed to open HDF5 file '{file_path}': {error}")),
+        Some(file_path) => {
+            let mut builder = File::with_options()
+                .with_fapl(|fapl| {
+                    fapl.fclose_degree(hdf5_metno::plist::file_access::FileCloseDegree::Strong)
+                })
+                .clone();
+            let file = match open_mode {
+                ResolvedOpenMode::ReadSwmr => builder
+                    .with_fapl(|fapl| fapl.libver_v110())
+                    .open_as(file_path, hdf5_metno::OpenMode::ReadSWMR),
+                _ => builder.open(file_path),
+            };
+            file.map(Some)
+                .map_err(|error| format!("Failed to open HDF5 file '{file_path}': {error}"))
+        }
         None => Ok(None),
     }
 }
@@ -596,8 +608,9 @@ pub(crate) fn evaluate_preview_expression(
     items: &[ChartItem],
     expression: &str,
     file_path: Option<&str>,
+    open_mode: ResolvedOpenMode,
 ) -> Result<DatasetPlotingData, String> {
-    let file = open_worker_file(file_path)?;
+    let file = open_worker_file(file_path, open_mode)?;
     let snapshot = ExpressionEvalSnapshot::new(items);
     let evaluated = snapshot.evaluate_expression_with_file(expression, file.as_ref())?;
     dataset_ploting_data_from_points(evaluated.points)
@@ -608,7 +621,7 @@ fn compute_expression_refresh(
 ) -> MultiChartExpressionRefreshResult {
     let _refresh_timer = perf::metrics().mchart.detail_refresh.start();
     let mut snapshot = ExpressionEvalSnapshot::new(&request.items);
-    let file = match open_worker_file(request.file_path.as_deref()) {
+    let file = match open_worker_file(request.file_path.as_deref(), request.open_mode) {
         Ok(file) => file,
         Err(message) => {
             return MultiChartExpressionRefreshResult::Failure {

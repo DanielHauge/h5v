@@ -11,7 +11,7 @@ use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
-    h5f::{DatasetMeta, ImageType},
+    h5f::{DatasetMeta, ImageType, ResolvedOpenMode},
     ui::mchart::ChartItem,
 };
 
@@ -125,6 +125,7 @@ pub struct PreviewExpressionRequest {
     pub key: PreviewExpressionKey,
     pub items: Vec<ChartItem>,
     pub file_path: Option<String>,
+    pub open_mode: ResolvedOpenMode,
 }
 
 #[derive(Debug, Clone)]

@@ -115,6 +115,7 @@ pub(crate) fn handle_preview_expression_eval(
             &request.items,
             &request.key.expression,
             request.file_path.as_deref(),
+            request.open_mode,
         ) {
             Ok(data_preview) => PreviewExpressionResult::Success {
                 key: request.key,

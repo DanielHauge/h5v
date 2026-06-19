@@ -33,6 +33,7 @@ use crate::{
     error::AppError,
     h5f::{
         read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, HasPath, Node,
+        ResolvedOpenMode,
     },
     ui::{
         perf,
@@ -358,11 +359,7 @@ fn render_file_preview(
         ("hdf5 root path".to_string(), plain_file_value(file.name())),
         (
             "open mode".to_string(),
-            plain_file_value(if state.readonly {
-                "read-only".to_string()
-            } else {
-                "read-write".to_string()
-            }),
+            plain_file_value(state.resolved_open_mode.label().to_string()),
         ),
         (
             "path type".to_string(),
@@ -547,6 +544,7 @@ pub fn render_preview(
                             key: current_key.clone(),
                             items: state.multi_chart.chart_items().to_vec(),
                             file_path: state.file.as_ref().map(|file| file.filename()),
+                            open_mode: state.resolved_open_mode,
                         },
                     );
                 }
@@ -581,6 +579,12 @@ pub fn render_preview(
     }
 
     if let Node::Dataset(dataset, attr) = node {
+        if state.resolved_open_mode == ResolvedOpenMode::ReadSwmr {
+            if let Err(error) = dataset.refresh() {
+                render_error(f, &area_inner, format!("Refresh dataset error: {}", error));
+                return;
+            }
+        }
         if attr.is_empty() {
             render_empty_dataset(f, &area_inner);
             return;

@@ -11,7 +11,7 @@ use crate::{
     compat::RuntimeConfig,
     configure,
     error::{log_error, AppError},
-    h5f::{HasPath, Node},
+    h5f::{HasPath, Node, RequestedOpenMode},
     ui::{
         command::{execute_command, parse_command_text, StartupCommand},
         cursor::strip_blink_modifiers,
@@ -43,7 +43,7 @@ pub(super) fn main_recover_loop(
     terminal: &mut AppTerminal,
     filename: String,
     link: bool,
-    writable: bool,
+    requested_open_mode: RequestedOpenMode,
     runtime_config: RuntimeConfig,
     startup_commands: &[StartupCommand],
     new_version: Option<&str>,
@@ -56,7 +56,7 @@ pub(super) fn main_recover_loop(
         mut state,
         tx_events,
         rx_events,
-    } = prepare_app(&filename, link, writable, runtime_config)?;
+    } = prepare_app(&filename, link, requested_open_mode, runtime_config)?;
 
     if run_startup_commands(&mut state, startup_commands)? {
         return Ok(());
@@ -138,7 +138,7 @@ pub(super) fn main_recover_loop(
                     .schedule_viewport_detail_loads(state.file.as_ref());
                 if let Err(error) = state
                     .multi_chart
-                    .queue_expression_detail_refresh(state.file.as_ref())
+                    .queue_expression_detail_refresh(state.file.as_ref(), state.resolved_open_mode)
                 {
                     apply_app_toast(&mut state, AppToast::Error(error));
                 }
@@ -656,7 +656,7 @@ pub(super) fn main_recover_loop(
                 }
                 if let Err(error) = state
                     .multi_chart
-                    .queue_expression_detail_refresh(state.file.as_ref())
+                    .queue_expression_detail_refresh(state.file.as_ref(), state.resolved_open_mode)
                 {
                     apply_app_toast(&mut state, AppToast::Error(error));
                 }

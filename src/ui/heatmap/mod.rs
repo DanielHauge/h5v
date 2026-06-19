@@ -13,7 +13,7 @@ use ratatui_image::StatefulImage;
 
 use crate::{
     error::AppError,
-    h5f::{DatasetMeta, H5FNode, Node},
+    h5f::{DatasetMeta, H5FNode, Node, ResolvedOpenMode},
     ui::{
         app::{AppEvent, HeatmapLoadedResult},
         page_scroll::PageDisplayInfo,
@@ -77,6 +77,9 @@ pub fn render_heatmap(
             return Ok(());
         }
     };
+    if state.resolved_open_mode == ResolvedOpenMode::ReadSwmr {
+        ds.refresh()?;
+    }
     if attr.is_empty() {
         render_empty_dataset(f, area);
         return Ok(());

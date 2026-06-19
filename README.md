@@ -48,6 +48,14 @@ Open a file in read-only mode:
 h5v h5v-example.h5
 ```
 
+Read a file that may already be open in another process:
+
+```bash
+h5v --read-mode auto live-data.h5
+```
+
+`--read-mode auto` tries normal read-only first, then SWMR read-only, then a copied snapshot fallback.
+
 Open imported tabular files through the import pipeline:
 
 ```bash

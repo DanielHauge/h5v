@@ -21,6 +21,7 @@ use crate::{
         read_opaque_values_1d, read_opaque_values_2d, read_projected_values_1d,
         read_projected_values_2d, read_selected_values_bytes, read_varlen_u8_matrix_table,
         read_varlen_u8_matrix_values, DatasetMeta, EnumRenderOverrides, H5FNode, ProjectionDecode,
+        ResolvedOpenMode,
     },
     ui::{render::sprint_typedescriptor, state::Focus},
 };
@@ -59,6 +60,16 @@ pub trait RenderIntercept<T: Display> {
 }
 
 pub struct DefaultMatrixResultRenderIntercept;
+
+fn refresh_dataset_for_swmr(
+    ds: &hdf5_metno::Dataset,
+    state: &AppState,
+) -> Result<(), AppError> {
+    if state.resolved_open_mode == ResolvedOpenMode::ReadSwmr {
+        ds.refresh()?;
+    }
+    Ok(())
+}
 
 impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
@@ -239,6 +250,7 @@ pub fn render_matrix<T: H5Type + Display>(
     state: &mut AppState,
     result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
+    refresh_dataset_for_swmr(ds, state)?;
     render_matrix_with_reader(
         f,
         area,
@@ -260,6 +272,7 @@ pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
     state: &mut AppState,
     result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
+    refresh_dataset_for_swmr(ds, state)?;
     render_matrix_with_reader(
         f,
         area,
@@ -280,6 +293,7 @@ pub fn render_opaque_matrix(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    refresh_dataset_for_swmr(ds, state)?;
     render_matrix_with_reader(
         f,
         area,
@@ -300,6 +314,7 @@ pub fn render_varlen_u8_matrix(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    refresh_dataset_for_swmr(ds, state)?;
     render_matrix_with_reader(
         f,
         area,
@@ -320,6 +335,7 @@ pub fn render_compound_root_matrix(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
+    refresh_dataset_for_swmr(ds, state)?;
     let Some(compound) = attr.current_compound_type() else {
         render_not_yet_implemented(f, area, "Compound root matrix metadata is unavailable");
         return Ok(());

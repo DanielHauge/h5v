@@ -11,7 +11,7 @@ use std::{
 use crate::{
     configure,
     data::{plot_dataset_with_cap, DatasetPlotingData, PreviewSelection, SliceSelection},
-    h5f::{plot_projected_with_cap, DatasetMeta},
+    h5f::{plot_projected_with_cap, DatasetMeta, ResolvedOpenMode},
     ui::{app::AppEvent, perf},
 };
 
@@ -117,6 +117,7 @@ pub struct MultiChartExpressionRefreshRequest {
     pub revision: u64,
     pub items: Vec<ChartItem>,
     pub file_path: Option<String>,
+    pub open_mode: ResolvedOpenMode,
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +400,7 @@ impl MultiChartState {
     pub(crate) fn queue_expression_detail_refresh(
         &mut self,
         file: Option<&File>,
+        open_mode: ResolvedOpenMode,
     ) -> Result<(), String> {
         if !configure::current_multichart_settings().derived_detail_enabled {
             self.pending_expression_refresh_revision = None;
@@ -436,6 +438,7 @@ impl MultiChartState {
                 revision: self.expression_revision,
                 items: self.items.clone(),
                 file_path: file.map(|file| file.filename()),
+                open_mode,
             })
             .map_err(|_| {
                 self.pending_expression_refresh_revision = None;

@@ -5,6 +5,7 @@ use ratatui::{
     style::Style,
     text::{Line, Span},
 };
+use tempfile::NamedTempFile;
 
 use crate::{
     configure,
@@ -26,6 +27,74 @@ pub enum Node {
     Group(Group, GroupMeta),
     Dataset(Dataset, DatasetMeta),
     Broken(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOpenMode {
+    Standard,
+    Swmr,
+    Snapshot,
+    Auto,
+}
+
+impl ReadOpenMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "read-only",
+            Self::Swmr => "SWMR read-only",
+            Self::Snapshot => "snapshot read-only",
+            Self::Auto => "auto read-only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestedOpenMode {
+    Read(ReadOpenMode),
+    Write,
+}
+
+impl RequestedOpenMode {
+    pub const fn with_write(self, write: bool) -> Self {
+        if write {
+            Self::Write
+        } else {
+            match self {
+                Self::Read(mode) => Self::Read(mode),
+                Self::Write => Self::Read(ReadOpenMode::Standard),
+            }
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Read(mode) => mode.label(),
+            Self::Write => "read-write",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedOpenMode {
+    ReadOnly,
+    ReadSwmr,
+    ReadSnapshot,
+    Write,
+}
+
+impl ResolvedOpenMode {
+    pub const fn readonly(self) -> bool {
+        !matches!(self, Self::Write)
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::ReadSwmr => "SWMR read-only",
+            Self::ReadSnapshot => "snapshot read-only",
+            Self::Write => "read-write",
+        }
+    }
 }
 
 impl Node {
@@ -311,6 +380,9 @@ impl H5FNode {
 pub struct H5F {
     pub root: Rc<RefCell<H5FNode>>,
     pub file: File,
+    pub requested_open_mode: RequestedOpenMode,
+    pub resolved_open_mode: ResolvedOpenMode,
+    pub snapshot_file: Option<NamedTempFile>,
 }
 
 #[cfg(test)]

@@ -1,11 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
 use hdf5_metno::{
+    OpenMode,
     plist::file_access::FileCloseDegree,
     types::{TypeDescriptor, VarLenUnicode},
     Dataset, File, Group, LinkType,
 };
 use ratatui::style::Color;
+use tempfile::NamedTempFile;
 
 use crate::{
     error::AppError,
@@ -20,6 +22,7 @@ use super::{
     compound::root_compound_projection,
     meta::{CompoundFieldProjection, DatasetMeta, EnumRenderOverrides, GroupMeta},
     model::{H5FNode, Node, H5F},
+    ReadOpenMode, RequestedOpenMode, ResolvedOpenMode,
 };
 
 pub trait HasChildren {
@@ -622,15 +625,113 @@ fn build_dataset_meta(
     })
 }
 
+struct OpenFileHandle {
+    file: File,
+    resolved_open_mode: ResolvedOpenMode,
+    snapshot_file: Option<NamedTempFile>,
+}
+
+fn default_file_builder() -> hdf5_metno::FileBuilder {
+    File::with_options()
+        .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
+        .clone()
+}
+
+fn swmr_file_builder() -> hdf5_metno::FileBuilder {
+    File::with_options()
+        .with_fapl(|fapl| {
+            fapl.fclose_degree(FileCloseDegree::Strong).libver_v110()
+        })
+        .clone()
+}
+
+fn snapshot_file_parent(file_path: &str) -> Result<&Path, hdf5_metno::Error> {
+    Path::new(file_path).parent().ok_or_else(|| {
+        hdf5_metno::Error::from(format!(
+            "Failed to create snapshot for '{file_path}': path has no parent directory"
+        ))
+    })
+}
+
+fn open_snapshot_file(file_path: &str) -> Result<OpenFileHandle, hdf5_metno::Error> {
+    let parent = snapshot_file_parent(file_path)?;
+    let snapshot = tempfile::Builder::new()
+        .prefix(".h5v-snapshot-")
+        .suffix(".h5")
+        .tempfile_in(parent)
+        .map_err(|error| {
+            hdf5_metno::Error::from(format!(
+                "Failed to create snapshot for '{file_path}' in '{}': {error}",
+                parent.display()
+            ))
+        })?;
+    fs::copy(file_path, snapshot.path()).map_err(|error| {
+        hdf5_metno::Error::from(format!(
+            "Failed to copy '{file_path}' into snapshot '{}': {error}",
+            snapshot.path().display()
+        ))
+    })?;
+    let file = default_file_builder().open(snapshot.path())?;
+    Ok(OpenFileHandle {
+        file,
+        resolved_open_mode: ResolvedOpenMode::ReadSnapshot,
+        snapshot_file: Some(snapshot),
+    })
+}
+
+fn open_readonly_file(
+    file_path: &str,
+    read_mode: ReadOpenMode,
+) -> Result<OpenFileHandle, hdf5_metno::Error> {
+    match read_mode {
+        ReadOpenMode::Standard => Ok(OpenFileHandle {
+            file: default_file_builder().open(file_path)?,
+            resolved_open_mode: ResolvedOpenMode::ReadOnly,
+            snapshot_file: None,
+        }),
+        ReadOpenMode::Swmr => Ok(OpenFileHandle {
+            file: swmr_file_builder().open_as(file_path, OpenMode::ReadSWMR)?,
+            resolved_open_mode: ResolvedOpenMode::ReadSwmr,
+            snapshot_file: None,
+        }),
+        ReadOpenMode::Snapshot => open_snapshot_file(file_path),
+        ReadOpenMode::Auto => {
+            let standard_error = match open_readonly_file(file_path, ReadOpenMode::Standard) {
+                Ok(handle) => return Ok(handle),
+                Err(error) => error,
+            };
+            let swmr_error = match open_readonly_file(file_path, ReadOpenMode::Swmr) {
+                Ok(handle) => return Ok(handle),
+                Err(error) => error,
+            };
+            match open_readonly_file(file_path, ReadOpenMode::Snapshot) {
+                Ok(handle) => Ok(handle),
+                Err(snapshot_error) => Err(hdf5_metno::Error::from(format!(
+                    "Failed to open HDF5 file '{file_path}' in auto read-only mode (standard: {}; SWMR: {}; snapshot: {})",
+                    standard_error, swmr_error, snapshot_error
+                ))),
+            }
+        }
+    }
+}
+
 impl H5F {
-    pub fn open(file_path: String, linked: bool, write: bool) -> Result<Self, hdf5_metno::Error> {
-        let builder = File::with_options()
-            .with_fapl(|fapl| fapl.fclose_degree(FileCloseDegree::Strong))
-            .clone();
-        let file = if write {
-            builder.open_rw(&file_path)?
-        } else {
-            builder.open(&file_path)?
+    pub fn open(
+        file_path: String,
+        linked: bool,
+        requested_open_mode: RequestedOpenMode,
+    ) -> Result<Self, hdf5_metno::Error> {
+        let OpenFileHandle {
+            file,
+            resolved_open_mode,
+            snapshot_file,
+        } = match requested_open_mode {
+            RequestedOpenMode::Write => OpenFileHandle {
+                file: default_file_builder().open_rw(&file_path)?,
+                resolved_open_mode: ResolvedOpenMode::Write,
+                snapshot_file: None,
+            },
+            RequestedOpenMode::Read(read_mode) => open_readonly_file(&file_path, read_mode)?,
         };
 
         let member_count = file.member_names()?.len();
@@ -647,7 +748,13 @@ impl H5F {
         root.borrow_mut().read_children()?;
         root.borrow_mut().expand_toggle()?;
 
-        Ok(Self { root, file })
+        Ok(Self {
+            root,
+            file,
+            requested_open_mode,
+            resolved_open_mode,
+            snapshot_file,
+        })
     }
 }
 
@@ -662,8 +769,8 @@ mod tests {
 
     use super::{
         build_dataset_meta, build_dataset_node, enum_render_attr_names, highlight_hint_from_name,
-        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType,
-        LinkedDataset,
+        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType, H5F,
+        LinkedDataset, ReadOpenMode, RequestedOpenMode, ResolvedOpenMode,
     };
     use crate::h5f::Node;
     use crate::ui::render::MatrixRenderType;
@@ -687,6 +794,51 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn explicit_snapshot_mode_opens_a_copied_file() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create source file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.new_dataset_builder()
+            .with_data(&[1_u8, 2, 3])
+            .create("values")
+            .expect("failed to create dataset");
+        file.close().expect("failed to close source hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Snapshot),
+        )
+        .expect("failed to open snapshot mode");
+
+        assert_eq!(opened.resolved_open_mode, ResolvedOpenMode::ReadSnapshot);
+        assert!(opened.snapshot_file.is_some());
+        assert_ne!(
+            opened.file.filename(),
+            temp.path().to_string_lossy().as_ref(),
+            "snapshot mode should open the copied temp file"
+        );
+    }
+
+    #[test]
+    fn auto_mode_uses_standard_read_for_normal_files() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create source file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.close().expect("failed to close source hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Auto),
+        )
+        .expect("failed to open auto mode");
+
+        assert_eq!(opened.resolved_open_mode, ResolvedOpenMode::ReadOnly);
+        assert!(opened.snapshot_file.is_none());
     }
 
     #[test]
