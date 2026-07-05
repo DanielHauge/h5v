@@ -53,7 +53,7 @@ impl ImgState {
 impl ChartPreviwState {
     pub fn current_request_key(&self) -> Option<ChartPreviewKey> {
         let (width, height) = self.rendered_size?;
-        Some(ChartPreviewKey {
+        let key = ChartPreviewKey {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
             mode: self.rendered_mode?,
@@ -61,13 +61,17 @@ impl ChartPreviwState {
             roi: self.rendered_roi,
             width,
             height,
-        })
+        };
+        key.has_viable_render_size().then_some(key)
     }
 
     pub fn touch_cached_preview(
         &mut self,
         key: &ChartPreviewKey,
     ) -> Option<(ClipboardImageData, PreviewChartViewport, DatasetPlotingData)> {
+        if !key.has_viable_render_size() {
+            return None;
+        }
         let index = self
             .cached_previews
             .iter()
@@ -88,6 +92,9 @@ impl ChartPreviwState {
         data_preview: DatasetPlotingData,
         capacity: usize,
     ) {
+        if !key.has_viable_render_size() {
+            return;
+        }
         self.cached_previews.retain(|entry| entry.key != key);
         self.cached_previews.push_back(CachedChartPreview {
             key,
@@ -112,5 +119,20 @@ impl ChartPreviwState {
         self.error = None;
         self.current_data = None;
         self.pending_key = Some(key);
+    }
+
+    pub fn clear_rendered_preview(&mut self) {
+        self.ds_loaded = None;
+        self.ds_selection = None;
+        self.rendered_mode = None;
+        self.rendered_viewport = None;
+        self.rendered_roi = None;
+        self.rendered_size = None;
+        self.protocol = None;
+        self.clipboard_image = None;
+        self.error = None;
+        self.pending_key = None;
+        self.last_plot_area = None;
+        self.drag_state = None;
     }
 }

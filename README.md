@@ -116,11 +116,21 @@ python scripts/generate_example_h5.py
 | Homebrew             | `brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git && brew install h5v`     |
 | Scoop                | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v`        |
 | cargo-binstall       | `cargo binstall h5v`                                                                      |
-| Cargo source build   | `cargo install h5v`                                                                       |
+| Cargo source build   | `cargo install --locked h5v`                                                              |
 
 On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
 
-On Ubuntu 22.04, install the validated source-build prerequisites before `cargo install h5v`:
+For `cargo install`, start with a current stable Rust toolchain from `rustup`. The packaged-source install path is validated in CI on Ubuntu 22.04.
+
+### Cargo source-build requirements
+
+Recommended install command:
+
+```bash
+cargo install --locked h5v
+```
+
+Validated Ubuntu 22.04 prerequisites:
 
 ```bash
 sudo apt-get update
@@ -128,7 +138,20 @@ sudo apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
 ```
 
-Other Linux distributions need the equivalent compiler toolchain, CMake, `pkg-config`, and `fontconfig`/`freetype`/`expat` development headers.
+What those cover:
+
+- `build-essential`: C/C++ compiler toolchain used by native dependencies
+- `cmake`: required by vendored/native build steps
+- `pkg-config`: used to discover native libraries
+- `libfontconfig1-dev`, `libfreetype6-dev`, `libexpat1-dev`: headers needed by the font/graphics stack used during source builds
+
+Other platforms:
+
+- Linux distributions other than Ubuntu need the equivalent compiler toolchain, CMake, `pkg-config`, and `fontconfig`/`freetype`/`expat` development headers.
+- macOS release builders install `cmake` and `pkg-config` before building. If a local `cargo install` fails on macOS, install those first with `brew install cmake pkg-config`.
+- On Windows, the supported path is the PowerShell installer or the published binaries. If you insist on `cargo install`, use the Rust MSVC toolchain and make sure the Visual Studio C++ build tools are already configured.
+
+If you just want a working binary and do not need a local source build, prefer the shell installer, PowerShell installer, or `cargo binstall`.
 
 ## Configuration and plugins
 

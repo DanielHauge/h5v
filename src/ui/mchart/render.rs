@@ -372,7 +372,9 @@ impl MultiChartState {
             return;
         }
 
-        let (cell_w, cell_h) = self.picker.font_size();
+        let font_size = self.picker.font_size();
+        let cell_w = font_size.width;
+        let cell_h = font_size.height;
         let new_height = chart_area.height as u32 * cell_h as u32;
         let new_width = chart_area.width as u32 * cell_w as u32;
         self.last_chart_panel_area = Some(chart_area);

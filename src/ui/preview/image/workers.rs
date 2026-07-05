@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::perf;
+use ratatui::layout::Size;
 use ratatui_image::ResizeEncodeRender;
 
 pub(crate) fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
@@ -68,7 +69,9 @@ pub(crate) fn handle_chartpreview_load(
 ) -> Sender<ChartPreviewLoadRequest> {
     let (tx_load, rx_load) = channel::<ChartPreviewLoadRequest>();
 
-    let (x, y) = picker.font_size();
+    let font_size = picker.font_size();
+    let x = font_size.width;
+    let y = font_size.height;
 
     thread::spawn(move || loop {
         if let Ok(mut req) = rx_load.recv() {
@@ -186,7 +189,7 @@ pub(crate) fn handle_chartpreview_load(
             let mut stateful_protocol = picker.new_resize_protocol(dyn_img);
             stateful_protocol.resize_encode(
                 &Resize::Scale(Some(FilterType::Triangle)),
-                Rect::new(0, 0, req.width, req.height),
+                Size::new(req.width, req.height),
             );
             if let Some(Err(error)) = stateful_protocol.last_encoding_result() {
                 send_chart_failure(

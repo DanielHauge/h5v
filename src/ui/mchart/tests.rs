@@ -38,7 +38,7 @@ pub(super) fn make_state() -> MultiChartState {
     let (tx_render, _rx_render) = channel();
     let (tx_expression_refresh, _rx_expression_refresh) = channel();
     MultiChartState::new(
-        Picker::from_fontsize((7, 14)),
+        Picker::from_fontsize(ratatui_image::FontSize::new(7, 14)),
         tx_load,
         tx_render,
         tx_expression_refresh,

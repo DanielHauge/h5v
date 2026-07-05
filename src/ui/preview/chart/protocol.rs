@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
     text::Span,
-    widgets::{Block, Clear},
+    widgets::{Block, Clear, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
@@ -30,6 +30,18 @@ fn render_chart_loading_indicator(f: &mut Frame<'_>, area: Rect) {
     f.render_widget(indicator, area);
 }
 
+fn render_chart_too_small(f: &mut Frame<'_>, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    f.render_widget(Clear, area);
+    let paragraph = Paragraph::new("Chart preview needs more space")
+        .style(Style::default().fg(configure::themed_color(|colors| colors.help.description)))
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
+    f.render_widget(paragraph, area);
+}
+
 pub(super) fn clear_active_chart_preview(state: &mut AppState<'_>) {
     state.chart_preview_state.ds_loaded = None;
     state.chart_preview_state.protocol = None;
@@ -51,6 +63,7 @@ pub(super) fn render_chart_protocol_state(
     is_pending: bool,
 ) -> Result<(), AppError> {
     if let Some(ref error) = state.chart_preview_state.error {
+        f.render_widget(Clear, chart_area);
         render_error(
             f,
             &chart_area,
@@ -67,6 +80,7 @@ pub(super) fn render_chart_protocol_state(
             render_chart_loading_indicator(f, chart_area);
         }
     } else if is_pending {
+        f.render_widget(Clear, chart_area);
         render_chart_loading_indicator(f, chart_area);
     }
     Ok(())
@@ -115,6 +129,12 @@ pub(super) fn queue_chart_preview_load(
     current_key: ChartPreviewKey,
     source: ChartPreviewSource,
 ) -> Result<(), AppError> {
+    if !current_key.has_viable_render_size() {
+        state.chart_preview_state.clear_rendered_preview();
+        render_chart_too_small(f, chart_area);
+        return Ok(());
+    }
+
     let is_pending = state.chart_preview_state.pending_key.as_ref() == Some(&current_key);
     let chart_loaded =
         state.chart_preview_state.current_request_key().as_ref() == Some(&current_key);

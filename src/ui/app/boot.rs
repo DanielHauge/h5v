@@ -100,8 +100,9 @@ pub(super) fn prepare_app<'a>(
     };
     let (bg_r, bg_g, bg_b) =
         configure::rgb_channels(configure::themed_color(|colors| colors.surface.bg));
-    picker.set_background_color(Rgba([bg_r, bg_g, bg_b, 255]));
-    let image_cell_size = picker.font_size();
+    picker.set_background_color(Some(Rgba([bg_r, bg_g, bg_b, 255])));
+    let picker_font_size = picker.font_size();
+    let image_cell_size = (picker_font_size.width, picker_font_size.height);
     let tx_resize = tx_events.clone();
     let tx_resize_img = handle_image_resize(tx_resize);
     let tx_load_imgfs =

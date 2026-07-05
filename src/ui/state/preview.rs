@@ -19,6 +19,8 @@ mod cache;
 mod viewport;
 
 pub const PREVIEW_CHART_VISIBLE_POINT_LIMIT: usize = 50;
+pub const MIN_PREVIEW_CHART_WIDTH: u16 = 10;
+pub const MIN_PREVIEW_CHART_HEIGHT: u16 = 4;
 
 pub struct ChartPreviewLoadRequest {
     pub key: ChartPreviewKey,
@@ -250,6 +252,12 @@ pub struct ChartPreviewKey {
     pub height: u16,
 }
 
+impl ChartPreviewKey {
+    pub fn has_viable_render_size(&self) -> bool {
+        self.width >= MIN_PREVIEW_CHART_WIDTH && self.height >= MIN_PREVIEW_CHART_HEIGHT
+    }
+}
+
 pub struct RawImageLoadRequest {
     pub key: ImageLoadKey,
     pub reader: BufReader<ByteReader>,
@@ -366,6 +374,34 @@ mod tests {
             length: 3,
             min: 1.0,
             max: 3.0,
+        }
+    }
+
+    fn chart_state() -> ChartPreviwState {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        ChartPreviwState {
+            mode: PreviewChartMode::Line,
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_mode: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            rendered_size: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: None,
+            data_bounds: None,
+            current_data: None,
+            roi: None,
+            last_chart_area: None,
+            last_plot_area: None,
+            drag_state: None,
         }
     }
 
@@ -566,6 +602,92 @@ mod tests {
         state.begin_loading(key.clone());
 
         assert_eq!(state.current_request_key(), Some(key));
+    }
+
+    #[test]
+    fn chart_preview_key_rejects_one_row_render_size() {
+        assert!(preview_key("normal").has_viable_render_size());
+
+        let tiny = ChartPreviewKey {
+            height: 1,
+            ..preview_key("tiny")
+        };
+
+        assert!(!tiny.has_viable_render_size());
+    }
+
+    #[test]
+    fn chart_preview_current_request_key_ignores_tiny_rendered_size() {
+        let mut state = chart_state();
+        let tiny = ChartPreviewKey {
+            height: 1,
+            ..preview_key("tiny")
+        };
+
+        state.begin_loading(tiny);
+
+        assert_eq!(state.current_request_key(), None);
+    }
+
+    #[test]
+    fn chart_preview_cache_ignores_tiny_entries() {
+        let mut state = chart_state();
+        let tiny = ChartPreviewKey {
+            height: 1,
+            ..preview_key("tiny")
+        };
+
+        state.cache_preview(
+            tiny.clone(),
+            clipboard_image(1),
+            bounds(),
+            data_preview(),
+            2,
+        );
+
+        assert!(state.cached_previews.is_empty());
+        assert!(state.touch_cached_preview(&tiny).is_none());
+    }
+
+    #[test]
+    fn chart_preview_size_change_invalidates_current_request_match() {
+        let mut state = chart_state();
+        let key = preview_key("resized");
+        let resized = ChartPreviewKey {
+            height: key.height + 1,
+            ..key.clone()
+        };
+
+        state.begin_loading(key.clone());
+
+        assert_eq!(state.current_request_key(), Some(key));
+        assert_ne!(state.current_request_key(), Some(resized));
+    }
+
+    #[test]
+    fn chart_preview_clear_rendered_preview_preserves_view_state() {
+        let mut state = chart_state();
+        let key = ChartPreviewKey {
+            viewport: Some(bounds()),
+            roi: Some(PreviewChartRoi {
+                start: 1,
+                end: 2,
+                precise: true,
+                selection_count: 1,
+            }),
+            ..preview_key("clear")
+        };
+        state.viewport = key.viewport;
+        state.roi = key.roi;
+        state.last_plot_area = Some(Rect::new(0, 0, 10, 10));
+        state.begin_loading(key);
+
+        state.clear_rendered_preview();
+
+        assert_eq!(state.current_request_key(), None);
+        assert!(state.last_plot_area.is_none());
+        assert!(state.viewport.is_some());
+        assert!(state.roi.is_some());
     }
 
     #[test]
