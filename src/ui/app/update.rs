@@ -1,6 +1,8 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::mpsc::Sender,
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -8,6 +10,8 @@ use serde_json::{json, Value};
 use update_informer::{registry, Check};
 
 use crate::{error::log_error, GIT_VERSION_SHORT};
+
+use super::AppEvent;
 
 pub(super) const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -38,6 +42,15 @@ fn load_update_check_cache(path: &Path) -> Option<UpdateCheckCache> {
     let contents = fs::read_to_string(path).ok()?;
     let value = serde_json::from_str(&contents).ok()?;
     parse_update_check_cache(value)
+}
+
+pub(super) fn cached_available_update(_now: SystemTime) -> Option<String> {
+    let cache = update_check_cache_path()
+        .as_deref()
+        .and_then(load_update_check_cache)?;
+    (cache.current_version == GIT_VERSION_SHORT)
+        .then_some(cache.available_version)
+        .flatten()
 }
 
 pub(super) fn write_update_check_cache(
@@ -123,11 +136,24 @@ where
     available_version
 }
 
-pub(super) fn check_for_available_update(now: SystemTime) -> Option<String> {
-    resolve_available_update(
-        update_check_cache_path().as_deref(),
-        GIT_VERSION_SHORT,
-        now,
-        fetch_latest_h5v_version,
-    )
+pub(super) fn spawn_update_check(tx_events: Sender<AppEvent>, now: SystemTime) {
+    let cache_path = update_check_cache_path();
+    if cache_path
+        .as_deref()
+        .and_then(load_update_check_cache)
+        .as_ref()
+        .is_some_and(|cache| update_check_cache_is_fresh(cache, GIT_VERSION_SHORT, now))
+    {
+        return;
+    }
+
+    thread::spawn(move || {
+        let version = resolve_available_update(
+            cache_path.as_deref(),
+            GIT_VERSION_SHORT,
+            now,
+            fetch_latest_h5v_version,
+        );
+        let _ = tx_events.send(AppEvent::UpdateAvailable(version));
+    });
 }

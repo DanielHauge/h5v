@@ -7,6 +7,7 @@ use std::{
         Arc,
     },
     thread,
+    time::SystemTime,
 };
 
 use crate::{
@@ -36,6 +37,7 @@ use super::{
     lifecycle::AppTerminal,
     reload::reload_current_file,
     render::{draw_app_frame, render_error},
+    update::spawn_update_check,
     AppEvent, ChartPreviewLoadedResult, HeatmapLoadedResult, ImageLoadedResult,
 };
 
@@ -76,12 +78,15 @@ pub(super) fn main_recover_loop(
         tx_events,
         rx_events,
     } = prepare_app(&filename, link, requested_open_mode, runtime_config)?;
+    let mut new_version = new_version.map(str::to_owned);
 
     if run_startup_commands(&mut state, startup_commands)? {
         return Ok(());
     }
 
-    redraw(terminal, &mut state, new_version)?;
+    redraw(terminal, &mut state, new_version.as_deref())?;
+    configure::spawn_pending_plugin_refreshes(tx_events.clone());
+    spawn_update_check(tx_events.clone(), SystemTime::now());
 
     let worker_running = Arc::new(AtomicBool::new(true));
     let _worker_shutdown = WorkerShutdownGuard {
@@ -108,7 +113,7 @@ pub(super) fn main_recover_loop(
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => {
                     apply_app_toast(&mut state, AppToast::Empty);
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => {
@@ -132,9 +137,22 @@ pub(super) fn main_recover_loop(
         }
 
         match event {
+            AppEvent::UpdateAvailable(available_version) => {
+                if new_version != available_version {
+                    let toast_version = available_version.clone();
+                    new_version = available_version;
+                    if let Some(version) = toast_version {
+                        apply_app_toast(
+                            &mut state,
+                            AppToast::Info(format!("Update available: {version}")),
+                        );
+                    }
+                    redraw(terminal, &mut state, new_version.as_deref())?;
+                }
+            }
             AppEvent::Toast(toast) => {
                 apply_app_toast(&mut state, toast);
-                redraw(terminal, &mut state, new_version)?;
+                redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::TermEvent(event) => {
                 let selected_before = state.selected_tree_path();
@@ -158,7 +176,7 @@ pub(super) fn main_recover_loop(
                         let message = recovered_ui_panic_message("input handling", payload);
                         log_error(&message);
                         apply_app_toast(&mut state, AppToast::Error(message));
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                         continue;
                     }
                 };
@@ -412,7 +430,7 @@ pub(super) fn main_recover_loop(
                             match callback_result {
                                 EventResult::Quit => {}
                                 EventResult::Redraw | EventResult::Copying => {
-                                    redraw(terminal, &mut state, new_version)?;
+                                    redraw(terminal, &mut state, new_version.as_deref())?;
                                 }
                                 EventResult::ReloadFile { .. }
                                 | EventResult::Configure { .. }
@@ -425,14 +443,14 @@ pub(super) fn main_recover_loop(
                     }
                     EventResult::Continue => {}
                     EventResult::Redraw => {
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                     EventResult::Copying => {
                         state.copying = true;
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                         state.copying = false;
                         thread::sleep(std::time::Duration::from_millis(100));
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                     EventResult::ReloadFile { write } => {
                         match reload_current_file(&mut state, write) {
@@ -445,7 +463,7 @@ pub(super) fn main_recover_loop(
                                 apply_app_toast(&mut state, AppToast::Error(error.to_string()));
                             }
                         }
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                     EventResult::Configure { reset } => {
                         match open_configuration_and_reload(&mut state, tx_events.clone(), reset) {
@@ -458,12 +476,12 @@ pub(super) fn main_recover_loop(
                                 apply_app_toast(&mut state, AppToast::Error(error.to_string()));
                             }
                         }
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                     EventResult::Error(error) => {
                         draw_error(terminal, &error)?;
                         thread::sleep(std::time::Duration::from_secs(2));
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                     EventResult::Toast(toast, full_redraw) => {
                         if full_redraw {
@@ -472,7 +490,7 @@ pub(super) fn main_recover_loop(
                             terminal.flush()?;
                         }
                         apply_app_toast(&mut state, toast);
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
             }
@@ -480,12 +498,12 @@ pub(super) fn main_recover_loop(
                 ImageResizeResult::Success(resize_response) => {
                     if let Some(ref mut img_thread_protocol) = state.img_state.protocol {
                         let _ = img_thread_protocol.update_resized_protocol(resize_response);
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
                 ImageResizeResult::Error(error) => {
                     state.img_state.error = Some(format!("Error resizing image: {error}"));
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             },
             AppEvent::ImageLoad(img_load) => match img_load {
@@ -504,7 +522,7 @@ pub(super) fn main_recover_loop(
                         state.img_state.protocol = Some(protocol);
                         state.img_state.clipboard_image = Some(clipboard_image);
                         state.img_state.error = None;
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
                 ImageLoadedResult::Failure { key, message } => {
@@ -513,7 +531,7 @@ pub(super) fn main_recover_loop(
                         state.img_state.protocol = None;
                         state.img_state.clipboard_image = None;
                         state.img_state.error = Some(message);
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
             },
@@ -536,7 +554,7 @@ pub(super) fn main_recover_loop(
                         }
                     }
                 }
-                redraw(terminal, &mut state, new_version)?;
+                redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
                 ChartPreviewLoadedResult::Success {
@@ -572,7 +590,7 @@ pub(super) fn main_recover_loop(
                     state
                         .chart_preview_state
                         .sync_data_bounds(Some(data_bounds));
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
                 ChartPreviewLoadedResult::Failure { key, message } => {
                     if state.chart_preview_state.pending_key.as_ref() == Some(&key) {
@@ -582,20 +600,20 @@ pub(super) fn main_recover_loop(
                         continue;
                     }
                     state.chart_preview_state.error = Some(message);
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             },
             AppEvent::PreviewChartResized(image_resize_result) => match image_resize_result {
                 ImageResizeResult::Success(resize_response) => {
                     if let Some(ref mut protocol) = state.chart_preview_state.protocol {
                         let _ = protocol.update_resized_protocol(resize_response);
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
                 ImageResizeResult::Error(error) => {
                     state.chart_preview_state.error =
                         Some(format!("Error resizing chart preview: {error}"));
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             },
             AppEvent::HeatmapLoad(heatmap_loaded_result) => match heatmap_loaded_result {
@@ -629,7 +647,7 @@ pub(super) fn main_recover_loop(
                             state.heatmap_render.cached_pages.pop_front();
                         }
                         if should_redraw {
-                            redraw(terminal, &mut state, new_version)?;
+                            redraw(terminal, &mut state, new_version.as_deref())?;
                         }
                     }
                 }
@@ -640,7 +658,7 @@ pub(super) fn main_recover_loop(
                             &mut state,
                             AppToast::Error(format!("Heatmap prefetch failed: {message}")),
                         );
-                        redraw(terminal, &mut state, new_version)?;
+                        redraw(terminal, &mut state, new_version.as_deref())?;
                     }
                 }
                 HeatmapLoadedResult::Dropped { key } => {
@@ -690,27 +708,27 @@ pub(super) fn main_recover_loop(
                 {
                     apply_app_toast(&mut state, AppToast::Error(error));
                 }
-                redraw(terminal, &mut state, new_version)?;
+                redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::MultiChartExpressionRefresh(result) => {
                 if let Err(error) = state.multi_chart.apply_expression_refresh_result(result) {
                     apply_app_toast(&mut state, AppToast::Error(error));
                 }
-                redraw(terminal, &mut state, new_version)?;
+                redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::MultiChartRender(result) => {
                 state.multi_chart.apply_render_result(result);
-                redraw(terminal, &mut state, new_version)?;
+                redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             }
             AppEvent::FileChanged => {
                 if let Some(toast) = state.register_file_watch_change() {
                     apply_app_toast(&mut state, toast);
-                    redraw(terminal, &mut state, new_version)?;
+                    redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             }
         }

@@ -24,7 +24,7 @@ use self::{
         RecoverLoopAction,
     },
     runtime::main_recover_loop,
-    update::check_for_available_update,
+    update::cached_available_update,
 };
 
 pub(super) use self::render::{main_content_focus, primary_text_style};
@@ -34,6 +34,7 @@ mod config;
 mod dialogs;
 mod events;
 mod lifecycle;
+mod picker_cache;
 mod reload;
 mod render;
 mod runtime;
@@ -54,7 +55,7 @@ pub fn init(
     let use_alternate_screen = resolve_alternate_screen(runtime_config);
     let mut terminal = init_terminal(use_alternate_screen)?;
 
-    let new_ver = check_for_available_update(SystemTime::now());
+    let new_ver = cached_available_update(SystemTime::now());
     let mut last_message = None;
 
     loop {
@@ -84,6 +85,7 @@ pub fn init(
 #[allow(clippy::large_enum_variant)]
 pub enum AppEvent {
     TermEvent(event::Event),
+    UpdateAvailable(Option<String>),
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
     PreviewExpression(PreviewExpressionResult),

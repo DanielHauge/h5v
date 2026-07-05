@@ -18,10 +18,30 @@ impl AppState<'_> {
         }
     }
 
-    pub fn set_clipboard_text(&mut self, text: String) -> std::result::Result<(), String> {
-        let Some(clipboard) = self.clipboard.as_mut() else {
+    pub fn clipboard_mut_or_init(&mut self) -> std::result::Result<&mut Clipboard, String> {
+        if self.clipboard.is_none() {
+            match Clipboard::new() {
+                Ok(clipboard) => {
+                    self.clipboard = Some(clipboard);
+                    self.clipboard_init_error = None;
+                }
+                Err(error) => {
+                    self.clipboard_init_error = Some(error.to_string());
+                    return Err(self.clipboard_unavailable_message());
+                }
+            }
+        }
+        if self.clipboard.is_none() {
             return Err(self.clipboard_unavailable_message());
-        };
+        }
+        match self.clipboard.as_mut() {
+            Some(clipboard) => Ok(clipboard),
+            None => Err("Clipboard initialization invariant failed".to_string()),
+        }
+    }
+
+    pub fn set_clipboard_text(&mut self, text: String) -> std::result::Result<(), String> {
+        let clipboard = self.clipboard_mut_or_init()?;
         clipboard.set_text(text).map_err(|error| error.to_string())
     }
 

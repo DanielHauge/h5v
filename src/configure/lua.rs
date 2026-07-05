@@ -26,6 +26,7 @@ pub use loader::{load_config_compatibility, run_lua_engine};
 #[cfg(test)]
 pub(crate) use mchart::reset_mchart_worker_runtime;
 pub(crate) use mchart::{run_registered_mchart_function, LuaMchartArgValue, LuaMchartReturnValue};
+pub(crate) use plugins::spawn_pending_plugin_refreshes;
 #[cfg(test)]
 use registration::{
     apply_lua_config, apply_non_registry_lua_config, parse_compatibility_override,

@@ -68,7 +68,8 @@ pub(crate) use lua::{
     build_selection_context as build_lua_selection_context, dispatch_lua_event,
     open_content_mode_target as open_lua_content_mode_target,
     parse_process_json_output as parse_lua_process_json, run_registered_mchart_function,
-    set_lua_toast, LuaMchartArgValue, LuaMchartReturnValue, LuaToastLevel,
+    set_lua_toast, spawn_pending_plugin_refreshes, LuaMchartArgValue, LuaMchartReturnValue,
+    LuaToastLevel,
 };
 pub use lua::{
     last_config_load_metrics, load_config_compatibility, run_lua_engine, with_command_lua_callback,

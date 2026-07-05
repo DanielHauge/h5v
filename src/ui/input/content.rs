@@ -88,7 +88,7 @@ fn copy_image_to_clipboard(
         height,
         bytes: Cow::Owned(bytes),
     };
-    let Some(clipboard) = state.clipboard.as_mut() else {
+    let Ok(clipboard) = state.clipboard_mut_or_init() else {
         return Ok(EventResult::Toast(
             AppToast::Warning(state.clipboard_unavailable_message()),
             false,

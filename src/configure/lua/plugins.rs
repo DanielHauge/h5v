@@ -4,6 +4,8 @@ use std::{
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     process::Command,
+    sync::{LazyLock, Mutex},
+    thread,
 };
 
 use mlua::{Lua, Table, Value};
@@ -13,9 +15,21 @@ use crate::configure::{
     registry::{PluginHandle, PluginMetadata, RegistryBuilder},
 };
 use crate::health::{HealthStatus, HealthcheckResult};
+use crate::{
+    error::log_error,
+    ui::{app::AppEvent, state::AppToast, toast::send_app_toast},
+};
 
 const PLUGINS_DEFINITIONS_FIELD: &str = "__definitions";
 const REGISTRY_OWNER_FIELD: &str = "__registry_owner";
+static PENDING_PLUGIN_REFRESHES: LazyLock<Mutex<Vec<DeferredPluginRefresh>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DeferredPluginRefresh {
+    source_key: String,
+    checkout_dir: PathBuf,
+}
 
 pub(super) fn build_plugins_table(lua: &Lua) -> Result<Table, ConfigureErrors> {
     let plugins = lua.create_table()?;
@@ -55,6 +69,41 @@ pub(super) fn register_lua_plugins(
             .map_err(|error| mlua::Error::runtime(error.to_string()))?;
     }
     Ok(())
+}
+
+pub(crate) fn spawn_pending_plugin_refreshes(tx_events: std::sync::mpsc::Sender<AppEvent>) {
+    let refreshes = match PENDING_PLUGIN_REFRESHES.lock() {
+        Ok(mut guard) => std::mem::take(&mut *guard),
+        Err(error) => {
+            log_error(format!("Plugin refresh queue lock poisoned: {error}"));
+            Vec::new()
+        }
+    };
+    if refreshes.is_empty() {
+        return;
+    }
+    thread::spawn(move || {
+        for refresh in refreshes {
+            match refresh_git_plugin_checkout(&refresh.checkout_dir, &refresh.source_key) {
+                Ok(true) => {
+                    send_app_toast(
+                        &tx_events,
+                        AppToast::Info(format!(
+                            "Plugin '{}' updated in background; restart h5v to use the new version",
+                            refresh.source_key
+                        )),
+                    );
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    log_error(format!(
+                        "Background plugin refresh failed for '{}': {error}",
+                        refresh.source_key
+                    ));
+                }
+            }
+        }
+    });
 }
 
 fn use_plugin(
@@ -669,25 +718,7 @@ fn install_git_plugin(
             ],
         )?;
     } else if auto_pull {
-        crate::ui::app::render_startup_progress("Updating plugin...", Some(source_key));
-        run_git(
-            Some(&checkout_dir),
-            &[
-                "fetch".to_string(),
-                "--quiet".to_string(),
-                "origin".to_string(),
-                "main".to_string(),
-            ],
-        )?;
-        crate::ui::app::render_startup_progress("Checking out plugin...", Some(source_key));
-        run_git(
-            Some(&checkout_dir),
-            &[
-                "checkout".to_string(),
-                "--quiet".to_string(),
-                "FETCH_HEAD".to_string(),
-            ],
-        )?;
+        queue_deferred_plugin_refresh(source_key, &checkout_dir);
     }
 
     checkout_dir.canonicalize().map_err(|error| {
@@ -696,6 +727,23 @@ fn install_git_plugin(
             checkout_dir.display()
         )
     })
+}
+
+fn queue_deferred_plugin_refresh(source_key: &str, checkout_dir: &Path) {
+    let refresh = DeferredPluginRefresh {
+        source_key: source_key.to_string(),
+        checkout_dir: checkout_dir.to_path_buf(),
+    };
+    let Ok(mut guard) = PENDING_PLUGIN_REFRESHES.lock() else {
+        return;
+    };
+    if guard
+        .iter()
+        .any(|pending| pending.checkout_dir == refresh.checkout_dir)
+    {
+        return;
+    }
+    guard.push(refresh);
 }
 
 fn read_plugin_manifest(plugin_root: &Path) -> Result<PluginManifest, String> {
@@ -798,6 +846,33 @@ fn resolve_git_commit(path: &Path) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn refresh_git_plugin_checkout(checkout_dir: &Path, source_key: &str) -> Result<bool, String> {
+    let before = resolve_git_commit(checkout_dir).unwrap_or_default();
+    run_git(
+        Some(checkout_dir),
+        &[
+            "fetch".to_string(),
+            "--quiet".to_string(),
+            "origin".to_string(),
+            "main".to_string(),
+        ],
+    )
+    .map_err(|error| format!("failed to fetch latest plugin commit for '{source_key}': {error}"))?;
+    run_git(
+        Some(checkout_dir),
+        &[
+            "checkout".to_string(),
+            "--quiet".to_string(),
+            "FETCH_HEAD".to_string(),
+        ],
+    )
+    .map_err(|error| {
+        format!("failed to checkout latest plugin commit for '{source_key}': {error}")
+    })?;
+    let after = resolve_git_commit(checkout_dir)?;
+    Ok(before != after)
 }
 
 fn plugin_state_dir() -> Result<PathBuf, std::io::Error> {

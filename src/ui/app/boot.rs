@@ -4,7 +4,6 @@ use std::sync::{
 };
 use std::time::Instant;
 
-use arboard::Clipboard;
 use image::Rgba;
 use ratatui_image::picker::{Picker, ProtocolType};
 
@@ -92,9 +91,13 @@ pub(super) fn prepare_app<'a>(
         message = "opened HDF5 file"
     );
 
-    #[allow(deprecated)]
     let mut picker = if runtime_config.terminal_graphics {
-        Picker::from_query_stdio().unwrap_or(Picker::halfblocks())
+        super::picker_cache::load_cached_picker().unwrap_or_else(|| {
+            #[allow(deprecated)]
+            let picker = Picker::from_query_stdio().unwrap_or(Picker::halfblocks());
+            super::picker_cache::store_picker(&picker);
+            picker
+        })
     } else {
         Picker::halfblocks()
     };
@@ -178,11 +181,6 @@ pub(super) fn prepare_app<'a>(
         cursor_row: 0,
         cursor_col: 0,
     };
-    let (clipboard, clipboard_init_error) = match Clipboard::new() {
-        Ok(clipboard) => (Some(clipboard), None),
-        Err(error) => (None, Some(error.to_string())),
-    };
-
     let page_state = state::PageState {
         idx: 0,
         page_count: 0,
@@ -233,8 +231,8 @@ pub(super) fn prepare_app<'a>(
         treeview: vec![],
         tree_view_cursor: 0,
         focus: Focus::Tree(LastFocused::Attributes),
-        clipboard,
-        clipboard_init_error,
+        clipboard: None,
+        clipboard_init_error: None,
         mode: Mode::Normal,
         command_return_mode: Mode::Normal,
         help_return_mode: Mode::Normal,

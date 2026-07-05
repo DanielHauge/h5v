@@ -1,6 +1,12 @@
-use std::{sync::mpsc::Sender, time::Instant};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::mpsc::Sender,
+    time::{Instant, UNIX_EPOCH},
+};
 
 use mlua::Error as LuaError;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     configure::{self, install_registry_snapshot, ThemeName},
@@ -15,9 +21,99 @@ use super::registration::{
 };
 use super::{set_last_config_load_metrics, ConfigLoadMetrics};
 
+const COMPATIBILITY_CACHE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CompatibilityCacheKey {
+    config_path: String,
+    config_size: u64,
+    config_mtime_secs: u64,
+    config_mtime_nanos: u32,
+    default_compatibility: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CompatibilityCacheEntry {
+    version: u32,
+    key: CompatibilityCacheKey,
+    resolved_compatibility: bool,
+}
+
+fn compatibility_cache_path() -> Option<PathBuf> {
+    dirs::cache_dir().map(|path| path.join("h5v").join("compatibility.json"))
+}
+
+fn compatibility_cache_key(
+    default_compatibility: bool,
+) -> Result<CompatibilityCacheKey, ConfigureErrors> {
+    let config_path = configure::ensure_config_path()?;
+    let metadata = fs::metadata(&config_path).map_err(ConfigureErrors::FailureToReadConfig)?;
+    let modified = metadata
+        .modified()
+        .map_err(ConfigureErrors::FailureToReadConfig)?;
+    let modified = modified.duration_since(UNIX_EPOCH).unwrap_or_default();
+    Ok(CompatibilityCacheKey {
+        config_path: config_path.display().to_string(),
+        config_size: metadata.len(),
+        config_mtime_secs: modified.as_secs(),
+        config_mtime_nanos: modified.subsec_nanos(),
+        default_compatibility,
+    })
+}
+
+fn load_cached_compatibility(
+    key: &CompatibilityCacheKey,
+) -> std::result::Result<Option<bool>, std::io::Error> {
+    let Some(path) = compatibility_cache_path() else {
+        return Ok(None);
+    };
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let Ok(entry) = serde_json::from_str::<CompatibilityCacheEntry>(&contents) else {
+        return Ok(None);
+    };
+    if entry.version != COMPATIBILITY_CACHE_VERSION || entry.key != *key {
+        return Ok(None);
+    }
+    Ok(Some(entry.resolved_compatibility))
+}
+
+fn store_compatibility_cache(key: CompatibilityCacheKey, resolved_compatibility: bool) {
+    let Some(path) = compatibility_cache_path() else {
+        return;
+    };
+    let entry = CompatibilityCacheEntry {
+        version: COMPATIBILITY_CACHE_VERSION,
+        key,
+        resolved_compatibility,
+    };
+    let Ok(contents) = serde_json::to_string(&entry) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, contents);
+}
+
 pub fn load_config_compatibility(
     default_compatibility: bool,
 ) -> Result<Option<bool>, ConfigureErrors> {
+    let cache_key = compatibility_cache_key(default_compatibility)?;
+    if let Some(value) =
+        load_cached_compatibility(&cache_key).map_err(ConfigureErrors::FailureToReadConfig)?
+    {
+        tracing::info!(
+            kind = "config",
+            phase = "compatibility_cache_hit",
+            duration_ms = 0_u64,
+            message = "reused cached compatibility config result"
+        );
+        return Ok(Some(value));
+    }
     let prepare_started = Instant::now();
     let prepared = prepare_lua_config(None, default_compatibility)?;
     tracing::info!(
@@ -41,7 +137,11 @@ pub fn load_config_compatibility(
         chunk_name = chunk_name.as_str(),
         message = "executed compatibility config chunk"
     );
-    parse_compatibility_override(&h5v)
+    let resolved = parse_compatibility_override(&h5v)?;
+    if let Some(value) = resolved {
+        store_compatibility_cache(cache_key, value);
+    }
+    Ok(resolved)
 }
 
 pub fn run_lua_engine(

@@ -66,12 +66,13 @@ pub(super) fn open_configuration_and_reload(
         config_path
     };
 
-    if let Err(error) = run_lua_engine(tx_events, state.compatibility_mode) {
+    if let Err(error) = run_lua_engine(tx_events.clone(), state.compatibility_mode) {
         log_configuration_error(&error);
         let message = configuration_warning_message(&error, true);
         state.configuration_warning = Some(message.clone());
         return Ok(AppToast::Warning(message));
     }
+    configure::spawn_pending_plugin_refreshes(tx_events.clone());
     let plugin_health_warning = plugin_health_warning_message();
     if let Ok(Some(compatibility_mode)) =
         configure::load_config_compatibility(state.compatibility_mode)
