@@ -609,14 +609,39 @@ jobs:
       - name: Publish to crates.io
         run: |
           version="${{ needs.generate-changelog.outputs.version }}"
+          crates_io_user_agent="h5v-release-workflow/${version} (https://github.com/${GITHUB_REPOSITORY})"
+
+          crate_release_exists() {
+            local crate="$1"
+            local version="$2"
+            local url="https://crates.io/api/v1/crates/${crate}/${version}"
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --user-agent "$crates_io_user_agent" \
+              "$url" >/dev/null
+          }
 
           publish_with_retries() {
             local crate="$1"
             local retries="$2"
             local delay="$3"
 
+            if crate_release_exists "$crate" "$version"; then
+              echo "$crate v$version is already on crates.io."
+              return 0
+            fi
+
             for ((attempt = 1; attempt <= retries; attempt++)); do
               if cargo publish -p "$crate" --allow-dirty; then
+                return 0
+              fi
+
+              if crate_release_exists "$crate" "$version"; then
+                echo "$crate v$version appeared on crates.io after cargo publish returned an error."
                 return 0
               fi
 
@@ -635,10 +660,9 @@ jobs:
             local version="$2"
             local retries="$3"
             local delay="$4"
-            local url="https://crates.io/api/v1/crates/${crate}/${version}"
 
             for ((attempt = 1; attempt <= retries; attempt++)); do
-              if curl --fail --silent --show-error --location "$url" >/dev/null; then
+              if crate_release_exists "$crate" "$version"; then
                 return 0
               fi
 
