@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build-test:
     name: Build and verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -43,11 +43,85 @@ jobs:
         with:
           cache-bin: false
 
-      - name: Verify crate
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Package crates
         run: |
-          cargo package --allow-dirty -p h5v-macros
-          cargo package --allow-dirty -p h5v
-          cargo check --workspace --locked
+          cargo package --allow-dirty --no-verify -p h5v-macros
+          cargo package --allow-dirty --no-verify -p h5v
+
+      - name: Verify packaged-source cargo install
+        shell: bash
+        run: |
+          python <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          import tarfile
+          import tempfile
+
+          package_dir = pathlib.Path("target/package")
+          work_dir = pathlib.Path(
+              tempfile.mkdtemp(
+                  prefix="h5v-packaged-install-",
+                  dir=os.environ.get("RUNNER_TEMP"),
+              )
+          )
+          install_root = work_dir / "install-root"
+
+          def unpack(crate_name: str) -> pathlib.Path:
+              prefix = f"{crate_name}-"
+              matches = sorted(
+                  path
+                  for path in package_dir.glob(f"{crate_name}-*.crate")
+                  if path.name.startswith(prefix)
+                  and path.name[len(prefix) : len(prefix) + 1].isdigit()
+              )
+              if len(matches) != 1:
+                  raise RuntimeError(
+                      f"Expected exactly one packaged crate for {crate_name}, found {len(matches)}"
+                  )
+              crate_path = matches[0]
+              with tarfile.open(crate_path) as archive:
+                  archive.extractall(work_dir)
+
+              unpacked_dir = work_dir / crate_path.stem
+              if not unpacked_dir.is_dir():
+                  raise FileNotFoundError(f"Expected unpacked crate at {unpacked_dir}")
+              return unpacked_dir
+
+          macros_dir = unpack("h5v-macros")
+          h5v_dir = unpack("h5v")
+
+          cargo_config_dir = work_dir / ".cargo"
+          cargo_config_dir.mkdir()
+          cargo_config_dir.joinpath("config.toml").write_text(
+              "[patch.crates-io]\n"
+              f'h5v-macros = {{ path = "{macros_dir.as_posix()}" }}\n',
+              encoding="utf-8",
+          )
+
+          subprocess.run(
+              [
+                  "cargo",
+                  "install",
+                  "--locked",
+                  "--path",
+                  str(h5v_dir),
+                  "--root",
+                  str(install_root),
+              ],
+              check=True,
+              cwd=work_dir,
+          )
+
+          binary_path = install_root / "bin" / "h5v"
+          if not binary_path.is_file():
+              raise FileNotFoundError(f"Expected installed binary at {binary_path}")
+
+          subprocess.run([str(binary_path), "--help"], check=True, cwd=work_dir)
+          PY
 
   generate-changelog:
     name: Generate changelog and tag

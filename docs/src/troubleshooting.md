@@ -40,15 +40,23 @@ See [Installation](./installation.md) for persistent compatibility settings.
 
 ## A Linux release says `GLIBC_x.y` was not found
 
-Official Linux releases target Ubuntu 22.04 and newer.
+Official Linux releases target Ubuntu 22.04 and newer. The source-build path is also checked on Ubuntu 22.04 with the prerequisites below.
 
 If your distro is older than that baseline, build locally instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential cmake pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+```
+
+Then run:
 
 ```bash
 cargo install h5v
 ```
 
-That links against your local system libraries instead of the release builder's glibc version.
+That links against your local system libraries instead of the release builder's glibc version. On non-Ubuntu systems, install the equivalent packages first.
 
 ## A compound dataset does not show in matrix mode
 

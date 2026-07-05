@@ -562,6 +562,7 @@ pub(super) fn main_recover_loop(
                     state.chart_preview_state.protocol = Some(protocol);
                     state.chart_preview_state.clipboard_image = Some(clipboard_image);
                     state.chart_preview_state.error = None;
+                    state.chart_preview_state.rendered_mode = Some(key.mode);
                     state.chart_preview_state.rendered_viewport = key.viewport;
                     state.chart_preview_state.rendered_roi = key.roi;
                     state.chart_preview_state.rendered_size = Some((key.width, key.height));

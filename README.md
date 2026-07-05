@@ -120,7 +120,15 @@ python scripts/generate_example_h5.py
 
 On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
 
-On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
+On Ubuntu 22.04, install the validated source-build prerequisites before `cargo install h5v`:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential cmake pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+```
+
+Other Linux distributions need the equivalent compiler toolchain, CMake, `pkg-config`, and `fontconfig`/`freetype`/`expat` development headers.
 
 ## Configuration and plugins
 

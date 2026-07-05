@@ -78,6 +78,7 @@ pub enum ContentAction {
     Move(Direction, usize),
     Edit,
     Copy,
+    CyclePreviewChartMode,
     HeatmapZoomIn,
     HeatmapZoomOut,
     HeatmapResetView,

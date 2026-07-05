@@ -9,8 +9,8 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     symbols::Marker,
-    text::Span,
-    widgets::{Axis, Chart, Dataset, GraphType},
+    text::{Line, Span},
+    widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap},
     Frame,
 };
 
@@ -22,14 +22,15 @@ use crate::{
         plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
     },
     ui::{
+        chart_stats::{box_plot_summary, histogram_summary},
         matrix::{EnumRenderer, RenderIntercept},
         page_scroll::PageDisplayInfo,
         perf,
         preview::render_string_preview,
         render::MatrixRenderType,
         state::{
-            AppState, ChartPreviewKey, ChartPreviewSource, Focus, Mode, PageType, PreviewChartRoi,
-            PreviewChartViewport,
+            AppState, ChartPreviewKey, ChartPreviewSource, Focus, Mode, PageType, PreviewChartMode,
+            PreviewChartRoi, PreviewChartViewport,
         },
         std_comp_render::{render_error, render_string, render_unsupported_rendering},
     },
@@ -41,8 +42,8 @@ mod protocol;
 pub(crate) use context::preview_chart_data_bounds;
 use context::{
     copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_roi_range,
-    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_points,
-    preview_x_axis_max, preview_x_min, render_preview_context_panel,
+    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_index_window,
+    preview_visible_points, preview_x_axis_max, preview_x_min, render_preview_context_panel,
 };
 use protocol::{clear_active_chart_preview, queue_chart_preview_load};
 
@@ -68,13 +69,47 @@ fn sync_direct_chart_preview(
         .chart_preview_state
         .set_current_data(Some(data_preview.clone()));
     state.chart_preview_state.set_chart_area(Some(chart_area));
-    state
-        .chart_preview_state
-        .set_plot_area(preview_chart_plot_area(
-            chart_area,
-            state.image_cell_size,
-            data_preview.max,
-        ));
+    state.chart_preview_state.set_plot_area(
+        state
+            .chart_preview_state
+            .mode
+            .supports_roi()
+            .then(|| preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max))
+            .flatten(),
+    );
+}
+
+fn preview_windowed_values(
+    data_preview: &DatasetPlotingData,
+    viewport: PreviewChartViewport,
+    x_min: f64,
+) -> Vec<f64> {
+    let Some((start, end)) = preview_visible_index_window(data_preview, viewport, x_min) else {
+        return Vec::new();
+    };
+    data_preview.data[start..=end]
+        .iter()
+        .map(|(_, y)| *y)
+        .filter(|value| value.is_finite())
+        .collect()
+}
+
+fn render_preview_summary_widget(
+    f: &mut Frame,
+    chart_area: &Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+) {
+    let paragraph = Paragraph::new(lines)
+        .style(Style::default().fg(configure::themed_color(|colors| colors.text.primary)))
+        .alignment(ratatui::layout::Alignment::Left)
+        .wrap(Wrap { trim: true })
+        .block(
+            ratatui::widgets::Block::default()
+                .title(title)
+                .title_alignment(ratatui::layout::Alignment::Center),
+        );
+    f.render_widget(paragraph, *chart_area);
 }
 
 pub fn render_precomputed_chart_preview(
@@ -109,15 +144,16 @@ pub fn render_precomputed_chart_preview(
     state.chart_preview_state.set_chart_area(Some(chart_area));
     state
         .chart_preview_state
-        .set_plot_area(preview_chart_plot_area(
-            chart_area,
-            state.image_cell_size,
-            data_preview.max,
-        ));
+        .set_plot_area(if state.chart_preview_state.mode.supports_roi() {
+            preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max)
+        } else {
+            None
+        });
 
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: preview_selection.clone(),
+        mode: state.chart_preview_state.mode,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -342,6 +378,7 @@ pub fn render_chart_preview(
         &areas_split[0],
         node,
         &shape,
+        state.chart_preview_state.mode,
         selector_info.as_ref(),
         stats_info.as_deref(),
     );
@@ -386,6 +423,7 @@ pub fn render_chart_preview(
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
+        mode: state.chart_preview_state.mode,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -593,6 +631,7 @@ fn render_projected_chart_preview(
         &areas_split[0],
         node,
         &shape,
+        state.chart_preview_state.mode,
         selector_info.as_ref(),
         stats_info.as_deref(),
     );
@@ -635,6 +674,7 @@ fn render_projected_chart_preview(
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
+        mode: state.chart_preview_state.mode,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -658,15 +698,19 @@ fn render_projected_chart_preview(
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
         state.chart_preview_state.set_chart_area(Some(chart_area));
-        state.chart_preview_state.set_plot_area(
-            state
-                .chart_preview_state
-                .current_data
-                .as_ref()
-                .and_then(|data| {
-                    preview_chart_plot_area(chart_area, state.image_cell_size, data.max)
-                }),
-        );
+        state
+            .chart_preview_state
+            .set_plot_area(if state.chart_preview_state.mode.supports_roi() {
+                state
+                    .chart_preview_state
+                    .current_data
+                    .as_ref()
+                    .and_then(|data| {
+                        preview_chart_plot_area(chart_area, state.image_cell_size, data.max)
+                    })
+            } else {
+                None
+            });
         queue_chart_preview_load(
             f,
             chart_area,
@@ -702,6 +746,72 @@ fn render_chart_widget(
             y_min: data_preview.min,
             y_max: data_preview.max,
         });
+    let mode = state.chart_preview_state.mode;
+    if matches!(
+        mode,
+        PreviewChartMode::Histogram | PreviewChartMode::BoxPlot
+    ) {
+        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        match mode {
+            PreviewChartMode::Histogram => {
+                let Some(summary) = histogram_summary(&values) else {
+                    render_preview_summary_widget(
+                        f,
+                        chart_area,
+                        "Histogram",
+                        vec![Line::from("No finite values in the visible window.")],
+                    );
+                    return;
+                };
+                render_preview_summary_widget(
+                    f,
+                    chart_area,
+                    "Histogram",
+                    vec![
+                        Line::from(format!("visible values {}", values.len())),
+                        Line::from(format!(
+                            "range {:.4}..{:.4}  bins {}",
+                            summary.value_min, summary.value_max, summary.bin_count
+                        )),
+                        Line::from(format!("max bin count {:.0}", summary.count_max)),
+                        Line::from("Image protocol renders the plotted histogram."),
+                    ],
+                );
+            }
+            PreviewChartMode::BoxPlot => {
+                let Some(summary) = box_plot_summary(&values) else {
+                    render_preview_summary_widget(
+                        f,
+                        chart_area,
+                        "Box plot",
+                        vec![Line::from("No finite values in the visible window.")],
+                    );
+                    return;
+                };
+                render_preview_summary_widget(
+                    f,
+                    chart_area,
+                    "Box plot",
+                    vec![
+                        Line::from(format!("visible values {}", values.len())),
+                        Line::from(format!(
+                            "q1 {:.4}  median {:.4}  q3 {:.4}",
+                            summary.q1, summary.median, summary.q3
+                        )),
+                        Line::from(format!(
+                            "whiskers {:.4}..{:.4}  outliers {}",
+                            summary.whisker_low,
+                            summary.whisker_high,
+                            summary.outliers.len()
+                        )),
+                        Line::from("Image protocol renders the plotted box plot."),
+                    ],
+                );
+            }
+            _ => {}
+        }
+        return;
+    }
     let x_label_count = match chart_area.width {
         0..=7 => 1,
         _ => chart_area.width / 8,
@@ -739,16 +849,33 @@ fn render_chart_widget(
         .map(|(x, y)| (x_min + *x, *y))
         .collect::<Vec<_>>();
     let visible_points = preview_visible_points(&data_preview, viewport, x_min);
-    let mut datasets = vec![Dataset::default()
-        .marker(Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(
-            Style::default()
-                .fg(configure::themed_color(|colors| colors.chart.preview_line))
-                .bold(),
-        )
-        .data(&data)];
-    if let Some(points) = visible_points.as_ref() {
+    let mut datasets = Vec::new();
+    if matches!(mode, PreviewChartMode::Line) {
+        datasets.push(
+            Dataset::default()
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.chart.preview_line))
+                        .bold(),
+                )
+                .data(&data),
+        );
+    }
+    if matches!(mode, PreviewChartMode::Scatter) {
+        datasets.push(
+            Dataset::default()
+                .marker(Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(
+                    Style::default()
+                        .fg(configure::themed_color(|colors| colors.chart.preview_line))
+                        .bold(),
+                )
+                .data(&data),
+        );
+    } else if let Some(points) = visible_points.as_ref() {
         datasets.push(
             Dataset::default()
                 .marker(Marker::Block)
@@ -766,7 +893,7 @@ fn render_chart_widget(
             .map(|(start, end)| (roi, data[start..=end].to_vec()))
     });
     if let Some((roi, roi_data)) = roi_storage.as_ref() {
-        if roi.selection_count >= 2 {
+        if roi.selection_count >= 2 && matches!(mode, PreviewChartMode::Line) {
             datasets.push(
                 Dataset::default()
                     .marker(if roi.precise {
@@ -785,10 +912,14 @@ fn render_chart_widget(
                     .data(roi_data),
             );
         }
-        if visible_points.is_some() {
+        if visible_points.is_some() || matches!(mode, PreviewChartMode::Scatter) {
             datasets.push(
                 Dataset::default()
-                    .marker(Marker::Block)
+                    .marker(if matches!(mode, PreviewChartMode::Scatter) {
+                        Marker::Dot
+                    } else {
+                        Marker::Block
+                    })
                     .graph_type(GraphType::Scatter)
                     .style(
                         Style::default()
@@ -837,6 +968,7 @@ pub fn render_image_chart(
     height: u32,
     x_min: f64,
     data_preview: DatasetPlotingData,
+    mode: PreviewChartMode,
     viewport: Option<PreviewChartViewport>,
     roi: Option<PreviewChartRoi>,
 ) -> Result<(), AppError> {
@@ -868,6 +1000,136 @@ pub fn render_image_chart(
         y_min: data_preview.min,
         y_max: data_preview.max,
     });
+    if matches!(mode, PreviewChartMode::Histogram) {
+        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        let Some(summary) = histogram_summary(&values) else {
+            return Err(AppError::DrawingError(
+                "No finite values available for histogram preview".to_string(),
+            ));
+        };
+        let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
+        root.fill(&plot_bg)
+            .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
+        let layout = preview_chart_layout(width, height, summary.count_max);
+        let mut chart = ChartBuilder::on(&root)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
+            .build_cartesian_2d(summary.value_min..summary.value_max, 0.0..summary.count_max)
+            .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+        chart
+            .configure_mesh()
+            .x_desc("value")
+            .y_desc("count")
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+            .map_err(|e| AppError::DrawingError(format!("Error drawing histogram mesh: {}", e)))?;
+        chart
+            .draw_series(summary.bins.iter().map(|bin| {
+                plotters::prelude::Rectangle::new(
+                    [(bin.start, 0.0), (bin.end, bin.count)],
+                    line.mix(0.45).filled(),
+                )
+            }))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing histogram bars: {}", e)))?;
+        root.present()
+            .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
+        return Ok(());
+    }
+    if matches!(mode, PreviewChartMode::BoxPlot) {
+        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        let Some(summary) = box_plot_summary(&values) else {
+            return Err(AppError::DrawingError(
+                "No finite values available for box-plot preview".to_string(),
+            ));
+        };
+        let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
+        root.fill(&plot_bg)
+            .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
+        let layout = preview_chart_layout(width, height, summary.value_max);
+        let mut chart = ChartBuilder::on(&root)
+            .margin(layout.margin)
+            .x_label_area_size(layout.x_label_area_size)
+            .y_label_area_size(layout.y_label_area_size)
+            .build_cartesian_2d(0.5..1.5, summary.value_min..summary.value_max)
+            .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+        chart
+            .configure_mesh()
+            .x_desc("visible window")
+            .y_desc("value")
+            .x_labels(1)
+            .x_label_formatter(&|_| "series".to_string())
+            .x_label_style(
+                ("sans-serif", layout.x_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .y_label_style(
+                ("sans-serif", layout.y_label_font_size)
+                    .into_font()
+                    .color(&axis),
+            )
+            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+            .light_line_style(grid.mix(0.35))
+            .bold_line_style(grid.mix(0.55))
+            .draw()
+            .map_err(|e| AppError::DrawingError(format!("Error drawing box-plot mesh: {}", e)))?;
+        let x = 1.0;
+        let half_width = 0.2;
+        chart
+            .draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![(x, summary.whisker_low), (x, summary.q1)],
+                ShapeStyle::from(&line).stroke_width(2),
+            )))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing lower whisker: {}", e)))?;
+        chart
+            .draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![(x, summary.q3), (x, summary.whisker_high)],
+                ShapeStyle::from(&line).stroke_width(2),
+            )))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing upper whisker: {}", e)))?;
+        chart
+            .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                line.mix(0.25).filled(),
+            )))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing box body: {}", e)))?;
+        chart
+            .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                ShapeStyle::from(&line).stroke_width(2),
+            )))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing box outline: {}", e)))?;
+        chart
+            .draw_series(std::iter::once(plotters::element::PathElement::new(
+                vec![
+                    (x - half_width, summary.median),
+                    (x + half_width, summary.median),
+                ],
+                ShapeStyle::from(&selected).stroke_width(3),
+            )))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing median: {}", e)))?;
+        chart
+            .draw_series(summary.outliers.iter().map(|value| {
+                plotters::element::Circle::new((x, *value), 4, ShapeStyle::from(&selected).filled())
+            }))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing outliers: {}", e)))?;
+        root.present()
+            .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
+        return Ok(());
+    }
     let root = BitMapBackend::with_buffer(buffer, (width, height)).into_drawing_area();
     root.margin(10, 10, 10, 10);
     root.fill(&plot_bg)
@@ -904,13 +1166,27 @@ pub fn render_image_chart(
         .draw()
         .map_err(|e| AppError::DrawingError(format!("Error drawing mesh: {}", e)))?;
 
-    let data = data_preview.data.iter().map(|(x, y)| (x_min + *x, *y));
-    let line_series =
-        plotters::prelude::LineSeries::new(data, ShapeStyle::from(&line).stroke_width(3));
-    chart
-        .draw_series(line_series)
-        .map_err(|e| AppError::DrawingError(format!("Error drawing line series: {}", e)))?;
-    if let Some(points) = preview_visible_points(&data_preview, viewport, x_min) {
+    let data = data_preview
+        .data
+        .iter()
+        .map(|(x, y)| (x_min + *x, *y))
+        .collect::<Vec<_>>();
+    if matches!(mode, PreviewChartMode::Line) {
+        let line_series = plotters::prelude::LineSeries::new(
+            data.iter().copied(),
+            ShapeStyle::from(&line).stroke_width(3),
+        );
+        chart
+            .draw_series(line_series)
+            .map_err(|e| AppError::DrawingError(format!("Error drawing line series: {}", e)))?;
+    }
+    if matches!(mode, PreviewChartMode::Scatter) {
+        chart
+            .draw_series(data.iter().copied().map(|point| {
+                plotters::prelude::Circle::new(point, 3, ShapeStyle::from(&line).filled())
+            }))
+            .map_err(|e| AppError::DrawingError(format!("Error drawing scatter points: {}", e)))?;
+    } else if let Some(points) = preview_visible_points(&data_preview, viewport, x_min) {
         chart
             .draw_series(points.iter().copied().map(|point| {
                 plotters::prelude::Circle::new(
@@ -935,22 +1211,22 @@ pub fn render_image_chart(
                         })?;
                 }
             }
-            let roi_points = data_preview.data[start..=end]
-                .iter()
-                .map(|(x, y)| (x_min + *x, *y));
-            if roi.selection_count >= 2 {
+            let roi_points = data[start..=end].iter().copied().collect::<Vec<_>>();
+            if roi.selection_count >= 2 && matches!(mode, PreviewChartMode::Line) {
                 chart
                     .draw_series(plotters::prelude::LineSeries::new(
-                        roi_points.clone(),
+                        roi_points.iter().copied(),
                         ShapeStyle::from(&roi_line).stroke_width(5),
                     ))
                     .map_err(|e| {
                         AppError::DrawingError(format!("Error drawing roi line: {}", e))
                     })?;
             }
-            if preview_visible_points(&data_preview, viewport, x_min).is_some() {
+            if preview_visible_points(&data_preview, viewport, x_min).is_some()
+                || matches!(mode, PreviewChartMode::Scatter)
+            {
                 chart
-                    .draw_series(roi_points.map(|point| {
+                    .draw_series(roi_points.into_iter().map(|point| {
                         plotters::prelude::Circle::new(
                             point,
                             PREVIEW_SELECTED_POINT_MARKER_RADIUS,

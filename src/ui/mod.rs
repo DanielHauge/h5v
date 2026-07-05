@@ -1,6 +1,7 @@
 pub mod app;
 pub mod attributes;
 pub mod chart_math;
+pub mod chart_stats;
 pub mod chrome;
 pub mod command;
 pub mod cursor;

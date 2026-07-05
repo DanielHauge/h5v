@@ -56,6 +56,7 @@ impl ChartPreviwState {
         Some(ChartPreviewKey {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
+            mode: self.rendered_mode?,
             viewport: self.rendered_viewport,
             roi: self.rendered_roi,
             width,
@@ -102,6 +103,7 @@ impl ChartPreviwState {
     pub fn begin_loading(&mut self, key: ChartPreviewKey) {
         self.ds_loaded = Some(key.ds_path.clone());
         self.ds_selection = Some(key.selection.clone());
+        self.rendered_mode = Some(key.mode);
         self.rendered_viewport = key.viewport;
         self.rendered_roi = key.roi;
         self.rendered_size = Some((key.width, key.height));

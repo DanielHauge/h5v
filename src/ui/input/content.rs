@@ -377,6 +377,7 @@ fn copy_chart_preview(
             == Some(crate::ui::state::ChartPreviewKey {
                 ds_path: ds_path.to_string(),
                 selection: selection.clone(),
+                mode: state.chart_preview_state.mode,
                 viewport: state.chart_preview_state.rendered_viewport,
                 roi: state.chart_preview_state.rendered_roi,
                 width: chart_area.width,
@@ -416,6 +417,7 @@ fn copy_chart_preview(
         height,
         x_min,
         data_preview,
+        state.chart_preview_state.mode,
         state.chart_preview_state.effective_viewport(),
         state.chart_preview_state.roi,
     )?;
@@ -674,6 +676,7 @@ fn apply_content_edit_request(
     state.chart_preview_state.protocol = None;
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
+    state.chart_preview_state.rendered_mode = None;
     state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.rendered_size = None;
     state.chart_preview_state.pending_key = None;
@@ -876,6 +879,10 @@ pub fn handle_normal_content_event(
                     (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Preview) => {
                         copy_preview_content(state)
                     }
+                    (
+                        Some(BoundAction::Action(ContentAction::CyclePreviewChartMode)),
+                        ContentShowMode::Preview,
+                    ) => Ok(redraw_if(state.chart_preview_state.cycle_mode())),
                     (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Matrix) => {
                         let text = match selected_matrix_copy_text(state) {
                             Ok(text) => text,

@@ -54,7 +54,21 @@ cargo install h5v
 
 `cargo install h5v` builds from the published crates.io source package, so it does not require a Git checkout.
 
-On Linux, source builds may require native packages such as `cmake`, `pkg-config`, `libfontconfig`, `freetype`, and `expat` development headers.
+Validated Ubuntu 22.04 prerequisites:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential cmake pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+```
+
+After those packages are installed, run:
+
+```bash
+cargo install h5v
+```
+
+Other Linux distributions need the equivalent compiler toolchain, CMake, `pkg-config`, and `fontconfig`/`freetype`/`expat` development headers.
 
 ## Terminal graphics
 

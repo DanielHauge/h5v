@@ -1,4 +1,7 @@
-use crate::ui::chart_math::{normalized_axis_bounds, padded_axis_bounds};
+use crate::ui::{
+    chart_math::normalized_axis_bounds,
+    chart_stats::{box_plot_summary, histogram_summary},
+};
 
 use super::super::{
     model::sanitize_chart_points, ChartItem, MultiChartState, MultiChartViewMode, Point,
@@ -6,21 +9,6 @@ use super::super::{
     PreparedHistogramBin, PreparedHistogramData, PreparedHistogramSeries, PreparedLineChartData,
     PreparedLineChartSeries,
 };
-
-fn quantile_sorted(values: &[f64], quantile: f64) -> f64 {
-    if values.len() == 1 {
-        return values[0];
-    }
-    let position = quantile.clamp(0.0, 1.0) * (values.len() - 1) as f64;
-    let lower = position.floor() as usize;
-    let upper = position.ceil() as usize;
-    if lower == upper {
-        values[lower]
-    } else {
-        let weight = position - lower as f64;
-        values[lower] * (1.0 - weight) + values[upper] * weight
-    }
-}
 
 impl MultiChartState {
     pub(super) fn item_display_label(&self, item: &ChartItem) -> String {
@@ -186,10 +174,9 @@ impl MultiChartState {
         }
 
         let selected_item_id = self.selected_item().map(|item| item.id);
-        let mut series_values = Vec::new();
-        let mut value_min = f64::MAX;
-        let mut value_max = f64::MIN;
         let mut max_samples = 0usize;
+        let mut series_values = Vec::new();
+        let mut summary_bounds = None;
 
         for item in visible_items {
             let values = self
@@ -201,31 +188,33 @@ impl MultiChartState {
                 continue;
             }
             max_samples = max_samples.max(values.len());
-            for value in &values {
-                value_min = value_min.min(*value);
-                value_max = value_max.max(*value);
-            }
+            let summary = histogram_summary(&values)?;
+            let (overall_min, overall_max) =
+                summary_bounds.unwrap_or((summary.value_min, summary.value_max));
+            summary_bounds = Some((
+                overall_min.min(summary.value_min),
+                overall_max.max(summary.value_max),
+            ));
             series_values.push((item, values));
         }
         if series_values.is_empty() {
             return None;
         }
 
-        let (value_min, value_max) = normalized_axis_bounds(value_min, value_max)?;
+        let (value_min, value_max) = summary_bounds?;
         let bin_count = match max_samples {
             0 => return None,
             1..=4 => max_samples,
             n => ((n as f64).sqrt().round() as usize).clamp(6, 64),
         };
-        let bin_width = (value_max - value_min) / bin_count as f64;
         let mut count_max = 0.0_f64;
         let mut series = Vec::new();
 
         for (item, values) in series_values {
             let mut counts = vec![0usize; bin_count];
+            let bin_width = (value_max - value_min) / bin_count as f64;
             for value in values {
-                let normalized: f64 = (value - value_min) / bin_width;
-                let normalized = normalized.floor();
+                let normalized = ((value - value_min) / bin_width).floor();
                 let index = normalized
                     .max(0.0)
                     .min((bin_count.saturating_sub(1)) as f64) as usize;
@@ -235,18 +224,14 @@ impl MultiChartState {
             let bins = counts
                 .into_iter()
                 .enumerate()
-                .map(|(index, count)| {
-                    let start = value_min + bin_width * index as f64;
-                    let end = if index + 1 == bin_count {
+                .map(|(index, count)| PreparedHistogramBin {
+                    start: value_min + bin_width * index as f64,
+                    end: if index + 1 == bin_count {
                         value_max
                     } else {
-                        start + bin_width
-                    };
-                    PreparedHistogramBin {
-                        start,
-                        end,
-                        count: count as f64,
-                    }
+                        value_min + bin_width * (index + 1) as f64
+                    },
+                    count: count as f64,
                 })
                 .collect::<Vec<_>>();
             series.push(PreparedHistogramSeries {
@@ -275,62 +260,40 @@ impl MultiChartState {
             return None;
         }
         let selected_item_id = self.selected_item().map(|item| item.id);
-        let mut value_min = f64::MAX;
-        let mut value_max = f64::MIN;
         let mut series = Vec::new();
+        let mut plot_bounds = None;
 
         for (x_index, item) in visible_items.into_iter().enumerate() {
-            let mut values: Vec<f64> = self
+            let values: Vec<f64> = self
                 .windowed_visible_points(item)
                 .into_iter()
                 .map(|(_, y)| y)
                 .filter(|value| value.is_finite())
                 .collect();
-            if values.is_empty() {
-                continue;
-            }
-            values.sort_by(|left: &f64, right: &f64| left.total_cmp(right));
-            let q1 = quantile_sorted(&values, 0.25);
-            let median = quantile_sorted(&values, 0.5);
-            let q3 = quantile_sorted(&values, 0.75);
-            let iqr = q3 - q1;
-            let fence_low = q1 - 1.5 * iqr;
-            let fence_high = q3 + 1.5 * iqr;
-            let whisker_low = values
-                .iter()
-                .copied()
-                .find(|value| *value >= fence_low)
-                .unwrap_or(values[0]);
-            let whisker_high = values
-                .iter()
-                .copied()
-                .rev()
-                .find(|value| *value <= fence_high)
-                .unwrap_or(*values.last()?);
-            let outliers = values
-                .iter()
-                .copied()
-                .filter(|value| *value < whisker_low || *value > whisker_high)
-                .collect::<Vec<_>>();
-            value_min = value_min.min(*values.first()?);
-            value_max = value_max.max(*values.last()?);
+            let summary = box_plot_summary(&values)?;
+            let (overall_min, overall_max) =
+                plot_bounds.unwrap_or((summary.value_min, summary.value_max));
+            plot_bounds = Some((
+                overall_min.min(summary.value_min),
+                overall_max.max(summary.value_max),
+            ));
             series.push(PreparedBoxPlotSeries {
                 label: self.item_display_label(item),
                 color_slot: item.color_slot,
                 x_index,
-                q1,
-                median,
-                q3,
-                whisker_low,
-                whisker_high,
-                outliers,
+                q1: summary.q1,
+                median: summary.median,
+                q3: summary.q3,
+                whisker_low: summary.whisker_low,
+                whisker_high: summary.whisker_high,
+                outliers: summary.outliers,
                 is_selected: selected_item_id == Some(item.id),
             });
         }
         if series.is_empty() {
             return None;
         }
-        let (value_min, value_max) = padded_axis_bounds(value_min, value_max)?;
+        let (value_min, value_max) = plot_bounds?;
         Some(PreparedBoxPlotData {
             value_min,
             value_max,

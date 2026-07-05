@@ -139,11 +139,13 @@ pub(super) fn prepare_app<'a>(
     };
 
     let chart_preview_state = ChartPreviwState {
+        mode: crate::ui::state::PreviewChartMode::Line,
         ds_loaded: None,
         protocol: None,
         clipboard_image: None,
         error: None,
         ds_selection: None,
+        rendered_mode: None,
         rendered_viewport: None,
         rendered_roi: None,
         rendered_size: None,

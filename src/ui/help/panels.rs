@@ -351,6 +351,9 @@ fn describe_content_target(target: &BoundAction<ContentAction>) -> String {
             }
             ContentAction::Edit => "Edit the selected value".to_string(),
             ContentAction::Copy => "Copy the selected value".to_string(),
+            ContentAction::CyclePreviewChartMode => {
+                "Cycle the preview chart between line, scatter, histogram, and box plot".to_string()
+            }
             ContentAction::HeatmapZoomIn => {
                 "Zoom in the active heatmap or preview chart".to_string()
             }

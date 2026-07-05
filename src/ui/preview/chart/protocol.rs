@@ -36,6 +36,7 @@ pub(super) fn clear_active_chart_preview(state: &mut AppState<'_>) {
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
+    state.chart_preview_state.rendered_mode = None;
     state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.rendered_roi = None;
     state.chart_preview_state.rendered_size = None;
@@ -90,6 +91,7 @@ fn restore_cached_chart_preview(state: &mut AppState<'_>, key: &ChartPreviewKey)
     };
     state.chart_preview_state.ds_loaded = Some(key.ds_path.clone());
     state.chart_preview_state.ds_selection = Some(key.selection.clone());
+    state.chart_preview_state.rendered_mode = Some(key.mode);
     state.chart_preview_state.rendered_viewport = key.viewport;
     state.chart_preview_state.rendered_size = Some((key.width, key.height));
     state.chart_preview_state.protocol = Some(protocol);

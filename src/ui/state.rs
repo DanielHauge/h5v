@@ -65,8 +65,8 @@ pub use help_state::{
 pub use preview::{
     ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
     ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, PageState, PageType, PreviewChartRoi, PreviewChartViewport, PreviewChartZoomMode,
-    PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
+    ImgState, PageState, PageType, PreviewChartMode, PreviewChartRoi, PreviewChartViewport,
+    PreviewChartZoomMode, PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
     PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
     CHART_PREVIEW_CACHE_CAPACITY, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };

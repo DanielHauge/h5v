@@ -11,6 +11,19 @@ use super::{
 };
 
 impl ChartPreviwState {
+    pub fn cycle_mode(&mut self) -> bool {
+        let next = self.mode.next();
+        if self.mode == next {
+            return false;
+        }
+        self.mode = next;
+        if !self.mode.supports_roi() {
+            self.roi = None;
+            self.drag_state = None;
+        }
+        true
+    }
+
     pub fn reset_viewport(&mut self) {
         self.viewport = None;
         self.data_bounds = None;
@@ -62,6 +75,9 @@ impl ChartPreviwState {
     }
 
     pub fn clear_roi(&mut self) -> bool {
+        if !self.mode.supports_roi() {
+            return false;
+        }
         let had_roi = self.roi.is_some();
         self.roi = None;
         had_roi
@@ -130,6 +146,9 @@ impl ChartPreviwState {
     }
 
     pub fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
+        if !self.mode.supports_viewport() {
+            return false;
+        }
         let Some(current) = self.effective_viewport() else {
             return false;
         };
@@ -151,6 +170,9 @@ impl ChartPreviwState {
         zoom_in: bool,
         mode: PreviewChartZoomMode,
     ) -> bool {
+        if !self.mode.supports_viewport() {
+            return false;
+        }
         let Some(bounds) = self.data_bounds else {
             return false;
         };
@@ -201,6 +223,9 @@ impl ChartPreviwState {
         percent: f64,
         mode: PreviewChartZoomMode,
     ) -> bool {
+        if !self.mode.supports_viewport() {
+            return false;
+        }
         let Some(chart_area) = self.last_chart_area else {
             return false;
         };
@@ -227,6 +252,9 @@ impl ChartPreviwState {
         percent: f64,
         mode: PreviewChartZoomMode,
     ) -> bool {
+        if !self.mode.supports_viewport() {
+            return false;
+        }
         let Some(chart_area) = self.last_plot_area else {
             return false;
         };
@@ -247,7 +275,11 @@ impl ChartPreviwState {
     }
 
     pub fn start_drag_at_position(&mut self, column: u16, row: u16) -> bool {
-        if !self.chart_contains_position(column, row) || self.precise_point_mode() {
+        if !self.mode.supports_viewport()
+            || !self.mode.supports_roi()
+            || !self.chart_contains_position(column, row)
+            || self.precise_point_mode()
+        {
             return false;
         }
         let Some(viewport) = self.effective_viewport() else {
@@ -325,6 +357,9 @@ impl ChartPreviwState {
     }
 
     fn precise_point_mode(&self) -> bool {
+        if !self.mode.supports_roi() {
+            return false;
+        }
         let Some((start, end)) = self.visible_index_window() else {
             return false;
         };
@@ -375,6 +410,9 @@ impl ChartPreviwState {
     }
 
     pub fn cycle_roi_at_position(&mut self, column: u16, row: u16) -> bool {
+        if !self.mode.supports_roi() {
+            return false;
+        }
         let Some(hit) = self.roi_at_position(column, row) else {
             return false;
         };
@@ -392,6 +430,9 @@ impl ChartPreviwState {
     }
 
     pub fn zoom_to_roi(&mut self) -> bool {
+        if !self.mode.supports_roi() || !self.mode.supports_viewport() {
+            return false;
+        }
         let Some(roi) = self.roi else {
             return false;
         };

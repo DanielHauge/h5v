@@ -17,7 +17,8 @@ use crate::{
         mchart::chart_plot_area_in_rect,
         page_scroll::{compact_count, PageDisplayInfo},
         state::{
-            AppState, PreviewChartRoi, PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+            AppState, PreviewChartMode, PreviewChartRoi, PreviewChartViewport,
+            PREVIEW_CHART_VISIBLE_POINT_LIMIT,
         },
     },
 };
@@ -315,11 +316,12 @@ pub(super) fn render_preview_context_panel(
     area: &Rect,
     node: &mut H5FNode,
     shape: &[usize],
+    mode: PreviewChartMode,
     view_info: Option<&PageDisplayInfo<'_>>,
     stats_lines: Option<&[Line<'static>]>,
 ) {
     let block = Block::default()
-        .title("View & selection")
+        .title(format!("View & selection [{} · t]", mode.label()))
         .title_style(
             Style::default()
                 .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -405,7 +407,7 @@ pub(super) fn preview_roi_x_bounds(
     Some((start_x - (left_step / 2.0), end_x + (right_step / 2.0)))
 }
 
-fn preview_visible_index_window(
+pub(super) fn preview_visible_index_window(
     data_preview: &DatasetPlotingData,
     viewport: PreviewChartViewport,
     x_min: f64,

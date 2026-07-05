@@ -379,6 +379,12 @@ const CONTENT_ACTION_CODES: &[ActionCode<ContentAction>] = &[
         default_keys: &["y"],
     },
     ActionCode {
+        symbol: "CyclePreviewChartMode",
+        code: "cycle-preview-chart-mode",
+        action: ContentAction::CyclePreviewChartMode,
+        default_keys: &["t"],
+    },
+    ActionCode {
         symbol: "HeatmapZoomIn",
         code: "heatmap-zoom-in",
         action: ContentAction::HeatmapZoomIn,

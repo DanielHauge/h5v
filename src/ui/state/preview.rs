@@ -51,11 +51,13 @@ pub struct ClipboardImageData {
 }
 
 pub struct ChartPreviwState {
+    pub mode: PreviewChartMode,
     pub ds_loaded: Option<String>,
     pub protocol: Option<ThreadProtocol>,
     pub clipboard_image: Option<ClipboardImageData>,
     pub error: Option<String>,
     pub ds_selection: Option<PreviewSelection>,
+    pub rendered_mode: Option<PreviewChartMode>,
     pub rendered_viewport: Option<PreviewChartViewport>,
     pub rendered_roi: Option<PreviewChartRoi>,
     pub rendered_size: Option<(u16, u16)>,
@@ -70,6 +72,42 @@ pub struct ChartPreviwState {
     pub last_chart_area: Option<Rect>,
     pub last_plot_area: Option<Rect>,
     pub drag_state: Option<PreviewChartDragState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewChartMode {
+    Line,
+    Scatter,
+    Histogram,
+    BoxPlot,
+}
+
+impl PreviewChartMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Line => "Line",
+            Self::Scatter => "Scatter",
+            Self::Histogram => "Histogram",
+            Self::BoxPlot => "Box plot",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Line => Self::Scatter,
+            Self::Scatter => Self::Histogram,
+            Self::Histogram => Self::BoxPlot,
+            Self::BoxPlot => Self::Line,
+        }
+    }
+
+    pub fn supports_viewport(self) -> bool {
+        matches!(self, Self::Line | Self::Scatter)
+    }
+
+    pub fn supports_roi(self) -> bool {
+        matches!(self, Self::Line | Self::Scatter)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -205,6 +243,7 @@ impl ImageWindowState {
 pub struct ChartPreviewKey {
     pub ds_path: String,
     pub selection: PreviewSelection,
+    pub mode: PreviewChartMode,
     pub viewport: Option<PreviewChartViewport>,
     pub roi: Option<PreviewChartRoi>,
     pub width: u16,
@@ -296,6 +335,7 @@ mod tests {
                 x: 0,
                 slice: crate::data::SliceSelection::All,
             },
+            mode: PreviewChartMode::Line,
             viewport: None,
             roi: None,
             width: 10,
@@ -334,11 +374,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -385,11 +427,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -447,11 +491,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: Some("stale".to_string()),
             protocol: None,
             clipboard_image: Some(clipboard_image(9)),
             error: Some("old".to_string()),
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: Some(bounds()),
             rendered_roi: None,
             rendered_size: None,
@@ -494,11 +540,13 @@ mod tests {
             ..preview_key("viewported")
         };
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -526,11 +574,13 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let key = preview_key("same");
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: Some(key.ds_path.clone()),
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: Some(key.selection.clone()),
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -564,11 +614,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -600,11 +652,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -646,11 +700,13 @@ mod tests {
             y_max: 9.0,
         };
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -684,11 +740,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: Some(preview_key("roi").selection),
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -739,11 +797,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: Some(preview_key("roi").selection),
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -780,11 +840,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: Some(preview_key("drag").selection),
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -825,11 +887,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: Some(preview_key("drag").selection),
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -875,11 +939,13 @@ mod tests {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
             error: None,
             ds_selection: None,
+            rendered_mode: None,
             rendered_viewport: None,
             rendered_roi: None,
             rendered_size: None,
@@ -906,6 +972,81 @@ mod tests {
         assert!(state.viewport.is_some());
         assert!(state.clear_roi_or_zoom());
         assert!(state.viewport.is_none());
+    }
+
+    #[test]
+    fn preview_chart_mode_cycle_clears_roi_for_statistical_modes() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("mode").selection),
+            rendered_mode: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            rendered_size: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(bounds()),
+            data_bounds: Some(bounds()),
+            current_data: Some(data_preview()),
+            roi: Some(PreviewChartRoi {
+                start: 0,
+                end: 1,
+                precise: false,
+                selection_count: 2,
+            }),
+            last_chart_area: None,
+            last_plot_area: None,
+            drag_state: None,
+        };
+
+        assert!(state.cycle_mode());
+        assert_eq!(state.mode, PreviewChartMode::Scatter);
+        assert!(state.roi.is_some());
+
+        assert!(state.cycle_mode());
+        assert_eq!(state.mode, PreviewChartMode::Histogram);
+        assert!(state.roi.is_none());
+    }
+
+    #[test]
+    fn preview_chart_histogram_mode_disables_zoom_and_roi_interactions() {
+        let (tx_resize_chartpreview, _) = channel();
+        let (tx_load_chartpreview, _) = channel();
+        let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Histogram,
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: Some(preview_key("mode").selection),
+            rendered_mode: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            rendered_size: None,
+            pending_key: None,
+            tx_resize_chartpreview,
+            tx_load_chartpreview,
+            cached_previews: Default::default(),
+            viewport: Some(bounds()),
+            data_bounds: Some(bounds()),
+            current_data: Some(data_preview()),
+            roi: None,
+            last_chart_area: Some(Rect::new(0, 0, 10, 10)),
+            last_plot_area: Some(Rect::new(0, 0, 10, 10)),
+            drag_state: None,
+        };
+
+        assert!(!state.zoom_with_anchor(10.0, 0.5, 0.5, true, PreviewChartZoomMode::Uniform));
+        assert!(!state.cycle_roi_at_position(1, 1));
+        assert!(!state.start_drag_at_position(1, 1));
     }
 
     #[test]

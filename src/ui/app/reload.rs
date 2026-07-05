@@ -194,6 +194,7 @@ fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
     state.chart_preview_state.clipboard_image = None;
     state.chart_preview_state.error = None;
     state.chart_preview_state.ds_selection = None;
+    state.chart_preview_state.rendered_mode = None;
     state.chart_preview_state.rendered_viewport = None;
     state.chart_preview_state.rendered_size = None;
     state.chart_preview_state.pending_key = None;
