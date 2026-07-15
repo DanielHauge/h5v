@@ -38,6 +38,14 @@ scoop bucket add h5v https://github.com/DanielHauge/h5v
 scoop install h5v/h5v
 ```
 
+### Debian package
+
+Download `h5v_<version>_amd64.deb` from [GitHub Releases](https://github.com/DanielHauge/h5v/releases), then install it on Debian-family amd64 systems:
+
+```bash
+sudo apt install ./h5v_<version>_amd64.deb
+```
+
 ### Prebuilt binaries with cargo-binstall
 
 ```bash

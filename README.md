@@ -4,59 +4,38 @@
 </p>
 </div>
 
+# h5v
+
 > **A terminal-first HDF5 explorer for charts, matrices, images, compound schemas, and scripted workflows.**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh | sh
 ```
 
-The shell installer works on Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin.
+The shell installer supports Linux, macOS, and POSIX-style Windows shells such as Git Bash, MSYS2, and Cygwin.
 
-`h5v` is a Rust TUI for inspecting HDF5 files in the terminal: browse the tree, switch between preview, matrix, and heatmap views, inspect image datasets inline, drill into compound fields, edit attributes in write mode, and script startup workflows. CSV, TSV, XLSX, and Parquet files can also be opened; `h5v` imports them into cached HDF5 snapshots on launch so they work with the same tree and chart flows.
+`h5v` is a Rust TUI for inspecting HDF5 files: browse the tree, preview charts, matrices, heatmaps, images, and compound schemas, edit attributes in write mode, and automate startup with scripts. CSV, TSV, XLSX, and Parquet files are imported into cached HDF5 snapshots so they use the same workflows.
 
 <div class="oranda-hide">
 
 ## What it looks like
 
-| Charts                                                                                                     | Heatmap                                                                                                              | Images                                                                                                              |
-| ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg)         | ![Heatmap view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/heatmap.png)                 | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg)                |
-| Multichart                                                                                                 | Commands                                                                                                             | Help                                                                                                                |
-| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg)                    | ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg)                  |
-
-## Highlights
-
-- Tree browsing for datasets, groups, links, and projected compound fields.
-- Preview, matrix, heatmap, image, and schema views from the same selection.
-- In-place edits when the file is opened with `-w`.
-- Startup automation with commands, scripts, and `press ...`.
-- Derived series and comparisons in multichart.
+| Charts                                                                                                     | Heatmap                                                                                             | Images                                                                                              |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| ![Chart preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/chart.jpg)         | ![Heatmap view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/heatmap.png) | ![Image preview](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/images.jpg) |
+| Multichart                                                                                                 | Commands                                                                                            | Help                                                                                                |
+| ![Multichart view](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/multi-chart.jpg) | ![Command mode](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/cmd.jpg)     | ![Help overlay](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/help.jpg)    |
 
 </div>
 
 ## Quick start
 
-If you do not have an h5 file, you can download an example:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/examples/h5v-example.h5 -o h5v-example.h5
-```
-
-Open a file in read-only mode:
-
-```bash
 h5v h5v-example.h5
 ```
 
-Read a file that may already be open in another process:
-
-```bash
-h5v --read-mode auto live-data.h5
-```
-
-`--read-mode auto` tries normal read-only first, then SWMR read-only, then a copied snapshot fallback.
-
-Open imported tabular files through the import pipeline:
+Open tabular data directly:
 
 ```bash
 h5v data.csv
@@ -64,137 +43,46 @@ h5v reference.h5 experiment.tsv
 h5v workbook.xlsx metrics.parquet
 ```
 
-If your terminal renders icons, line drawing, or graphics previews badly, start in compatibility mode:
+Open a file that may be in use elsewhere, or enable edits:
 
 ```bash
-h5v --compatibility h5v-example.h5
-```
-
-That switches the UI to simpler symbols and disables terminal graphics previews. To make it the default, set `H5V_COMPATIBILITY_MODE=true` in your shell rc file.
-
-Open the same file in write mode so edits are allowed:
-
-```bash
+h5v --read-mode auto live-data.h5
 h5v -w h5v-example.h5
 ```
 
-Themes, symbols, and heatmap defaults are configured in Lua. Inside `h5v`, run `:configure` to open `init.lua`, or `:configure reset` to regenerate the default scaffold.
+`--read-mode auto` tries standard read-only access, SWMR, then a copied snapshot. Use `--compatibility` when your terminal has problems with icons, line drawing, or graphics previews.
 
-Start with scripted commands:
-
-```bash
-h5v examples/h5v-example.h5 \
-  -c "goto /matrices/cube" \
-  -c "focus content" \
-  -c "mode matrix"
-```
-
-Validate a startup script without launching the UI:
-
-```bash
-h5v path/to/file.h5 --script-test --script setup.h5v
-```
-
-Try the bundled example file and walkthrough script from this repository:
+Run the bundled walkthrough:
 
 ```bash
 h5v examples/h5v-example.h5 --script examples/h5v-example.h5v
 ```
 
-Regenerate the example file after editing the generator:
-
-```bash
-python scripts/generate_example_h5.py
-```
-
 ## Installation
 
-| Method               | Command                                                                                   |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| Shell installer      | `curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh \| sh`      |
-| PowerShell installer | `irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 \| iex`           |
-| Homebrew             | `brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git && brew install h5v`     |
-| Scoop                | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v`        |
-| cargo-binstall       | `cargo binstall h5v`                                                                      |
-| Cargo source build   | `cargo install --locked h5v`                                                              |
+| Method | Command |
+| --- | --- |
+| Shell installer | `curl -fsSL https://raw.githubusercontent.com/DanielHauge/h5v/main/install.sh \| sh` |
+| PowerShell installer | `irm https://raw.githubusercontent.com/DanielHauge/h5v/main/install.ps1 \| iex` |
+| Homebrew | `brew tap DanielHauge/h5v https://github.com/DanielHauge/h5v.git && brew install h5v` |
+| Scoop | `scoop bucket add h5v https://github.com/DanielHauge/h5v && scoop install h5v/h5v` |
+| Debian package | Download `h5v_<version>_amd64.deb` from [Releases](https://github.com/DanielHauge/h5v/releases), then `sudo apt install ./h5v_<version>_amd64.deb` |
+| cargo-binstall | `cargo binstall h5v` |
+| Build from source | `cargo install --locked h5v` |
 
-On Windows, `install.ps1` installs into `%LOCALAPPDATA%\Programs\h5v\bin` and adds that directory to the user `PATH`.
-
-For `cargo install`, start with a current stable Rust toolchain from `rustup`. The packaged-source install path is validated in CI on Ubuntu 22.04.
-
-### Cargo source-build requirements
-
-Recommended install command:
-
-```bash
-cargo install --locked h5v
-```
-
-Validated Ubuntu 22.04 prerequisites:
+For a source build on Ubuntu 22.04:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+cargo install --locked h5v
 ```
 
-What those cover:
+Other Linux distributions need equivalent compiler, CMake, `pkg-config`, and fontconfig/freetype/expat development packages. See the [installation guide](https://danielhauge.github.io/h5v/book/installation.html) for platform details.
 
-- `build-essential`: C/C++ compiler toolchain used by native dependencies
-- `cmake`: required by vendored/native build steps
-- `pkg-config`: used to discover native libraries
-- `libfontconfig1-dev`, `libfreetype6-dev`, `libexpat1-dev`: headers needed by the font/graphics stack used during source builds
+## Configuration and documentation
 
-Other platforms:
+Run `:configure` inside h5v to open `init.lua`; `:configure reset` regenerates the default scaffold. Use `--config <PATH>` for another configuration file, and `--init-plugin <PATH>` to create a plugin scaffold.
 
-- Linux distributions other than Ubuntu need the equivalent compiler toolchain, CMake, `pkg-config`, and `fontconfig`/`freetype`/`expat` development headers.
-- macOS release builders install `cmake` and `pkg-config` before building. If a local `cargo install` fails on macOS, install those first with `brew install cmake pkg-config`.
-- On Windows, the supported path is the PowerShell installer or the published binaries. If you insist on `cargo install`, use the Rust MSVC toolchain and make sure the Visual Studio C++ build tools are already configured.
-
-If you just want a working binary and do not need a local source build, prefer the shell installer, PowerShell installer, or `cargo binstall`.
-
-## Configuration and plugins
-
-Configuration lives in `init.lua`.
-
-```text
-:configure
-:configure reset
-```
-
-- `:configure` opens the config file and reloads it on exit.
-- `:configure reset` writes a fresh scaffold.
-- `--config <PATH>` uses a different config file.
-- `--init-plugin <PATH>` creates a plugin scaffold. Rerun it to refresh `.luarc.json` and `.h5v-luals/h5v.lua` without overwriting `h5v-plugin.toml` or `lua/init.lua`.
-
-Plugins are loaded from `init.lua` with `h5v.plugins.use(...)` and can come from:
-
-- a local path
-- `owner/repo`
-- a git URL
-
-Use the in-app help as the source of truth for commands, keymaps, actions, health, and plugin status.
-
-![Light theme configuration example](https://raw.githubusercontent.com/DanielHauge/h5v/main/docs/src/assets/themes.png)
-
-## Documentation
-
-The manual is published at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/), and the source lives in [`docs/src`](https://github.com/DanielHauge/h5v/tree/main/docs/src).
-
-- Inside `h5v`, press `?` for keybindings, commands, multichart, heatmap, health, and customization help.
-- The in-app help is the primary reference for controls and command behavior.
-
-- [Overview](https://danielhauge.github.io/h5v/book/)
-- [Quick start](https://danielhauge.github.io/h5v/book/quick-start.html)
-- [Configuration](https://danielhauge.github.io/h5v/book/configuration.html)
-- [Plugins](https://danielhauge.github.io/h5v/book/plugins.html)
-- [Heatmap](https://danielhauge.github.io/h5v/book/heatmap.html)
-- [Multichart](https://danielhauge.github.io/h5v/book/multichart.html)
-
-## Core interaction model
-
-- `Shift` + arrow keys or `Ctrl+W` then `h/j/k/l` move focus between panes.
-- `Tab` cycles content modes when more than one is available.
-- `:` opens the command minibuffer, `.` repeats the last command, and `?` opens the in-app help overlay.
-- `m` adds the current previewable selection to multichart and `M` opens multichart mode.
-- `s` toggles the sidebar, `/` enters search, and `Ctrl+R` reloads the file from disk.
+Press `?` in h5v for the current commands, keybindings, health checks, and customization help. The full guide is at [danielhauge.github.io/h5v/book](https://danielhauge.github.io/h5v/book/).

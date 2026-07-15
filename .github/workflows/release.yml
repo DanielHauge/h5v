@@ -206,7 +206,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake build-essential pkg-config libfontconfig1-dev libfreetype6-dev libexpat1-dev
+            cmake build-essential pkg-config dpkg-dev libfontconfig1-dev libfreetype6-dev libexpat1-dev
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
@@ -306,6 +306,68 @@ jobs:
           )
           PY
 
+      - name: Build Debian package
+        if: matrix.build.TARGET == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.build.TARGET }}
+        run: |
+          package_version="${RELEASE_VERSION#v}"
+          package_root="debian-package"
+          package_file="h5v_${package_version}_amd64.deb"
+          dependency_root="$(mktemp -d)"
+          trap 'rm -rf "$dependency_root"' EXIT
+
+          install -d \
+            "$package_root/DEBIAN" \
+            "$package_root/usr/bin" \
+            "$package_root/usr/share/doc/h5v"
+          install -m 755 "target/$TARGET/release/h5v" "$package_root/usr/bin/h5v"
+          install -m 644 LICENSE "$package_root/usr/share/doc/h5v/copyright"
+
+          install -d "$dependency_root/debian"
+          cat >"$dependency_root/debian/control" <<'EOF'
+          Source: h5v
+          Section: utils
+          Priority: optional
+          Maintainer: Daniel Hauge <animcuil@gmail.com>
+          Standards-Version: 4.7.0
+
+          Package: h5v
+          Architecture: amd64
+          Description: Terminal HDF5 viewer with matrix/chart/image previews
+          EOF
+
+          depends="$(
+            cd "$dependency_root"
+            dpkg-shlibdeps -O -e "$GITHUB_WORKSPACE/$package_root/usr/bin/h5v" |
+              sed -n 's/^shlibs:Depends=//p'
+          )"
+          if [ -z "$depends" ]; then
+            echo "Could not determine Debian runtime dependencies" >&2
+            exit 1
+          fi
+
+          cat >"$package_root/DEBIAN/control" <<EOF
+          Package: h5v
+          Version: $package_version
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Depends: $depends
+          Maintainer: Daniel Hauge <animcuil@gmail.com>
+          Homepage: https://github.com/${{ github.repository }}
+          Description: Terminal HDF5 viewer with matrix/chart/image previews
+          EOF
+
+          dpkg-deb --root-owner-group --build "$package_root" "$package_file"
+          sha256sum "$package_file" >"$package_file.sha256"
+          dpkg-deb --info "$package_file"
+          test "$(dpkg-deb --field "$package_file" Package)" = "h5v"
+          test "$(dpkg-deb --field "$package_file" Architecture)" = "amd64"
+          dpkg-deb --contents "$package_file"
+          dpkg-deb --contents "$package_file" | grep -F " ./usr/bin/h5v"
+
       - name: Prepare release assets
         shell: bash
         env:
@@ -357,7 +419,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.build.TARGET }}
-          path: h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
+          path: |
+            h5v-${{ matrix.build.TARGET }}-v${{ env.RELEASE_VERSION }}*
+            h5v_*_amd64.deb*
           if-no-files-found: error
 
   publish-release-assets:
