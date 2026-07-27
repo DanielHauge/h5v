@@ -15,6 +15,23 @@ Multichart expressions can refer to existing chart items, datasets, and attribut
 | `load(/group/scalar)` | Scalar dataset value |
 | `load(/group/ds:BIAS)` | Scalar attribute on a group or dataset |
 | `#$1:SCALE` | Scalar attribute on the dataset backing chart item `$1` |
+| `load("/Run (1)/x")` | Quoted path, for names containing `(`, `)`, `[` or `:` |
+
+## Paths with unusual characters
+
+Paths and attribute names may contain spaces, hyphens, dots, plus signs, commas
+and non-ASCII characters without quoting:
+
+```text
+load(/Run 1/temp-sensor) + load(/2024-01-05/pressure)
+```
+
+Quote the name when it contains a character the parser uses as a delimiter —
+`(`, `)`, `[`, `:` — or leading/trailing whitespace:
+
+```text
+load("/Run (1)/x") + load(/ds:"Wavelength (nm)")
+```
 
 ## Y-series and x/y-series
 
