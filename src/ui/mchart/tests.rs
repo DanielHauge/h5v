@@ -941,3 +941,136 @@ fn click_view_mode_hitbox_switches_modes() {
     assert!(state.click_view_mode_hitbox(11, 0));
     assert_eq!(state.view_mode(), MultiChartViewMode::Histogram);
 }
+
+fn load_ref_path(expression: &str) -> Result<String, String> {
+    let tokens = tokenize_expression(expression)?;
+    match tokens.first() {
+        Some(ExpressionToken::LoadRef(load_ref)) => {
+            let ExpressionObjectTarget::AbsolutePath(path) = &load_ref.target;
+            Ok(path.clone())
+        }
+        _ => Err(format!("expected a load ref, got {tokens:?}")),
+    }
+}
+
+#[test]
+fn load_paths_accept_real_world_name_characters() {
+    // Regression: spaces and hyphens used to terminate the path scan, so any
+    // real-world HDF5 path failed to parse with "missing a closing ')'".
+    for path in [
+        "/Run 1/temp-sensor",
+        "/2024-01-05/data",
+        "/a.b/c-d",
+        "/group/temp+offset",
+        "/measurements/x,y",
+        "/温度/センサー",
+    ] {
+        assert_eq!(load_ref_path(&format!("load({path})")).as_deref(), Ok(path));
+    }
+}
+
+#[test]
+fn load_paths_accept_quoted_form_for_reserved_characters() {
+    for path in ["/Run (1)/x", "/group/a[raw]", "/group/a:b"] {
+        assert_eq!(
+            load_ref_path(&format!("load(\"{path}\")")).as_deref(),
+            Ok(path)
+        );
+    }
+    assert!(load_ref_path("load(\"/unterminated)").is_err());
+    assert!(load_ref_path("load(\"relative/path\")").is_err());
+}
+
+#[test]
+fn load_paths_ignore_surrounding_whitespace_but_keep_interior() {
+    assert_eq!(load_ref_path("load( /Run 1/x )").as_deref(), Ok("/Run 1/x"));
+}
+
+#[test]
+fn load_ref_render_round_trips_through_the_tokenizer() {
+    // The capture -> edit path re-parses render() output; it must survive.
+    for expression in [
+        "load(/Run 1/temp-sensor)",
+        "load(\"/Run (1)/x\")",
+        "load(/Run 1/x)[..,0]",
+        "load(/ds:date/time)",
+        "load(/ds:\"Wavelength (nm)\")",
+    ] {
+        let path = load_ref_path(expression).expect(expression);
+        let tokens = tokenize_expression(expression).expect(expression);
+        let ExpressionToken::LoadRef(load_ref) = &tokens[0] else {
+            panic!("expected load ref for {expression}");
+        };
+        let rendered = load_ref.render();
+        assert_eq!(
+            load_ref_path(&rendered).as_deref(),
+            Ok(path.as_str()),
+            "round trip failed for {expression} -> {rendered}"
+        );
+    }
+}
+
+#[test]
+fn arithmetic_between_load_refs_with_awkward_paths_still_parses() {
+    let tokens = tokenize_expression("load(/Run 1/a) + load(/Run 1/b)").expect("tokenize");
+    assert_eq!(tokens.len(), 3);
+    assert!(matches!(tokens[1], ExpressionToken::Plus));
+}
+
+#[test]
+fn parser_errors_do_not_leak_debug_formatting() {
+    let err = tokenize_expression("+ ,")
+        .and_then(|tokens| parse_derived_expression(&tokens).map(|_| ()))
+        .expect_err("should fail");
+    assert!(!err.contains("ExpressionToken"), "leaked Debug repr: {err}");
+}
+
+#[test]
+fn awkward_hdf5_paths_load_and_evaluate_end_to_end() {
+    let temp = tempfile::Builder::new()
+        .suffix(".h5")
+        .tempfile()
+        .expect("temp file");
+    let file = hdf5_metno::File::create(temp.path()).expect("create hdf5");
+    let group = file.create_group("Run 1").expect("group");
+    for (name, scale) in [("temp-sensor", 1.0f32), ("pressure sensor", 2.0f32)] {
+        let values = (0..16).map(|i| i as f32 * scale).collect::<Vec<_>>();
+        group
+            .new_dataset::<f32>()
+            .shape([16])
+            .create(name)
+            .expect("dataset")
+            .write(&values)
+            .expect("write");
+    }
+    let mut state = make_state();
+
+    // Capturing by path used to fail at the re-parse inside dataset_reference_item.
+    let captured = state
+        .dataset_reference_item("/Run 1/temp-sensor", Some(&file))
+        .expect("dataset reference with a space and a hyphen must parse");
+    let ChartSource::DatasetSelection(source) = &captured.source else {
+        panic!("expected a dataset selection");
+    };
+    assert_eq!(source.dataset_path, "/Run 1/temp-sensor");
+
+    // And the rendered form must be re-editable (capture -> edit round trip).
+    let editable = captured
+        .source
+        .editable_expression()
+        .expect("editable expression");
+    assert!(
+        tokenize_expression(&editable).is_ok(),
+        "prefilled edit buffer does not parse: {editable}"
+    );
+
+    // Arithmetic across two awkward paths.
+    let evaluated = state
+        .evaluate_expression_with_file(
+            "load(/Run 1/temp-sensor) + load(/Run 1/pressure sensor)",
+            Some(&file),
+        )
+        .expect("expression over awkward paths");
+    assert_eq!(evaluated.points.len(), 16);
+    assert_eq!(evaluated.points[3].1, 3.0 + 6.0);
+}

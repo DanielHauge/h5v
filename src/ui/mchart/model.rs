@@ -1,3 +1,4 @@
+use super::expression::render_expression_name;
 use crate::data::{PreviewSelection, SliceSelection};
 
 pub type Point = (f64, f64);
@@ -173,8 +174,9 @@ impl DatasetChartSource {
     }
 
     pub fn expression_reference(&self) -> String {
+        let path = render_expression_name(&self.display_path);
         if self.shape.is_empty() {
-            return format!("load({})", self.display_path);
+            return format!("load({path})");
         }
         let selectors = (0..self.shape.len())
             .map(|dim| {
@@ -188,7 +190,7 @@ impl DatasetChartSource {
                 }
             })
             .collect::<Vec<_>>();
-        format!("load({})[{}]", self.display_path, selectors.join(","))
+        format!("load({path})[{}]", selectors.join(","))
     }
 
     pub fn slice_summary(&self) -> String {

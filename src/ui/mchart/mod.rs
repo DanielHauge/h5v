@@ -35,8 +35,9 @@ use eval::{
     ValidatedExpressionLoad,
 };
 use expression::{
-    collect_parsed_expression_refs, parse_derived_expression, tokenize_expression, ExpressionAst,
-    ExpressionObjectTarget, ExpressionRefs, ExpressionToken, ParsedExpression,
+    collect_parsed_expression_refs, parse_derived_expression, render_expression_name,
+    tokenize_expression, ExpressionAst, ExpressionObjectTarget, ExpressionRefs, ExpressionToken,
+    ParsedExpression,
 };
 pub use load::{handle_mchart_load, handle_mchart_render};
 use model::sanitize_chart_points;
@@ -726,10 +727,13 @@ impl MultiChartState {
         }
         let prefixed = if normalized.starts_with("load(") {
             normalized.to_string()
-        } else if let Some((path, selectors)) = normalized.split_once('[') {
-            format!("load({path})[{selectors}")
+        } else if let Some((path, selectors)) = normalized
+            .strip_suffix(']')
+            .and_then(|body| body.rsplit_once('['))
+        {
+            format!("load({})[{selectors}]", render_expression_name(path))
         } else {
-            format!("load({normalized})")
+            format!("load({})", render_expression_name(normalized))
         };
         let Some(series_ref) = Self::raw_dataset_reference(&prefixed)? else {
             return Err(format!(

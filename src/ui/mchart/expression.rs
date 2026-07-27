@@ -92,10 +92,28 @@ pub(super) type ExpressionSeriesRef = ExpressionLoadRef;
 #[cfg(test)]
 pub(super) type ExpressionScalarRef = ExpressionLoadRef;
 
+impl ExpressionToken {
+    pub(super) fn render(&self) -> String {
+        match self {
+            ExpressionToken::ItemRef(item_ref) => item_ref.render(),
+            ExpressionToken::LoadRef(load_ref) => load_ref.render(),
+            ExpressionToken::Identifier(name) => name.clone(),
+            ExpressionToken::Number(value) => value.to_string(),
+            ExpressionToken::Plus => "+".to_string(),
+            ExpressionToken::Minus => "-".to_string(),
+            ExpressionToken::Star => "*".to_string(),
+            ExpressionToken::Slash => "/".to_string(),
+            ExpressionToken::Comma => ",".to_string(),
+            ExpressionToken::LParen => "(".to_string(),
+            ExpressionToken::RParen => ")".to_string(),
+        }
+    }
+}
+
 impl ExpressionObjectTarget {
     pub(super) fn render(&self) -> String {
         match self {
-            ExpressionObjectTarget::AbsolutePath(path) => path.clone(),
+            ExpressionObjectTarget::AbsolutePath(path) => render_expression_name(path),
         }
     }
 }
@@ -121,7 +139,11 @@ impl ExpressionItemTarget {
 impl ExpressionLoadRef {
     pub(super) fn render(&self) -> String {
         let base = match &self.attr_name {
-            Some(attr_name) => format!("load({}:{attr_name})", self.target.render()),
+            Some(attr_name) => format!(
+                "load({}:{})",
+                self.target.render(),
+                render_expression_name(attr_name)
+            ),
             None => format!("load({})", self.target.render()),
         };
         match &self.selectors {
@@ -427,21 +449,64 @@ fn parse_expression_item_slice(
     Ok(ExpressionItemSlice { start, end })
 }
 
+/// Characters that cannot appear in a bare (unquoted) path or attribute name,
+/// because they terminate the scan. Anything else -- spaces, `-`, `+`, `.`,
+/// commas, unicode -- is a legitimate HDF5 name character and must be accepted.
+const EXPRESSION_BARE_NAME_BREAKS: [char; 3] = ['[', ':', ')'];
+
+pub(super) fn expression_name_needs_quotes(text: &str) -> bool {
+    text.is_empty()
+        || text.trim() != text
+        || text
+            .chars()
+            .any(|ch| EXPRESSION_BARE_NAME_BREAKS.contains(&ch) || ch == '"')
+}
+
+/// Render an HDF5 path or attribute name so that it tokenizes back to itself.
+pub(super) fn render_expression_name(text: &str) -> String {
+    if expression_name_needs_quotes(text) {
+        // ponytail: no escape syntax; a literal '"' in an HDF5 name is
+        // unrepresentable. Add backslash escapes if that ever shows up.
+        format!("\"{text}\"")
+    } else {
+        text.to_string()
+    }
+}
+
+fn parse_expression_bare_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut name = String::new();
+    while let Some(&next) = chars.peek() {
+        if EXPRESSION_BARE_NAME_BREAKS.contains(&next) {
+            break;
+        }
+        name.push(next);
+        chars.next();
+    }
+    // Trailing whitespace belongs to `load( /a/b )`, not to the name.
+    name.truncate(name.trim_end().len());
+    name
+}
+
+fn parse_expression_quoted_name(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<String, String> {
+    chars.next();
+    let mut name = String::new();
+    for next in chars.by_ref() {
+        if next == '"' {
+            return Ok(name);
+        }
+        name.push(next);
+    }
+    Err(format!(
+        "Quoted name \"{name} is missing a closing '\"' in load reference"
+    ))
+}
+
 fn parse_expression_absolute_path(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
 ) -> Result<String, String> {
-    let mut path = String::new();
-    while let Some(&next) = chars.peek() {
-        if next == '['
-            || next == ':'
-            || next.is_whitespace()
-            || matches!(next, '+' | '-' | '*' | ',' | '(' | ')')
-        {
-            break;
-        }
-        path.push(next);
-        chars.next();
-    }
+    let path = parse_expression_bare_name(chars);
     if path.is_empty() {
         return Err("Expected an absolute HDF5 path beginning with '/'".to_string());
     }
@@ -459,12 +524,23 @@ fn parse_expression_object_target(
     function_name: &str,
 ) -> Result<ExpressionObjectTarget, String> {
     match chars.peek().copied() {
+        Some('"') => {
+            let path = parse_expression_quoted_name(chars)?;
+            if !path.starts_with('/') {
+                return Err(format!(
+                    "Quoted path \"{path}\" must be an absolute HDF5 path beginning with '/'"
+                ));
+            }
+            Ok(ExpressionObjectTarget::AbsolutePath(path))
+        }
         Some('/') => Ok(ExpressionObjectTarget::AbsolutePath(
             parse_expression_absolute_path(chars)?,
         )),
         _ => Err(match function_name {
-            "load" => "Data references must use load(/group/dataset) or load(/group/dataset:ATTR)"
-                .to_string(),
+            "load" => {
+                "Data references must use load(/group/dataset), load(/group/dataset:ATTR), or load(\"/quoted path\")"
+                    .to_string()
+            }
             _ => "Invalid expression reference".to_string(),
         }),
     }
@@ -481,7 +557,7 @@ pub(super) fn parse_expression_load_ref(
     let target = parse_expression_object_target(chars, "load")?;
     let attr_name = if chars.peek() == Some(&':') {
         chars.next();
-        let attr_name = parse_expression_attribute_name(chars);
+        let attr_name = parse_expression_attribute_name(chars)?;
         if attr_name.is_empty() {
             return Err(format!(
                 "Expected an attribute name after '{}:' in load reference",
@@ -587,17 +663,13 @@ fn parse_expression_dataset_selectors(
         .collect()
 }
 
-fn parse_expression_attribute_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
-    let mut attr_name = String::new();
-    while let Some(&next) = chars.peek() {
-        if next == '[' || next.is_whitespace() || matches!(next, '+' | '-' | '*' | '/' | '(' | ')')
-        {
-            break;
-        }
-        attr_name.push(next);
-        chars.next();
+fn parse_expression_attribute_name(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<String, String> {
+    if chars.peek() == Some(&'"') {
+        return parse_expression_quoted_name(chars);
     }
-    attr_name
+    Ok(parse_expression_bare_name(chars))
 }
 
 fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String> {
@@ -711,7 +783,10 @@ fn parse_expression(tokens: &[ExpressionToken]) -> Result<ExpressionAst, String>
                 *pos += 1;
                 Ok(expr)
             }
-            other => Err(format!("Unexpected token '{other:?}' in expression")),
+            other => Err(format!(
+                "Unexpected token '{}' in expression",
+                other.render()
+            )),
         }
     }
 

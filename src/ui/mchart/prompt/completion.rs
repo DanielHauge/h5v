@@ -9,7 +9,9 @@ use crate::{
 };
 
 use super::eval::normalize_absolute_object_path;
-use super::expression::{parse_expression_item_ref, parse_expression_load_ref};
+use super::expression::{
+    parse_expression_item_ref, parse_expression_load_ref, render_expression_name,
+};
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -826,6 +828,7 @@ fn expression_path_suggestions(
     let mut suggestions = expression_absolute_path_entries(file, cache)
         .into_iter()
         .filter_map(|entry| {
+            let rendered_path = render_expression_name(&entry.path);
             let label = match (function, entry.kind, entry.shape.as_ref()) {
                 (
                     ExpressionReferenceFunction::Load,
@@ -833,12 +836,11 @@ fn expression_path_suggestions(
                     Some(shape),
                 ) if !shape.is_empty() => {
                     format!(
-                        "{function_name}({})[{}]",
-                        entry.path,
+                        "{function_name}({rendered_path})[{}]",
                         vec![".."; shape.len()].join(",")
                     )
                 }
-                _ => format!("{function_name}({})", entry.path),
+                _ => format!("{function_name}({rendered_path})"),
             };
             let basename = entry.path.rsplit('/').next();
             let score = expression_suggestion_score(&entry.path, target_prefix, basename)?;

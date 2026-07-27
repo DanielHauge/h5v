@@ -403,7 +403,7 @@ fn collect_expression_input_ids_includes_item_refs() {
 #[test]
 fn rejects_item_refs_inside_load_calls() {
     let err = tokenize_expression("load($1:TRACE)").unwrap_err();
-    assert!(err.contains("load(/group/dataset) or load(/group/dataset:ATTR)"));
+    assert!(err.contains("Data references must use load("));
 }
 
 #[test]
@@ -639,6 +639,6 @@ fn expression_derived_rejects_item_refs_inside_load_calls() {
     assert!(matches!(
         item.load_state,
         MultiChartLoadState::Error(ref message)
-            if message.contains("load(/group/dataset) or load(/group/dataset:ATTR)")
+            if message.contains("Data references must use load(")
     ));
 }
