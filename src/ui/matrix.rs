@@ -453,11 +453,14 @@ pub fn render_compound_root_matrix(
     let col_start = compound_root_field_window(state, field_count, max_cols).start;
     let selection = compound_root_matrix_selection(node, attr, row_dim, row_start, max_rows);
     let (bytes, _) = read_selected_values_bytes(ds, selection)?;
-    let record_size = compound.size;
-    if bytes.len() != max_rows * record_size {
+    let record_size = ds.dtype()?.size();
+    let expected_bytes = max_rows.checked_mul(record_size).ok_or_else(|| {
+        AppError::DrawingError("Compound root matrix byte size overflowed usize".to_string())
+    })?;
+    if bytes.len() != expected_bytes {
         return Err(AppError::DrawingError(format!(
             "Compound root matrix byte size mismatch: expected {} bytes, got {}",
-            max_rows * record_size,
+            expected_bytes,
             bytes.len()
         )));
     }
@@ -581,11 +584,12 @@ pub(crate) fn compound_root_matrix_cell_text(
     }
     let (bytes, _) =
         read_selected_values_bytes(dataset, Selection::Hyperslab(Hyperslab::from(slice)))?;
-    if bytes.len() != compound.size {
+    let record_size = dataset.dtype()?.size();
+    if bytes.len() != record_size {
         return Err(AppError::DrawingError(format!(
             "Compound root cell read returned {} bytes, expected {}",
             bytes.len(),
-            compound.size
+            record_size
         )));
     }
     compound_root_matrix_field_text_from_record(&bytes, field)
