@@ -54,7 +54,6 @@ hdf5-metno = { version = "0.13", features = [
 ] }
 hdf5-metno-sys = { version = "0.12", features = [
     "static",
-    "threadsafe",
     "zlib",
 ] }
 zstd-sys = { version = "2.0.16", default-features = false }

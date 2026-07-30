@@ -220,7 +220,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-targets: ${{ runner.os != 'Windows' }}
 
       - name: Install cargo-wix
         if: runner.os == 'Windows'
