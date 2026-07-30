@@ -242,12 +242,14 @@ pub(super) fn apply_lua_config_with_snapshot(
 }
 
 pub(super) fn apply_non_registry_lua_config(h5v: &Table) -> Result<(), ConfigureErrors> {
+    let chart_config = super::chart::parse_chart_config(h5v)?;
     let heatmap_config = parse_heatmap_config(h5v)?;
     let layout_config = parse_layout_config(h5v)?;
     let keymap_config = parse_keymaps_config(h5v)?;
     if let Some(layout_settings) = layout_config {
         configure::set_auto_layout_settings(&layout_settings);
     }
+    configure::set_chart_settings(&chart_config.unwrap_or_default());
     if let Some((range_modes, default_settings)) = heatmap_config {
         configure::set_heatmap_ranges(&range_modes, &default_settings.range);
     }

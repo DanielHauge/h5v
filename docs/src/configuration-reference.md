@@ -10,6 +10,7 @@ Use [Configuration](./configuration.md) for the normal setup flow. Use this page
 | `h5v.symbol_theme` | string |
 | `h5v.compatibility` | boolean |
 | `h5v.content_mode_order` | string[] |
+| `h5v.chart.*` | table |
 | `h5v.layout.*` | integer, `"NN%"`, or `"*"` |
 | `h5v.heatmap.*` | table |
 | `h5v.multichart.*` | table |
@@ -175,6 +176,19 @@ end)
 
 - `default_colormap`: `turbo`, `grayscale`, `inferno`
 - `default_normalization`: `linear`, `log`, `sqrt`
+
+## Chart axis numbers
+
+Preview and multichart share `h5v.chart`. `axis_numbers` is `auto` (default), `exact`, or `scientific`.
+In `auto`, nonzero finite values use scientific notation when their base-10 exponent is at or below `scientific_lower_exponent` (default `-3`) or at or above `scientific_upper_exponent` (default `5`). Lower must not exceed upper.
+
+```lua
+h5v.chart = {
+  axis_numbers = "auto",
+  scientific_lower_exponent = -3,
+  scientific_upper_exponent = 5,
+}
+```
 
 ## Accepted color values
 

@@ -22,6 +22,7 @@ use crate::{
         plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
     },
     ui::{
+        chart_math::format_axis_number,
         chart_stats::{box_plot_summary, histogram_summary},
         matrix::{EnumRenderer, RenderIntercept},
         page_scroll::PageDisplayInfo,
@@ -821,7 +822,7 @@ fn render_chart_widget(
             let x = viewport.x_min
                 + (viewport.x_max - viewport.x_min) * (i as f64) / (x_label_count as f64);
             Span::styled(
-                format!("{:.1}", x),
+                format_axis_number(x),
                 configure::themed_color(|colors| colors.chart.label),
             )
         })
@@ -837,7 +838,7 @@ fn render_chart_widget(
             let y = viewport.y_min
                 + (viewport.y_max - viewport.y_min) * (i as f64) / (y_label_count as f64);
             Span::styled(
-                format!("{:.1}", y),
+                format_axis_number(y),
                 configure::themed_color(|colors| colors.chart.label),
             )
         })
@@ -1021,6 +1022,8 @@ pub fn render_image_chart(
             .configure_mesh()
             .x_desc("value")
             .y_desc("count")
+            .x_label_formatter(&|value| format_axis_number(*value))
+            .y_label_formatter(&|value| format_axis_number(*value))
             .x_label_style(
                 ("sans-serif", layout.x_label_font_size)
                     .into_font()
@@ -1071,6 +1074,7 @@ pub fn render_image_chart(
             .y_desc("value")
             .x_labels(1)
             .x_label_formatter(&|_| "series".to_string())
+            .y_label_formatter(&|value| format_axis_number(*value))
             .x_label_style(
                 ("sans-serif", layout.x_label_font_size)
                     .into_font()
@@ -1134,8 +1138,7 @@ pub fn render_image_chart(
     root.margin(10, 10, 10, 10);
     root.fill(&plot_bg)
         .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
-    let max = data_preview.max;
-    let layout = preview_chart_layout(width, height, max);
+    let layout = preview_chart_layout(width, height, data_preview.max);
 
     let mut chart = ChartBuilder::on(&root)
         .margin(layout.margin)
@@ -1150,6 +1153,8 @@ pub fn render_image_chart(
     // Draw the mesh (grid lines)
     chart
         .configure_mesh()
+        .x_label_formatter(&|value| format_axis_number(*value))
+        .y_label_formatter(&|value| format_axis_number(*value))
         .x_label_style(
             ("sans-serif", layout.x_label_font_size)
                 .into_font()

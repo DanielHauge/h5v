@@ -6,7 +6,10 @@ use plotters::{
 use crate::{
     configure,
     error::log_error,
-    ui::chart_math::{raster_chart_layout, RasterChartLayout, RasterChartLayoutHints},
+    ui::chart_math::{
+        axis_label_area_size, format_axis_number, raster_chart_layout, RasterChartLayout,
+        RasterChartLayoutHints,
+    },
 };
 
 use super::super::{
@@ -57,7 +60,7 @@ fn render_line_chart_request(
         let layout = line_chart_layout(
             request.width,
             request.height,
-            format!("{:.4}", prepared.y_max).len() as u32 * 3 + 30,
+            axis_label_area_size(&[prepared.y_min, prepared.y_max], 30),
         );
         let chart = plotters::prelude::ChartBuilder::on(&root)
             .margin(layout.margin)
@@ -85,6 +88,8 @@ fn render_line_chart_request(
             .configure_mesh()
             .x_desc("x values")
             .y_desc("value")
+            .x_label_formatter(&|value| format_axis_number(*value))
+            .y_label_formatter(&|value| format_axis_number(*value))
             .y_label_style(
                 ("sans-serif", layout.y_label_font_size)
                     .into_font()
@@ -183,7 +188,7 @@ fn render_histogram_request(
         let layout = line_chart_layout(
             request.width,
             request.height,
-            format!("{:.0}", prepared.count_max).len() as u32 * 3 + 30,
+            axis_label_area_size(&[0.0, prepared.count_max], 30),
         );
         let chart = plotters::prelude::ChartBuilder::on(&root)
             .margin(layout.margin)
@@ -208,6 +213,8 @@ fn render_histogram_request(
             .configure_mesh()
             .x_desc(format!("value ({} bins)", prepared.bin_count))
             .y_desc("count")
+            .x_label_formatter(&|value| format_axis_number(*value))
+            .y_label_formatter(&|value| format_axis_number(*value))
             .y_label_style(
                 ("sans-serif", layout.y_label_font_size)
                     .into_font()
@@ -311,7 +318,10 @@ fn render_box_plot_request(
             RasterChartLayoutHints {
                 preferred_margin: 12,
                 preferred_x_label_area_size: 60,
-                preferred_y_label_area_size: 45,
+                preferred_y_label_area_size: axis_label_area_size(
+                    &[prepared.value_min, prepared.value_max],
+                    30,
+                ),
                 preferred_x_label_font_size: 16,
                 preferred_y_label_font_size: 18,
                 min_plot_width: 48,
@@ -353,6 +363,7 @@ fn render_box_plot_request(
                     labels[index as usize].clone()
                 }
             })
+            .y_label_formatter(&|value| format_axis_number(*value))
             .y_label_style(
                 ("sans-serif", layout.y_label_font_size)
                     .into_font()
@@ -513,7 +524,10 @@ fn render_comparison_scatter_request(
             RasterChartLayoutHints {
                 preferred_margin: 10,
                 preferred_x_label_area_size: 30,
-                preferred_y_label_area_size: 45,
+                preferred_y_label_area_size: axis_label_area_size(
+                    &[prepared.y_min, prepared.y_max],
+                    30,
+                ),
                 preferred_x_label_font_size: 18,
                 preferred_y_label_font_size: 18,
                 min_plot_width: 48,
@@ -543,6 +557,8 @@ fn render_comparison_scatter_request(
             .configure_mesh()
             .x_desc(prepared.x_label.clone())
             .y_desc(prepared.y_label.clone())
+            .x_label_formatter(&|value| format_axis_number(*value))
+            .y_label_formatter(&|value| format_axis_number(*value))
             .y_label_style(
                 ("sans-serif", layout.y_label_font_size)
                     .into_font()

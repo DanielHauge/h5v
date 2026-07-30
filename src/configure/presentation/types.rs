@@ -164,6 +164,31 @@ pub struct MultiChartSettings {
     pub derived_detail_enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AxisNumberFormat {
+    Exact,
+    #[default]
+    Auto,
+    Scientific,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChartSettings {
+    pub axis_numbers: AxisNumberFormat,
+    pub scientific_lower_exponent: i32,
+    pub scientific_upper_exponent: i32,
+}
+
+impl Default for ChartSettings {
+    fn default() -> Self {
+        Self {
+            axis_numbers: AxisNumberFormat::Auto,
+            scientific_lower_exponent: -3,
+            scientific_upper_exponent: 5,
+        }
+    }
+}
+
 impl Default for MultiChartSettings {
     fn default() -> Self {
         Self {
@@ -287,6 +312,7 @@ pub struct ConfigSnapshot {
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
     pub(crate) multichart_settings: MultiChartSettings,
+    pub(crate) chart_settings: ChartSettings,
     pub(crate) keymap_config: KeymapConfig,
     pub(crate) keymaps: EffectiveKeymaps,
 }
@@ -304,6 +330,7 @@ pub(crate) struct ConfigState {
     pub(crate) heatmap_range_modes: Vec<HeatmapRangeMode>,
     pub(crate) heatmap_default_settings: HeatmapSettings,
     pub(crate) multichart_settings: MultiChartSettings,
+    pub(crate) chart_settings: ChartSettings,
     pub(crate) keymap_config: KeymapConfig,
     pub(crate) keymaps: EffectiveKeymaps,
 }

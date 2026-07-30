@@ -16,7 +16,7 @@ use super::catalog::available_color_names;
 use super::{
     palette::{SymbolThemeName, ThemeName},
     parsing::parse_color,
-    types::{ConfigSnapshot, ConfigState, ThemeColors, UiSymbols},
+    types::{ChartSettings, ConfigSnapshot, ConfigState, ThemeColors, UiSymbols},
 };
 
 const THEME_SETTING: &str = "builtin.setting.theme";
@@ -68,6 +68,7 @@ static CONFIG_STATE: LazyLock<RwLock<ConfigState>> = LazyLock::new(|| {
         heatmap_range_modes: Vec::new(),
         heatmap_default_settings: HeatmapSettings::default(),
         multichart_settings: super::types::MultiChartSettings::default(),
+        chart_settings: ChartSettings::default(),
         keymap_config: KeymapConfig::default(),
         keymaps: EffectiveKeymaps::default(),
     })
@@ -87,6 +88,7 @@ pub fn reset_config(theme: ThemeName) {
         state.heatmap_range_modes = Vec::new();
         state.heatmap_default_settings = HeatmapSettings::default();
         state.multichart_settings = super::types::MultiChartSettings::default();
+        state.chart_settings = ChartSettings::default();
         state.keymap_config = KeymapConfig::default();
         state.keymaps = EffectiveKeymaps::default();
     });
@@ -104,6 +106,7 @@ pub fn snapshot_config() -> ConfigSnapshot {
         heatmap_range_modes: state.heatmap_range_modes.clone(),
         heatmap_default_settings: state.heatmap_default_settings.clone(),
         multichart_settings: state.multichart_settings.clone(),
+        chart_settings: state.chart_settings.clone(),
         keymap_config: state.keymap_config.clone(),
         keymaps: state.keymaps.clone(),
     })
@@ -122,6 +125,7 @@ pub fn restore_config(snapshot: ConfigSnapshot) {
         state.heatmap_range_modes = snapshot.heatmap_range_modes;
         state.heatmap_default_settings = snapshot.heatmap_default_settings;
         state.multichart_settings = snapshot.multichart_settings;
+        state.chart_settings = snapshot.chart_settings;
         state.keymap_config = snapshot.keymap_config;
         state.keymaps = snapshot.keymaps;
     });
@@ -184,6 +188,7 @@ pub fn apply_registry_snapshot(snapshot: &RegistrySnapshot) -> Result<(), String
         state.heatmap_range_modes = Vec::new();
         state.heatmap_default_settings = heatmap_default_settings;
         state.multichart_settings = multichart_settings;
+        state.chart_settings = ChartSettings::default();
         state.keymap_config = KeymapConfig::default();
         state.keymaps = EffectiveKeymaps::default();
     });
@@ -207,6 +212,16 @@ pub fn set_color_override(name: &str, color: Color) -> Result<(), String> {
 
 pub fn current_theme_name() -> ThemeName {
     with_config_read(|state| state.active_theme_variant)
+}
+
+pub fn current_chart_settings() -> ChartSettings {
+    with_config_read(|state| state.chart_settings.clone())
+}
+
+pub fn set_chart_settings(settings: &ChartSettings) {
+    with_config_write(|state| {
+        state.chart_settings = settings.clone();
+    });
 }
 
 pub fn current_theme_handle() -> String {

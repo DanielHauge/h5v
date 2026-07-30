@@ -16,6 +16,7 @@ use crate::{
 };
 
 use super::{
+    chart::build_chart_table,
     commands::build_commands_table,
     events::build_events_table,
     heatmap::build_heatmap_table,
@@ -51,6 +52,7 @@ pub(super) fn build_h5v_table(
     default_compatibility: bool,
 ) -> Result<Table, ConfigureErrors> {
     let h5v = lua.create_table()?;
+    h5v.set("chart", build_chart_table(lua)?)?;
     let modes = build_mode_constants_table(lua)?;
     let actions = build_action_constants_table(lua)?;
     let keymaps = build_keymaps_table(lua)?;

@@ -1,5 +1,60 @@
 use ratatui::layout::Rect;
 
+use crate::configure::{self, AxisNumberFormat};
+
+pub(crate) fn format_axis_number(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-∞"
+        } else {
+            "∞"
+        }
+        .to_string();
+    }
+    let value = if value == 0.0 { 0.0 } else { value };
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let settings = configure::current_chart_settings();
+    let scientific = match settings.axis_numbers {
+        AxisNumberFormat::Exact => false,
+        AxisNumberFormat::Scientific => true,
+        AxisNumberFormat::Auto => {
+            let exponent = value.abs().log10().floor() as i32;
+            value != 0.0
+                && (exponent <= settings.scientific_lower_exponent
+                    || exponent >= settings.scientific_upper_exponent)
+        }
+    };
+    let output = if scientific {
+        format!("{value:.4e}")
+    } else {
+        format!("{value:.12}")
+    };
+    trim_number(&output)
+}
+
+pub(crate) fn axis_label_area_size(values: &[f64], padding: u32) -> u32 {
+    values
+        .iter()
+        .map(|value| format_axis_number(*value).len() as u32 * 3 + padding)
+        .max()
+        .unwrap_or(padding)
+}
+
+fn trim_number(value: &str) -> String {
+    let (mantissa, exponent) = value.split_once('e').unwrap_or((value, ""));
+    let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+    if exponent.is_empty() {
+        mantissa.to_string()
+    } else {
+        format!("{mantissa}e{}", exponent.parse::<i32>().unwrap_or(0))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RasterChartLayout {
     pub margin: u32,
@@ -171,8 +226,9 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::{
-        clamp_axis_range, normalized_axis_bounds, padded_axis_bounds, point_in_rect,
-        raster_chart_layout, zoom_axis_range, RasterChartLayoutHints,
+        axis_label_area_size, clamp_axis_range, format_axis_number, normalized_axis_bounds,
+        padded_axis_bounds, point_in_rect, raster_chart_layout, zoom_axis_range,
+        RasterChartLayoutHints,
     };
 
     #[test]
@@ -235,5 +291,25 @@ mod tests {
         assert!(layout.y_label_area_size <= 32);
         assert!(layout.x_label_area_size + layout.margin * 2 + 40 <= 64);
         assert!(layout.y_label_area_size + layout.margin * 2 + 48 <= 80);
+    }
+
+    #[test]
+    fn formats_axis_numbers_by_mode_and_boundary() {
+        let snapshot = crate::configure::snapshot_config();
+        let mut settings = crate::configure::ChartSettings::default();
+        settings.axis_numbers = crate::configure::AxisNumberFormat::Auto;
+        crate::configure::set_chart_settings(&settings);
+        assert_eq!(format_axis_number(1e-3), "1e-3");
+        assert_eq!(format_axis_number(1e-2), "0.01");
+        assert_eq!(format_axis_number(1e5), "1e5");
+        settings.axis_numbers = crate::configure::AxisNumberFormat::Exact;
+        crate::configure::set_chart_settings(&settings);
+        assert_eq!(format_axis_number(1e5), "100000");
+        settings.axis_numbers = crate::configure::AxisNumberFormat::Scientific;
+        crate::configure::set_chart_settings(&settings);
+        assert_eq!(format_axis_number(-0.0), "0");
+        assert_eq!(format_axis_number(f64::INFINITY), "∞");
+        assert!(axis_label_area_size(&[1e5], 30) > 30);
+        crate::configure::restore_config(snapshot);
     }
 }

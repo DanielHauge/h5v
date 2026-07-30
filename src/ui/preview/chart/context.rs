@@ -12,7 +12,8 @@ use crate::{
     h5f::H5FNode,
     ui::{
         chart_math::{
-            normalized_axis_bounds, raster_chart_layout, RasterChartLayout, RasterChartLayoutHints,
+            axis_label_area_size, normalized_axis_bounds, raster_chart_layout, RasterChartLayout,
+            RasterChartLayoutHints,
         },
         mchart::chart_plot_area_in_rect,
         page_scroll::{compact_count, PageDisplayInfo},
@@ -34,7 +35,7 @@ pub(super) fn preview_chart_layout(
     height_px: u32,
     max_value: f64,
 ) -> RasterChartLayout {
-    let y_label_area_size = format!("{max_value:.4}").len() as u32 * 3 + 30;
+    let y_label_area_size = axis_label_area_size(&[max_value], 30);
     raster_chart_layout(
         width_px,
         height_px,

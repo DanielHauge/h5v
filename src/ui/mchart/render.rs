@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use crate::{configure, ui::cursor::set_input_cursor};
+use crate::{
+    configure,
+    ui::{chart_math::format_axis_number, cursor::set_input_cursor},
+};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::Style,
@@ -439,7 +442,7 @@ impl MultiChartState {
                     + (prepared.plot_x_max - prepared.plot_x_min) * (i as f64)
                         / (x_label_count.max(1) as f64);
                 Span::styled(
-                    format!("{x:.1}"),
+                    format_axis_number(x),
                     configure::themed_color(|colors| colors.chart.label),
                 )
             })
@@ -455,7 +458,7 @@ impl MultiChartState {
                     + (prepared.y_max - prepared.y_min) * (i as f64)
                         / (y_label_count.max(1) as f64);
                 Span::styled(
-                    format!("{y:.1}"),
+                    format_axis_number(y),
                     configure::themed_color(|colors| colors.chart.label),
                 )
             })

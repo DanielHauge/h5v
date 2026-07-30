@@ -1,4 +1,5 @@
 mod bootstrap;
+mod chart;
 mod commands;
 mod context;
 mod events;
