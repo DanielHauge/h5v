@@ -394,6 +394,7 @@ jobs:
 
           binary_path = pathlib.Path("target") / target / "release" / bin_name
           shutil.copy2(binary_path, root_dir / bin_name)
+          shutil.copy2("THIRD_PARTY_NOTICES", root_dir / "THIRD_PARTY_NOTICES")
 
           if archive_format == "tar.gz":
               archive_path = pathlib.Path(f"{archive_stem}.tar.gz")

@@ -13,6 +13,7 @@ mod configure;
 mod data;
 mod error;
 mod h5f;
+mod hdf5_zstd;
 mod health;
 mod importing;
 mod linking;
@@ -34,6 +35,7 @@ pub const GIT_VERSION: &str = env!("H5V_GIT_VERSION");
 pub const GIT_VERSION_SHORT: &str = env!("H5V_GIT_VERSION_SHORT");
 
 fn main() -> Result<(), AppError> {
+    hdf5_zstd::register()?;
     let startup_started = Instant::now();
     let args = Args::parse_from(normalize_cli_args(std::env::args_os()));
     if let Err(error) = logging::initialize() {

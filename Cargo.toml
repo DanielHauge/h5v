@@ -21,6 +21,7 @@ include = [
     "/Cargo.lock",
     "/README.md",
     "/LICENSE",
+    "/THIRD_PARTY_NOTICES",
 ]
 
 [package.metadata.binstall]
@@ -51,7 +52,12 @@ hdf5-metno = { version = "0.13", features = [
     "static",
     "zlib",
 ] }
-hdf5-metno-sys = "0.12"
+hdf5-metno-sys = { version = "0.12", features = [
+    "static",
+    "threadsafe",
+    "zlib",
+] }
+zstd-sys = { version = "2.0.16", default-features = false }
 image = { version = "0.25.10" } # PNG + JPEG libs
 itertools = "0.15"
 libc = "0.2.185"
@@ -102,3 +108,6 @@ lto = "thin"
 
 [dev-dependencies]
 rust_xlsxwriter = "0.95.0"
+
+[build-dependencies]
+cc = "1.2"

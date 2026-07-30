@@ -8,6 +8,8 @@ fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR missing"));
 
+    build_hdf5_zstd_filter(&manifest_dir);
+
     if let Some(git_dir) = resolve_git_dir(&manifest_dir) {
         emit_git_rerun_hints(&git_dir);
     }
@@ -29,6 +31,20 @@ fn main() {
 
     println!("cargo:rustc-env=H5V_GIT_VERSION={full_version}");
     println!("cargo:rustc-env=H5V_GIT_VERSION_SHORT={short_version}");
+}
+
+fn build_hdf5_zstd_filter(manifest_dir: &Path) {
+    let source = manifest_dir.join("src/hdf5_zstd_filter.c");
+    println!("cargo:rerun-if-changed={}", source.display());
+
+    let hdf5_include = env::var("DEP_HDF5_INCLUDE").expect("DEP_HDF5_INCLUDE missing");
+    let zstd_include = env::var("DEP_ZSTD_INCLUDE").expect("DEP_ZSTD_INCLUDE missing");
+    let mut build = cc::Build::new();
+    build.file(source).include(hdf5_include);
+    for include in zstd_include.split(';').filter(|path| !path.is_empty()) {
+        build.include(include);
+    }
+    build.compile("h5v_hdf5_zstd_filter");
 }
 
 fn git_describe(manifest_dir: &Path, args: &[&str]) -> Option<String> {

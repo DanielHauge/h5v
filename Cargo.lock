@@ -1593,6 +1593,7 @@ dependencies = [
  "arboard",
  "bktree",
  "calamine",
+ "cc",
  "clap",
  "csv",
  "dirs",
@@ -1621,6 +1622,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "update-informer",
+ "zstd-sys",
 ]
 
 [[package]]
