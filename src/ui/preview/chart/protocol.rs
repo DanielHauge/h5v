@@ -2,8 +2,7 @@ use image::imageops::FilterType;
 use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
-    text::Span,
-    widgets::{Block, Clear, Paragraph, Wrap},
+    widgets::{Clear, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
@@ -19,16 +18,6 @@ use crate::{
         std_comp_render::render_error,
     },
 };
-
-fn render_chart_loading_indicator(f: &mut Frame<'_>, area: Rect) {
-    let indicator = Block::default()
-        .title(Span::styled(
-            configure::configured_symbol(|symbols| symbols.chart.loading_indicator),
-            Style::default().fg(configure::themed_color(|colors| colors.help.description)),
-        ))
-        .title_alignment(Alignment::Right);
-    f.render_widget(indicator, area);
-}
 
 fn render_chart_too_small(f: &mut Frame<'_>, area: Rect) {
     if area.width == 0 || area.height == 0 {
@@ -72,16 +61,13 @@ pub(super) fn render_chart_protocol_state(
         return Ok(());
     }
     if let Some(ref mut protocol) = state.chart_preview_state.protocol {
+        if is_pending {
+            return Ok(());
+        }
         f.render_widget(Clear, chart_area);
         let chart_widget =
             StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
         f.render_stateful_widget(chart_widget, chart_area, protocol);
-        if is_pending {
-            render_chart_loading_indicator(f, chart_area);
-        }
-    } else if is_pending {
-        f.render_widget(Clear, chart_area);
-        render_chart_loading_indicator(f, chart_area);
     }
     Ok(())
 }
@@ -141,8 +127,8 @@ pub(super) fn queue_chart_preview_load(
 
     if state.should_debounce_preview(node) {
         perf::metrics().preview.debounce_skips.increment();
-        if !chart_loaded && !restore_cached_chart_preview(state, &current_key) {
-            clear_active_chart_preview(state);
+        if !chart_loaded {
+            restore_cached_chart_preview(state, &current_key);
         }
         return render_chart_protocol_state(f, chart_area, state, true);
     }

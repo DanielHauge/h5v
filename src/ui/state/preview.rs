@@ -584,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn chart_preview_begin_loading_clears_active_preview_state() {
+    fn chart_preview_begin_loading_retains_active_preview() {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!(state.ds_loaded, Some("fresh".to_string()));
         assert_eq!(state.ds_selection, Some(key.selection.clone()));
         assert_eq!(state.rendered_viewport, None);
-        assert!(state.clipboard_image.is_none());
+        assert_eq!(state.clipboard_image, Some(clipboard_image(9)));
         assert!(state.error.is_none());
         assert_eq!(state.pending_key, Some(key));
     }
@@ -1259,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn image_begin_loading_clears_active_image_state() {
+    fn image_begin_loading_retains_active_image() {
         let (tx_resize_img, _) = channel();
         let (tx_load_imgfs, _) = channel();
         let (tx_load_imgfsvlen, _) = channel();
@@ -1292,7 +1292,7 @@ mod tests {
 
         assert_eq!(state.ds, Some("fresh".to_string()));
         assert_eq!(state.current_key, Some(key.clone()));
-        assert!(state.clipboard_image.is_none());
+        assert_eq!(state.clipboard_image, Some(clipboard_image(7)));
         assert!(state.error.is_none());
         assert_eq!(state.idx_loaded, 2);
         assert!(state.pending_keys.contains(&key));

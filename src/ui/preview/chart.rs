@@ -448,15 +448,6 @@ pub fn render_chart_preview(
     let stats_info = preview_stats_info(state);
     let areas_split =
         Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-    render_preview_context_panel(
-        f,
-        &areas_split[0],
-        node,
-        &shape,
-        state,
-        selector_info.as_ref(),
-        stats_info.as_deref(),
-    );
     let chart_area = areas_split[1].inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -541,6 +532,16 @@ pub fn render_chart_preview(
             },
         )?;
     }
+    render_preview_context_panel(
+        f,
+        &areas_split[0],
+        node,
+        &shape,
+        state,
+        selector_info.as_ref(),
+        stats_info.as_deref(),
+        state.chart_preview_state.pending_key.is_some(),
+    );
 
     Ok(())
 }
@@ -703,15 +704,6 @@ fn render_projected_chart_preview(
     let stats_info = preview_stats_info(state);
     let areas_split =
         Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
-    render_preview_context_panel(
-        f,
-        &areas_split[0],
-        node,
-        &shape,
-        state,
-        selector_info.as_ref(),
-        stats_info.as_deref(),
-    );
     let chart_area = areas_split[1].inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -803,6 +795,16 @@ fn render_projected_chart_preview(
             },
         )?;
     }
+    render_preview_context_panel(
+        f,
+        &areas_split[0],
+        node,
+        &shape,
+        state,
+        selector_info.as_ref(),
+        stats_info.as_deref(),
+        state.chart_preview_state.pending_key.is_some(),
+    );
     Ok(())
 }
 

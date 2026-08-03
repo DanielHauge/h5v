@@ -359,6 +359,7 @@ pub(super) fn render_preview_context_panel(
     state: &mut AppState<'_>,
     view_info: Option<&PageDisplayInfo<'_>>,
     stats_lines: Option<&[Line<'static>]>,
+    loading: bool,
 ) {
     let mode = state.chart_preview_state.mode;
     let title = format!("View & selection [{} · t]", mode.label());
@@ -390,7 +391,17 @@ pub(super) fn render_preview_context_panel(
                 .bold()
         }
     };
-    let mut title_spans = vec![Span::raw(title.clone())];
+    let mut title_spans = Vec::new();
+    if loading {
+        title_spans.push(Span::styled(
+            format!(
+                "{} ",
+                configure::configured_symbol(|symbols| symbols.chart.loading_indicator)
+            ),
+            Style::default().fg(configure::themed_color(|colors| colors.help.description)),
+        ));
+    }
+    title_spans.push(Span::raw(title.clone()));
     for (_, label, selected) in &axes {
         title_spans.push(Span::raw(format!("  {label} ")));
         title_spans.push(Span::styled(

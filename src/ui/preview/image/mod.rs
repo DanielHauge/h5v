@@ -78,18 +78,6 @@ fn raw_image_frame_count(
     }
 }
 
-fn render_image_loading_indicator(f: &mut Frame, area: Rect) {
-    let indicator = Block::default()
-        .title(Span::styled(
-            crate::configure::configured_symbol(|symbols| symbols.chart.loading_indicator),
-            Style::default().fg(crate::configure::themed_color(|colors| {
-                colors.help.description
-            })),
-        ))
-        .title_alignment(ratatui::layout::Alignment::Right);
-    f.render_widget(indicator, area);
-}
-
 pub(crate) fn thread_protocol_from_clipboard_image(
     picker: &Picker,
     tx_resize_img: &Sender<ResizeRequest>,
@@ -380,16 +368,34 @@ fn render_image_chrome(
     if let Some(window) = window {
         let title = match stack {
             Some((idx, count)) => format!(
-                " Viewport {} | image {}/{}{} ",
+                " {}Viewport {} | image {}/{} ",
+                if loading {
+                    format!(
+                        "{} ",
+                        crate::configure::configured_symbol(|symbols| symbols
+                            .chart
+                            .loading_indicator)
+                    )
+                } else {
+                    String::new()
+                },
                 window.label(),
                 idx + 1,
                 count,
-                if loading { " *" } else { "" }
             ),
             None => format!(
-                " Viewport {}{} ",
+                " {}Viewport {} ",
+                if loading {
+                    format!(
+                        "{} ",
+                        crate::configure::configured_symbol(|symbols| symbols
+                            .chart
+                            .loading_indicator)
+                    )
+                } else {
+                    String::new()
+                },
                 window.label(),
-                if loading { " *" } else { "" }
             ),
         };
         let block = Block::default()
@@ -474,12 +480,33 @@ fn render_image_chrome(
     } else {
         let title = match stack {
             Some((idx, count)) => format!(
-                " Image {}/{}{} ",
+                " {}Image {}/{} ",
+                if loading {
+                    format!(
+                        "{} ",
+                        crate::configure::configured_symbol(|symbols| symbols
+                            .chart
+                            .loading_indicator)
+                    )
+                } else {
+                    String::new()
+                },
                 idx + 1,
                 count,
-                if loading { " *" } else { "" }
             ),
-            None => format!(" Image{} ", if loading { " *" } else { "" }),
+            None => format!(
+                " {}Image ",
+                if loading {
+                    format!(
+                        "{} ",
+                        crate::configure::configured_symbol(|symbols| symbols
+                            .chart
+                            .loading_indicator)
+                    )
+                } else {
+                    String::new()
+                }
+            ),
         };
         let block = Block::default()
             .title(title)
@@ -596,31 +623,24 @@ fn render_ds_img(
         window_start: desired_window.as_ref().map_or(0, |window| window.start),
         window_len: desired_window.as_ref().map_or(0, |window| window.len),
     };
+    let mut image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
+    if !image_loaded && restore_cached_image(state, &desired_key) {
+        image_loaded = true;
+    }
     let render_area = render_image_chrome(
         f,
         area,
         has_stack.then_some((state.page_state.idx, state.page_state.page_count)),
         desired_window.as_ref(),
-        state.img_state.pending_keys.contains(&desired_key),
+        !image_loaded || state.img_state.pending_keys.contains(&desired_key),
     )?;
-    let mut image_loaded = state.img_state.current_request_key() == Some(desired_key.clone());
-    if !image_loaded && restore_cached_image(state, &desired_key) {
-        image_loaded = true;
-    }
     if state.should_debounce_preview(selected_node) {
-        if image_loaded {
+        if !state.img_state.pending_keys.contains(&desired_key) {
             if let Some(ref mut protocol) = state.img_state.protocol {
                 let image_widget =
                     StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
                 f.render_stateful_widget(image_widget, render_area, protocol);
             }
-        } else {
-            state.img_state.protocol = None;
-            state.img_state.clipboard_image = None;
-            state.img_state.error = None;
-        }
-        if !image_loaded || state.img_state.pending_keys.contains(&desired_key) {
-            render_image_loading_indicator(f, render_area);
         }
         return Ok(());
     }
@@ -636,12 +656,11 @@ fn render_ds_img(
                     ),
                     render_area,
                 );
-            } else if let Some(ref mut protocol) = state.img_state.protocol {
-                let image_widget =
-                    StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
-                f.render_stateful_widget(image_widget, render_area, protocol);
-                if state.img_state.pending_keys.contains(&desired_key) {
-                    render_image_loading_indicator(f, render_area);
+            } else if !state.img_state.pending_keys.contains(&desired_key) {
+                if let Some(ref mut protocol) = state.img_state.protocol {
+                    let image_widget =
+                        StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle)));
+                    f.render_stateful_widget(image_widget, render_area, protocol);
                 }
                 schedule_dataset_image_prefetch(
                     state,
@@ -720,8 +739,7 @@ fn render_raw_img(
     if !image_loaded && restore_cached_image(state, &desired_key) {
         image_loaded = true;
     }
-    let show_loading = state.img_state.pending_keys.contains(&desired_key)
-        || (state.should_debounce_preview(selected_node) && !image_loaded);
+    let show_loading = !image_loaded || state.img_state.pending_keys.contains(&desired_key);
     let render_area = if has_stack {
         render_image_chrome(
             f,
@@ -735,19 +753,12 @@ fn render_raw_img(
     };
 
     if state.should_debounce_preview(selected_node) {
-        if image_loaded {
+        if !state.img_state.pending_keys.contains(&desired_key) {
             if let Some(ref mut protocol) = state.img_state.protocol {
                 let image_widget =
                     StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
                 f.render_stateful_widget(image_widget, render_area, protocol);
             }
-        } else {
-            state.img_state.protocol = None;
-            state.img_state.clipboard_image = None;
-            state.img_state.error = None;
-        }
-        if show_loading {
-            render_image_loading_indicator(f, render_area);
         }
         if image_loaded && !state.img_state.pending_keys.contains(&desired_key) {
             if let Some(frame_count) = varlen_frame_count {
@@ -770,12 +781,11 @@ fn render_raw_img(
                 );
             }
             None => {
-                if let Some(ref mut protocol) = state.img_state.protocol {
-                    let image_widget =
-                        StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
-                    f.render_stateful_widget(image_widget, render_area, protocol);
-                    if state.img_state.pending_keys.contains(&desired_key) {
-                        render_image_loading_indicator(f, render_area);
+                if !state.img_state.pending_keys.contains(&desired_key) {
+                    if let Some(ref mut protocol) = state.img_state.protocol {
+                        let image_widget =
+                            StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
+                        f.render_stateful_widget(image_widget, render_area, protocol);
                     }
                 }
                 if let Some(frame_count) = varlen_frame_count {

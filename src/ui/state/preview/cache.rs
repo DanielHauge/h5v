@@ -40,8 +40,6 @@ impl ImgState {
     }
 
     pub fn begin_loading(&mut self, key: ImageLoadKey, idx_loaded: i32) {
-        self.protocol = None;
-        self.clipboard_image = None;
         self.error = None;
         self.ds = Some(key.ds_path.clone());
         self.current_key = Some(key.clone());
@@ -116,8 +114,6 @@ impl ChartPreviwState {
         self.rendered_viewport = key.viewport;
         self.rendered_roi = key.roi;
         self.rendered_size = Some((key.width, key.height));
-        self.protocol = None;
-        self.clipboard_image = None;
         self.error = None;
         self.current_data = None;
         self.pending_key = Some(key);
