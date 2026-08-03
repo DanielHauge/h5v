@@ -27,7 +27,7 @@ fn multichart_overview_panel() -> (String, Vec<Line<'static>>) {
     let mut lines = vec![
         paragraph_line("Multichart compares raw selections, derived series, and scalar values in one workspace."),
         paragraph_line("Open it with M. Add the current preview selection with m. Use Enter or n to create expressions."),
-        paragraph_line("Use t / Tab to cycle line, histogram, box plot, and comparison scatter views; f / F fit the visible data; 0 / c resets the line viewport."),
+        paragraph_line("Use t / Tab to cycle line, histogram, box plot, and comparison scatter views; Shift+X / Shift+Y toggle logarithmic X / Y axes; f / F fit the visible data; 0 / c resets the line viewport."),
         Line::raw(""),
         section_title_line("Quick flow"),
     ];

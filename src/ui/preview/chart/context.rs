@@ -16,9 +16,10 @@ use crate::{
             RasterChartLayoutHints,
         },
         mchart::chart_plot_area_in_rect,
+        mchart::ChartAxisScale,
         page_scroll::{compact_count, PageDisplayInfo},
         state::{
-            AppState, PreviewChartMode, PreviewChartRoi, PreviewChartViewport,
+            AppState, PreviewAxisScaleHitbox, PreviewChartRoi, PreviewChartViewport,
             PREVIEW_CHART_VISIBLE_POINT_LIMIT,
         },
     },
@@ -59,6 +60,44 @@ pub(super) fn preview_x_min(page_state: &crate::ui::state::PageState) -> f64 {
     }
 }
 
+pub(crate) fn preview_effective_x_domain(
+    data: &DatasetPlotingData,
+    viewport: PreviewChartViewport,
+    x_min: f64,
+    logarithmic: bool,
+) -> Option<(f64, f64)> {
+    if !logarithmic {
+        return Some((viewport.x_min, viewport.x_max));
+    }
+    let (start, end) = preview_visible_index_window(data, viewport, x_min)?;
+    let (min, max) = data.data[start..=end]
+        .iter()
+        .map(|(x, _)| x_min + x)
+        .filter(|x| x.is_finite() && *x > 0.0)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), x| {
+            (min.min(x), max.max(x))
+        });
+    (min.is_finite() && max.is_finite()).then_some((min, max.max(min * 2.0)))
+}
+
+pub(crate) fn preview_x_from_ratio(domain: (f64, f64), logarithmic: bool, ratio: f64) -> f64 {
+    let ratio = ratio.clamp(0.0, 1.0);
+    if logarithmic {
+        (domain.0.ln() + (domain.1.ln() - domain.0.ln()) * ratio).exp()
+    } else {
+        domain.0 + (domain.1 - domain.0) * ratio
+    }
+}
+
+pub(crate) fn preview_x_ratio(domain: (f64, f64), logarithmic: bool, x: f64) -> f64 {
+    if logarithmic {
+        ((x.max(domain.0).min(domain.1).ln() - domain.0.ln()) / (domain.1.ln() - domain.0.ln()))
+            .clamp(0.0, 1.0)
+    } else {
+        ((x - domain.0) / (domain.1 - domain.0)).clamp(0.0, 1.0)
+    }
+}
+
 pub(crate) fn preview_chart_data_bounds(
     data_preview: &DatasetPlotingData,
     x_min: f64,
@@ -74,7 +113,7 @@ pub(crate) fn preview_chart_data_bounds(
 }
 
 pub(super) fn preview_view_info(
-    state: &AppState<'_>,
+    state: &mut AppState<'_>,
     total_items: usize,
 ) -> Option<PageDisplayInfo<'static>> {
     if !state.chart_preview_state.has_explicit_viewport() {
@@ -317,12 +356,55 @@ pub(super) fn render_preview_context_panel(
     area: &Rect,
     node: &mut H5FNode,
     shape: &[usize],
-    mode: PreviewChartMode,
+    state: &mut AppState<'_>,
     view_info: Option<&PageDisplayInfo<'_>>,
     stats_lines: Option<&[Line<'static>]>,
 ) {
+    let mode = state.chart_preview_state.mode;
+    let title = format!("View & selection [{} · t]", mode.label());
+    let control_width = "  X  Lin  Log ".chars().count() as u16;
+    let mut axes = Vec::new();
+    for (x_axis, label, selected) in [
+        (true, "X", state.chart_preview_state.x_axis_scale),
+        (false, "Y", state.chart_preview_state.y_axis_scale),
+    ] {
+        if super::preview_axis_scale_supported(state, x_axis)
+            && area.width
+                > title.chars().count() as u16
+                    + control_width.saturating_mul(axes.len() as u16 + 1)
+                    + 2
+        {
+            axes.push((x_axis, label, selected));
+        }
+    }
+    let control_style = |scale, selected| {
+        if scale == selected {
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.accent.selection_fg))
+                .bg(configure::themed_color(|colors| colors.accent.selection_bg))
+                .bold()
+        } else {
+            Style::default()
+                .fg(configure::themed_color(|colors| colors.help.description))
+                .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
+                .bold()
+        }
+    };
+    let mut title_spans = vec![Span::raw(title.clone())];
+    for (_, label, selected) in &axes {
+        title_spans.push(Span::raw(format!("  {label} ")));
+        title_spans.push(Span::styled(
+            " Lin ",
+            control_style(ChartAxisScale::Linear, *selected),
+        ));
+        title_spans.push(Span::styled(
+            " Log ",
+            control_style(ChartAxisScale::Logarithmic, *selected),
+        ));
+    }
+    let title_line = Line::from(title_spans);
     let block = Block::default()
-        .title(format!("View & selection [{} · t]", mode.label()))
+        .title(title_line)
         .title_style(
             Style::default()
                 .fg(configure::themed_color(|colors| colors.surface.panel_title))
@@ -334,6 +416,26 @@ pub(super) fn render_preview_context_panel(
             colors.surface.panel_border
         })));
     f.render_widget(block, *area);
+    let mut control_x = area
+        .x
+        .saturating_add(1)
+        .saturating_add(title.chars().count() as u16);
+    for (x_axis, _, _) in axes {
+        control_x = control_x.saturating_add(4);
+        state.ui_layout.preview_axis_scales.extend([
+            PreviewAxisScaleHitbox {
+                area: Rect::new(control_x, area.y, 5, 1),
+                x_axis,
+                scale: ChartAxisScale::Linear,
+            },
+            PreviewAxisScaleHitbox {
+                area: Rect::new(control_x.saturating_add(5), area.y, 5, 1),
+                x_axis,
+                scale: ChartAxisScale::Logarithmic,
+            },
+        ]);
+        control_x = control_x.saturating_add(10);
+    }
 
     let inner = area.inner(Margin {
         vertical: 1,

@@ -3,20 +3,64 @@ use ratatui::layout::Rect;
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
     ui::chart_math::{clamp_axis_range, normalized_axis_bounds, point_in_rect, zoom_axis_range},
+    ui::preview::chart::{preview_effective_x_domain, preview_x_from_ratio, preview_x_ratio},
 };
 
 use super::{
-    ChartPreviwState, PreviewChartDragState, PreviewChartRoi, PreviewChartViewport,
-    PreviewChartZoomMode, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+    ChartPreviwState, PreviewChartDragState, PreviewChartMode, PreviewChartRoi,
+    PreviewChartViewport, PreviewChartZoomMode, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };
+use crate::ui::mchart::ChartAxisScale;
 
 impl ChartPreviwState {
+    pub fn set_x_axis_scale(&mut self, scale: ChartAxisScale) {
+        let next = if self.mode.supports_x_log_scale() {
+            scale
+        } else {
+            ChartAxisScale::Linear
+        };
+        if self.x_axis_scale != next {
+            self.x_axis_scale = next;
+            self.invalidate_render();
+        }
+    }
+
+    pub fn set_y_axis_scale(&mut self, scale: ChartAxisScale) {
+        let next = if self.mode.supports_y_log_scale() {
+            scale
+        } else {
+            ChartAxisScale::Linear
+        };
+        if self.y_axis_scale != next {
+            self.y_axis_scale = next;
+            self.invalidate_render();
+        }
+    }
+
+    fn invalidate_render(&mut self) {
+        self.protocol = None;
+        self.clipboard_image = None;
+        self.error = None;
+        self.rendered_mode = None;
+        self.rendered_viewport = None;
+        self.rendered_roi = None;
+        self.rendered_size = None;
+        self.pending_key = None;
+        self.cached_previews.clear();
+    }
+
     pub fn cycle_mode(&mut self) -> bool {
         let next = self.mode.next();
         if self.mode == next {
             return false;
         }
         self.mode = next;
+        if !self.mode.supports_x_log_scale() {
+            self.x_axis_scale = ChartAxisScale::Linear;
+        }
+        if !self.mode.supports_y_log_scale() {
+            self.y_axis_scale = ChartAxisScale::Linear;
+        }
         if !self.mode.supports_roi() {
             self.roi = None;
             self.drag_state = None;
@@ -62,6 +106,12 @@ impl ChartPreviwState {
 
     pub fn set_current_data(&mut self, data: Option<DatasetPlotingData>) {
         self.current_data = data;
+        if !self.mode.supports_x_log_scale() {
+            self.x_axis_scale = ChartAxisScale::Linear;
+        }
+        if !self.mode.supports_y_log_scale() {
+            self.y_axis_scale = ChartAxisScale::Linear;
+        }
         if let Some(roi) = self.roi {
             let len = self
                 .current_data
@@ -152,11 +202,29 @@ impl ChartPreviwState {
         let Some(current) = self.effective_viewport() else {
             return false;
         };
-        let x_shift = (current.x_max - current.x_min) * dx_percent / 100.0;
+        let x_log = self.x_axis_scale == ChartAxisScale::Logarithmic;
+        let x_domain = self.current_data.as_ref().and_then(|data| {
+            preview_effective_x_domain(data, current, self.selection_x_min(), x_log)
+        });
+        let (x_min, x_max) = if let Some((min, max)) = x_domain {
+            let shift = if x_log {
+                (max.ln() - min.ln()) * dx_percent / 100.0
+            } else {
+                (max - min) * dx_percent / 100.0
+            };
+            if x_log {
+                ((min.ln() + shift).exp(), (max.ln() + shift).exp())
+            } else {
+                (min + shift, max + shift)
+            }
+        } else {
+            let shift = (current.x_max - current.x_min) * dx_percent / 100.0;
+            (current.x_min + shift, current.x_max + shift)
+        };
         let y_shift = (current.y_max - current.y_min) * dy_percent / 100.0;
         self.set_explicit_viewport(Some(PreviewChartViewport {
-            x_min: current.x_min + x_shift,
-            x_max: current.x_max + x_shift,
+            x_min,
+            x_max,
             y_min: current.y_min + y_shift,
             y_max: current.y_max + y_shift,
         }))
@@ -181,15 +249,46 @@ impl ChartPreviwState {
         };
 
         let (x_min, x_max) = match mode {
-            PreviewChartZoomMode::Uniform | PreviewChartZoomMode::XOnly => zoom_axis_range(
-                current.x_min,
-                current.x_max,
-                bounds.x_min,
-                bounds.x_max,
-                anchor_x_ratio,
-                percent,
-                zoom_in,
-            ),
+            PreviewChartZoomMode::Uniform | PreviewChartZoomMode::XOnly => {
+                let logarithmic = self.x_axis_scale == ChartAxisScale::Logarithmic;
+                let domain = self.current_data.as_ref().and_then(|data| {
+                    preview_effective_x_domain(data, current, self.selection_x_min(), logarithmic)
+                });
+                let bounds_domain = self.current_data.as_ref().and_then(|data| {
+                    preview_effective_x_domain(data, bounds, self.selection_x_min(), logarithmic)
+                });
+                if logarithmic {
+                    let Some(domain) = domain else { return false };
+                    let Some(bounds_domain) = bounds_domain else {
+                        return false;
+                    };
+                    let anchor_x_ratio = preview_x_ratio(
+                        domain,
+                        true,
+                        preview_x_from_ratio(domain, true, anchor_x_ratio),
+                    );
+                    let (min, max) = zoom_axis_range(
+                        domain.0.ln(),
+                        domain.1.ln(),
+                        bounds_domain.0.ln(),
+                        bounds_domain.1.ln(),
+                        anchor_x_ratio,
+                        percent,
+                        zoom_in,
+                    );
+                    (min.exp(), max.exp())
+                } else {
+                    zoom_axis_range(
+                        current.x_min,
+                        current.x_max,
+                        bounds.x_min,
+                        bounds.x_max,
+                        anchor_x_ratio,
+                        percent,
+                        zoom_in,
+                    )
+                }
+            }
             PreviewChartZoomMode::YOnly => (current.x_min, current.x_max),
         };
         let (y_min, y_max) = match mode {
@@ -226,7 +325,7 @@ impl ChartPreviwState {
         if !self.mode.supports_viewport() {
             return false;
         }
-        let Some(chart_area) = self.last_chart_area else {
+        let Some(chart_area) = self.last_plot_area else {
             return false;
         };
         if !point_in_rect(chart_area, column, row) {
@@ -381,12 +480,25 @@ impl ChartPreviwState {
         if visible_len == 0 {
             return None;
         }
-        let relative_col = column.saturating_sub(chart_area.x) as usize;
+        let ratio = column.saturating_sub(chart_area.x) as f64
+            / chart_area.width.saturating_sub(1).max(1) as f64;
+        let x = self.current_data.as_ref().and_then(|data| {
+            preview_effective_x_domain(
+                data,
+                self.effective_viewport()?,
+                self.selection_x_min(),
+                self.x_axis_scale == ChartAxisScale::Logarithmic,
+            )
+            .map(|domain| {
+                preview_x_from_ratio(
+                    domain,
+                    self.x_axis_scale == ChartAxisScale::Logarithmic,
+                    ratio,
+                )
+            })
+        })?;
         if self.precise_point_mode() {
-            let idx = visible_start
-                + ((relative_col as f64 / chart_area.width.saturating_sub(1).max(1) as f64)
-                    * visible_len.saturating_sub(1) as f64)
-                    .round() as usize;
+            let idx = preview_index_at_x(x, self.selection_x_min(), true);
             let idx = idx.clamp(visible_start, visible_end);
             return Some(PreviewChartRoi {
                 start: idx,
@@ -395,15 +507,13 @@ impl ChartPreviwState {
                 selection_count: 1,
             });
         }
-        let width = chart_area.width.max(1) as usize;
-        let start = visible_start + (relative_col * visible_len) / width;
-        let end = visible_start
-            + (((relative_col + 1) * visible_len).div_ceil(width))
-                .saturating_sub(1)
-                .min(visible_len.saturating_sub(1));
+        let start = preview_index_at_x(x, self.selection_x_min(), false);
+        let end = preview_index_at_x(x, self.selection_x_min(), true);
         Some(PreviewChartRoi {
-            start: start.min(visible_end),
-            end: end.min(visible_end).max(start.min(visible_end)),
+            start: start.clamp(visible_start, visible_end),
+            end: end
+                .clamp(visible_start, visible_end)
+                .max(start.clamp(visible_start, visible_end)),
             precise: false,
             selection_count: 1,
         })
@@ -451,7 +561,15 @@ impl ChartPreviwState {
                 y_max = y_max.max(y);
             }
         }
-        let x_start = x_min + start as f64;
+        let x_start = if self.x_axis_scale == ChartAxisScale::Logarithmic {
+            data.data[start..=end]
+                .iter()
+                .map(|(x, _)| x_min + x)
+                .find(|x| *x > 0.0)
+                .unwrap_or(x_min + start as f64)
+        } else {
+            x_min + start as f64
+        };
         let x_end = x_min + end as f64 + if roi.precise { 0.0 } else { 1.0 };
         let Some((x_min, x_max)) = normalized_axis_bounds(x_start, x_end) else {
             return false;
@@ -472,9 +590,53 @@ impl ChartPreviwState {
     }
 }
 
+impl PreviewChartMode {
+    pub fn supports_x_log_scale(self) -> bool {
+        matches!(self, Self::Line | Self::Scatter | Self::Histogram)
+    }
+
+    pub fn supports_y_log_scale(self) -> bool {
+        matches!(self, Self::Line | Self::Scatter | Self::BoxPlot)
+    }
+}
+
 fn viewport_eq(left: PreviewChartViewport, right: PreviewChartViewport) -> bool {
     (left.x_min - right.x_min).abs() < 1e-9
         && (left.x_max - right.x_max).abs() < 1e-9
         && (left.y_min - right.y_min).abs() < 1e-9
         && (left.y_max - right.y_max).abs() < 1e-9
+}
+
+fn preview_index_at_x(x: f64, x_min: f64, round: bool) -> usize {
+    let index = x - x_min;
+    if round {
+        index.round().max(0.0) as usize
+    } else {
+        index.floor().max(0.0) as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui::preview::chart::{preview_x_from_ratio, preview_x_ratio};
+
+    use super::preview_index_at_x;
+
+    #[test]
+    fn log_x_left_click_selects_an_early_index() {
+        let x = preview_x_from_ratio((1.0, 1_000.0), true, 0.1);
+        assert_eq!(preview_index_at_x(x, 0.0, true), 2);
+        assert!(preview_index_at_x(100.0, 0.0, true) > 2);
+    }
+
+    #[test]
+    fn log_x_screen_transform_round_trips() {
+        let domain = (1.0, 1_000.0);
+        let ratio = 0.6;
+        assert!(
+            (preview_x_ratio(domain, true, preview_x_from_ratio(domain, true, ratio)) - ratio)
+                .abs()
+                < 1e-9
+        );
+    }
 }

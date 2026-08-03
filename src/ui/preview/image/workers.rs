@@ -162,6 +162,8 @@ pub(crate) fn handle_chartpreview_load(
                 x_min,
                 data_preview.clone(),
                 req.key.mode,
+                req.key.x_axis_scale,
+                req.key.y_axis_scale,
                 req.key.viewport,
                 req.key.roi,
             ) {

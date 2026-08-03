@@ -548,6 +548,46 @@ fn box_plot_mode_prepares_visible_window_distribution_summaries() {
 }
 
 #[test]
+fn box_plot_log_scale_uses_positive_marks_not_linear_padding() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, 0.1), (1.0, 0.2), (2.0, 0.3), (3.0, 0.4)],
+    );
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+    state.set_y_axis_scale(ChartAxisScale::Logarithmic);
+
+    let PreparedChartData::BoxPlot(prepared) = state.prepared_chart_data().expect("box plot")
+    else {
+        panic!("expected box plot chart data");
+    };
+    assert_eq!(prepared.y_axis_scale, ChartAxisScale::Logarithmic);
+}
+
+#[test]
+fn line_log_scale_rejects_nonpositive_plotted_coordinate() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 1.0), (1.0, 2.0)]);
+    state.set_x_axis_scale(ChartAxisScale::Logarithmic);
+
+    let PreparedChartData::Line(prepared) = state.prepared_chart_data().expect("line chart") else {
+        panic!("expected line chart data");
+    };
+    assert_eq!(prepared.x_axis_scale, ChartAxisScale::Linear);
+}
+
+#[test]
 fn histogram_mode_prepares_overlayed_bins_from_visible_window() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -735,6 +775,7 @@ fn histogram_render_request_succeeds() {
         width: 400,
         height: 240,
         prepared: PreparedChartData::Histogram(PreparedHistogramData {
+            x_axis_scale: ChartAxisScale::Linear,
             value_min: 0.0,
             value_max: 4.0,
             count_max: 3.0,
@@ -773,6 +814,7 @@ fn box_plot_render_request_succeeds() {
         width: 400,
         height: 240,
         prepared: PreparedChartData::BoxPlot(PreparedBoxPlotData {
+            y_axis_scale: ChartAxisScale::Linear,
             value_min: 0.0,
             value_max: 10.0,
             series: vec![PreparedBoxPlotSeries {

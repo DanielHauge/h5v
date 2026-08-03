@@ -79,6 +79,8 @@ pub enum ContentAction {
     Edit,
     Copy,
     CyclePreviewChartMode,
+    ToggleXAxisScale,
+    ToggleYAxisScale,
     HeatmapZoomIn,
     HeatmapZoomOut,
     HeatmapResetView,
@@ -112,6 +114,8 @@ pub enum MultiChartAction {
     Quit,
     ShowHelp,
     CycleViewMode,
+    ToggleXAxisScale,
+    ToggleYAxisScale,
     ZoomIn,
     ZoomOut,
     PanLeft,
@@ -570,6 +574,39 @@ mod tests {
                 &keymaps
             ),
             Some(BoundAction::Action(MultiChartAction::ZoomOut))
+        );
+    }
+
+    #[test]
+    fn shift_x_and_y_toggle_axis_scales() {
+        let keymaps = EffectiveKeymaps::default();
+        assert_eq!(
+            content_action(
+                &KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            Some(BoundAction::Action(ContentAction::ToggleXAxisScale))
+        );
+        assert_eq!(
+            content_action(
+                &KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            Some(BoundAction::Action(ContentAction::ToggleYAxisScale))
+        );
+        assert_eq!(
+            multichart_action(
+                &KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            Some(BoundAction::Action(MultiChartAction::ToggleXAxisScale))
+        );
+        assert_eq!(
+            multichart_action(
+                &KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            Some(BoundAction::Action(MultiChartAction::ToggleYAxisScale))
         );
     }
 

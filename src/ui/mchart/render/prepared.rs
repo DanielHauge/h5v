@@ -4,13 +4,25 @@ use crate::ui::{
 };
 
 use super::super::{
-    model::sanitize_chart_points, ChartItem, MultiChartState, MultiChartViewMode, Point,
-    PreparedBoxPlotData, PreparedBoxPlotSeries, PreparedChartData, PreparedComparisonScatterData,
-    PreparedHistogramBin, PreparedHistogramData, PreparedHistogramSeries, PreparedLineChartData,
-    PreparedLineChartSeries,
+    model::{sanitize_chart_points, ChartAxisScale},
+    ChartItem, MultiChartState, MultiChartViewMode, Point, PreparedBoxPlotData,
+    PreparedBoxPlotSeries, PreparedChartData, PreparedComparisonScatterData, PreparedHistogramBin,
+    PreparedHistogramData, PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
 };
 
 impl MultiChartState {
+    fn effective_axis_scale(
+        &self,
+        requested: ChartAxisScale,
+        supported: bool,
+        valid: bool,
+    ) -> ChartAxisScale {
+        if supported && valid {
+            requested
+        } else {
+            ChartAxisScale::Linear
+        }
+    }
     pub(super) fn item_display_label(&self, item: &ChartItem) -> String {
         item.name
             .as_ref()
@@ -155,6 +167,22 @@ impl MultiChartState {
         };
 
         Some(PreparedLineChartData {
+            x_axis_scale: self.effective_axis_scale(
+                self.x_axis_scale,
+                self.view_mode.supports_x_log_scale(),
+                series
+                    .iter()
+                    .flat_map(|series| &series.points)
+                    .all(|(x, _)| x.is_finite() && *x > 0.0),
+            ),
+            y_axis_scale: self.effective_axis_scale(
+                self.y_axis_scale,
+                self.view_mode.supports_y_log_scale(),
+                series
+                    .iter()
+                    .flat_map(|series| &series.points)
+                    .all(|(_, y)| y.is_finite() && *y > 0.0),
+            ),
             plot_x_min,
             plot_x_max,
             y_min,
@@ -242,6 +270,13 @@ impl MultiChartState {
             });
         }
         Some(PreparedHistogramData {
+            x_axis_scale: self.effective_axis_scale(
+                self.x_axis_scale,
+                self.view_mode.supports_x_log_scale(),
+                series.iter().flat_map(|series| &series.bins).all(|bin| {
+                    bin.start.is_finite() && bin.end.is_finite() && bin.start > 0.0 && bin.end > 0.0
+                }),
+            ),
             value_min,
             value_max,
             count_max: count_max.max(1.0),
@@ -295,6 +330,22 @@ impl MultiChartState {
         }
         let (value_min, value_max) = plot_bounds?;
         Some(PreparedBoxPlotData {
+            y_axis_scale: self.effective_axis_scale(
+                self.y_axis_scale,
+                self.view_mode.supports_y_log_scale(),
+                series.iter().all(|series| {
+                    [
+                        series.whisker_low,
+                        series.q1,
+                        series.median,
+                        series.q3,
+                        series.whisker_high,
+                    ]
+                    .into_iter()
+                    .chain(series.outliers.iter().copied())
+                    .all(|value| value.is_finite() && value > 0.0)
+                }),
+            ),
             value_min,
             value_max,
             series,
@@ -353,6 +404,16 @@ impl MultiChartState {
         let bounds = Self::bounds_from_points(points.iter())?;
 
         Some(PreparedComparisonScatterData {
+            x_axis_scale: self.effective_axis_scale(
+                self.x_axis_scale,
+                self.view_mode.supports_x_log_scale(),
+                points.iter().all(|(x, _)| x.is_finite() && *x > 0.0),
+            ),
+            y_axis_scale: self.effective_axis_scale(
+                self.y_axis_scale,
+                self.view_mode.supports_y_log_scale(),
+                points.iter().all(|(_, y)| y.is_finite() && *y > 0.0),
+            ),
             label: format!(
                 "{} vs {}",
                 self.item_display_label(left),

@@ -21,6 +21,7 @@ use crate::{
     ui::{
         edit::perform_edit,
         matrix::compound_root_matrix_cell_text,
+        mchart::ChartAxisScale,
         preview::chart::render_image_chart,
         preview::preview_text_for_compound_schema,
         render::MatrixRenderType,
@@ -378,6 +379,8 @@ fn copy_chart_preview(
                 ds_path: ds_path.to_string(),
                 selection: selection.clone(),
                 mode: state.chart_preview_state.mode,
+                x_axis_scale: state.chart_preview_state.x_axis_scale,
+                y_axis_scale: state.chart_preview_state.y_axis_scale,
                 viewport: state.chart_preview_state.rendered_viewport,
                 roi: state.chart_preview_state.rendered_roi,
                 width: chart_area.width,
@@ -418,6 +421,8 @@ fn copy_chart_preview(
         x_min,
         data_preview,
         state.chart_preview_state.mode,
+        state.chart_preview_state.x_axis_scale,
+        state.chart_preview_state.y_axis_scale,
         state.chart_preview_state.effective_viewport(),
         state.chart_preview_state.roi,
     )?;
@@ -883,6 +888,28 @@ pub fn handle_normal_content_event(
                         Some(BoundAction::Action(ContentAction::CyclePreviewChartMode)),
                         ContentShowMode::Preview,
                     ) => Ok(redraw_if(state.chart_preview_state.cycle_mode())),
+                    (
+                        Some(BoundAction::Action(ContentAction::ToggleXAxisScale)),
+                        ContentShowMode::Preview,
+                    ) => {
+                        let scale = state.chart_preview_state.x_axis_scale;
+                        state.chart_preview_state.set_x_axis_scale(match scale {
+                            ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
+                            ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
+                        });
+                        Ok(redraw_if(state.chart_preview_state.x_axis_scale != scale))
+                    }
+                    (
+                        Some(BoundAction::Action(ContentAction::ToggleYAxisScale)),
+                        ContentShowMode::Preview,
+                    ) => {
+                        let scale = state.chart_preview_state.y_axis_scale;
+                        state.chart_preview_state.set_y_axis_scale(match scale {
+                            ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
+                            ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
+                        });
+                        Ok(redraw_if(state.chart_preview_state.y_axis_scale != scale))
+                    }
                     (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Matrix) => {
                         let text = match selected_matrix_copy_text(state) {
                             Ok(text) => text,

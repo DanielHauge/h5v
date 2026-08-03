@@ -12,7 +12,7 @@ use ratatui_image::thread::{ResizeRequest, ThreadProtocol};
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
     h5f::{DatasetMeta, ImageType, ResolvedOpenMode},
-    ui::mchart::ChartItem,
+    ui::mchart::{ChartAxisScale, ChartItem},
 };
 
 mod cache;
@@ -54,6 +54,8 @@ pub struct ClipboardImageData {
 
 pub struct ChartPreviwState {
     pub mode: PreviewChartMode,
+    pub x_axis_scale: ChartAxisScale,
+    pub y_axis_scale: ChartAxisScale,
     pub ds_loaded: Option<String>,
     pub protocol: Option<ThreadProtocol>,
     pub clipboard_image: Option<ClipboardImageData>,
@@ -82,6 +84,55 @@ pub enum PreviewChartMode {
     Scatter,
     Histogram,
     BoxPlot,
+}
+
+#[cfg(test)]
+mod log_scale_tests {
+    use super::*;
+    use std::sync::mpsc::channel;
+
+    #[test]
+    fn raw_zero_x_does_not_reset_requested_preview_log_scale() {
+        let (resize_tx, _) = channel();
+        let (load_tx, _) = channel();
+        let mut state = ChartPreviwState {
+            mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Logarithmic,
+            y_axis_scale: ChartAxisScale::Linear,
+            ds_loaded: None,
+            protocol: None,
+            clipboard_image: None,
+            error: None,
+            ds_selection: None,
+            rendered_mode: None,
+            rendered_viewport: None,
+            rendered_roi: None,
+            rendered_size: None,
+            pending_key: None,
+            tx_resize_chartpreview: resize_tx,
+            tx_load_chartpreview: load_tx,
+            cached_previews: VecDeque::new(),
+            viewport: None,
+            data_bounds: Some(PreviewChartViewport {
+                x_min: 1.0,
+                x_max: 2.0,
+                y_min: 1.0,
+                y_max: 2.0,
+            }),
+            current_data: None,
+            roi: None,
+            last_chart_area: None,
+            last_plot_area: None,
+            drag_state: None,
+        };
+        state.set_current_data(Some(DatasetPlotingData {
+            data: vec![(0.0, 1.0), (1.0, 2.0)],
+            length: 2,
+            min: 1.0,
+            max: 2.0,
+        }));
+        assert_eq!(state.x_axis_scale, ChartAxisScale::Logarithmic);
+    }
 }
 
 impl PreviewChartMode {
@@ -246,6 +297,8 @@ pub struct ChartPreviewKey {
     pub ds_path: String,
     pub selection: PreviewSelection,
     pub mode: PreviewChartMode,
+    pub x_axis_scale: ChartAxisScale,
+    pub y_axis_scale: ChartAxisScale,
     pub viewport: Option<PreviewChartViewport>,
     pub roi: Option<PreviewChartRoi>,
     pub width: u16,
@@ -344,6 +397,8 @@ mod tests {
                 slice: crate::data::SliceSelection::All,
             },
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             viewport: None,
             roi: None,
             width: 10,
@@ -382,6 +437,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -411,6 +468,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -464,6 +523,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -528,6 +589,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: Some("stale".to_string()),
             protocol: None,
             clipboard_image: Some(clipboard_image(9)),
@@ -577,6 +640,8 @@ mod tests {
         };
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -697,6 +762,8 @@ mod tests {
         let key = preview_key("same");
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: Some(key.ds_path.clone()),
             protocol: None,
             clipboard_image: None,
@@ -737,6 +804,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -775,6 +844,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -823,6 +894,8 @@ mod tests {
         };
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -863,6 +936,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -920,6 +995,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -963,6 +1040,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -1010,6 +1089,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -1062,6 +1143,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -1102,6 +1185,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,
@@ -1144,6 +1229,8 @@ mod tests {
         let (tx_load_chartpreview, _) = channel();
         let mut state = ChartPreviwState {
             mode: PreviewChartMode::Histogram,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             ds_loaded: None,
             protocol: None,
             clipboard_image: None,

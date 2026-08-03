@@ -73,7 +73,8 @@ pub use preview::{
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,
     HelpSidebarHitbox, HelpSidebarTarget, HelpTabHitbox, LogsFilterHitbox, LogsFilterTarget,
-    MatrixCellHitbox, MatrixRowHitbox, MetadataCellHitbox, TreeHitbox, UiLayoutState,
+    MatrixCellHitbox, MatrixRowHitbox, MetadataCellHitbox, PreviewAxisScaleHitbox, TreeHitbox,
+    UiLayoutState,
 };
 
 pub struct AppState<'a> {

@@ -3,6 +3,13 @@ use crate::data::{PreviewSelection, SliceSelection};
 
 pub type Point = (f64, f64);
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ChartAxisScale {
+    #[default]
+    Linear,
+    Logarithmic,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartXAxisPolicy {
     SampleIndex,
@@ -58,6 +65,27 @@ impl MultiChartViewMode {
             | MultiChartViewMode::BoxPlot
             | MultiChartViewMode::ComparisonScatter => "window",
         }
+    }
+
+    pub fn supports_x_log_scale(self) -> bool {
+        matches!(self, Self::Line | Self::Histogram | Self::ComparisonScatter)
+    }
+
+    pub fn supports_y_log_scale(self) -> bool {
+        matches!(self, Self::Line | Self::BoxPlot | Self::ComparisonScatter)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_scale_support_matches_chart_semantics() {
+        assert!(MultiChartViewMode::Histogram.supports_x_log_scale());
+        assert!(!MultiChartViewMode::Histogram.supports_y_log_scale());
+        assert!(!MultiChartViewMode::BoxPlot.supports_x_log_scale());
+        assert!(MultiChartViewMode::BoxPlot.supports_y_log_scale());
     }
 }
 

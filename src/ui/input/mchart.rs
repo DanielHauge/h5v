@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind, KeyModifiers, MouseButton, 
 
 use crate::{
     error::AppError,
-    ui::mchart::ChartZoomMode,
+    ui::mchart::{ChartAxisScale, ChartZoomMode},
     ui::state::{AppState, AppToast, Mode},
 };
 
@@ -144,6 +144,24 @@ pub(crate) fn handle_mchart_event(
                         state.multi_chart.cycle_view_mode();
                         Ok(EventResult::Redraw)
                     }
+                    Some(BoundAction::Action(MultiChartAction::ToggleXAxisScale)) => {
+                        state.multi_chart.set_x_axis_scale(
+                            match state.multi_chart.x_axis_scale() {
+                                ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
+                                ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
+                            },
+                        );
+                        Ok(EventResult::Redraw)
+                    }
+                    Some(BoundAction::Action(MultiChartAction::ToggleYAxisScale)) => {
+                        state.multi_chart.set_y_axis_scale(
+                            match state.multi_chart.y_axis_scale() {
+                                ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
+                                ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
+                            },
+                        );
+                        Ok(EventResult::Redraw)
+                    }
                     Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
                         Ok(if state.multi_chart.zoom_in(10.0) {
                             EventResult::Redraw
@@ -280,6 +298,12 @@ pub(crate) fn handle_mchart_event(
         },
         Event::Mouse(mouse_event) => match mouse_event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                if state
+                    .multi_chart
+                    .click_axis_scale_hitbox(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
                 if state
                     .multi_chart
                     .click_view_mode_hitbox(mouse_event.column, mouse_event.row)

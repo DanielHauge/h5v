@@ -354,6 +354,12 @@ fn describe_content_target(target: &BoundAction<ContentAction>) -> String {
             ContentAction::CyclePreviewChartMode => {
                 "Cycle the preview chart between line, scatter, histogram, and box plot".to_string()
             }
+            ContentAction::ToggleXAxisScale => {
+                "Toggle the preview X axis between linear and logarithmic".to_string()
+            }
+            ContentAction::ToggleYAxisScale => {
+                "Toggle the preview Y axis between linear and logarithmic".to_string()
+            }
             ContentAction::HeatmapZoomIn => {
                 "Zoom in the active heatmap or preview chart".to_string()
             }
@@ -397,6 +403,12 @@ fn describe_multichart_target(target: &BoundAction<MultiChartAction>) -> String 
             MultiChartAction::ShowHelp => "Open the multichart help page".to_string(),
             MultiChartAction::CycleViewMode => {
                 "Cycle line, histogram, box plot, and comparison scatter modes".to_string()
+            }
+            MultiChartAction::ToggleXAxisScale => {
+                "Toggle the X axis between linear and logarithmic".to_string()
+            }
+            MultiChartAction::ToggleYAxisScale => {
+                "Toggle the Y axis between linear and logarithmic".to_string()
             }
             MultiChartAction::ZoomIn => "Zoom in".to_string(),
             MultiChartAction::ZoomOut => "Zoom out".to_string(),

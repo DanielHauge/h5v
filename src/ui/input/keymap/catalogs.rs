@@ -385,6 +385,18 @@ const CONTENT_ACTION_CODES: &[ActionCode<ContentAction>] = &[
         default_keys: &["t"],
     },
     ActionCode {
+        symbol: "ToggleXAxisScale",
+        code: "toggle-x-axis-scale",
+        action: ContentAction::ToggleXAxisScale,
+        default_keys: &["Shift+x"],
+    },
+    ActionCode {
+        symbol: "ToggleYAxisScale",
+        code: "toggle-y-axis-scale",
+        action: ContentAction::ToggleYAxisScale,
+        default_keys: &["Shift+y"],
+    },
+    ActionCode {
         symbol: "HeatmapZoomIn",
         code: "heatmap-zoom-in",
         action: ContentAction::HeatmapZoomIn,
@@ -527,6 +539,18 @@ const MULTICHART_ACTION_CODES: &[ActionCode<MultiChartAction>] = &[
         code: "cycle-view-mode",
         action: MultiChartAction::CycleViewMode,
         default_keys: &["Tab", "Shift+Tab", "t"],
+    },
+    ActionCode {
+        symbol: "ToggleXAxisScale",
+        code: "toggle-x-axis-scale",
+        action: MultiChartAction::ToggleXAxisScale,
+        default_keys: &["Shift+x"],
+    },
+    ActionCode {
+        symbol: "ToggleYAxisScale",
+        code: "toggle-y-axis-scale",
+        action: MultiChartAction::ToggleYAxisScale,
+        default_keys: &["Shift+y"],
     },
     ActionCode {
         symbol: "ZoomIn",

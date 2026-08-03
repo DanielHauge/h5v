@@ -14,10 +14,11 @@ use ratatui::{
 use ratatui_image::{picker::ProtocolType, StatefulImage};
 
 use super::{
-    prompt::ExpressionPromptFocus, ChartSource, ExpressionPromptInputKind,
+    prompt::ExpressionPromptFocus, ChartAxisScale, ChartSource, ExpressionPromptInputKind,
     ExpressionPromptMessageKind, ExpressionPromptMode, ExpressionPromptSuggestion,
-    ExpressionPromptSuggestionKind, MultiChartEditorHitbox, MultiChartItemHitbox, MultiChartState,
-    MultiChartViewModeHitbox, EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
+    ExpressionPromptSuggestionKind, MultiChartAxisScaleHitbox, MultiChartEditorHitbox,
+    MultiChartItemHitbox, MultiChartState, MultiChartViewModeHitbox,
+    EXPRESSION_PROMPT_VISIBLE_SUGGESTIONS,
 };
 
 mod backend;
@@ -143,6 +144,70 @@ impl MultiChartState {
         Line::from(spans)
     }
 
+    fn render_axis_scale_toolbar(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
+        self.axis_scale_hitboxes.clear();
+        let compact = area.width < 30;
+        let mut spans = Vec::new();
+        let mut offset = 0u16;
+        for (x_axis, label, supported, selected) in [
+            (
+                true,
+                "X",
+                self.view_mode().supports_x_log_scale(),
+                self.x_axis_scale(),
+            ),
+            (
+                false,
+                "Y",
+                self.view_mode().supports_y_log_scale(),
+                self.y_axis_scale(),
+            ),
+        ] {
+            if !spans.is_empty() {
+                spans.push(Span::raw("  "));
+                offset = offset.saturating_add(2);
+            }
+            spans.push(Span::styled(
+                format!("{label} "),
+                Style::default().fg(configure::themed_color(|colors| colors.help.muted)),
+            ));
+            offset = offset.saturating_add(2);
+            for scale in [ChartAxisScale::Linear, ChartAxisScale::Logarithmic] {
+                let text = match (compact, scale) {
+                    (true, ChartAxisScale::Linear) => " Lin ",
+                    (true, ChartAxisScale::Logarithmic) => " Log ",
+                    (false, ChartAxisScale::Linear) => " Linear ",
+                    (false, ChartAxisScale::Logarithmic) => " Log ",
+                };
+                let width = text.chars().count() as u16;
+                let style = if scale == selected {
+                    mchart_mode_tab_style(true)
+                } else if supported || matches!(scale, ChartAxisScale::Linear) {
+                    mchart_mode_tab_style(false)
+                } else {
+                    mchart_soft_muted(
+                        Style::default().fg(configure::themed_color(|colors| colors.help.muted)),
+                    )
+                };
+                spans.push(Span::styled(text, style));
+                if supported || matches!(scale, ChartAxisScale::Linear) {
+                    self.axis_scale_hitboxes.push(MultiChartAxisScaleHitbox {
+                        area: Rect::new(area.x.saturating_add(offset), area.y, width, 1),
+                        x_axis,
+                        scale,
+                    });
+                }
+                offset = offset.saturating_add(width);
+            }
+        }
+        let line = Line::from(spans);
+        let start = area.width.saturating_sub(line.width() as u16) / 2;
+        for hitbox in &mut self.axis_scale_hitboxes {
+            hitbox.area.x = hitbox.area.x.saturating_add(start);
+        }
+        f.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+    }
+
     pub(super) fn chart_mode_subheader(&self) -> String {
         match self.view_mode() {
             super::MultiChartViewMode::Line => {
@@ -265,6 +330,7 @@ impl MultiChartState {
 
     fn render_chart_panel(&mut self, f: &mut ratatui::Frame<'_>, area: Rect) {
         self.view_mode_hitboxes.clear();
+        self.axis_scale_hitboxes.clear();
         let block = Block::default()
             .title(self.chart_panel_title())
             .borders(Borders::TOP)
@@ -280,7 +346,18 @@ impl MultiChartState {
         let chart_panel_area = block.inner(area);
         f.render_widget(block, area);
 
-        let (tabs_area, subheader_area, chart_area) = if chart_panel_area.height >= 3 {
+        let (tabs_area, scales_area, subheader_area, chart_area) = if chart_panel_area.height >= 4 {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(chart_panel_area);
+            (Some(chunks[0]), Some(chunks[1]), Some(chunks[2]), chunks[3])
+        } else if chart_panel_area.height >= 3 {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -289,9 +366,9 @@ impl MultiChartState {
                     Constraint::Min(0),
                 ])
                 .split(chart_panel_area);
-            (Some(chunks[0]), Some(chunks[1]), chunks[2])
+            (Some(chunks[0]), None, Some(chunks[1]), chunks[2])
         } else {
-            (None, None, chart_panel_area)
+            (None, None, None, chart_panel_area)
         };
         if let Some(tabs_area) = tabs_area {
             let tabs = self.chart_mode_tabs();
@@ -313,6 +390,9 @@ impl MultiChartState {
                 }
             }
             f.render_widget(Paragraph::new(tabs).alignment(Alignment::Center), tabs_area);
+        }
+        if let Some(scales_area) = scales_area {
+            self.render_axis_scale_toolbar(f, scales_area);
         }
         if let Some(subheader_area) = subheader_area {
             f.render_widget(

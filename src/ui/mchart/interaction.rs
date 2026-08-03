@@ -350,6 +350,30 @@ impl MultiChartState {
 }
 
 impl MultiChartState {
+    pub fn click_axis_scale_hitbox(&mut self, column: u16, row: u16) -> bool {
+        let Some(hitbox) = self
+            .axis_scale_hitboxes
+            .iter()
+            .find(|hitbox| point_in_rect(hitbox.area, column, row))
+            .copied()
+        else {
+            return false;
+        };
+        if if hitbox.x_axis {
+            self.x_axis_scale() == hitbox.scale
+        } else {
+            self.y_axis_scale() == hitbox.scale
+        } {
+            return false;
+        }
+        if hitbox.x_axis {
+            self.set_x_axis_scale(hitbox.scale);
+        } else {
+            self.set_y_axis_scale(hitbox.scale);
+        }
+        true
+    }
+
     pub fn click_view_mode_hitbox(&mut self, column: u16, row: u16) -> bool {
         let Some(hitbox) = self
             .view_mode_hitboxes

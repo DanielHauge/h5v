@@ -57,6 +57,8 @@ impl ChartPreviwState {
             ds_path: self.ds_loaded.clone()?,
             selection: self.ds_selection.clone()?,
             mode: self.rendered_mode?,
+            x_axis_scale: self.x_axis_scale,
+            y_axis_scale: self.y_axis_scale,
             viewport: self.rendered_viewport,
             roi: self.rendered_roi,
             width,

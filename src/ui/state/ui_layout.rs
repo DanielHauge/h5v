@@ -1,6 +1,7 @@
 use ratatui::layout::Rect;
 
 use crate::configure::registry::ContentModeHandle;
+use crate::ui::mchart::ChartAxisScale;
 
 use super::{
     HelpCommandSection, HelpCustomizationSection, HelpKeymapSection, HelpMultiChartSection, HelpTab,
@@ -51,6 +52,13 @@ pub struct MatrixCellHitbox {
 pub struct HeatmapSettingHitbox {
     pub area: Rect,
     pub setting: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreviewAxisScaleHitbox {
+    pub area: Rect,
+    pub x_axis: bool,
+    pub scale: ChartAxisScale,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,4 +122,5 @@ pub struct UiLayoutState {
     pub matrix_rows: Vec<MatrixRowHitbox>,
     pub matrix_cells: Vec<MatrixCellHitbox>,
     pub heatmap_settings: Vec<HeatmapSettingHitbox>,
+    pub preview_axis_scales: Vec<PreviewAxisScaleHitbox>,
 }

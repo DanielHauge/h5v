@@ -1,7 +1,7 @@
 use hdf5_metno::types::TypeDescriptor;
 use plotters::{
     chart::ChartBuilder,
-    prelude::{BitMapBackend, IntoDrawingArea},
+    prelude::{BitMapBackend, IntoDrawingArea, IntoLogRange},
     style::{Color as _, IntoFont, RGBColor, ShapeStyle},
 };
 
@@ -25,6 +25,7 @@ use crate::{
         chart_math::format_axis_number,
         chart_stats::{box_plot_summary, histogram_summary},
         matrix::{EnumRenderer, RenderIntercept},
+        mchart::ChartAxisScale,
         page_scroll::PageDisplayInfo,
         perf,
         preview::render_string_preview,
@@ -40,11 +41,13 @@ use crate::{
 mod context;
 mod protocol;
 
-pub(crate) use context::preview_chart_data_bounds;
 use context::{
     copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_roi_range,
     preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_index_window,
     preview_visible_points, preview_x_axis_max, preview_x_min, render_preview_context_panel,
+};
+pub(crate) use context::{
+    preview_chart_data_bounds, preview_effective_x_domain, preview_x_from_ratio, preview_x_ratio,
 };
 use protocol::{clear_active_chart_preview, queue_chart_preview_load};
 
@@ -52,9 +55,78 @@ pub const MAX_PAGE_SIZE: usize = 2_500_000;
 const PREVIEW_POINT_MARKER_RADIUS: i32 = 5;
 const PREVIEW_SELECTED_POINT_MARKER_RADIUS: i32 = 7;
 
+fn valid_log_range(min: f64, max: f64) -> bool {
+    min.is_finite() && max.is_finite() && min > 0.0 && max > min
+}
+
+fn positive_marks(values: impl IntoIterator<Item = f64>) -> bool {
+    values
+        .into_iter()
+        .all(|value| value.is_finite() && value > 0.0)
+}
+
 fn clear_chart_preview_layout(state: &mut AppState<'_>) {
     state.chart_preview_state.set_chart_area(None);
     state.chart_preview_state.set_plot_area(None);
+    state.ui_layout.preview_axis_scales.clear();
+}
+
+fn preview_axis_scale_supported(state: &AppState<'_>, x_axis: bool) -> bool {
+    let mode_supported = if x_axis {
+        state.chart_preview_state.mode.supports_x_log_scale()
+    } else {
+        state.chart_preview_state.mode.supports_y_log_scale()
+    };
+    let Some(data) = state.chart_preview_state.current_data.as_ref() else {
+        return mode_supported;
+    };
+    let viewport = state.chart_preview_state.effective_viewport();
+    let values = preview_windowed_values(
+        data,
+        viewport.unwrap_or(PreviewChartViewport {
+            x_min: preview_x_min(&state.page_state),
+            x_max: f64::INFINITY,
+            y_min: 0.0,
+            y_max: 0.0,
+        }),
+        preview_x_min(&state.page_state),
+    );
+    mode_supported
+        && match (state.chart_preview_state.mode, x_axis) {
+            (PreviewChartMode::Histogram, true) => histogram_summary(&values)
+                .is_some_and(|summary| positive_marks([summary.value_min, summary.value_max])),
+            (PreviewChartMode::BoxPlot, false) => {
+                box_plot_summary(&values).is_some_and(|summary| {
+                    positive_marks(
+                        [
+                            summary.whisker_low,
+                            summary.q1,
+                            summary.median,
+                            summary.q3,
+                            summary.whisker_high,
+                        ]
+                        .into_iter()
+                        .chain(summary.outliers),
+                    )
+                })
+            }
+            (PreviewChartMode::Line | PreviewChartMode::Scatter, true) => {
+                preview_effective_x_domain(
+                    data,
+                    viewport.unwrap_or(PreviewChartViewport {
+                        x_min: preview_x_min(&state.page_state),
+                        x_max: f64::INFINITY,
+                        y_min: 0.0,
+                        y_max: 0.0,
+                    }),
+                    preview_x_min(&state.page_state),
+                    true,
+                )
+                .is_some()
+            }
+            (_, true) => false,
+            (_, false) => positive_marks(data.data.iter().map(|(_, y)| *y)),
+        }
 }
 
 fn sync_direct_chart_preview(
@@ -155,6 +227,8 @@ pub fn render_precomputed_chart_preview(
         ds_path: node.node.path(),
         selection: preview_selection.clone(),
         mode: state.chart_preview_state.mode,
+        x_axis_scale: state.chart_preview_state.x_axis_scale,
+        y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -379,7 +453,7 @@ pub fn render_chart_preview(
         &areas_split[0],
         node,
         &shape,
-        state.chart_preview_state.mode,
+        state,
         selector_info.as_ref(),
         stats_info.as_deref(),
     );
@@ -425,6 +499,8 @@ pub fn render_chart_preview(
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
         mode: state.chart_preview_state.mode,
+        x_axis_scale: state.chart_preview_state.x_axis_scale,
+        y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -632,7 +708,7 @@ fn render_projected_chart_preview(
         &areas_split[0],
         node,
         &shape,
-        state.chart_preview_state.mode,
+        state,
         selector_info.as_ref(),
         stats_info.as_deref(),
     );
@@ -676,6 +752,8 @@ fn render_projected_chart_preview(
         ds_path: node.node.path(),
         selection: data_preview_selection.clone(),
         mode: state.chart_preview_state.mode,
+        x_axis_scale: state.chart_preview_state.x_axis_scale,
+        y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
         width: chart_area.width,
@@ -970,6 +1048,8 @@ pub fn render_image_chart(
     x_min: f64,
     data_preview: DatasetPlotingData,
     mode: PreviewChartMode,
+    x_axis_scale: ChartAxisScale,
+    y_axis_scale: ChartAxisScale,
     viewport: Option<PreviewChartViewport>,
     roi: Option<PreviewChartRoi>,
 ) -> Result<(), AppError> {
@@ -1012,41 +1092,56 @@ pub fn render_image_chart(
         root.fill(&plot_bg)
             .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
         let layout = preview_chart_layout(width, height, summary.count_max);
-        let mut chart = ChartBuilder::on(&root)
-            .margin(layout.margin)
-            .x_label_area_size(layout.x_label_area_size)
-            .y_label_area_size(layout.y_label_area_size)
-            .build_cartesian_2d(summary.value_min..summary.value_max, 0.0..summary.count_max)
-            .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
-        chart
-            .configure_mesh()
-            .x_desc("value")
-            .y_desc("count")
-            .x_label_formatter(&|value| format_axis_number(*value))
-            .y_label_formatter(&|value| format_axis_number(*value))
-            .x_label_style(
-                ("sans-serif", layout.x_label_font_size)
-                    .into_font()
-                    .color(&axis),
-            )
-            .y_label_style(
-                ("sans-serif", layout.y_label_font_size)
-                    .into_font()
-                    .color(&axis),
-            )
-            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
-            .light_line_style(grid.mix(0.35))
-            .bold_line_style(grid.mix(0.55))
-            .draw()
-            .map_err(|e| AppError::DrawingError(format!("Error drawing histogram mesh: {}", e)))?;
-        chart
-            .draw_series(summary.bins.iter().map(|bin| {
-                plotters::prelude::Rectangle::new(
-                    [(bin.start, 0.0), (bin.end, bin.count)],
-                    line.mix(0.45).filled(),
-                )
-            }))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing histogram bars: {}", e)))?;
+        macro_rules! draw_histogram {
+            ($x:expr) => {
+                let mut chart = ChartBuilder::on(&root)
+                    .margin(layout.margin)
+                    .x_label_area_size(layout.x_label_area_size)
+                    .y_label_area_size(layout.y_label_area_size)
+                    .build_cartesian_2d($x, 0.0..summary.count_max)
+                    .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+                chart
+                    .configure_mesh()
+                    .x_desc("value")
+                    .y_desc("count")
+                    .x_label_formatter(&|value| format_axis_number(*value))
+                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_style(
+                        ("sans-serif", layout.x_label_font_size)
+                            .into_font()
+                            .color(&axis),
+                    )
+                    .y_label_style(
+                        ("sans-serif", layout.y_label_font_size)
+                            .into_font()
+                            .color(&axis),
+                    )
+                    .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+                    .light_line_style(grid.mix(0.35))
+                    .bold_line_style(grid.mix(0.55))
+                    .draw()
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing histogram mesh: {}", e))
+                    })?;
+                chart
+                    .draw_series(summary.bins.iter().map(|bin| {
+                        plotters::prelude::Rectangle::new(
+                            [(bin.start, 0.0), (bin.end, bin.count)],
+                            line.mix(0.45).filled(),
+                        )
+                    }))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing histogram bars: {}", e))
+                    })?;
+            };
+        }
+        if x_axis_scale == ChartAxisScale::Logarithmic
+            && valid_log_range(summary.value_min, summary.value_max)
+        {
+            draw_histogram!((summary.value_min..summary.value_max).log_scale());
+        } else {
+            draw_histogram!(summary.value_min..summary.value_max);
+        }
         root.present()
             .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
         return Ok(());
@@ -1062,74 +1157,101 @@ pub fn render_image_chart(
         root.fill(&plot_bg)
             .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
         let layout = preview_chart_layout(width, height, summary.value_max);
-        let mut chart = ChartBuilder::on(&root)
-            .margin(layout.margin)
-            .x_label_area_size(layout.x_label_area_size)
-            .y_label_area_size(layout.y_label_area_size)
-            .build_cartesian_2d(0.5..1.5, summary.value_min..summary.value_max)
-            .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
-        chart
-            .configure_mesh()
-            .x_desc("visible window")
-            .y_desc("value")
-            .x_labels(1)
-            .x_label_formatter(&|_| "series".to_string())
-            .y_label_formatter(&|value| format_axis_number(*value))
-            .x_label_style(
-                ("sans-serif", layout.x_label_font_size)
-                    .into_font()
-                    .color(&axis),
-            )
-            .y_label_style(
-                ("sans-serif", layout.y_label_font_size)
-                    .into_font()
-                    .color(&axis),
-            )
-            .axis_style(ShapeStyle::from(&axis).stroke_width(2))
-            .light_line_style(grid.mix(0.35))
-            .bold_line_style(grid.mix(0.55))
-            .draw()
-            .map_err(|e| AppError::DrawingError(format!("Error drawing box-plot mesh: {}", e)))?;
-        let x = 1.0;
-        let half_width = 0.2;
-        chart
-            .draw_series(std::iter::once(plotters::element::PathElement::new(
-                vec![(x, summary.whisker_low), (x, summary.q1)],
-                ShapeStyle::from(&line).stroke_width(2),
-            )))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing lower whisker: {}", e)))?;
-        chart
-            .draw_series(std::iter::once(plotters::element::PathElement::new(
-                vec![(x, summary.q3), (x, summary.whisker_high)],
-                ShapeStyle::from(&line).stroke_width(2),
-            )))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing upper whisker: {}", e)))?;
-        chart
-            .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                [(x - half_width, summary.q1), (x + half_width, summary.q3)],
-                line.mix(0.25).filled(),
-            )))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing box body: {}", e)))?;
-        chart
-            .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                [(x - half_width, summary.q1), (x + half_width, summary.q3)],
-                ShapeStyle::from(&line).stroke_width(2),
-            )))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing box outline: {}", e)))?;
-        chart
-            .draw_series(std::iter::once(plotters::element::PathElement::new(
-                vec![
-                    (x - half_width, summary.median),
-                    (x + half_width, summary.median),
-                ],
-                ShapeStyle::from(&selected).stroke_width(3),
-            )))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing median: {}", e)))?;
-        chart
-            .draw_series(summary.outliers.iter().map(|value| {
-                plotters::element::Circle::new((x, *value), 4, ShapeStyle::from(&selected).filled())
-            }))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing outliers: {}", e)))?;
+        macro_rules! draw_box_plot {
+            ($y:expr) => {
+                let mut chart = ChartBuilder::on(&root)
+                    .margin(layout.margin)
+                    .x_label_area_size(layout.x_label_area_size)
+                    .y_label_area_size(layout.y_label_area_size)
+                    .build_cartesian_2d(0.5..1.5, $y)
+                    .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+                chart
+                    .configure_mesh()
+                    .x_desc("visible window")
+                    .y_desc("value")
+                    .x_labels(1)
+                    .x_label_formatter(&|_| "series".to_string())
+                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_style(
+                        ("sans-serif", layout.x_label_font_size)
+                            .into_font()
+                            .color(&axis),
+                    )
+                    .y_label_style(
+                        ("sans-serif", layout.y_label_font_size)
+                            .into_font()
+                            .color(&axis),
+                    )
+                    .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+                    .light_line_style(grid.mix(0.35))
+                    .bold_line_style(grid.mix(0.55))
+                    .draw()
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing box-plot mesh: {}", e))
+                    })?;
+                let x = 1.0;
+                let half_width = 0.2;
+                chart
+                    .draw_series(std::iter::once(plotters::element::PathElement::new(
+                        vec![(x, summary.whisker_low), (x, summary.q1)],
+                        ShapeStyle::from(&line).stroke_width(2),
+                    )))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing lower whisker: {}", e))
+                    })?;
+                chart
+                    .draw_series(std::iter::once(plotters::element::PathElement::new(
+                        vec![(x, summary.q3), (x, summary.whisker_high)],
+                        ShapeStyle::from(&line).stroke_width(2),
+                    )))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing upper whisker: {}", e))
+                    })?;
+                chart
+                    .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                        [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                        line.mix(0.25).filled(),
+                    )))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing box body: {}", e))
+                    })?;
+                chart
+                    .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
+                        [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                        ShapeStyle::from(&line).stroke_width(2),
+                    )))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing box outline: {}", e))
+                    })?;
+                chart
+                    .draw_series(std::iter::once(plotters::element::PathElement::new(
+                        vec![
+                            (x - half_width, summary.median),
+                            (x + half_width, summary.median),
+                        ],
+                        ShapeStyle::from(&selected).stroke_width(3),
+                    )))
+                    .map_err(|e| AppError::DrawingError(format!("Error drawing median: {}", e)))?;
+                chart
+                    .draw_series(summary.outliers.iter().map(|value| {
+                        plotters::element::Circle::new(
+                            (x, *value),
+                            4,
+                            ShapeStyle::from(&selected).filled(),
+                        )
+                    }))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing outliers: {}", e))
+                    })?;
+            };
+        }
+        if y_axis_scale == ChartAxisScale::Logarithmic
+            && valid_log_range(summary.value_min, summary.value_max)
+        {
+            draw_box_plot!((summary.value_min..summary.value_max).log_scale());
+        } else {
+            draw_box_plot!(summary.value_min..summary.value_max);
+        }
         root.present()
             .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
         return Ok(());
@@ -1139,110 +1261,167 @@ pub fn render_image_chart(
     root.fill(&plot_bg)
         .map_err(|e| AppError::DrawingError(format!("Error filling background: {}", e)))?;
     let layout = preview_chart_layout(width, height, data_preview.max);
+    let x_log_bounds = (x_axis_scale == ChartAxisScale::Logarithmic)
+        .then(|| preview_effective_x_domain(&data_preview, viewport, x_min, true))
+        .flatten();
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin(layout.margin)
-        .x_label_area_size(layout.x_label_area_size)
-        .y_label_area_size(layout.y_label_area_size)
-        .build_cartesian_2d(
-            viewport.x_min..viewport.x_max,
-            viewport.y_min..viewport.y_max,
-        )
-        .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+    macro_rules! draw_xy_chart {
+        ($x:expr, $y:expr, $log_x:expr) => {{
+            let mut chart = ChartBuilder::on(&root)
+                .margin(layout.margin)
+                .x_label_area_size(layout.x_label_area_size)
+                .y_label_area_size(layout.y_label_area_size)
+                .build_cartesian_2d($x, $y)
+                .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
 
-    // Draw the mesh (grid lines)
-    chart
-        .configure_mesh()
-        .x_label_formatter(&|value| format_axis_number(*value))
-        .y_label_formatter(&|value| format_axis_number(*value))
-        .x_label_style(
-            ("sans-serif", layout.x_label_font_size)
-                .into_font()
-                .color(&axis),
-        )
-        .y_label_style(
-            ("sans-serif", layout.y_label_font_size)
-                .into_font()
-                .color(&axis),
-        )
-        .axis_style(ShapeStyle::from(&axis).stroke_width(2))
-        .light_line_style(grid.mix(0.35))
-        .bold_line_style(grid.mix(0.55))
-        .draw()
-        .map_err(|e| AppError::DrawingError(format!("Error drawing mesh: {}", e)))?;
-
-    let data = data_preview
-        .data
-        .iter()
-        .map(|(x, y)| (x_min + *x, *y))
-        .collect::<Vec<_>>();
-    if matches!(mode, PreviewChartMode::Line) {
-        let line_series = plotters::prelude::LineSeries::new(
-            data.iter().copied(),
-            ShapeStyle::from(&line).stroke_width(3),
-        );
-        chart
-            .draw_series(line_series)
-            .map_err(|e| AppError::DrawingError(format!("Error drawing line series: {}", e)))?;
-    }
-    if matches!(mode, PreviewChartMode::Scatter) {
-        chart
-            .draw_series(data.iter().copied().map(|point| {
-                plotters::prelude::Circle::new(point, 3, ShapeStyle::from(&line).filled())
-            }))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing scatter points: {}", e)))?;
-    } else if let Some(points) = preview_visible_points(&data_preview, viewport, x_min) {
-        chart
-            .draw_series(points.iter().copied().map(|point| {
-                plotters::prelude::Circle::new(
-                    point,
-                    PREVIEW_POINT_MARKER_RADIUS,
-                    ShapeStyle::from(&line).filled(),
+            chart
+                .configure_mesh()
+                .x_label_formatter(&|value| format_axis_number(*value))
+                .y_label_formatter(&|value| format_axis_number(*value))
+                .x_label_style(
+                    ("sans-serif", layout.x_label_font_size)
+                        .into_font()
+                        .color(&axis),
                 )
-            }))
-            .map_err(|e| AppError::DrawingError(format!("Error drawing point markers: {}", e)))?;
-    }
-    if let Some(roi) = roi {
-        if let Some((start, end)) = preview_roi_range(&data_preview, roi, x_min) {
-            if !roi.precise {
-                if let Some((x0, x1)) = preview_roi_x_bounds(&data_preview, start, end, x_min) {
-                    chart
-                        .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                            [(x0, viewport.y_min), (x1, viewport.y_max)],
-                            roi_fill.filled(),
-                        )))
-                        .map_err(|e| {
-                            AppError::DrawingError(format!("Error drawing roi fill: {}", e))
-                        })?;
-                }
+                .y_label_style(
+                    ("sans-serif", layout.y_label_font_size)
+                        .into_font()
+                        .color(&axis),
+                )
+                .axis_style(ShapeStyle::from(&axis).stroke_width(2))
+                .light_line_style(grid.mix(0.35))
+                .bold_line_style(grid.mix(0.55))
+                .draw()
+                .map_err(|e| AppError::DrawingError(format!("Error drawing mesh: {}", e)))?;
+
+            let data = data_preview
+                .data
+                .iter()
+                .map(|(x, y)| (x_min + *x, *y))
+                .collect::<Vec<_>>();
+            if matches!(mode, PreviewChartMode::Line) {
+                let line_series = plotters::prelude::LineSeries::new(
+                    data.iter().copied().filter(|(x, _)| !$log_x || *x > 0.0),
+                    ShapeStyle::from(&line).stroke_width(3),
+                );
+                chart.draw_series(line_series).map_err(|e| {
+                    AppError::DrawingError(format!("Error drawing line series: {}", e))
+                })?;
             }
-            let roi_points = data[start..=end].iter().copied().collect::<Vec<_>>();
-            if roi.selection_count >= 2 && matches!(mode, PreviewChartMode::Line) {
+            if matches!(mode, PreviewChartMode::Scatter) {
                 chart
-                    .draw_series(plotters::prelude::LineSeries::new(
-                        roi_points.iter().copied(),
-                        ShapeStyle::from(&roi_line).stroke_width(5),
+                    .draw_series(
+                        data.iter()
+                            .copied()
+                            .filter(|(x, _)| !$log_x || *x > 0.0)
+                            .map(|point| {
+                                plotters::prelude::Circle::new(
+                                    point,
+                                    3,
+                                    ShapeStyle::from(&line).filled(),
+                                )
+                            }),
+                    )
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing scatter points: {}", e))
+                    })?;
+            } else if let Some(points) = preview_visible_points(&data_preview, viewport, x_min) {
+                chart
+                    .draw_series(points.into_iter().filter(|(x, _)| !$log_x || *x > 0.0).map(
+                        |point| {
+                            plotters::prelude::Circle::new(
+                                point,
+                                PREVIEW_POINT_MARKER_RADIUS,
+                                ShapeStyle::from(&line).filled(),
+                            )
+                        },
                     ))
                     .map_err(|e| {
-                        AppError::DrawingError(format!("Error drawing roi line: {}", e))
+                        AppError::DrawingError(format!("Error drawing point markers: {}", e))
                     })?;
             }
-            if preview_visible_points(&data_preview, viewport, x_min).is_some()
-                || matches!(mode, PreviewChartMode::Scatter)
-            {
-                chart
-                    .draw_series(roi_points.into_iter().map(|point| {
-                        plotters::prelude::Circle::new(
-                            point,
-                            PREVIEW_SELECTED_POINT_MARKER_RADIUS,
-                            ShapeStyle::from(&roi_line).filled(),
-                        )
-                    }))
-                    .map_err(|e| {
-                        AppError::DrawingError(format!("Error drawing roi points: {}", e))
-                    })?;
+            if let Some(roi) = roi {
+                if let Some((start, end)) = preview_roi_range(&data_preview, roi, x_min) {
+                    if !roi.precise {
+                        if let Some((x0, x1)) =
+                            preview_roi_x_bounds(&data_preview, start, end, x_min)
+                        {
+                            if !$log_x || (x0 > 0.0 && x1 > 0.0) {
+                                chart
+                                    .draw_series(std::iter::once(
+                                        plotters::prelude::Rectangle::new(
+                                            [(x0, viewport.y_min), (x1, viewport.y_max)],
+                                            roi_fill.filled(),
+                                        ),
+                                    ))
+                                    .map_err(|e| {
+                                        AppError::DrawingError(format!(
+                                            "Error drawing roi fill: {}",
+                                            e
+                                        ))
+                                    })?;
+                            }
+                        }
+                    }
+                    let roi_points = data[start..=end]
+                        .iter()
+                        .copied()
+                        .filter(|(x, _)| !$log_x || *x > 0.0)
+                        .collect::<Vec<_>>();
+                    if roi.selection_count >= 2 && matches!(mode, PreviewChartMode::Line) {
+                        chart
+                            .draw_series(plotters::prelude::LineSeries::new(
+                                roi_points.iter().copied(),
+                                ShapeStyle::from(&roi_line).stroke_width(5),
+                            ))
+                            .map_err(|e| {
+                                AppError::DrawingError(format!("Error drawing roi line: {}", e))
+                            })?;
+                    }
+                    if preview_visible_points(&data_preview, viewport, x_min).is_some()
+                        || matches!(mode, PreviewChartMode::Scatter)
+                    {
+                        chart
+                            .draw_series(roi_points.into_iter().map(|point| {
+                                plotters::prelude::Circle::new(
+                                    point,
+                                    PREVIEW_SELECTED_POINT_MARKER_RADIUS,
+                                    ShapeStyle::from(&roi_line).filled(),
+                                )
+                            }))
+                            .map_err(|e| {
+                                AppError::DrawingError(format!("Error drawing roi points: {}", e))
+                            })?;
+                    }
+                }
             }
-        }
+        }};
+    }
+    match (
+        x_log_bounds,
+        y_axis_scale == ChartAxisScale::Logarithmic
+            && valid_log_range(viewport.y_min, viewport.y_max),
+    ) {
+        (None, false) => draw_xy_chart!(
+            viewport.x_min..viewport.x_max,
+            viewport.y_min..viewport.y_max,
+            false
+        ),
+        (Some((x_min, x_max)), false) => draw_xy_chart!(
+            (x_min..x_max).log_scale(),
+            viewport.y_min..viewport.y_max,
+            true
+        ),
+        (None, true) => draw_xy_chart!(
+            viewport.x_min..viewport.x_max,
+            (viewport.y_min..viewport.y_max).log_scale(),
+            false
+        ),
+        (Some((x_min, x_max)), true) => draw_xy_chart!(
+            (x_min..x_max).log_scale(),
+            (viewport.y_min..viewport.y_max).log_scale(),
+            true
+        ),
     }
     root.present()
         .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
@@ -1253,9 +1432,15 @@ pub fn render_image_chart(
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{preview_chart_plot_area, preview_visible_points, preview_x_axis_max};
+    use super::{
+        preview_chart_plot_area, preview_effective_x_domain, preview_visible_points,
+        preview_x_axis_max, render_image_chart,
+    };
     use crate::data::DatasetPlotingData;
-    use crate::ui::state::{PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT};
+    use crate::ui::{
+        mchart::ChartAxisScale,
+        state::{PreviewChartMode, PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT},
+    };
     use ratatui::layout::Rect;
 
     fn sample_preview(len: usize) -> DatasetPlotingData {
@@ -1276,6 +1461,36 @@ mod tests {
             min: 1.0,
         };
         assert_eq!(preview_x_axis_max(&preview), 2.0);
+    }
+
+    #[test]
+    fn preview_log_x_ignores_raw_index_zero() {
+        let preview = sample_preview(3);
+        let viewport = PreviewChartViewport {
+            x_min: 0.0,
+            x_max: 2.0,
+            y_min: 0.0,
+            y_max: 2.0,
+        };
+        assert_eq!(
+            preview_effective_x_domain(&preview, viewport, 0.0, true),
+            Some((1.0, 2.0))
+        );
+
+        let mut buffer = vec![0; 64 * 64 * 3];
+        assert!(render_image_chart(
+            &mut buffer,
+            64,
+            64,
+            0.0,
+            preview,
+            PreviewChartMode::Line,
+            ChartAxisScale::Logarithmic,
+            ChartAxisScale::Linear,
+            Some(viewport),
+            None,
+        )
+        .is_ok());
     }
 
     #[test]

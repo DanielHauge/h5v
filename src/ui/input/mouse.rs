@@ -347,6 +347,13 @@ fn handle_left_click(
     toggle_if_selected: bool,
 ) -> Result<EventResult, AppError> {
     if state.active_content_mode() == ContentShowMode::Preview
+        && click_preview_axis_scale(state, column, row)
+    {
+        state.focus = Focus::Content;
+        return Ok(EventResult::Redraw);
+    }
+
+    if state.active_content_mode() == ContentShowMode::Preview
         && state.chart_preview_state.cycle_roi_at_position(column, row)
     {
         state.focus = Focus::Content;
@@ -466,6 +473,24 @@ fn handle_left_click(
     }
 
     Ok(EventResult::Continue)
+}
+
+fn click_preview_axis_scale(state: &mut AppState<'_>, column: u16, row: u16) -> bool {
+    let Some(hitbox) = state
+        .ui_layout
+        .preview_axis_scales
+        .iter()
+        .find(|hitbox| point_in_rect(hitbox.area, column, row))
+        .copied()
+    else {
+        return false;
+    };
+    if hitbox.x_axis {
+        state.chart_preview_state.set_x_axis_scale(hitbox.scale);
+    } else {
+        state.chart_preview_state.set_y_axis_scale(hitbox.scale);
+    }
+    true
 }
 
 fn handle_heatmap_scroll(

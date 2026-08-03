@@ -144,6 +144,8 @@ pub(super) fn prepare_app<'a>(
 
     let chart_preview_state = ChartPreviwState {
         mode: crate::ui::state::PreviewChartMode::Line,
+        x_axis_scale: crate::ui::mchart::ChartAxisScale::Linear,
+        y_axis_scale: crate::ui::mchart::ChartAxisScale::Linear,
         ds_loaded: None,
         protocol: None,
         clipboard_image: None,

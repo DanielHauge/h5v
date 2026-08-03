@@ -43,8 +43,8 @@ pub use load::{handle_mchart_load, handle_mchart_render};
 use model::sanitize_chart_points;
 #[allow(unused_imports)]
 pub use model::{
-    ChartItem, ChartItemId, ChartItemStats, ChartLodWindow, ChartSeries, ChartSource,
-    ChartXAxisPolicy, DatasetChartKind, DatasetChartSource, DerivedExpressionKind,
+    ChartAxisScale, ChartItem, ChartItemId, ChartItemStats, ChartLodWindow, ChartSeries,
+    ChartSource, ChartXAxisPolicy, DatasetChartKind, DatasetChartSource, DerivedExpressionKind,
     MultiChartLoadState, MultiChartViewMode, Point,
 };
 use prompt::{
@@ -57,10 +57,10 @@ pub(crate) use render::chart_plot_area_in_rect;
 pub(crate) use types::ChartZoomMode;
 pub use types::{CapturedMultiChartItem, MultiChartRenderRequest, MultiChartRenderResult};
 use types::{
-    ChartDragState, ChartItemStatus, ChartViewport, MultiChartEditorHitbox, MultiChartItemHitbox,
-    MultiChartViewModeHitbox, PreparedBoxPlotData, PreparedBoxPlotSeries, PreparedChartData,
-    PreparedComparisonScatterData, PreparedHistogramBin, PreparedHistogramData,
-    PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
+    ChartDragState, ChartItemStatus, ChartViewport, MultiChartAxisScaleHitbox,
+    MultiChartEditorHitbox, MultiChartItemHitbox, MultiChartViewModeHitbox, PreparedBoxPlotData,
+    PreparedBoxPlotSeries, PreparedChartData, PreparedComparisonScatterData, PreparedHistogramBin,
+    PreparedHistogramData, PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
 };
 
 #[derive(Debug, Clone)]
@@ -159,6 +159,8 @@ pub struct MultiChartState {
     next_color_slot: usize,
     x_axis_policy: ChartXAxisPolicy,
     view_mode: MultiChartViewMode,
+    x_axis_scale: ChartAxisScale,
+    y_axis_scale: ChartAxisScale,
     expression_prompt: Option<ExpressionPromptState>,
     last_chart_area: Option<Rect>,
     last_chart_panel_area: Option<Rect>,
@@ -166,6 +168,7 @@ pub struct MultiChartState {
     pub(super) item_hitboxes: Vec<MultiChartItemHitbox>,
     pub(super) editor_hitbox: Option<MultiChartEditorHitbox>,
     pub(super) view_mode_hitboxes: Vec<MultiChartViewModeHitbox>,
+    pub(super) axis_scale_hitboxes: Vec<MultiChartAxisScaleHitbox>,
     expression_revision: u64,
     pending_expression_refresh_revision: Option<u64>,
 }
@@ -196,6 +199,8 @@ impl MultiChartState {
             next_color_slot: 0,
             x_axis_policy: ChartXAxisPolicy::SampleIndex,
             view_mode: MultiChartViewMode::Line,
+            x_axis_scale: ChartAxisScale::Linear,
+            y_axis_scale: ChartAxisScale::Linear,
             expression_prompt: None,
             last_chart_area: None,
             last_chart_panel_area: None,
@@ -203,6 +208,7 @@ impl MultiChartState {
             item_hitboxes: Vec::new(),
             editor_hitbox: None,
             view_mode_hitboxes: Vec::new(),
+            axis_scale_hitboxes: Vec::new(),
             expression_revision: 0,
             pending_expression_refresh_revision: None,
         }
@@ -329,6 +335,24 @@ impl MultiChartState {
         self.view_mode = self.view_mode.next();
         self.modified = true;
         self.view_mode
+    }
+
+    pub fn x_axis_scale(&self) -> ChartAxisScale {
+        self.x_axis_scale
+    }
+
+    pub fn y_axis_scale(&self) -> ChartAxisScale {
+        self.y_axis_scale
+    }
+
+    pub fn set_x_axis_scale(&mut self, scale: ChartAxisScale) {
+        self.x_axis_scale = scale;
+        self.modified = true;
+    }
+
+    pub fn set_y_axis_scale(&mut self, scale: ChartAxisScale) {
+        self.y_axis_scale = scale;
+        self.modified = true;
     }
 
     pub(crate) fn refresh_expression_detail_series(

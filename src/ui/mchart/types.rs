@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 
 use super::{
-    model::{ChartSource, MultiChartLoadState, MultiChartViewMode, Point},
+    model::{ChartAxisScale, ChartSource, MultiChartLoadState, MultiChartViewMode, Point},
     MultiChartLoadRequest,
 };
 
@@ -32,6 +32,13 @@ pub(in crate::ui) struct MultiChartViewModeHitbox {
     pub(in crate::ui) mode: MultiChartViewMode,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(in crate::ui) struct MultiChartAxisScaleHitbox {
+    pub(in crate::ui) area: Rect,
+    pub(in crate::ui) x_axis: bool,
+    pub(in crate::ui) scale: ChartAxisScale,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChartZoomMode {
     Uniform,
@@ -56,6 +63,8 @@ pub(super) struct PreparedLineChartSeries {
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedLineChartData {
+    pub(super) x_axis_scale: ChartAxisScale,
+    pub(super) y_axis_scale: ChartAxisScale,
     pub(super) plot_x_min: f64,
     pub(super) plot_x_max: f64,
     pub(super) y_min: f64,
@@ -80,6 +89,7 @@ pub(super) struct PreparedHistogramSeries {
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedHistogramData {
+    pub(super) x_axis_scale: ChartAxisScale,
     pub(super) value_min: f64,
     pub(super) value_max: f64,
     pub(super) count_max: f64,
@@ -103,6 +113,7 @@ pub(super) struct PreparedBoxPlotSeries {
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedBoxPlotData {
+    pub(super) y_axis_scale: ChartAxisScale,
     pub(super) value_min: f64,
     pub(super) value_max: f64,
     pub(super) series: Vec<PreparedBoxPlotSeries>,
@@ -110,6 +121,8 @@ pub(super) struct PreparedBoxPlotData {
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedComparisonScatterData {
+    pub(super) x_axis_scale: ChartAxisScale,
+    pub(super) y_axis_scale: ChartAxisScale,
     pub(super) label: String,
     pub(super) x_label: String,
     pub(super) y_label: String,
