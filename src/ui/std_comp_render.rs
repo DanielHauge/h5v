@@ -14,7 +14,7 @@ use syntect::{
 
 use crate::{
     configure,
-    h5f::{H5FNode, Node},
+    h5f::{DatasetHandle, H5FNode, Node},
 };
 
 pub fn render_string<T: ToString>(
@@ -288,7 +288,7 @@ pub fn render_empty_dataset(f: &mut Frame, area: &Rect) {
 
 pub fn render_unsupported_rendering(f: &mut Frame, area: &Rect, selected_node: &Node, desc: &str) {
     let (ds, _) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), attr) => (ds, attr),
         _ => return,
     };
 

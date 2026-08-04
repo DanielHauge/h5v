@@ -257,21 +257,31 @@ pub(crate) fn handle_imagefsvlen_load(
             while let Ok(queued) = rx_load.try_recv() {
                 req = queued;
             }
+            let requested_frame_idx = req.key.idx;
+            let frame_count = req.dataset.shape().first().copied().unwrap_or_default();
+            let frame_idx = requested_frame_idx as usize;
+            if frame_idx >= frame_count {
+                send_image_failure(
+                    &tx_events,
+                    req.key,
+                    format!(
+                        "Varlen image index {} is out of bounds for {} frame(s)",
+                        requested_frame_idx, frame_count
+                    ),
+                );
+                continue;
+            }
             let data = match req
                 .dataset
-                .read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(Selection::All)
-            {
+                .read_slice_1d::<hdf5_metno::types::VarLenArray<u8>, _>(
+                    s![frame_idx..frame_idx + 1],
+                ) {
                 Ok(d) => {
-                    let frame_idx = req.key.idx;
-                    let Some(bytes) = d.get(frame_idx as usize) else {
+                    let Some(bytes) = d.first() else {
                         send_image_failure(
                             &tx_events,
                             req.key,
-                            format!(
-                                "Varlen image index {} is out of bounds for {} frame(s)",
-                                frame_idx,
-                                d.len()
-                            ),
+                            "Varlen image frame selection returned no data",
                         );
                         continue;
                     };

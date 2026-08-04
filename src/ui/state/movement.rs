@@ -48,12 +48,15 @@ impl AppState<'_> {
             },
             ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let node = &current_node.node.borrow_mut();
+                let mut node = current_node.node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
                 let current_node = &node.node;
                 if self.matrix_view_state.row_offset == 0 {
                     return Ok(EventResult::Redraw);
                 }
-                if let Node::Dataset(_, dsattr) = current_node {
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = current_node {
                     let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset =
                         (self.matrix_view_state.row_offset.saturating_sub(dec)).min(
@@ -134,9 +137,12 @@ impl AppState<'_> {
                 }
             },
             ContentShowMode::Matrix => {
-                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let mut node = self.treeview[self.tree_view_cursor].node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
                 let current_node = &node.node;
-                if let Node::Dataset(_, dsattr) = current_node {
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = current_node {
                     let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset = (self.matrix_view_state.row_offset + inc)
                         .min(
@@ -210,9 +216,12 @@ impl AppState<'_> {
                 }
             },
             ContentShowMode::Matrix => {
-                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let mut node = self.treeview[self.tree_view_cursor].node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
                 let current_node = &node.node;
-                if let Node::Dataset(_, dsattr) = current_node {
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = current_node {
                     let row_selected_shape = dsattr.shape[node.selected_row];
                     self.matrix_view_state.row_offset = idx.min(
                         row_selected_shape
@@ -334,12 +343,15 @@ impl AppState<'_> {
         }
     }
 
-    fn smart_2d_seek_axis(&self) -> Result<Option<SeekAxis>> {
+    fn smart_2d_seek_axis(&mut self) -> Result<Option<SeekAxis>> {
         match self.active_content_mode() {
             ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let node = current_node.node.borrow();
-                let Node::Dataset(_, dsattr) = &node.node else {
+                let mut node = current_node.node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
+                let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = &node.node else {
                     return Ok(None);
                 };
                 let row_total = dsattr.shape[node.selected_row];
@@ -359,8 +371,11 @@ impl AppState<'_> {
             }
             ContentShowMode::Heatmap => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let node = current_node.node.borrow();
-                let Node::Dataset(_, dsattr) = &node.node else {
+                let mut node = current_node.node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
+                let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = &node.node else {
                     return Ok(None);
                 };
                 let source_rows = dsattr.shape[node.selected_row];
@@ -392,9 +407,14 @@ impl AppState<'_> {
     fn seek_matrix_row(&mut self, row: usize) -> Result<EventResult> {
         let Some(row_total) = ({
             let current_node = &self.treeview[self.tree_view_cursor];
-            let node = current_node.node.borrow();
+            let mut node = current_node.node.borrow_mut();
+            if matches!(node.node, Node::Dataset(_, _)) {
+                node.ensure_dataset_meta()?;
+            }
             match &node.node {
-                Node::Dataset(_, dsattr) => Some(dsattr.shape[node.selected_row]),
+                Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => {
+                    Some(dsattr.shape[node.selected_row])
+                }
                 _ => None,
             }
         }) else {
@@ -411,9 +431,12 @@ impl AppState<'_> {
     fn seek_matrix_col(&mut self, col: usize) -> Result<EventResult> {
         let Some(col_total) = ({
             let current_node = &self.treeview[self.tree_view_cursor];
-            let node = current_node.node.borrow();
+            let mut node = current_node.node.borrow_mut();
+            if matches!(node.node, Node::Dataset(_, _)) {
+                node.ensure_dataset_meta()?;
+            }
             match &node.node {
-                Node::Dataset(_, dsattr) => Some(
+                Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => Some(
                     if dsattr.is_compound_container() && dsattr.supports_compound_root_matrix() {
                         dsattr
                             .compound_root_matrix_column_count()
@@ -438,9 +461,12 @@ impl AppState<'_> {
     fn seek_heatmap_row(&mut self, row: usize) -> Result<EventResult> {
         let Some((source_rows, source_cols)) = ({
             let current_node = &self.treeview[self.tree_view_cursor];
-            let node = current_node.node.borrow();
+            let mut node = current_node.node.borrow_mut();
+            if matches!(node.node, Node::Dataset(_, _)) {
+                node.ensure_dataset_meta()?;
+            }
             match &node.node {
-                Node::Dataset(_, dsattr) => Some((
+                Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => Some((
                     dsattr.shape[node.selected_row],
                     dsattr.shape[node.selected_col],
                 )),
@@ -474,9 +500,12 @@ impl AppState<'_> {
     fn seek_heatmap_col(&mut self, col: usize) -> Result<EventResult> {
         let Some((source_rows, source_cols)) = ({
             let current_node = &self.treeview[self.tree_view_cursor];
-            let node = current_node.node.borrow();
+            let mut node = current_node.node.borrow_mut();
+            if matches!(node.node, Node::Dataset(_, _)) {
+                node.ensure_dataset_meta()?;
+            }
             match &node.node {
-                Node::Dataset(_, dsattr) => Some((
+                Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => Some((
                     dsattr.shape[node.selected_row],
                     dsattr.shape[node.selected_col],
                 )),
@@ -604,9 +633,12 @@ impl AppState<'_> {
                 }
             },
             ContentShowMode::Matrix => {
-                let node = &self.treeview[self.tree_view_cursor].node.borrow_mut();
+                let mut node = self.treeview[self.tree_view_cursor].node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
                 let current_node = &node.node;
-                if let Node::Dataset(_, dsattr) = current_node {
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = current_node {
                     let col_selected_shape = if dsattr.is_compound_container()
                         && dsattr.supports_compound_root_matrix()
                     {
@@ -670,12 +702,15 @@ impl AppState<'_> {
             },
             ContentShowMode::Matrix => {
                 let current_node = &self.treeview[self.tree_view_cursor];
-                let node = &current_node.node.borrow_mut();
+                let mut node = current_node.node.borrow_mut();
+                if matches!(node.node, Node::Dataset(_, _)) {
+                    node.ensure_dataset_meta()?;
+                }
                 let current_node = &node.node;
                 if self.matrix_view_state.col_offset == 0 {
                     return Ok(EventResult::Redraw);
                 }
-                if let Node::Dataset(_, dsattr) = current_node {
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = current_node {
                     let col_selected_shape = if dsattr.is_compound_container()
                         && dsattr.supports_compound_root_matrix()
                     {

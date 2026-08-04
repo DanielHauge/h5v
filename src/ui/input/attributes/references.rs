@@ -282,8 +282,12 @@ fn navigate_dataset_region_target(
 
     let current_node = &state.treeview[state.tree_view_cursor];
     let mut node = current_node.node.borrow_mut();
+    if matches!(node.node, crate::h5f::Node::Dataset(_, _)) {
+        node.ensure_dataset_meta()
+            .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))?;
+    }
     let (shape, available_modes) = match &node.node {
-        crate::h5f::Node::Dataset(_, meta) => (
+        crate::h5f::Node::Dataset(_, crate::h5f::DatasetMetaState::Loaded(meta)) => (
             meta.shape.clone(),
             state.filter_runtime_content_modes(node.content_show_modes()),
         ),

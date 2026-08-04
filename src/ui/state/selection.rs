@@ -105,6 +105,9 @@ impl AppState<'_> {
             current.borrow_mut().view_loaded = (index + 50) as u32;
             current = next;
         }
+        if matches!(current.borrow().node, Node::Dataset(_, _)) {
+            current.borrow_mut().ensure_dataset_meta()?;
+        }
         self.compute_tree_view();
         let Some((index, _)) = self
             .treeview
@@ -204,7 +207,10 @@ impl AppState<'_> {
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
-                if let Node::Dataset(_, dsattr) = &current_node.node {
+                if matches!(current_node.node, Node::Dataset(_, _)) {
+                    current_node.ensure_dataset_meta()?;
+                }
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = &current_node.node {
                     if matches!(active_mode, ContentShowMode::Matrix)
                         && dsattr.is_compound_container()
                         && dsattr.supports_compound_root_matrix()
@@ -267,6 +273,9 @@ impl AppState<'_> {
     pub fn capture_multichart_item(&self) -> Result<Option<CapturedMultiChartItem>> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
+        if matches!(node.node, Node::Dataset(_, _)) {
+            node.ensure_dataset_meta()?;
+        }
         match &node.node {
             Node::Group(_, meta) => {
                 let Some(expression) = meta.preview_expr.as_deref() else {
@@ -285,8 +294,15 @@ impl AppState<'_> {
                     request: None,
                 }))
             }
-            Node::Dataset(_, dsattr) if dsattr.is_compound_container() => Ok(None),
-            Node::Dataset(ds, dsattr) => {
+            Node::Dataset(_, DatasetMetaState::Loaded(dsattr))
+                if dsattr.is_compound_container() =>
+            {
+                Ok(None)
+            }
+            Node::Dataset(
+                crate::h5f::DatasetHandle::Loaded(ds),
+                DatasetMetaState::Loaded(dsattr),
+            ) => {
                 let ds = ds.clone();
                 let meta = dsattr.clone();
                 let shape = dsattr.shape.clone();
@@ -337,8 +353,11 @@ impl AppState<'_> {
         let active_mode = self.active_content_mode();
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
+        if matches!(node.node, Node::Dataset(_, _)) {
+            node.ensure_dataset_meta()?;
+        }
         let shape_len = match &node.node {
-            Node::Dataset(_, dsattr) => dsattr.shape.len(),
+            Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => dsattr.shape.len(),
             _ => return Ok(EventResult::Continue),
         };
         node.sync_selection_rank(shape_len);
@@ -371,7 +390,7 @@ impl AppState<'_> {
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
                 let is_compound_root_matrix = matches!(
                     &node.node,
-                    Node::Dataset(_, dsattr)
+                    Node::Dataset(_, DatasetMetaState::Loaded(dsattr))
                         if matches!(active_mode, ContentShowMode::Matrix)
                             && dsattr.is_compound_container()
                             && dsattr.supports_compound_root_matrix()
@@ -418,8 +437,11 @@ impl AppState<'_> {
     pub fn change_selected_index(&mut self, delta: isize) -> Result<EventResult> {
         let current_node = &self.treeview[self.tree_view_cursor];
         let mut node = current_node.node.borrow_mut();
+        if matches!(node.node, Node::Dataset(_, _)) {
+            node.ensure_dataset_meta()?;
+        }
         let shape = match &node.node {
-            Node::Dataset(_, dsattr) => dsattr.shape.clone(),
+            Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) => dsattr.shape.clone(),
             _ => return Ok(EventResult::Continue),
         };
         node.sync_selection_rank(shape.len());
@@ -439,7 +461,10 @@ impl AppState<'_> {
             ContentShowMode::Matrix | ContentShowMode::Heatmap => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
-                if let Node::Dataset(_, dsattr) = &current_node.node {
+                if matches!(current_node.node, Node::Dataset(_, _)) {
+                    current_node.ensure_dataset_meta()?;
+                }
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = &current_node.node {
                     if matches!(active_mode, ContentShowMode::Matrix)
                         && dsattr.is_compound_container()
                         && dsattr.supports_compound_root_matrix()
@@ -479,7 +504,10 @@ impl AppState<'_> {
             ContentShowMode::Preview => {
                 let current_node = &self.treeview[self.tree_view_cursor];
                 let mut current_node = current_node.node.borrow_mut();
-                if let Node::Dataset(_, dsattr) = &current_node.node {
+                if matches!(current_node.node, Node::Dataset(_, _)) {
+                    current_node.ensure_dataset_meta()?;
+                }
+                if let Node::Dataset(_, DatasetMetaState::Loaded(dsattr)) = &current_node.node {
                     let shape = dsattr.shape.clone();
                     current_node.selected_x = ((current_node.selected_x as isize + delta)
                         % shape.len() as isize)

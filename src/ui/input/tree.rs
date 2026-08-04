@@ -1,4 +1,5 @@
 use std::cmp::{max, min};
+use std::rc::Rc;
 
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
@@ -38,9 +39,22 @@ pub fn handle_normal_tree_event(
                 }
                 Some(BoundAction::Action(TreeAction::Collapse)) => {
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    if tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().collapse();
+                    if tree_item.load_more || tree_item.node.borrow().expanded {
+                        let node = tree_item.node.clone();
+                        node.borrow_mut().collapse();
+                        state.tree_view_cursor = state
+                            .treeview
+                            .iter()
+                            .position(|item| !item.load_more && Rc::ptr_eq(&item.node, &node))
+                            .unwrap_or(state.tree_view_cursor);
                         state.compute_tree_view();
+                        Ok(EventResult::Redraw)
+                    } else if let Some(parent) = tree_item.parent.clone() {
+                        state.tree_view_cursor = state
+                            .treeview
+                            .iter()
+                            .position(|item| !item.load_more && Rc::ptr_eq(&item.node, &parent))
+                            .unwrap_or(state.tree_view_cursor);
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
@@ -48,15 +62,37 @@ pub fn handle_normal_tree_event(
                 }
                 Some(BoundAction::Action(TreeAction::Expand)) => {
                     if state.treeview[state.tree_view_cursor].load_more {
-                        return Ok(EventResult::Continue);
+                        let tree_item = &state.treeview[state.tree_view_cursor];
+                        tree_item.node.borrow_mut().view_loaded += 50;
+                        state.compute_tree_view();
+                        return Ok(EventResult::Redraw);
                     }
 
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    if !tree_item.node.borrow().expanded {
-                        tree_item.node.borrow_mut().expand()?;
+                    if !tree_item.node.borrow().is_expandable() {
+                        return Ok(EventResult::Continue);
+                    }
+                    let node = tree_item.node.clone();
+                    if !node.borrow().expanded {
+                        let expand_result = node.borrow_mut().expand();
+                        if let Err(error) = expand_result {
+                            state.compute_tree_view();
+                            return Err(error.into());
+                        }
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
+                        let node = tree_item.node.clone();
+                        if let Some(child) = state.treeview.get(state.tree_view_cursor + 1) {
+                            if child
+                                .parent
+                                .as_ref()
+                                .is_some_and(|parent| Rc::ptr_eq(parent, &node))
+                            {
+                                state.tree_view_cursor += 1;
+                                return Ok(EventResult::Redraw);
+                            }
+                        }
                         Ok(EventResult::Continue)
                     }
                 }
@@ -69,9 +105,18 @@ pub fn handle_normal_tree_event(
                     }
 
                     let tree_item = &state.treeview[state.tree_view_cursor];
-                    tree_item.node.borrow_mut().expand_toggle()?;
-                    state.compute_tree_view();
-                    Ok(EventResult::Redraw)
+                    if tree_item.node.borrow().is_expandable() {
+                        let node = tree_item.node.clone();
+                        let expand_result = node.borrow_mut().expand_toggle();
+                        if let Err(error) = expand_result {
+                            state.compute_tree_view();
+                            return Err(error.into());
+                        }
+                        state.compute_tree_view();
+                        Ok(EventResult::Redraw)
+                    } else {
+                        Ok(EventResult::Continue)
+                    }
                 }
                 Some(BoundAction::Action(TreeAction::AddToMultiChart)) => {
                     let Some(captured) = state.capture_multichart_item()? else {

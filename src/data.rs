@@ -3,7 +3,8 @@ use core::f64;
 use hdf5_metno::{Dataset, Error, H5Type, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
-pub(crate) const DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES: usize = 4096;
+pub(crate) const DEFAULT_CHART_PREVIEW_MAX_SAMPLES: usize = 4096;
+pub(crate) const DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES: usize = DEFAULT_CHART_PREVIEW_MAX_SAMPLES;
 
 pub trait Previewable {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error>;
@@ -144,7 +145,11 @@ impl MatrixValues for Dataset {
 
 impl Previewable for Dataset {
     fn plot(&self, selection: &PreviewSelection) -> Result<DatasetPlotingData, Error> {
-        plot_dataset_with_cap(self, selection, usize::MAX)
+        let max_samples = match selection.slice {
+            SliceSelection::All => DEFAULT_CHART_PREVIEW_MAX_SAMPLES,
+            SliceSelection::FromTo(_, _) => usize::MAX,
+        };
+        plot_dataset_with_cap(self, selection, max_samples)
     }
 }
 
@@ -203,7 +208,8 @@ pub(crate) fn plot_sampling_step_with_cap(length: usize, max_samples: usize) -> 
 mod tests {
     use super::{
         plot_sampling_step_with_cap, validate_preview_selection_shape, PreviewSelection,
-        SliceSelection, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
+        Previewable, SliceSelection, DEFAULT_CHART_PREVIEW_MAX_SAMPLES,
+        DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES,
     };
 
     #[test]
@@ -251,5 +257,60 @@ mod tests {
             plot_sampling_step_with_cap(10_000, DEFAULT_MCHART_OVERVIEW_MAX_SAMPLES),
             3
         );
+    }
+
+    #[test]
+    fn default_plot_caps_an_unbounded_chart_axis() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create HDF5 file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create HDF5 file");
+        let values = (0..DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("values")
+            .expect("failed to create dataset");
+
+        let preview = dataset
+            .plot(&PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::All,
+            })
+            .expect("failed to plot dataset");
+
+        assert_eq!(preview.length, DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1);
+        assert_eq!(
+            preview.data.len(),
+            (DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1).div_ceil(2)
+        );
+        assert!(preview.data.len() <= DEFAULT_CHART_PREVIEW_MAX_SAMPLES);
+    }
+
+    #[test]
+    fn default_plot_keeps_viewport_bounded_selection_full_resolution() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create HDF5 file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create HDF5 file");
+        let values = (0..DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("values")
+            .expect("failed to create dataset");
+
+        let preview = dataset
+            .plot(&PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::FromTo(0, values.len()),
+            })
+            .expect("failed to plot dataset");
+
+        assert_eq!(preview.data.len(), values.len());
     }
 }

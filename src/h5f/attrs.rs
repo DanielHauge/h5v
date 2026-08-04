@@ -19,7 +19,7 @@ use super::{
         write_attr_from_text, AttributeCreateType, FixedStringRewrite,
     },
     meta::SYSTEM_PROPERTIES,
-    model::{H5FNode, Node},
+    model::{DatasetHandle, DatasetMetaState, H5FNode, Node},
 };
 
 pub trait HasAttributes {
@@ -56,7 +56,8 @@ impl HasName for Node {
                     .to_string()
             }
             Node::Group(_, meta) => meta.display_name.clone(),
-            Node::Dataset(_, meta) => meta.display_name.clone(),
+            Node::Dataset(_, DatasetMetaState::Pending(identity)) => identity.display_name.clone(),
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) => meta.display_name.clone(),
             Node::Broken(name) => name.clone(),
         }
     }
@@ -67,10 +68,14 @@ impl HasPath for Node {
         match self {
             Node::File(file) => file.name(),
             Node::Group(group, _) => group.name(),
-            Node::Dataset(dataset, meta) => meta
+            Node::Dataset(_, DatasetMetaState::Pending(identity)) => identity.path.clone(),
+            Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => meta
                 .virtual_path()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| dataset.name()),
+            Node::Dataset(DatasetHandle::Pending { .. }, DatasetMetaState::Loaded(meta)) => {
+                meta.virtual_path().unwrap_or(&meta.filename).to_string()
+            }
             Node::Broken(n) => n.clone(),
         }
         .to_string()
@@ -92,7 +97,10 @@ impl HasAttributes for Node {
         match self {
             Node::File(file) => Ok(file.attr_names()?),
             Node::Group(group, _) => Ok(group.attr_names()?),
-            Node::Dataset(dataset, _) => Ok(dataset.attr_names()?),
+            Node::Dataset(DatasetHandle::Loaded(dataset), _) => Ok(dataset.attr_names()?),
+            Node::Dataset(DatasetHandle::Pending { .. }, _) => Err(hdf5_metno::Error::Internal(
+                "Dataset metadata is pending".to_string(),
+            )),
             Node::Broken(_) => Ok(vec![]),
         }
     }
@@ -101,7 +109,10 @@ impl HasAttributes for Node {
         match self {
             Node::File(file) => file.attr(name),
             Node::Group(group, _) => group.attr(name),
-            Node::Dataset(dataset, _) => dataset.attr(name),
+            Node::Dataset(DatasetHandle::Loaded(dataset), _) => dataset.attr(name),
+            Node::Dataset(DatasetHandle::Pending { .. }, _) => Err(hdf5_metno::Error::Internal(
+                "Dataset metadata is pending".to_string(),
+            )),
             Node::Broken(_) => Err(hdf5_metno::Error::Internal(String::from(
                 "Cannot read from broken link",
             ))),
@@ -146,7 +157,12 @@ impl HasAttributes for Node {
         let group = match self {
             Node::File(file) => file.as_group()?,
             Node::Group(group, _) => group.as_group()?,
-            Node::Dataset(dataset, _) => dataset.as_group()?,
+            Node::Dataset(DatasetHandle::Loaded(dataset), _) => dataset.as_group()?,
+            Node::Dataset(DatasetHandle::Pending { .. }, _) => {
+                return Err(AppError::Hdf5(hdf5_metno::Error::Internal(
+                    "Dataset metadata is pending".to_string(),
+                )))
+            }
             Node::Broken(_) => {
                 return Err(hdf5_metno::Error::Internal(String::from(
                     "Cannot update attribute on broken link",
@@ -178,7 +194,12 @@ fn node_attribute_group(node: &Node) -> Result<Group, AppError> {
     match node {
         Node::File(file) => file.as_group().map_err(AppError::from),
         Node::Group(group, _) => group.as_group().map_err(AppError::from),
-        Node::Dataset(dataset, _) => dataset.as_group().map_err(AppError::from),
+        Node::Dataset(DatasetHandle::Loaded(dataset), _) => {
+            dataset.as_group().map_err(AppError::from)
+        }
+        Node::Dataset(DatasetHandle::Pending { .. }, _) => {
+            Err(hdf5_metno::Error::Internal("Dataset metadata is pending".to_string()).into())
+        }
         Node::Broken(_) => Err(hdf5_metno::Error::Internal(String::from(
             "Cannot update attribute on broken link",
         ))
@@ -285,7 +306,11 @@ pub struct ComputedAttributes {
 }
 
 impl ComputedAttributes {
-    pub fn new(node: &Node) -> Result<Self, hdf5_metno::Error> {
+    pub fn new(node: &mut H5FNode) -> Result<Self, hdf5_metno::Error> {
+        if matches!(node.node, Node::Dataset(_, DatasetMetaState::Pending(_))) {
+            node.ensure_dataset_meta()?;
+        }
+        let node = &node.node;
         let attributes = node.attributes()?;
         let longest_name_length = attributes
             .iter()
@@ -303,7 +328,7 @@ impl ComputedAttributes {
         let name_area_width = longest_name_length + 3;
         let property_rows = std::iter::once(node.render(name_area_width))
             .chain(match node {
-                Node::Dataset(_, ds) => ds.render(name_area_width),
+                Node::Dataset(_, DatasetMetaState::Loaded(ds)) => ds.render(name_area_width),
                 Node::Group(_, grp_meta) => grp_meta.render(name_area_width),
                 _ => vec![],
             })
@@ -507,7 +532,7 @@ impl H5FNode {
         match self.computed_attributes {
             Some(ref computed_attributes) => Ok(computed_attributes),
             None => {
-                let computed_attributes = ComputedAttributes::new(&self.node)?;
+                let computed_attributes = ComputedAttributes::new(self)?;
                 self.computed_attributes = Some(computed_attributes);
                 self.computed_attributes
                     .as_ref()
@@ -517,7 +542,7 @@ impl H5FNode {
     }
 
     pub fn recompute_attributes(&mut self) -> Result<(), hdf5_metno::Error> {
-        self.computed_attributes = Some(ComputedAttributes::new(&self.node)?);
+        self.computed_attributes = Some(ComputedAttributes::new(self)?);
         Ok(())
     }
 }

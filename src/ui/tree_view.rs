@@ -19,12 +19,65 @@ use super::state::{AppState, Focus, Mode, TreeHitbox};
 #[derive(Debug)]
 pub struct TreeItem<'a> {
     pub node: Rc<RefCell<H5FNode>>,
+    pub parent: Option<Rc<RefCell<H5FNode>>>,
     pub load_more: bool,
     pub line: Line<'a>,
 }
 
+#[derive(Clone)]
+struct TreeSelection {
+    node: Rc<RefCell<H5FNode>>,
+    load_more: bool,
+    ancestors: Vec<Rc<RefCell<H5FNode>>>,
+}
+
+fn tree_selection(treeview: &[TreeItem<'_>], cursor: usize) -> Option<TreeSelection> {
+    let item = treeview.get(cursor)?;
+    let mut ancestors = Vec::new();
+    if item.load_more {
+        ancestors.push(item.node.clone());
+    }
+    let mut parent = item.parent.clone();
+    while let Some(node) = parent {
+        parent = treeview
+            .iter()
+            .find(|item| !item.load_more && Rc::ptr_eq(&item.node, &node))
+            .and_then(|item| item.parent.clone());
+        ancestors.push(node);
+    }
+    Some(TreeSelection {
+        node: item.node.clone(),
+        load_more: item.load_more,
+        ancestors,
+    })
+}
+
+fn restored_tree_cursor(treeview: &[TreeItem<'_>], selection: &TreeSelection) -> Option<usize> {
+    treeview
+        .iter()
+        .position(|item| {
+            Rc::ptr_eq(&item.node, &selection.node) && item.load_more == selection.load_more
+        })
+        .or_else(|| {
+            selection.ancestors.iter().find_map(|ancestor| {
+                treeview
+                    .iter()
+                    .position(|item| !item.load_more && Rc::ptr_eq(&item.node, ancestor))
+            })
+        })
+}
+
+fn group_load_marker(load_error: bool) -> Option<&'static str> {
+    if load_error {
+        Some("[! retry]")
+    } else {
+        None
+    }
+}
+
 impl AppState<'_> {
     pub fn compute_tree_view(&mut self) {
+        let selection = tree_selection(&self.treeview, self.tree_view_cursor);
         let mut tree_view = Vec::new();
         let file_icon = Text::from(configure::configured_symbol(|symbols| {
             symbols.tree.root_file_icon
@@ -36,6 +89,7 @@ impl AppState<'_> {
         );
         let root_tree_item = TreeItem {
             node: self.root.clone(),
+            parent: None,
             load_more: false,
             line: text,
         };
@@ -45,14 +99,19 @@ impl AppState<'_> {
             vec![Span::raw("".to_string())],
             0,
             &self.multi_chart,
+            None,
         );
         tree_view.extend(children);
         self.treeview = tree_view;
-        self.tree_view_cursor = self
-            .treeview
-            .len()
-            .saturating_sub(1)
-            .min(self.tree_view_cursor);
+        self.tree_view_cursor = selection
+            .as_ref()
+            .and_then(|selection| restored_tree_cursor(&self.treeview, selection))
+            .unwrap_or_else(|| {
+                self.treeview
+                    .len()
+                    .saturating_sub(1)
+                    .min(self.tree_view_cursor)
+            });
     }
 }
 
@@ -61,6 +120,7 @@ fn compute_tree_view_rec<'a>(
     prefix: Vec<Span<'a>>,
     indent: u8,
     mchart: &MultiChartState,
+    parent: Option<Rc<RefCell<H5FNode>>>,
 ) -> Vec<TreeItem<'a>> {
     let mut tree_view = Vec::new();
     if !node.borrow().expanded {
@@ -105,6 +165,7 @@ fn compute_tree_view_rec<'a>(
             let line = Line::from(spans);
             let tree_item = TreeItem {
                 node: node.clone(),
+                parent: parent.clone(),
                 load_more: true,
                 line,
             };
@@ -121,14 +182,29 @@ fn compute_tree_view_rec<'a>(
             configure::configured_symbol(|symbols| symbols.tree.collapse_collapsed)
         };
 
-        let folder_icon_base = match (c.expanded, !c.children.is_empty()) {
-            (true, true) => configure::configured_symbol(|symbols| symbols.tree.folder_open_branch),
-            (true, false) => configure::configured_symbol(|symbols| symbols.tree.folder_open_leaf),
-            (false, true) => {
-                configure::configured_symbol(|symbols| symbols.tree.folder_closed_branch)
-            }
-            (false, false) => {
-                configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
+        let has_children = if c.read {
+            !c.children.is_empty()
+        } else if let crate::h5f::Node::Group(_, meta) = &c.node {
+            meta.has_children
+        } else {
+            false
+        };
+        let folder_icon_base = if c.load_error.is_some() {
+            "!"
+        } else {
+            match (c.expanded, has_children) {
+                (true, true) => {
+                    configure::configured_symbol(|symbols| symbols.tree.folder_open_branch)
+                }
+                (true, false) => {
+                    configure::configured_symbol(|symbols| symbols.tree.folder_open_leaf)
+                }
+                (false, true) => {
+                    configure::configured_symbol(|symbols| symbols.tree.folder_closed_branch)
+                }
+                (false, false) => {
+                    configure::configured_symbol(|symbols| symbols.tree.folder_closed_leaf)
+                }
             }
         };
         let folder_icon_link = c.icon();
@@ -186,6 +262,12 @@ fn compute_tree_view_rec<'a>(
             child.borrow().name(),
             Style::default().fg(name_color),
         ));
+        if let Some(marker) = group_load_marker(c.load_error.is_some()) {
+            line_vec.push(Span::styled(
+                format!(" {marker}"),
+                Style::default().fg(configure::themed_color(|colors| colors.text.error)),
+            ));
+        }
         let path = child.borrow().node.path();
         let memberships = mchart
             .chart_items()
@@ -220,6 +302,7 @@ fn compute_tree_view_rec<'a>(
 
         let tree_item = TreeItem {
             node: child.clone(),
+            parent: Some(node.clone()),
             load_more: false,
             line,
         };
@@ -240,7 +323,8 @@ fn compute_tree_view_rec<'a>(
         };
 
         if child.borrow().is_expandable() {
-            let children = compute_tree_view_rec(child, prefix_clone, indent, mchart);
+            let children =
+                compute_tree_view_rec(child, prefix_clone, indent, mchart, Some(node.clone()));
             tree_view.extend(children);
         }
     }
@@ -414,5 +498,83 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &mut AppState) {
             }
         }
         Mode::Help | Mode::Logs | Mode::MultiChart => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use ratatui::text::Line;
+
+    use super::{group_load_marker, restored_tree_cursor, tree_selection, TreeItem};
+    use crate::h5f::{H5FNode, Node};
+
+    fn item(
+        node: &Rc<RefCell<H5FNode>>,
+        parent: Option<&Rc<RefCell<H5FNode>>>,
+        load_more: bool,
+    ) -> TreeItem<'static> {
+        TreeItem {
+            node: node.clone(),
+            parent: parent.cloned(),
+            load_more,
+            line: Line::default(),
+        }
+    }
+
+    #[test]
+    fn recompute_preserves_the_same_visible_node() {
+        let root = Rc::new(RefCell::new(H5FNode::new(Node::Broken("root".to_string()))));
+        let child = Rc::new(RefCell::new(H5FNode::new(Node::Broken(
+            "child".to_string(),
+        ))));
+        let before = vec![item(&root, None, false), item(&child, Some(&root), false)];
+        let selection = tree_selection(&before, 1).expect("selection should exist");
+
+        assert_eq!(restored_tree_cursor(&before, &selection), Some(1));
+    }
+
+    #[test]
+    fn recompute_moves_a_hidden_selection_to_its_visible_parent() {
+        let root = Rc::new(RefCell::new(H5FNode::new(Node::Broken("root".to_string()))));
+        let parent = Rc::new(RefCell::new(H5FNode::new(Node::Broken(
+            "parent".to_string(),
+        ))));
+        let child = Rc::new(RefCell::new(H5FNode::new(Node::Broken(
+            "child".to_string(),
+        ))));
+        let before = vec![
+            item(&root, None, false),
+            item(&parent, Some(&root), false),
+            item(&child, Some(&parent), false),
+        ];
+        let after = vec![item(&root, None, false), item(&parent, Some(&root), false)];
+        let selection = tree_selection(&before, 2).expect("selection should exist");
+
+        assert_eq!(restored_tree_cursor(&after, &selection), Some(1));
+    }
+
+    #[test]
+    fn completed_load_more_keeps_selection_on_its_group() {
+        let root = Rc::new(RefCell::new(H5FNode::new(Node::Broken("root".to_string()))));
+        let group = Rc::new(RefCell::new(H5FNode::new(Node::Broken(
+            "group".to_string(),
+        ))));
+        let before = vec![
+            item(&root, None, false),
+            item(&group, Some(&root), false),
+            item(&group, Some(&root), true),
+        ];
+        let after = vec![item(&root, None, false), item(&group, Some(&root), false)];
+        let selection = tree_selection(&before, 2).expect("selection should exist");
+
+        assert_eq!(restored_tree_cursor(&after, &selection), Some(1));
+    }
+
+    #[test]
+    fn failed_group_load_has_a_distinct_retry_marker() {
+        assert_eq!(group_load_marker(false), None);
+        assert_eq!(group_load_marker(true), Some("[! retry]"));
     }
 }

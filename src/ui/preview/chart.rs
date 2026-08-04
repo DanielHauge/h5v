@@ -19,7 +19,8 @@ use crate::{
     data::{DatasetPlotingData, PreviewSelection, Previewable, SliceSelection},
     error::AppError,
     h5f::{
-        plot_projected, read_projected_scalar, read_single_value_dataset, H5FNode, HasPath, Node,
+        plot_projected, read_projected_scalar, read_single_value_dataset, DatasetHandle,
+        DatasetMetaState, H5FNode, HasPath, Node,
     },
     ui::{
         chart_math::format_axis_number,
@@ -252,8 +253,11 @@ pub fn render_chart_preview(
 ) -> Result<(), AppError> {
     let _chart_render_timer = perf::metrics().preview.chart_render.start();
     clear_chart_preview_layout(state);
+    node.ensure_dataset_meta()?;
     let (ds, ds_meta) = match &node.node {
-        Node::Dataset(ds, attr) => (ds.clone(), attr.clone()),
+        Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => {
+            (ds.clone(), attr.clone())
+        }
         _ => return Ok(()),
     };
     if ds_meta.is_compound_leaf() && matches!(ds_meta.matrixable, Some(MatrixRenderType::Strings)) {

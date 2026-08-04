@@ -3,7 +3,7 @@ use std::{cell::RefCell, fs, path::Path, rc::Rc};
 use hdf5_metno::{
     plist::file_access::FileCloseDegree,
     types::{TypeDescriptor, VarLenUnicode},
-    Dataset, File, Group, LinkType, OpenMode,
+    Dataset, File, Group, LinkType, LocationType, OpenMode,
 };
 use ratatui::style::Color;
 use tempfile::NamedTempFile;
@@ -20,30 +20,9 @@ use super::{
     attrs::HasName,
     compound::root_compound_projection,
     meta::{CompoundFieldProjection, DatasetMeta, EnumRenderOverrides, GroupMeta},
-    model::{H5FNode, Node, H5F},
+    model::{DatasetHandle, DatasetIdentity, DatasetMetaState, H5FNode, Node, H5F},
     ReadOpenMode, RequestedOpenMode, ResolvedOpenMode,
 };
-
-pub trait HasChildren {
-    fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
-    fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error>;
-    fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error>;
-    fn get_externals(&self) -> Result<Vec<ExternalObject>, hdf5_metno::Error>;
-    fn get_soft_datasets(&self) -> Result<Vec<LinkedDataset>, hdf5_metno::Error>;
-}
-
-#[derive(Debug)]
-pub struct LinkedDataset {
-    dataset: Dataset,
-    link_name: String,
-}
-
-#[derive(Debug)]
-pub enum ExternalObject {
-    Dataset(LinkedDataset),
-    Group(Group),
-    LinkBroken(String, String),
-}
 
 fn highlight_hint_from_name(name: &str) -> Option<String> {
     name.rsplit_once('.')
@@ -158,88 +137,9 @@ fn resolve_enum_render_overrides(
     (!overrides.is_empty()).then_some(overrides)
 }
 
-impl HasChildren for Group {
-    fn get_soft_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        let soft_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::Soft == link.link_type {
-                match group.group(name) {
-                    Ok(g) => objects.push(g),
-                    Err(_) => return true,
-                }
-            }
-            true
-        })?;
-        Ok(soft_groups)
-    }
-
-    fn get_soft_datasets(&self) -> Result<Vec<LinkedDataset>, hdf5_metno::Error> {
-        let soft_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::Soft == link.link_type {
-                match group.dataset(name) {
-                    Ok(dataset) => objects.push(LinkedDataset {
-                        dataset,
-                        link_name: name.to_string(),
-                    }),
-                    Err(_) => return true,
-                }
-            }
-            true
-        })?;
-        Ok(soft_datasets)
-    }
-
-    fn get_hard_groups(&self) -> Result<Vec<Group>, hdf5_metno::Error> {
-        let hard_groups = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::Hard == link.link_type {
-                match group.group(name) {
-                    Ok(g) => objects.push(g),
-                    Err(_) => return true,
-                }
-            }
-            true
-        })?;
-        Ok(hard_groups)
-    }
-
-    fn get_hard_datasets(&self) -> Result<Vec<Dataset>, hdf5_metno::Error> {
-        let datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::Hard == link.link_type {
-                match group.dataset(name) {
-                    Ok(ds) => objects.push(ds),
-                    Err(_) => return true,
-                }
-            }
-            true
-        })?;
-        Ok(datasets)
-    }
-
-    fn get_externals(&self) -> Result<Vec<ExternalObject>, hdf5_metno::Error> {
-        let external_datasets = self.iter_visit_default(vec![], |group, name, link, objects| {
-            if LinkType::External == link.link_type {
-                if let Ok(ds) = group.dataset(name) {
-                    objects.push(ExternalObject::Dataset(LinkedDataset {
-                        dataset: ds,
-                        link_name: name.to_string(),
-                    }));
-                } else if let Ok(grp) = group.group(name) {
-                    objects.push(ExternalObject::Group(grp));
-                } else {
-                    objects.push(ExternalObject::LinkBroken(
-                        name.to_string(),
-                        group.filename().to_string(),
-                    ));
-                }
-            }
-            true
-        })?;
-        Ok(external_datasets)
-    }
-}
-
 pub enum DSType {
-    Linked(LinkedDataset),
-    Hard(Dataset),
+    Linked(Group, String),
+    Hard(Group, String),
     BrokenLink(String, String),
 }
 
@@ -250,6 +150,48 @@ pub enum GrpType {
 }
 
 impl H5FNode {
+    pub fn ensure_dataset_meta(&mut self) -> Result<&DatasetMeta, hdf5_metno::Error> {
+        let pending = match &self.node {
+            Node::Dataset(
+                DatasetHandle::Pending { parent, name },
+                DatasetMetaState::Pending(identity),
+            ) => Some((parent.clone(), name.clone(), identity.clone())),
+            Node::Dataset(_, DatasetMetaState::Loaded(_)) => None,
+            _ => return Err(hdf5_metno::Error::Internal("Not a dataset".to_string())),
+        };
+        let Some((parent, name, identity)) = pending else {
+            return match &self.node {
+                Node::Dataset(_, DatasetMetaState::Loaded(meta)) => Ok(meta),
+                _ => unreachable!(),
+            };
+        };
+        let dataset = match parent.dataset(&name) {
+            Ok(dataset) => dataset,
+            Err(error) => {
+                self.load_error = Some(error.to_string());
+                return Err(error);
+            }
+        };
+        match materialize_dataset_meta(&dataset, identity) {
+            Ok(meta) => {
+                self.sync_selection_rank(meta.shape.len());
+                self.node = Node::Dataset(
+                    DatasetHandle::Loaded(dataset),
+                    DatasetMetaState::Loaded(meta),
+                );
+                self.load_error = None;
+            }
+            Err(error) => {
+                self.load_error = Some(error.to_string());
+                return Err(error);
+            }
+        }
+        match &self.node {
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) => Ok(meta),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn full_path(&self) -> String {
         if let Some(ref name) = self.display_name {
             return name.clone();
@@ -267,12 +209,13 @@ impl H5FNode {
                 .next_back()
                 .unwrap_or("")
                 .to_string(),
-            Node::Dataset(ds, _) => ds
+            Node::Dataset(DatasetHandle::Loaded(ds), _) => ds
                 .filename()
                 .split('/')
                 .next_back()
                 .unwrap_or("")
                 .to_string(),
+            Node::Dataset(DatasetHandle::Pending { name, .. }, _) => name.clone(),
             Node::Broken(path) => path.clone(),
         }
     }
@@ -289,13 +232,6 @@ impl H5FNode {
             return Ok(());
         }
         self.expanded = true;
-
-        for child in &self.children {
-            let mut child_node = child.borrow_mut();
-            if child_node.is_expandable() {
-                child_node.read_children()?;
-            }
-        }
         Ok(())
     }
 
@@ -303,13 +239,6 @@ impl H5FNode {
         self.read_children()?;
         if !self.expanded {
             self.expanded = true;
-        }
-
-        for child in &self.children {
-            let mut child_node = child.borrow_mut();
-            if child_node.is_expandable() {
-                child_node.read_children()?;
-            }
         }
         Ok(())
     }
@@ -344,6 +273,9 @@ impl H5FNode {
                         if relative_path.len() > n.len() + 1 {
                             return child_node.expand_path(&relative_path[n.len() + 1..]);
                         }
+                        if matches!(child_node.node, Node::Dataset(_, _)) {
+                            child_node.ensure_dataset_meta()?;
+                        }
                         return Ok(Some(i));
                     }
                 }
@@ -354,19 +286,32 @@ impl H5FNode {
     }
 
     fn read_children(&mut self) -> Result<(), hdf5_metno::Error> {
+        let result = self.read_children_once();
+        self.load_error = result.as_ref().err().map(ToString::to_string);
+        result
+    }
+
+    fn read_children_once(&mut self) -> Result<(), hdf5_metno::Error> {
         if self.read {
             return Ok(());
         }
         if matches!(self.node, Node::Broken(_)) {
+            self.read = true;
             return Ok(());
         }
 
-        if let Node::Dataset(dataset, meta) = &self.node {
+        if matches!(self.node, Node::Dataset(_, _)) {
+            let meta = self.ensure_dataset_meta()?.clone();
+            let Node::Dataset(DatasetHandle::Loaded(dataset), _) = &self.node else {
+                unreachable!()
+            };
             if !meta.is_compound_container() {
+                self.read = true;
                 return Ok(());
             }
-            let children = synthetic_compound_children(dataset, meta)?;
+            let children = synthetic_compound_children(dataset, &meta)?;
             self.children = children;
+            self.read = true;
             return Ok(());
         }
 
@@ -377,30 +322,83 @@ impl H5FNode {
             Node::Dataset(_, _) => unreachable!("It should be guarded by the previous match"),
         };
 
-        let mut groups = vec![];
-        let mut datasets = vec![];
-        for g in has_children.get_hard_groups()? {
-            groups.push(GrpType::Hard(g));
-        }
-
-        for external in has_children.get_externals()? {
-            match external {
-                ExternalObject::Dataset(dataset) => datasets.push(DSType::Linked(dataset)),
-                ExternalObject::Group(group) => groups.push(GrpType::External(group)),
-                ExternalObject::LinkBroken(fname, name) => {
-                    datasets.push(DSType::BrokenLink(fname, name))
+        let (
+            hard_groups,
+            external_groups,
+            soft_groups,
+            hard_datasets,
+            external_datasets,
+            soft_datasets,
+            broken_externals,
+        ) = has_children.iter_visit_default(
+            (vec![], vec![], vec![], vec![], vec![], vec![], vec![]),
+            |group, name, link, nodes| {
+                let is_link = link.link_type != LinkType::Hard;
+                match group.loc_type_by_name(name) {
+                    Ok(LocationType::Group) => {
+                        if let Ok(child) = group.group(name) {
+                            match link.link_type {
+                                LinkType::Hard => nodes.0.push(child),
+                                LinkType::External => nodes.1.push(child),
+                                LinkType::Soft => nodes.2.push(child),
+                            }
+                        } else if link.link_type == LinkType::External {
+                            nodes
+                                .6
+                                .push((name.to_string(), group.filename().to_string()));
+                        }
+                    }
+                    Ok(LocationType::Dataset) => {
+                        if is_link {
+                            match link.link_type {
+                                LinkType::External => {
+                                    nodes.4.push((group.clone(), name.to_string()))
+                                }
+                                LinkType::Soft => nodes.5.push((group.clone(), name.to_string())),
+                                _ => {}
+                            }
+                        } else {
+                            nodes.3.push((group.clone(), name.to_string()));
+                        }
+                    }
+                    Ok(_) if link.link_type == LinkType::External => nodes
+                        .6
+                        .push((name.to_string(), group.filename().to_string())),
+                    Ok(_) => {}
+                    Err(_) if link.link_type == LinkType::External => nodes
+                        .6
+                        .push((name.to_string(), group.filename().to_string())),
+                    Err(_) => {}
                 }
-            }
-        }
-        for g in has_children.get_soft_groups()? {
-            groups.push(GrpType::Soft(g));
-        }
-        for d in has_children.get_hard_datasets()? {
-            datasets.push(DSType::Hard(d));
-        }
-        for d in has_children.get_soft_datasets()? {
-            datasets.push(DSType::Linked(d));
-        }
+                true
+            },
+        )?;
+
+        let groups = hard_groups
+            .into_iter()
+            .map(GrpType::Hard)
+            .chain(external_groups.into_iter().map(GrpType::External))
+            .chain(soft_groups.into_iter().map(GrpType::Soft))
+            .collect::<Vec<_>>();
+        let mut datasets = external_datasets
+            .into_iter()
+            .map(|(group, name)| DSType::Linked(group, name))
+            .collect::<Vec<_>>();
+        datasets.extend(
+            broken_externals
+                .into_iter()
+                .map(|(name, filename)| DSType::BrokenLink(name, filename)),
+        );
+        datasets.extend(
+            hard_datasets
+                .into_iter()
+                .map(|(group, name)| DSType::Hard(group, name)),
+        );
+        datasets.extend(
+            soft_datasets
+                .into_iter()
+                .map(|(group, name)| DSType::Linked(group, name)),
+        );
 
         let mut children = Vec::new();
         for wrapped_g in groups {
@@ -421,6 +419,7 @@ impl H5FNode {
 
             let meta = GroupMeta {
                 is_link,
+                has_children: !g.is_empty(),
                 display_name,
                 filename: g.filename().to_string(),
                 preview_expr: g
@@ -437,33 +436,55 @@ impl H5FNode {
             children.push(Rc::new(RefCell::new(H5FNode::new(node))));
         }
         self.children = children;
+        self.read = true;
         Ok(())
     }
 }
 
 fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Error> {
-    let (dataset, is_link, link_name, broken_node) = match wrapped_ds {
-        DSType::Hard(dataset) => (Some(dataset), false, None, None),
-        DSType::Linked(LinkedDataset { dataset, link_name }) => {
-            (Some(dataset), true, Some(link_name), None)
-        }
-        DSType::BrokenLink(name, _fname) => (None, true, None, Some(Node::Broken(name))),
+    let (parent, name, is_link, link_name, display_name, broken_node) = match wrapped_ds {
+        DSType::Hard(parent, name) => (Some(parent), Some(name.clone()), false, None, name, None),
+        DSType::Linked(parent, link_name) => (
+            Some(parent),
+            Some(link_name.clone()),
+            true,
+            Some(link_name.clone()),
+            link_name,
+            None,
+        ),
+        DSType::BrokenLink(name, _fname) => (
+            None,
+            None,
+            true,
+            None,
+            String::new(),
+            Some(Node::Broken(name)),
+        ),
     };
 
     if let Some(broken_node) = broken_node {
         return Ok(Some(broken_node));
     }
 
-    let Some(dataset) = dataset else {
+    let (Some(parent), Some(name)) = (parent, name) else {
         return Ok(None);
     };
-    let display_name = dataset
-        .name()
-        .split('/')
-        .next_back()
-        .unwrap_or("")
-        .to_string();
+    let identity = DatasetIdentity {
+        display_name,
+        is_link,
+        link_name,
+        path: format!("{}/{}", parent.name().trim_end_matches('/'), name),
+    };
+    Ok(Some(Node::Dataset(
+        DatasetHandle::Pending { parent, name },
+        DatasetMetaState::Pending(identity),
+    )))
+}
 
+fn materialize_dataset_meta(
+    dataset: &Dataset,
+    identity: DatasetIdentity,
+) -> Result<DatasetMeta, hdf5_metno::Error> {
     let dtype = dataset.dtype()?;
     let data_bytesize = dtype.size();
     let (dtype_desc, unsupported_reason) = match dtype.to_descriptor() {
@@ -486,9 +507,9 @@ fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Er
     };
     let meta = build_dataset_meta(
         &dataset,
-        display_name,
-        is_link,
-        link_name,
+        identity.display_name,
+        identity.is_link,
+        identity.link_name,
         dtype_desc,
         compound_projection,
         shape,
@@ -496,7 +517,7 @@ fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Er
         total_elems,
         unsupported_reason,
     )?;
-    Ok(Some(Node::Dataset(dataset, meta)))
+    Ok(meta)
 }
 
 fn synthetic_compound_children(
@@ -526,8 +547,8 @@ fn synthetic_compound_children(
             None,
         )?;
         out.push(Rc::new(RefCell::new(H5FNode::new(Node::Dataset(
-            dataset.clone(),
-            child_meta,
+            DatasetHandle::Loaded(dataset.clone()),
+            DatasetMetaState::Loaded(child_meta),
         )))));
     }
     Ok(out)
@@ -731,7 +752,7 @@ impl H5F {
             RequestedOpenMode::Read(read_mode) => open_readonly_file(&file_path, read_mode)?,
         };
 
-        let member_count = file.member_names()?.len();
+        let member_count = file.len();
         let mut h5node = H5FNode::new(Node::File(file.clone()));
         if linked {
             h5node.display_name = Some(
@@ -767,9 +788,9 @@ mod tests {
     use super::{
         build_dataset_meta, build_dataset_node, enum_render_attr_names, highlight_hint_from_name,
         parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType,
-        LinkedDataset, ReadOpenMode, RequestedOpenMode, ResolvedOpenMode, H5F,
+        ReadOpenMode, RequestedOpenMode, ResolvedOpenMode, H5F,
     };
-    use crate::h5f::Node;
+    use crate::h5f::{DatasetMetaState, H5FNode, Node};
     use crate::ui::render::MatrixRenderType;
 
     fn sample_enum() -> EnumType {
@@ -836,6 +857,160 @@ mod tests {
 
         assert_eq!(opened.resolved_open_mode, ResolvedOpenMode::ReadOnly);
         assert!(opened.snapshot_file.is_none());
+    }
+
+    #[test]
+    fn expanding_a_group_does_not_read_nested_groups() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let parent = file
+            .create_group("parent")
+            .expect("failed to create parent group");
+        let nested = parent
+            .create_group("nested")
+            .expect("failed to create nested group");
+        nested
+            .new_dataset_builder()
+            .with_data(&[1_u8])
+            .create("values")
+            .expect("failed to create dataset");
+        drop(nested);
+        drop(parent);
+        file.close().expect("failed to close hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Standard),
+        )
+        .expect("failed to open hdf5 file");
+        let parent = opened.root.borrow().children[0].clone();
+
+        parent
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to expand parent group");
+        let nested = parent.borrow().children[0].clone();
+        assert!(!nested.borrow().read, "nested group should remain unread");
+
+        nested
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to expand nested group");
+        assert_eq!(nested.borrow().children.len(), 1);
+    }
+
+    #[test]
+    fn unread_groups_keep_a_direct_child_count() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.create_group("empty")
+            .expect("failed to create empty group");
+        file.create_group("full")
+            .expect("failed to create full group")
+            .create_group("child")
+            .expect("failed to create child group");
+
+        let mut root = H5FNode::new(Node::File(file));
+        root.ensure_expanded().expect("expand root");
+
+        for child in &root.children {
+            let child = child.borrow();
+            let Node::Group(_, meta) = &child.node else {
+                panic!("expected group");
+            };
+            assert!(!child.read, "groups should remain unread");
+            assert_eq!(meta.has_children, meta.display_name == "full");
+        }
+    }
+
+    #[test]
+    fn loaded_children_are_cached_across_collapse() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let group = file.create_group("group").expect("failed to create group");
+        group
+            .new_dataset_builder()
+            .with_data(&[1_u8])
+            .create("values")
+            .expect("failed to create dataset");
+        drop(group);
+        file.close().expect("failed to close hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Standard),
+        )
+        .expect("failed to open hdf5 file");
+        let group = opened.root.borrow().children[0].clone();
+
+        group
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to expand group");
+        let child = group.borrow().children[0].clone();
+        assert!(group.borrow().read);
+
+        group.borrow_mut().collapse();
+        group
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to re-expand group");
+        assert!(std::rc::Rc::ptr_eq(&child, &group.borrow().children[0]));
+    }
+
+    #[test]
+    fn root_reopens_after_collapse() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.new_dataset_builder()
+            .with_data(&[1_u8])
+            .create("values")
+            .expect("failed to create dataset");
+        file.close().expect("failed to close hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Standard),
+        )
+        .expect("failed to open hdf5 file");
+        let mut root = opened.root.borrow_mut();
+
+        assert!(root.is_expandable());
+        root.collapse();
+        root.expand_toggle().expect("failed to reopen root");
+        assert!(root.expanded);
+        assert_eq!(root.children.len(), 1);
+    }
+
+    #[test]
+    fn broken_external_links_remain_visible_in_the_tree() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let missing_target = temp.path().with_extension("missing.h5");
+        file.link_external(
+            missing_target.to_string_lossy().as_ref(),
+            "/missing",
+            "broken-external",
+        )
+        .expect("failed to create external link");
+        file.close().expect("failed to close hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Standard),
+        )
+        .expect("failed to open hdf5 file");
+        let child = opened.root.borrow().children[0].clone();
+        assert!(matches!(child.borrow().node, Node::Broken(ref name) if name == "broken-external"));
     }
 
     #[test]
@@ -997,23 +1172,58 @@ mod tests {
         let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
-        let dataset = file
-            .new_dataset_builder()
+        file.new_dataset_builder()
             .with_data(&[1_u8, 2_u8, 3_u8])
             .create("target")
             .expect("failed to create dataset");
+        file.link_soft("/target", "alias")
+            .expect("failed to create alias");
 
-        let node = build_dataset_node(DSType::Linked(LinkedDataset {
-            dataset,
-            link_name: "alias".to_string(),
-        }))
+        let node = build_dataset_node(DSType::Linked(
+            file.as_group().expect("open root group"),
+            "alias".to_string(),
+        ))
         .expect("failed to build linked dataset node")
         .expect("expected linked dataset node");
 
-        let Node::Dataset(_, meta) = node else {
-            unreachable!("expected dataset node");
-        };
+        let mut node = H5FNode::new(node);
+        let meta = node
+            .ensure_dataset_meta()
+            .expect("materialize linked dataset");
         assert!(meta.is_link);
         assert_eq!(meta.link_name.as_deref(), Some("alias"));
+    }
+
+    #[test]
+    fn group_expansion_keeps_dataset_metadata_pending_until_used() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.new_dataset_builder()
+            .with_data(&[1_u16, 2_u16])
+            .create("values")
+            .expect("failed to create dataset");
+        let mut root = H5FNode::new(Node::File(file));
+
+        root.ensure_expanded().expect("expand root");
+        let child = root.children[0].clone();
+        assert!(matches!(
+            child.borrow().node,
+            Node::Dataset(_, DatasetMetaState::Pending(_))
+        ));
+
+        child
+            .borrow_mut()
+            .ensure_dataset_meta()
+            .expect("materialize dataset");
+        assert!(matches!(
+            child.borrow().node,
+            Node::Dataset(_, DatasetMetaState::Loaded(_))
+        ));
+        assert_eq!(child.borrow().selected_indexes, vec![0]);
+        child
+            .borrow_mut()
+            .ensure_dataset_meta()
+            .expect("use cached metadata");
     }
 }

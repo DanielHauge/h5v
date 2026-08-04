@@ -32,8 +32,8 @@ use crate::{
     configure,
     error::AppError,
     h5f::{
-        read_opaque_dataset_preview, read_string_dataset_preview, Encoding, H5FNode, HasPath, Node,
-        ResolvedOpenMode,
+        read_opaque_dataset_preview, read_string_dataset_preview, DatasetHandle, DatasetMetaState,
+        Encoding, H5FNode, HasPath, Node, ResolvedOpenMode,
     },
     ui::{
         perf,
@@ -579,7 +579,7 @@ pub fn render_preview(
         return;
     }
 
-    if let Node::Dataset(dataset, attr) = node {
+    if let Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(attr)) = node {
         if state.resolved_open_mode == ResolvedOpenMode::ReadSwmr {
             if let Err(error) = dataset.refresh() {
                 render_error(f, &area_inner, format!("Refresh dataset error: {}", error));
@@ -651,7 +651,7 @@ pub fn render_string_preview(
 ) -> Result<(), AppError> {
     let selected_node = &node.node;
     let (dataset, meta) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => (ds, attr),
         _ => {
             render_unsupported_rendering(
                 f,

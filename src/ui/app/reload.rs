@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     configure::registry::ContentModeHandle,
     error::AppError,
-    h5f::{self, HasPath, Node},
+    h5f::{self, DatasetMetaState, HasPath, Node},
     ui::state::{self, AppState, AttributeCursor, Focus, MatrixViewState},
 };
 
@@ -147,8 +147,11 @@ fn restore_selected_node_state(state: &mut AppState<'_>, snapshot: &ReloadSnapsh
     }
 
     let mut node = tree_item.node.borrow_mut();
+    if matches!(node.node, Node::Dataset(_, _)) && node.ensure_dataset_meta().is_err() {
+        return;
+    }
     let shape = match &node.node {
-        Node::Dataset(_, meta) => meta.shape.clone(),
+        Node::Dataset(_, DatasetMetaState::Loaded(meta)) => meta.shape.clone(),
         _ => Vec::new(),
     };
     let rank = shape.len();

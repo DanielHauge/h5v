@@ -13,7 +13,7 @@ use ratatui_image::StatefulImage;
 
 use crate::{
     error::AppError,
-    h5f::{DatasetMeta, H5FNode, Node, ResolvedOpenMode},
+    h5f::{DatasetHandle, DatasetMeta, DatasetMetaState, H5FNode, Node, ResolvedOpenMode},
     ui::{
         app::{AppEvent, HeatmapLoadedResult},
         page_scroll::PageDisplayInfo,
@@ -71,7 +71,7 @@ pub fn render_heatmap(
     state: &mut AppState,
 ) -> Result<(), AppError> {
     let (ds, attr) = match node.node.clone() {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => (ds, attr),
         _ => {
             render_not_yet_implemented(f, area, "Heatmap mode is only available for datasets");
             return Ok(());
@@ -155,6 +155,15 @@ fn render_heatmap_with_dataset(
         || state.heatmap_render.current_line_profile.is_some();
     let (heatmap_body, profile_area) = split_heatmap_body(layout.body, show_profile_panel);
     let heatmap_body_inner = panels::heatmap_frame_inner(&heatmap_body);
+    if !one_axis_heatmap_paging_supported(base_viewport, heatmap_body_inner, state.image_cell_size)
+    {
+        render_not_yet_implemented(
+            f,
+            area,
+            "Heatmap needs a two-axis tile here; zoom in to reduce one axis",
+        );
+        return Ok(());
+    }
     let header_page_window = compute_heatmap_page_window(
         ds_path,
         base_viewport.row_len,
@@ -573,17 +582,39 @@ fn compute_heatmap_page_window(
     let viewport_width = area.width.max(1) as f32 * image_cell_size.0.max(1) as f32;
     let viewport_height = area.height.max(1) as f32 * image_cell_size.1.max(1) as f32;
     let viewport_aspect = viewport_width / viewport_height;
-    let candidate = if (source_cols as f32 / source_rows.max(1) as f32) > viewport_aspect {
-        let len = ((source_rows as f32 * viewport_aspect).floor() as usize).clamp(1, source_cols);
-        (len < source_cols).then_some((HeatmapPageAxis::Cols, source_cols, len))
+    let preferred_axis = if (source_cols as f32 / source_rows.max(1) as f32) > viewport_aspect {
+        HeatmapPageAxis::Cols
     } else {
-        let len = ((source_cols as f32 / viewport_aspect).floor() as usize).clamp(1, source_rows);
-        (len < source_rows).then_some((HeatmapPageAxis::Rows, source_rows, len))
-    }?;
-
-    let (axis, total, len) = candidate;
+        HeatmapPageAxis::Rows
+    };
+    let pixel_budget = usize::from(area.width.max(1))
+        * usize::from(area.height.max(1))
+        * usize::from(image_cell_size.0.max(1))
+        * usize::from(image_cell_size.1.max(1));
+    let axis = match preferred_axis {
+        HeatmapPageAxis::Rows if source_cols > pixel_budget => HeatmapPageAxis::Cols,
+        HeatmapPageAxis::Cols if source_rows > pixel_budget => HeatmapPageAxis::Rows,
+        axis => axis,
+    };
+    let (total, aspect_len) = match axis {
+        HeatmapPageAxis::Rows => (
+            source_rows,
+            ((source_cols as f32 / viewport_aspect).floor() as usize).clamp(1, source_rows),
+        ),
+        HeatmapPageAxis::Cols => (
+            source_cols,
+            ((source_rows as f32 * viewport_aspect).floor() as usize).clamp(1, source_cols),
+        ),
+    };
+    let orthogonal_len = match axis {
+        HeatmapPageAxis::Rows => source_cols,
+        HeatmapPageAxis::Cols => source_rows,
+    };
+    let len = aspect_len.min((pixel_budget / orthogonal_len.max(1)).max(1));
     let clipped_fraction = 1.0 - (len as f32 / total.max(1) as f32);
-    if clipped_fraction < SMART_HEATMAP_PAGE_MIN_CLIPPED_FRACTION {
+    if len == total
+        || (len == aspect_len && clipped_fraction < SMART_HEATMAP_PAGE_MIN_CLIPPED_FRACTION)
+    {
         return None;
     }
 
@@ -608,6 +639,18 @@ fn compute_heatmap_page_window(
     }
 
     Some(window)
+}
+
+fn one_axis_heatmap_paging_supported(
+    viewport: HeatmapViewport,
+    area: Rect,
+    image_cell_size: (u16, u16),
+) -> bool {
+    let pixel_budget = usize::from(area.width.max(1))
+        * usize::from(area.height.max(1))
+        * usize::from(image_cell_size.0.max(1))
+        * usize::from(image_cell_size.1.max(1));
+    viewport.row_len.min(viewport.col_len) <= pixel_budget
 }
 
 fn clamp_heatmap_viewport(

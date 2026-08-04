@@ -21,11 +21,31 @@ use super::{
 };
 
 #[derive(Debug, Clone)]
+pub struct DatasetIdentity {
+    pub display_name: String,
+    pub is_link: bool,
+    pub link_name: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum DatasetHandle {
+    Pending { parent: Group, name: String },
+    Loaded(Dataset),
+}
+
+#[derive(Debug, Clone)]
+pub enum DatasetMetaState {
+    Pending(DatasetIdentity),
+    Loaded(DatasetMeta),
+}
+
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Node {
     File(File),
     Group(Group, GroupMeta),
-    Dataset(Dataset, DatasetMeta),
+    Dataset(DatasetHandle, DatasetMetaState),
     Broken(String),
 }
 
@@ -145,6 +165,7 @@ pub struct H5FNode {
     pub computed_attributes: Option<ComputedAttributes>,
     pub attributes_view_cursor: AttributeCursor,
     pub read: bool,
+    pub load_error: Option<String>,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
     pub selected_dim: usize,
@@ -159,7 +180,8 @@ pub struct H5FNode {
 impl H5FNode {
     pub fn new(node_type: Node) -> Self {
         let selected_indexes = match &node_type {
-            Node::Dataset(_, meta) => vec![0; meta.shape.len()],
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) => vec![0; meta.shape.len()],
+            Node::Dataset(_, DatasetMetaState::Pending(_)) => vec![],
             _ => vec![],
         };
         let selected_col = if selected_indexes.len() > 1 { 1 } else { 0 };
@@ -169,6 +191,7 @@ impl H5FNode {
             attributes_view_cursor: Default::default(),
             node: node_type,
             read: false,
+            load_error: None,
             children: vec![],
             view_loaded: 50,
             computed_attributes: None,
@@ -208,6 +231,19 @@ impl H5FNode {
         }
     }
 
+    pub fn dataset_identity(&self) -> Option<DatasetIdentity> {
+        match &self.node {
+            Node::Dataset(_, DatasetMetaState::Pending(identity)) => Some(identity.clone()),
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) => Some(DatasetIdentity {
+                display_name: meta.display_name.clone(),
+                is_link: meta.is_link,
+                link_name: meta.link_name.clone(),
+                path: meta.virtual_path().unwrap_or(&meta.filename).to_string(),
+            }),
+            _ => None,
+        }
+    }
+
     pub fn icon(&self) -> String {
         if let Node::Broken(_) = &self.node {
             return configure::configured_symbol(|symbols| symbols.tree.broken_node_icon)
@@ -233,10 +269,10 @@ impl H5FNode {
                 }
             }
             false => {
-                let Node::Dataset(_, meta) = &self.node else {
-                    return "? ".to_string();
-                };
-                if meta.is_link {
+                if self
+                    .dataset_identity()
+                    .is_some_and(|identity| identity.is_link)
+                {
                     configure::configured_symbol(|symbols| symbols.tree.dataset_link_icon)
                         .to_string()
                 } else {
@@ -257,7 +293,7 @@ impl H5FNode {
             Node::Group(_, _) => {
                 result.push(ContentShowMode::Preview);
             }
-            Node::Dataset(_, dataset_meta)
+            Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta))
                 if dataset_meta.is_compound_leaf()
                     && matches!(dataset_meta.matrixable, Some(MatrixRenderType::Strings)) =>
             {
@@ -267,7 +303,7 @@ impl H5FNode {
                     result.push(ContentShowMode::Preview);
                 }
             }
-            Node::Dataset(_, dataset_meta)
+            Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta))
                 if matches!(dataset_meta.matrixable, Some(MatrixRenderType::Opaque)) =>
             {
                 if dataset_meta.shape.iter().any(|x| *x > 1) {
@@ -276,13 +312,15 @@ impl H5FNode {
                     result.push(ContentShowMode::Preview);
                 }
             }
-            Node::Dataset(_, dataset_meta) if dataset_meta.is_compound_container() => {
+            Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta))
+                if dataset_meta.is_compound_container() =>
+            {
                 result.push(ContentShowMode::Preview);
                 if dataset_meta.supports_compound_root_matrix() {
                     result.push(ContentShowMode::Matrix);
                 }
             }
-            Node::Dataset(_, dataset_meta)
+            Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta))
                 if dataset_meta.is_compound_leaf()
                     && matches!(
                         dataset_meta.type_descriptor,
@@ -293,69 +331,72 @@ impl H5FNode {
                     result.push(ContentShowMode::Matrix);
                 }
             }
-            Node::Dataset(_, dataset_meta) => match dataset_meta.matrixable {
-                Some(matrix_renderable) => match matrix_renderable {
-                    MatrixRenderType::Float64 => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        }
-                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
-                            result.push(ContentShowMode::Heatmap);
-                        }
-                        result.push(ContentShowMode::Preview);
-                    }
-                    MatrixRenderType::Opaque => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        } else {
+            Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta)) => {
+                match dataset_meta.matrixable {
+                    Some(matrix_renderable) => match matrix_renderable {
+                        MatrixRenderType::Float64 => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            }
+                            if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                                result.push(ContentShowMode::Heatmap);
+                            }
                             result.push(ContentShowMode::Preview);
                         }
-                    }
-                    MatrixRenderType::Uint64 => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
+                        MatrixRenderType::Opaque => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            } else {
+                                result.push(ContentShowMode::Preview);
+                            }
                         }
-                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
-                            result.push(ContentShowMode::Heatmap);
-                        }
-                        result.push(ContentShowMode::Preview);
-                    }
-                    MatrixRenderType::Int64 => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        }
-                        if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
-                            result.push(ContentShowMode::Heatmap);
-                        }
-                        result.push(ContentShowMode::Preview);
-                    }
-                    MatrixRenderType::Strings => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        } else {
+                        MatrixRenderType::Uint64 => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            }
+                            if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                                result.push(ContentShowMode::Heatmap);
+                            }
                             result.push(ContentShowMode::Preview);
                         }
-                    }
-                    MatrixRenderType::Enum => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        }
-                        result.push(ContentShowMode::Preview);
-                    }
-                    MatrixRenderType::ByteArray => {
-                        if dataset_meta.shape.iter().any(|x| *x > 1) {
-                            result.push(ContentShowMode::Matrix);
-                        }
-                        if dataset_meta.image.is_some()
-                            || !dataset_meta.shape.iter().any(|x| *x > 1)
-                        {
+                        MatrixRenderType::Int64 => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            }
+                            if dataset_meta.shape.iter().filter(|x| **x > 1).count() >= 2 {
+                                result.push(ContentShowMode::Heatmap);
+                            }
                             result.push(ContentShowMode::Preview);
                         }
-                    }
-                    MatrixRenderType::Compound => {}
-                },
-                None => result.push(ContentShowMode::Preview),
-            },
+                        MatrixRenderType::Strings => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            } else {
+                                result.push(ContentShowMode::Preview);
+                            }
+                        }
+                        MatrixRenderType::Enum => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            }
+                            result.push(ContentShowMode::Preview);
+                        }
+                        MatrixRenderType::ByteArray => {
+                            if dataset_meta.shape.iter().any(|x| *x > 1) {
+                                result.push(ContentShowMode::Matrix);
+                            }
+                            if dataset_meta.image.is_some()
+                                || !dataset_meta.shape.iter().any(|x| *x > 1)
+                            {
+                                result.push(ContentShowMode::Preview);
+                            }
+                        }
+                        MatrixRenderType::Compound => {}
+                    },
+                    None => result.push(ContentShowMode::Preview),
+                }
+            }
+            Node::Dataset(_, DatasetMetaState::Pending(_)) => result.push(ContentShowMode::Preview),
         }
         result
     }
@@ -365,15 +406,18 @@ impl H5FNode {
     }
 
     pub fn is_compound_container(&self) -> bool {
-        matches!(&self.node, Node::Dataset(_, meta) if meta.is_compound_container())
+        matches!(&self.node, Node::Dataset(_, DatasetMetaState::Loaded(meta)) if meta.is_compound_container())
     }
 
     pub fn is_compound_leaf(&self) -> bool {
-        matches!(&self.node, Node::Dataset(_, meta) if meta.is_compound_leaf())
+        matches!(&self.node, Node::Dataset(_, DatasetMetaState::Loaded(meta)) if meta.is_compound_leaf())
     }
 
     pub fn is_expandable(&self) -> bool {
-        self.is_group() || self.is_compound_container()
+        matches!(self.node, Node::File(_,))
+            || self.is_group()
+            || matches!(self.node, Node::Dataset(_, DatasetMetaState::Pending(_)))
+            || self.is_compound_container()
     }
 }
 
@@ -389,7 +433,7 @@ pub struct H5F {
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{H5FNode, Node};
+    use super::{DatasetHandle, DatasetMetaState, H5FNode, Node};
     use crate::{
         h5f::{CompoundFieldProjection, DatasetMeta, Encoding},
         ui::{render::MatrixRenderType, state::ContentShowMode},
@@ -418,8 +462,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "labels".to_string(),
                 shape: vec![2],
@@ -443,7 +487,7 @@ mod tests {
                     field_type: TypeDescriptor::FixedAscii(8),
                     virtual_path: "/values/labels".to_string(),
                 }),
-            },
+            }),
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
@@ -460,8 +504,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "labels".to_string(),
                 shape: vec![2],
@@ -481,7 +525,7 @@ mod tests {
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: None,
-            },
+            }),
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
@@ -498,8 +542,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "records".to_string(),
                 shape: vec![2],
@@ -528,7 +572,7 @@ mod tests {
                         size: 16,
                     },
                 )),
-            },
+            }),
         ));
 
         assert_eq!(
@@ -548,8 +592,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "records".to_string(),
                 shape: vec![2, 2],
@@ -578,7 +622,7 @@ mod tests {
                         size: 16,
                     },
                 )),
-            },
+            }),
         ));
 
         assert_eq!(
@@ -598,8 +642,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "opaque".to_string(),
                 shape: vec![16],
@@ -619,7 +663,7 @@ mod tests {
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: None,
-            },
+            }),
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
@@ -636,8 +680,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "bytes".to_string(),
                 shape: vec![2],
@@ -659,7 +703,7 @@ mod tests {
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: None,
-            },
+            }),
         ));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
@@ -676,8 +720,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "values".to_string(),
                 shape: vec![2, 2],
@@ -697,7 +741,7 @@ mod tests {
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: None,
-            },
+            }),
         ));
 
         assert_eq!(
@@ -721,8 +765,8 @@ mod tests {
             .create("values")
             .expect("failed to create dataset");
         let node = H5FNode::new(Node::Dataset(
-            dataset,
-            DatasetMeta {
+            DatasetHandle::Loaded(dataset),
+            DatasetMetaState::Loaded(DatasetMeta {
                 link_name: None,
                 display_name: "values".to_string(),
                 shape: vec![2],
@@ -742,7 +786,7 @@ mod tests {
                 is_link: false,
                 filename: file.filename(),
                 compound_projection: None,
-            },
+            }),
         ));
 
         assert_eq!(

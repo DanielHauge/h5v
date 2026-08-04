@@ -11,7 +11,7 @@ use ndarray::{Array1, Array2};
 use crate::{
     data::{
         plot_sampling_step_with_cap, validate_preview_selection_shape, DatasetPlotingData,
-        PreviewSelection, SliceSelection,
+        PreviewSelection, SliceSelection, DEFAULT_CHART_PREVIEW_MAX_SAMPLES,
     },
     error::AppError,
 };
@@ -541,7 +541,11 @@ pub fn plot_projected(
     meta: &DatasetMeta,
     selection: &PreviewSelection,
 ) -> Result<DatasetPlotingData, AppError> {
-    plot_projected_with_cap(dataset, meta, selection, usize::MAX)
+    let max_samples = match selection.slice {
+        SliceSelection::All => DEFAULT_CHART_PREVIEW_MAX_SAMPLES,
+        SliceSelection::FromTo(_, _) => usize::MAX,
+    };
+    plot_projected_with_cap(dataset, meta, selection, max_samples)
 }
 
 pub fn plot_projected_with_cap(
@@ -718,18 +722,122 @@ pub fn root_compound_projection(
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use std::{mem::ManuallyDrop, str::FromStr};
+    use std::{mem::size_of, str::FromStr};
 
     use hdf5_metno::types::{TypeDescriptor, VarLenUnicode};
 
-    use super::ProjectionDecode;
+    use crate::{
+        data::{PreviewSelection, SliceSelection, DEFAULT_CHART_PREVIEW_MAX_SAMPLES},
+        h5f::{CompoundFieldProjection, DatasetMeta, Encoding},
+    };
+
+    use super::{plot_projected, read_dataset_raw_bytes, ProjectionDecode};
+
+    fn numeric_projection_meta() -> DatasetMeta {
+        DatasetMeta {
+            link_name: None,
+            display_name: "value".to_string(),
+            shape: vec![],
+            data_type: "f64".to_string(),
+            unsupported_reason: None,
+            type_descriptor: TypeDescriptor::Float(super::FloatSize::U8),
+            data_bytesize: size_of::<f64>(),
+            storage_required: 0,
+            total_bytes: 0,
+            total_elems: 0,
+            chunk_shape: None,
+            hl: None,
+            matrixable: None,
+            encoding: Encoding::Unknown,
+            image: None,
+            enum_render_overrides: None,
+            is_link: false,
+            filename: String::new(),
+            compound_projection: Some(CompoundFieldProjection {
+                field_path: vec![],
+                field_type: TypeDescriptor::Float(super::FloatSize::U8),
+                virtual_path: "/values/value".to_string(),
+            }),
+        }
+    }
+
+    fn numeric_projection_dataset() -> (tempfile::NamedTempFile, hdf5_metno::Dataset) {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create HDF5 file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create HDF5 file");
+        let values = (0..DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("values")
+            .expect("failed to create dataset");
+        (temp, dataset)
+    }
+
+    fn unicode_projection_dataset(
+        values: &[&str],
+    ) -> (tempfile::NamedTempFile, hdf5_metno::Dataset) {
+        let temp = tempfile::NamedTempFile::new().expect("failed to create HDF5 file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create HDF5 file");
+        let values = values
+            .iter()
+            .map(|value| VarLenUnicode::from_str(value).expect("failed to allocate varlen string"))
+            .collect::<Vec<_>>();
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("strings")
+            .expect("failed to create string dataset");
+        (temp, dataset)
+    }
+
+    #[test]
+    fn default_projected_plot_caps_an_unbounded_chart_axis() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let (_temp, dataset) = numeric_projection_dataset();
+        let preview = plot_projected(
+            &dataset,
+            &numeric_projection_meta(),
+            &PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::All,
+            },
+        )
+        .expect("failed to plot projected dataset");
+
+        assert_eq!(preview.length, DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1);
+        assert_eq!(
+            preview.data.len(),
+            (DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1).div_ceil(2)
+        );
+        assert!(preview.data.len() <= DEFAULT_CHART_PREVIEW_MAX_SAMPLES);
+    }
+
+    #[test]
+    fn default_projected_plot_keeps_bounded_selection_full_resolution() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let (_temp, dataset) = numeric_projection_dataset();
+        let preview = plot_projected(
+            &dataset,
+            &numeric_projection_meta(),
+            &PreviewSelection {
+                index: vec![0],
+                x: 0,
+                slice: SliceSelection::FromTo(0, DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1),
+            },
+        )
+        .expect("failed to plot projected dataset");
+
+        assert_eq!(preview.data.len(), DEFAULT_CHART_PREVIEW_MAX_SAMPLES + 1);
+    }
 
     #[test]
     fn projected_scalar_varlen_unicode_strings_are_supported() {
-        let value = ManuallyDrop::new(
-            VarLenUnicode::from_str("hello compound").expect("failed to allocate varlen string"),
-        );
-        let mut bytes = (value.as_ptr() as usize).to_ne_bytes().to_vec();
+        let _guard = crate::test_support::hdf5_test_guard();
+        let (_temp, dataset) = unicode_projection_dataset(&["hello compound"]);
+        let mut bytes = read_dataset_raw_bytes(&dataset).expect("read HDF5 string");
 
         let decoded = <String as ProjectionDecode>::decode_scalar_buffer(
             &TypeDescriptor::VarLenUnicode,
@@ -741,13 +849,9 @@ mod tests {
 
     #[test]
     fn projected_vector_varlen_unicode_strings_are_supported() {
-        let alpha =
-            ManuallyDrop::new(VarLenUnicode::from_str("alpha").expect("failed to allocate alpha"));
-        let beta =
-            ManuallyDrop::new(VarLenUnicode::from_str("beta").expect("failed to allocate beta"));
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(alpha.as_ptr() as usize).to_ne_bytes());
-        bytes.extend_from_slice(&(beta.as_ptr() as usize).to_ne_bytes());
+        let _guard = crate::test_support::hdf5_test_guard();
+        let (_temp, dataset) = unicode_projection_dataset(&["alpha", "beta"]);
+        let mut bytes = read_dataset_raw_bytes(&dataset).expect("read HDF5 strings");
 
         let decoded = <String as ProjectionDecode>::decode_value_buffer(
             &TypeDescriptor::VarLenUnicode,

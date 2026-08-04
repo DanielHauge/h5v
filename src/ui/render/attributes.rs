@@ -16,7 +16,7 @@ use crate::{
     ui::matrix::{EnumRenderer, RenderIntercept},
 };
 
-use super::typedesc::sprint_typedescriptor;
+use super::typedesc::{sprint_typedescriptor, type_contains_varlen};
 
 mod descriptor;
 mod raw;
@@ -31,6 +31,9 @@ use shared::{
     bracketed_spans, comma_separated, render_unsupported_type, render_values, render_varlen_values,
     single_span, styled_span, symbol_span, Renderable,
 };
+
+const MAX_ATTRIBUTE_DISPLAY_ELEMENTS: usize = 64;
+const MAX_ATTRIBUTE_DISPLAY_BYTES: usize = 64 * 1024;
 
 #[cfg(test)]
 use descriptor::type_descriptor_for_dtype;
@@ -254,6 +257,35 @@ fn render_opaque_array(attr: &Attribute) -> Result<Line<'static>, Error> {
     Ok(Line::from(bracketed_spans(spans)))
 }
 
+fn limited_attribute_value(
+    attr: &Attribute,
+    type_desc: Option<&TypeDescriptor>,
+) -> Result<Option<Line<'static>>, Error> {
+    if type_desc.is_some_and(type_contains_varlen) {
+        return Ok(Some(Line::from("<variable-length value not loaded>")));
+    }
+
+    let elements = attr.size();
+    if !attr.is_scalar() && elements > MAX_ATTRIBUTE_DISPLAY_ELEMENTS {
+        return Ok(Some(Line::from(format!(
+            "<{elements} elements exceeds {MAX_ATTRIBUTE_DISPLAY_ELEMENTS}-element preview>"
+        ))));
+    }
+
+    let bytes = attr
+        .dtype()?
+        .size()
+        .checked_mul(elements)
+        .ok_or_else(|| Error::from("Attribute byte size overflowed usize"))?;
+    if bytes > MAX_ATTRIBUTE_DISPLAY_BYTES {
+        return Ok(Some(Line::from(format!(
+            "<{bytes} bytes exceeds {MAX_ATTRIBUTE_DISPLAY_BYTES}-byte preview>"
+        ))));
+    }
+
+    Ok(None)
+}
+
 fn sprint_attribute_array(
     attr: &Attribute,
     type_desc: TypeDescriptor,
@@ -318,6 +350,9 @@ pub fn sprint_attribute(attr: &Attribute) -> Result<Line<'static>, Error> {
     let attr_type = match attribute_type_descriptor(attr) {
         Ok(attr_type) => attr_type,
         Err(error) if error.to_string() == "Unsupported datatype class" => {
+            if let Some(limited) = limited_attribute_value(attr, None)? {
+                return Ok(limited);
+            }
             return if attr.is_scalar() {
                 render_opaque_scalar(attr)
             } else {
@@ -326,6 +361,10 @@ pub fn sprint_attribute(attr: &Attribute) -> Result<Line<'static>, Error> {
         }
         Err(error) => return Err(error),
     };
+
+    if let Some(limited) = limited_attribute_value(attr, Some(&attr_type))? {
+        return Ok(limited);
+    }
 
     if attr.is_scalar() {
         Ok(Line::from(sprint_attribute_scalar(attr, attr_type)?))
@@ -359,7 +398,7 @@ mod tests {
 
     use super::{
         render_value_from_bytes, render_varlen_entry, sprint_attribute, type_descriptor_for_dtype,
-        RawVarLen,
+        RawVarLen, MAX_ATTRIBUTE_DISPLAY_ELEMENTS,
     };
 
     #[test]
@@ -476,6 +515,74 @@ mod tests {
             descriptor,
             TypeDescriptor::Reference(hdf5_metno::types::Reference::Object)
         );
+    }
+
+    #[test]
+    fn limits_large_attribute_arrays_without_rendering_values() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("h5v-limited-attr-{unique}.h5"));
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let values = vec![7_i32; MAX_ATTRIBUTE_DISPLAY_ELEMENTS + 1];
+        let attr = file
+            .new_attr_builder()
+            .with_data(&values)
+            .create("many")
+            .expect("failed creating array attribute");
+
+        assert_eq!(
+            sprint_attribute(&attr)
+                .expect("failed rendering array attribute")
+                .to_string(),
+            format!(
+                "<{} elements exceeds {}-element preview>",
+                MAX_ATTRIBUTE_DISPLAY_ELEMENTS + 1,
+                MAX_ATTRIBUTE_DISPLAY_ELEMENTS
+            )
+        );
+
+        drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
+        std::fs::remove_file(path).expect("failed removing temp hdf5 file");
+    }
+
+    #[test]
+    fn declines_compound_attributes_with_nested_varlen_members() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("h5v-varlen-compound-attr-{unique}.h5"));
+        let compound = CompoundType {
+            fields: vec![CompoundField::new(
+                "values",
+                TypeDescriptor::FixedArray(Box::new(TypeDescriptor::VarLenUnicode), 2),
+                0,
+                0,
+            )],
+            size: 2 * std::mem::size_of::<usize>(),
+        };
+        let file = File::create(&path).expect("failed creating temp hdf5 file");
+        let attr = file
+            .new_attr_builder()
+            .empty_as(&TypeDescriptor::Compound(compound))
+            .create("compound")
+            .expect("failed creating compound attr");
+
+        assert_eq!(
+            sprint_attribute(&attr)
+                .expect("failed rendering compound attribute")
+                .to_string(),
+            "<variable-length value not loaded>"
+        );
+
+        drop(attr);
+        file.close().expect("failed closing temp hdf5 file");
+        std::fs::remove_file(path).expect("failed removing temp hdf5 file");
     }
 
     #[test]

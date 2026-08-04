@@ -62,6 +62,7 @@ impl EnumRenderOverrides {
 #[derive(Debug, Clone)]
 pub struct GroupMeta {
     pub is_link: bool,
+    pub has_children: bool,
     pub filename: String,
     pub display_name: String,
     pub preview_expr: Option<String>,

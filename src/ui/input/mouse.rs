@@ -430,7 +430,12 @@ fn handle_left_click(
                             return Ok(EventResult::Redraw);
                         }
                         if tree_item.node.borrow().is_expandable() {
-                            tree_item.node.borrow_mut().expand_toggle()?;
+                            let node = tree_item.node.clone();
+                            let expand_result = node.borrow_mut().expand_toggle();
+                            if let Err(error) = expand_result {
+                                state.compute_tree_view();
+                                return Err(error.into());
+                            }
                             state.compute_tree_view();
                             return Ok(EventResult::Redraw);
                         }

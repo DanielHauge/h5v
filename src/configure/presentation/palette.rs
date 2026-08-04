@@ -378,7 +378,7 @@ impl UiSymbols {
                 compound_leaf_icon: "󰈚 ",
                 link_marker: "🔗",
                 broken_node_icon: "*- ",
-                load_more_label: "⤵ Load more",
+                load_more_label: "⤵ Load 50 more",
             },
             section: SectionSymbols {
                 properties_title: "󰜉 Properties",
@@ -437,7 +437,7 @@ impl UiSymbols {
                 compound_leaf_icon: "c ",
                 link_marker: "@",
                 broken_node_icon: "*- ",
-                load_more_label: "Load more",
+                load_more_label: "Load 50 more",
             },
             section: SectionSymbols {
                 properties_title: "Properties",

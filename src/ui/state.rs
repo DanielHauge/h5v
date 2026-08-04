@@ -15,7 +15,7 @@ use crate::{
     configure::registry::ContentModeHandle,
     data::{PreviewSelection, SliceSelection},
     error::AppError,
-    h5f::{H5FNode, HasPath, Node, RequestedOpenMode, ResolvedOpenMode},
+    h5f::{DatasetMetaState, H5FNode, HasPath, Node, RequestedOpenMode, ResolvedOpenMode},
     search::Searcher,
     ui::mchart::{
         CapturedMultiChartItem, ChartSource, DatasetChartKind, DatasetChartSource,

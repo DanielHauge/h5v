@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use hdf5_metno::{
     types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenArray, VarLenAscii, VarLenUnicode},
-    Dataset, H5Type, Selection,
+    Dataset, H5Type, Hyperslab, Selection, SliceOrIndex,
 };
 use ndarray::{arr0, Array1, Array2, IxDyn};
 
@@ -23,6 +23,10 @@ use super::{
     opaque::parse_opaque_bytes_from_text,
     parse_scalar, scalar_text_codec,
 };
+
+const STRING_PREVIEW_ELEMENTS: usize = 64;
+const STRING_PREVIEW_BYTES: usize = 64 * 1024;
+const MAX_FIXED_STRING_BYTES: usize = 32 * 1024;
 
 pub fn format_dataset_value_for_edit(
     dataset: &Dataset,
@@ -597,21 +601,14 @@ pub fn read_string_dataset_preview(
     dataset: &Dataset,
     encoding: &Encoding,
 ) -> Result<String, AppError> {
-    if dataset.size() <= 1 {
-        return read_scalar_string_dataset(dataset, encoding);
-    }
-
-    fn format_values(shape: &[usize], values: impl Iterator<Item = String>) -> String {
-        let preview_limit = 64usize;
-        let collected = values.take(preview_limit + 1).collect::<Vec<_>>();
-        let truncated = collected.len() > preview_limit;
-        let shown = if truncated {
-            &collected[..preview_limit]
-        } else {
-            &collected[..]
-        };
+    fn format_values(
+        shape: &[usize],
+        values: impl Iterator<Item = String>,
+        truncated: bool,
+    ) -> String {
+        let collected = values.collect::<Vec<_>>();
         let mut out = format!("shape {:?}\n\n", shape);
-        for (idx, value) in shown.iter().enumerate() {
+        for (idx, value) in collected.iter().enumerate() {
             out.push_str(&format!("[{idx}] {value}\n"));
         }
         if truncated {
@@ -621,39 +618,63 @@ pub fn read_string_dataset_preview(
     }
 
     let shape = dataset.shape();
+    let count = shape.iter().copied().fold(1usize, usize::saturating_mul);
+
+    if matches!(encoding, Encoding::Ascii | Encoding::UTF8) {
+        return Ok(format!(
+            "shape {:?}\n\n<variable-length string values are not previewed>",
+            shape
+        ));
+    }
+
+    if count == 0 {
+        return Ok(format!("shape {:?}\n\n<empty>", shape));
+    }
+
+    let item_size = dataset.dtype()?.size();
+    if item_size > MAX_FIXED_STRING_BYTES {
+        return Ok(format!(
+            "shape {:?}\n\n<fixed string values are {} bytes each; maximum supported value size is {} bytes>",
+            shape, item_size, MAX_FIXED_STRING_BYTES
+        ));
+    }
+    let limit = STRING_PREVIEW_BYTES
+        .checked_div(item_size)
+        .unwrap_or(0)
+        .min(STRING_PREVIEW_ELEMENTS);
+    if limit == 0 {
+        return Ok(format!(
+            "shape {:?}\n\n<fixed string values are {} bytes each; preview cap is {} bytes>",
+            shape, item_size, STRING_PREVIEW_BYTES
+        ));
+    }
+
+    if dataset.is_scalar() {
+        return read_scalar_string_dataset(dataset, encoding);
+    }
+
+    let selection = bounded_preview_selection(&shape, limit);
+    let truncated = count > limit;
     match encoding {
-        Encoding::Ascii => Ok(format_values(
-            &shape,
-            dataset
-                .read::<VarLenAscii, IxDyn>()
-                .map_err(AppError::from)?
-                .iter()
-                .map(|value| value.to_string()),
-        )),
-        Encoding::UTF8 => Ok(format_values(
-            &shape,
-            dataset
-                .read::<VarLenUnicode, IxDyn>()
-                .map_err(AppError::from)?
-                .iter()
-                .map(|value| value.to_string()),
-        )),
         Encoding::UTF8Fixed => Ok(format_values(
             &shape,
             dataset
-                .read::<FixedUnicode<32768>, IxDyn>()
+                .read_slice::<FixedUnicode<32768>, _, IxDyn>(selection.clone())
                 .map_err(AppError::from)?
                 .iter()
                 .map(|value| value.to_string()),
+            truncated,
         )),
         Encoding::AsciiFixed => Ok(format_values(
             &shape,
             dataset
-                .read::<FixedAscii<32768>, IxDyn>()
+                .read_slice::<FixedAscii<32768>, _, IxDyn>(selection)
                 .map_err(AppError::from)?
                 .iter()
                 .map(|value| value.to_string()),
+            truncated,
         )),
+        Encoding::Ascii | Encoding::UTF8 => unreachable!("variable-length strings return above"),
         Encoding::LittleEndian => Err(AppError::EditError(
             "LittleEndian not supported for string data".to_string(),
         )),
@@ -661,6 +682,37 @@ pub fn read_string_dataset_preview(
             "Unknown encoding not supported for string data".to_string(),
         )),
     }
+}
+
+pub(crate) fn bounded_preview_selection(shape: &[usize], limit: usize) -> Selection {
+    if shape.is_empty() {
+        return Selection::All;
+    }
+
+    let count = shape
+        .iter()
+        .copied()
+        .fold(1usize, usize::saturating_mul)
+        .min(limit);
+    if shape.len() == 1 {
+        return Selection::Hyperslab(Hyperslab::from(vec![SliceOrIndex::SliceTo {
+            start: 0,
+            step: 1,
+            end: count,
+            block: 1,
+        }]));
+    }
+
+    Selection::Points(Array2::from_shape_fn(
+        (count, shape.len()),
+        |(point, dimension)| {
+            let mut remaining = point;
+            for extent in shape[dimension + 1..].iter().rev() {
+                remaining /= *extent;
+            }
+            remaining % shape[dimension]
+        },
+    ))
 }
 
 pub fn read_single_value_dataset<T>(dataset: &Dataset) -> Result<T, AppError>
@@ -690,12 +742,20 @@ where
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use hdf5_metno::types::{IntSize, TypeDescriptor};
+    use std::str::FromStr;
+
+    use hdf5_metno::{
+        types::{IntSize, TypeDescriptor, VarLenUnicode},
+        File,
+    };
+    use ndarray::{Array2, IxDyn};
 
     use super::{
-        encode_fixed_array_memory_from_text, format_fixed_array_memory_for_edit,
-        format_varlen_u8_values_for_display, parse_varlen_u8_values_from_text,
+        bounded_preview_selection, encode_fixed_array_memory_from_text,
+        format_fixed_array_memory_for_edit, format_varlen_u8_values_for_display,
+        parse_varlen_u8_values_from_text, read_string_dataset_preview,
     };
+    use crate::h5f::meta::Encoding;
 
     #[test]
     fn fixed_array_edit_format_uses_one_line_per_value() {
@@ -741,5 +801,73 @@ mod tests {
             encode_fixed_array_memory_from_text(&TypeDescriptor::Integer(IntSize::U2), 3, "1\n2")
                 .expect_err("expected missing array entries to fail");
         assert!(err.to_string().contains("Expected 3 array values"));
+    }
+
+    #[test]
+    fn preview_selection_contains_at_most_64_first_values() {
+        let selection = bounded_preview_selection(&[10, 10], 64);
+        assert_eq!(
+            selection.out_shape([10, 10]).expect("selection shape"),
+            vec![64]
+        );
+
+        let hdf5_metno::Selection::Points(points) = selection else {
+            panic!("multidimensional preview should use point selection");
+        };
+        assert_eq!(points.row(0).to_vec(), vec![0, 0]);
+        assert_eq!(points.row(63).to_vec(), vec![6, 3]);
+    }
+
+    #[test]
+    fn preview_selection_reads_multidimensional_hdf5_values() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let values = Array2::from_shape_fn((10, 10), |(row, col)| (row * 10 + col) as i32);
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("values")
+            .expect("create matrix dataset");
+
+        let selected = dataset
+            .read_slice::<i32, _, IxDyn>(bounded_preview_selection(&[10, 10], 64))
+            .expect("read bounded matrix selection");
+        assert_eq!(selected.len(), 64);
+        assert_eq!(selected[0], 0);
+        assert_eq!(selected[63], 63);
+    }
+
+    #[test]
+    fn preview_selection_handles_scalar_and_empty_shapes() {
+        let scalar = bounded_preview_selection(&[], 64);
+        assert_eq!(
+            scalar.out_shape([]).expect("scalar selection shape"),
+            Vec::<usize>::new()
+        );
+
+        let empty = bounded_preview_selection(&[0, 10], 64);
+        assert_eq!(
+            empty.out_shape([0, 10]).expect("empty selection shape"),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn string_preview_reads_only_the_first_64_values() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let values = (0..65)
+            .map(|idx| VarLenUnicode::from_str(&format!("value-{idx}")))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("create string values");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("strings")
+            .expect("create string dataset");
+
+        let preview = read_string_dataset_preview(&dataset, &Encoding::UTF8)
+            .expect("decline variable-length string preview");
+        assert!(preview.contains("not previewed"));
     }
 }

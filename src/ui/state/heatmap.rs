@@ -7,7 +7,7 @@ use hdf5_metno::Dataset;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::{
-    h5f::{DatasetMeta, Node},
+    h5f::{DatasetMeta, DatasetMetaState, Node},
     ui::state::AppState,
 };
 
@@ -654,8 +654,9 @@ pub(super) fn clamp_heatmap_viewport(
 impl AppState<'_> {
     fn active_heatmap_shape(&self) -> Option<(usize, usize)> {
         let tree_item = self.treeview.get(self.tree_view_cursor)?;
-        let node = tree_item.node.borrow();
-        let Node::Dataset(_, attr) = &node.node else {
+        let mut node = tree_item.node.borrow_mut();
+        node.ensure_dataset_meta().ok()?;
+        let Node::Dataset(_, DatasetMetaState::Loaded(attr)) = &node.node else {
             return None;
         };
         Some((attr.shape[node.selected_row], attr.shape[node.selected_col]))

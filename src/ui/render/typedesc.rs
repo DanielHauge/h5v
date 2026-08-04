@@ -1,11 +1,27 @@
 use hdf5_metno::{
-    types::{CompoundField, CompoundType, Reference, TypeDescriptor},
-    Dataset,
+    types::{CompoundField, CompoundType, Reference, TypeDescriptor, VarLenAscii, VarLenUnicode},
+    Attribute, Dataset,
 };
 
 use crate::h5f::{Encoding, ImageType, InterlaceMode};
 
-use super::attributes::sprint_attribute;
+use super::attributes::attribute_type_descriptor;
+
+const MAX_IMAGE_METADATA_BYTES: usize = 256;
+
+pub fn type_contains_varlen(type_desc: &TypeDescriptor) -> bool {
+    match type_desc {
+        TypeDescriptor::VarLenAscii
+        | TypeDescriptor::VarLenUnicode
+        | TypeDescriptor::VarLenArray(_) => true,
+        TypeDescriptor::Compound(compound) => compound
+            .fields
+            .iter()
+            .any(|field| type_contains_varlen(&field.ty)),
+        TypeDescriptor::FixedArray(inner, _) => type_contains_varlen(inner),
+        _ => false,
+    }
+}
 
 pub fn sprint_typedescriptor(type_desc: &TypeDescriptor) -> String {
     match type_desc {
@@ -171,41 +187,34 @@ pub fn sprint_type_schema(type_desc: &TypeDescriptor) -> String {
 }
 
 // https://support.hdfgroup.org/documentation/hdf5/latest/_i_m_g.html
-pub fn is_image(d: &Dataset) -> Option<ImageType> {
-    let class = match d.attr("CLASS") {
-        Ok(class) => class,
-        Err(_) => return None,
-    };
-
-    match sprint_attribute(&class) {
-        Ok(class) => {
-            let class_string = class.to_string().replace("\"", "");
-            if class_string != "IMAGE" {
-                return None;
-            }
-        }
-        Err(_) => return None,
+fn read_image_metadata(attr: &Attribute) -> Option<String> {
+    if !attr.is_scalar() {
+        return None;
     }
 
-    let image_subclass = match d.attr("IMAGE_SUBCLASS") {
-        Ok(image_subclass) => image_subclass,
-        Err(_) => return None,
+    let value = match attribute_type_descriptor(attr).ok()? {
+        TypeDescriptor::VarLenAscii => attr.read_scalar::<VarLenAscii>().ok()?.as_str().to_owned(),
+        TypeDescriptor::VarLenUnicode => attr
+            .read_scalar::<VarLenUnicode>()
+            .ok()?
+            .as_str()
+            .to_owned(),
+        _ => return None,
     };
+    (value.len() <= MAX_IMAGE_METADATA_BYTES).then_some(value)
+}
 
-    let read_image_subclass = match sprint_attribute(&image_subclass) {
-        Ok(read_image_subclass) => read_image_subclass.to_string().replace("\"", ""),
-        Err(_) => return None,
-    };
+pub fn is_image(d: &Dataset) -> Option<ImageType> {
+    let class = read_image_metadata(&d.attr("CLASS").ok()?)?;
+    if class != "IMAGE" {
+        return None;
+    }
 
-    let interlace_mode = d.attr("INTERLACE_MODE").ok();
-
-    let interlace_mode_read = match interlace_mode {
-        Some(interlace_mode) => match sprint_attribute(&interlace_mode) {
-            Ok(interlace_mode_read) => Some(interlace_mode_read.to_string().replace("\"", "")),
-            Err(_) => None,
-        },
-        None => None,
-    };
+    let read_image_subclass = read_image_metadata(&d.attr("IMAGE_SUBCLASS").ok()?)?;
+    let interlace_mode_read = d
+        .attr("INTERLACE_MODE")
+        .ok()
+        .and_then(|attr| read_image_metadata(&attr));
 
     let interlace_node_parsed = match interlace_mode_read {
         Some(interlace) => match interlace.as_str() {
@@ -290,7 +299,68 @@ pub enum MatrixRenderType {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use hdf5_metno::types::{CompoundField, FloatSize, IntSize};
+    use hdf5_metno::{
+        types::{CompoundField, FloatSize, IntSize, VarLenUnicode},
+        File,
+    };
+    use std::str::FromStr;
+
+    #[test]
+    fn detects_varlen_members_nested_in_compounds_and_fixed_arrays() {
+        let type_desc = TypeDescriptor::Compound(CompoundType {
+            fields: vec![CompoundField::new(
+                "rows",
+                TypeDescriptor::FixedArray(
+                    Box::new(TypeDescriptor::Compound(CompoundType {
+                        fields: vec![CompoundField::new(
+                            "label",
+                            TypeDescriptor::VarLenUnicode,
+                            0,
+                            0,
+                        )],
+                        size: std::mem::size_of::<usize>(),
+                    })),
+                    2,
+                ),
+                0,
+                0,
+            )],
+            size: 2 * std::mem::size_of::<usize>(),
+        });
+
+        assert!(type_contains_varlen(&type_desc));
+    }
+
+    #[test]
+    fn detects_scalar_varlen_image_metadata() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let file = File::create("typedesc-vlen-image-metadata.h5").expect("create file");
+        let dataset = file
+            .new_dataset::<u8>()
+            .shape([1])
+            .create("image")
+            .expect("create dataset");
+        for (name, value) in [
+            ("CLASS", "IMAGE"),
+            ("IMAGE_SUBCLASS", "IMAGE_TRUECOLOR"),
+            ("INTERLACE_MODE", "INTERLACE_PIXEL"),
+        ] {
+            dataset
+                .new_attr::<VarLenUnicode>()
+                .create(name)
+                .expect("create metadata attribute")
+                .write_scalar(&VarLenUnicode::from_str(value).expect("valid metadata"))
+                .expect("write metadata attribute");
+        }
+
+        assert!(matches!(
+            is_image(&dataset),
+            Some(ImageType::Truecolor(InterlaceMode::Pixel))
+        ));
+        drop(dataset);
+        file.close().expect("close file");
+        std::fs::remove_file("typedesc-vlen-image-metadata.h5").expect("remove file");
+    }
 
     #[test]
     fn renders_nested_compound_schema() {

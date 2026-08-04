@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use hdf5_metno::{types::IntSize, Dataset, Selection};
+use hdf5_metno::{types::IntSize, Dataset};
 use image::{imageops::FilterType, DynamicImage, ImageBuffer, ImageFormat, Rgb};
 use ndarray::{s, Array2, Array3};
 use ratatui::{
@@ -23,7 +23,7 @@ use ratatui_image::{
 use crate::{
     data::Previewable,
     error::AppError,
-    h5f::{plot_projected, H5FNode, ImageType, InterlaceMode, Node},
+    h5f::{plot_projected, DatasetHandle, H5FNode, ImageType, InterlaceMode, Node},
     ui::{
         app::AppEvent,
         page_scroll::render_position_scroll,
@@ -556,7 +556,7 @@ fn render_unsupported_image_format(
     selected_node: &Node,
 ) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), attr) => (ds, attr),
         _ => return Ok(()),
     };
 
@@ -577,7 +577,7 @@ fn render_ds_img(
     img_type: ImageType,
 ) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), attr) => (ds, attr),
         _ => return Ok(()),
     };
     let ds_path = ds.name();
@@ -696,7 +696,7 @@ fn render_raw_img(
     img_format: ImageFormat,
 ) -> Result<(), AppError> {
     let (ds, _) = match selected_node {
-        Node::Dataset(ds, attr) => (ds, attr),
+        Node::Dataset(DatasetHandle::Loaded(ds), attr) => (ds, attr),
         _ => return Ok(()),
     };
     let typedesc = ds.dtype()?.to_descriptor()?;

@@ -12,7 +12,7 @@ use ratatui::{
 use crate::{
     configure,
     error::AppError,
-    h5f::{H5FNode, HasAttributes, HasPath, Node},
+    h5f::{DatasetHandle, DatasetMetaState, H5FNode, HasAttributes, HasPath, Node},
     ui::{
         self,
         custom_content::render_custom_content_mode,
@@ -102,6 +102,9 @@ pub fn render_main_display(
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
     let mut node = selected_node_no.borrow_mut();
+    if matches!(node.node, Node::Dataset(_, _)) {
+        node.ensure_dataset_meta()?;
+    }
     let prepared_attributes = if state.show_tree_view {
         Some(prepare_metadata_layout(&mut node, area.width)?)
     } else {
@@ -144,7 +147,9 @@ pub fn render_main_display(
     let supported_display_modes = configure::ordered_content_mode_handles(&available_handles);
     if supported_display_modes.is_empty() {
         let no_data_message = match &node.node {
-            Node::Dataset(_, meta) if meta.is_compound_container() => "Compound",
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) if meta.is_compound_container() => {
+                "Compound"
+            }
             _ => "Group",
         };
         let paragraph = Paragraph::new(no_data_message)
@@ -260,7 +265,9 @@ pub fn render_main_display(
         Some(ContentShowMode::Matrix) => {
             //
             let (ds, attr) = match node.node.clone() {
-                Node::Dataset(ds, attr) => (ds, attr),
+                Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => {
+                    (ds, attr)
+                }
                 _ => {
                     render_not_yet_implemented(
                         f,

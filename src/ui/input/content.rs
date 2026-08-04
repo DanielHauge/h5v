@@ -16,7 +16,7 @@ use crate::{
     h5f::{
         format_dataset_value_for_edit, plot_projected, read_opaque_dataset_preview,
         read_projected_scalar, read_scalar_string_dataset, read_single_value_dataset,
-        write_dataset_value_from_text, DatasetMeta, H5FNode, Node,
+        write_dataset_value_from_text, DatasetHandle, DatasetMeta, DatasetMetaState, H5FNode, Node,
     },
     ui::{
         edit::perform_edit,
@@ -118,8 +118,14 @@ fn copy_image_to_clipboard(
 fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventResult> {
     let tree_item = state.treeview[state.tree_view_cursor].node.clone();
     let mut node = tree_item.borrow_mut();
+    if matches!(node.node, Node::Dataset(_, _)) {
+        node.ensure_dataset_meta()
+            .map_err(|error| EventResult::Toast(AppToast::Warning(error.to_string()), false))?;
+    }
     let (dataset, meta) = match &node.node {
-        Node::Dataset(dataset, meta) => (dataset.clone(), meta.clone()),
+        Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => {
+            (dataset.clone(), meta.clone())
+        }
         _ => {
             return Err(EventResult::Toast(
                 AppToast::Warning("Only datasets can be copied from content view".to_string()),
@@ -442,8 +448,13 @@ fn copy_chart_preview(
 fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppError> {
     let tree_item = state.treeview[state.tree_view_cursor].node.clone();
     let mut node = tree_item.borrow_mut();
+    if matches!(node.node, Node::Dataset(_, _)) {
+        node.ensure_dataset_meta()?;
+    }
     let (dataset, meta) = match &node.node {
-        Node::Dataset(dataset, meta) => (dataset.clone(), meta.clone()),
+        Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => {
+            (dataset.clone(), meta.clone())
+        }
         _ => {
             return Ok(EventResult::Toast(
                 AppToast::Warning("Only datasets can be copied from content view".to_string()),
@@ -507,8 +518,16 @@ fn selected_content_edit_request(
     let tree_item = state.treeview[state.tree_view_cursor].node.clone();
     let content_mode = state.active_content_mode();
     let mut node = tree_item.borrow_mut();
+    if node.ensure_dataset_meta().is_err() {
+        return Err(EventResult::Toast(
+            AppToast::Warning("Dataset metadata could not be loaded; retry the action".to_string()),
+            false,
+        ));
+    }
     let (dataset, meta) = match &node.node {
-        Node::Dataset(dataset, meta) => (dataset.clone(), meta.clone()),
+        Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => {
+            (dataset.clone(), meta.clone())
+        }
         _ => {
             return Err(EventResult::Toast(
                 AppToast::Warning("Only datasets can be edited from content view".to_string()),

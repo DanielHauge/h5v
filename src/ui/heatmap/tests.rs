@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use super::{
     compute_heatmap_page_window,
-    load::compute_line_profile,
+    load::{bounded_heatmap_page_ranges, compute_line_profile},
     render::{compute_heatmap_color_scale, compute_region_selection, viewport_partition},
     HeatmapPageAxis, HeatmapPageWindow,
 };
@@ -65,7 +65,78 @@ fn resized_heatmap_page_window_keeps_current_page_index() {
 
     assert_eq!(resized.axis, HeatmapPageAxis::Cols);
     assert_eq!(resized.page, 2);
-    assert_eq!(resized.current_range(), (300, 600));
+    assert_eq!(resized.current_range(), (2, 5));
+}
+
+#[test]
+fn heatmap_page_window_caps_selection_to_rendered_pixel_budget() {
+    let window =
+        compute_heatmap_page_window("/x", 100, 1_000, Rect::new(0, 0, 30, 10), (1, 1), None)
+            .expect("expected paged heatmap");
+
+    assert_eq!(window.axis, HeatmapPageAxis::Cols);
+    assert_eq!(window.len, 3);
+    assert!(100 * window.len <= 30 * 10);
+}
+
+#[test]
+fn heatmap_declines_two_large_axes_without_two_axis_navigation() {
+    assert!(!super::one_axis_heatmap_paging_supported(
+        crate::ui::state::HeatmapViewport {
+            row_start: 0,
+            row_len: 1_000,
+            col_start: 0,
+            col_len: 1_000,
+        },
+        Rect::new(0, 0, 30, 10),
+        (1, 1),
+    ));
+}
+
+#[test]
+fn heatmap_source_selection_is_bounded_in_both_dimensions() {
+    let key = crate::ui::state::HeatmapRenderKey {
+        ds_path: "/x".to_string(),
+        width: 30,
+        height: 10,
+        cell_width: 1,
+        cell_height: 1,
+        viewport: None,
+        page_axis: Some(HeatmapPageAxis::Cols),
+        page_start: 0,
+        page_len: 1,
+        selected_row: 0,
+        selected_col: 1,
+        selected_indexes: vec![0, 0],
+        selected_cells: None,
+        line_selection: None,
+        settings: Default::default(),
+    };
+    let viewport = crate::ui::state::HeatmapViewport {
+        row_start: 0,
+        row_len: 100,
+        col_start: 0,
+        col_len: 1_000,
+    };
+    let ((row_start, row_end), (col_start, col_end)) =
+        bounded_heatmap_page_ranges(100, 1_000, &key, viewport)
+            .expect("one-axis page fits its source rectangle");
+    assert_eq!((row_start, row_end), (0, 100));
+    assert_eq!((col_start, col_end), (0, 1));
+    assert!((row_end - row_start) * (col_end - col_start) <= 30 * 10);
+
+    assert!(bounded_heatmap_page_ranges(
+        1_000,
+        1_000,
+        &key,
+        crate::ui::state::HeatmapViewport {
+            row_start: 0,
+            row_len: 1_000,
+            col_start: 0,
+            col_len: 1_000,
+        }
+    )
+    .is_err());
 }
 
 #[test]

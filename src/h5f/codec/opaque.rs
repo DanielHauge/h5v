@@ -7,6 +7,9 @@ use super::super::{
     compound::{read_dataset_raw_bytes, read_selected_values_bytes},
     meta::DatasetMeta,
 };
+use super::dataset::bounded_preview_selection;
+
+const OPAQUE_PREVIEW_ELEMENT_BYTES: usize = 24;
 
 pub fn format_opaque_bytes_for_edit(bytes: &[u8]) -> String {
     bytes
@@ -14,20 +17,6 @@ pub fn format_opaque_bytes_for_edit(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn compact_opaque_preview(bytes: &[u8], max_bytes: usize) -> String {
-    let shown = bytes
-        .iter()
-        .take(max_bytes)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if bytes.len() > max_bytes {
-        format!("{shown} …")
-    } else {
-        shown
-    }
 }
 
 fn hexdump_opaque_bytes(bytes: &[u8]) -> String {
@@ -149,7 +138,6 @@ pub fn read_opaque_dataset_preview(
     dataset: &Dataset,
     meta: &DatasetMeta,
 ) -> Result<String, AppError> {
-    let bytes = read_dataset_raw_bytes(dataset)?;
     let item_size = meta.data_bytesize;
     let reason = meta
         .unsupported_reason
@@ -164,6 +152,26 @@ pub fn read_opaque_dataset_preview(
         ));
     }
 
+    if item_size > OPAQUE_PREVIEW_ELEMENT_BYTES {
+        return Ok(format!(
+            "{}\n{}\n\n<opaque values are {} bytes each; preview cap is {} bytes>",
+            meta.data_type, reason, item_size, OPAQUE_PREVIEW_ELEMENT_BYTES
+        ));
+    }
+
+    if dataset.is_scalar() {
+        return Ok(format!(
+            "{}\n{}\n\n{}",
+            meta.data_type,
+            reason,
+            hexdump_opaque_bytes(&read_dataset_raw_bytes(dataset)?)
+        ));
+    }
+
+    let preview_limit = 64usize;
+    let selection = bounded_preview_selection(&dataset.shape(), preview_limit);
+    let (bytes, _) = read_selected_values_bytes(dataset, selection)?;
+
     if dataset.size() <= 1 {
         return Ok(format!(
             "{}\n{}\n\n{}",
@@ -173,7 +181,6 @@ pub fn read_opaque_dataset_preview(
         ));
     }
 
-    let preview_limit = 64usize;
     let mut out = format!(
         "{}\n{}\nshape {:?}\n\n",
         meta.data_type,
@@ -185,7 +192,10 @@ pub fn read_opaque_dataset_preview(
         .take(preview_limit)
         .enumerate()
     {
-        out.push_str(&format!("[{idx}] {}\n", compact_opaque_preview(chunk, 24)));
+        out.push_str(&format!(
+            "[{idx}] {}\n",
+            format_opaque_bytes_for_edit(chunk)
+        ));
     }
     if dataset.size() > preview_limit {
         out.push_str("...\n");

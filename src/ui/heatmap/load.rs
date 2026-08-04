@@ -46,40 +46,8 @@ pub(super) fn build_heatmap_page(
         col_start: 0,
         col_len: source_cols.max(1),
     });
-    let ((row_start, row_end), (col_start, col_end)) = match key.page_axis {
-        Some(HeatmapPageAxis::Rows) => (
-            (
-                base_viewport.row_start + key.page_start,
-                (base_viewport.row_start + key.page_start + key.page_len)
-                    .min(base_viewport.row_start + base_viewport.row_len),
-            ),
-            (
-                base_viewport.col_start,
-                base_viewport.col_start + base_viewport.col_len,
-            ),
-        ),
-        Some(HeatmapPageAxis::Cols) => (
-            (
-                base_viewport.row_start,
-                base_viewport.row_start + base_viewport.row_len,
-            ),
-            (
-                base_viewport.col_start + key.page_start,
-                (base_viewport.col_start + key.page_start + key.page_len)
-                    .min(base_viewport.col_start + base_viewport.col_len),
-            ),
-        ),
-        None => (
-            (
-                base_viewport.row_start,
-                base_viewport.row_start + base_viewport.row_len,
-            ),
-            (
-                base_viewport.col_start,
-                base_viewport.col_start + base_viewport.col_len,
-            ),
-        ),
-    };
+    let ((row_start, row_end), (col_start, col_end)) =
+        bounded_heatmap_page_ranges(source_rows, source_cols, key, base_viewport)?;
     let selection = build_heatmap_selection(
         key.selected_row,
         key.selected_col,
@@ -170,6 +138,45 @@ pub(super) fn build_heatmap_page(
                 .to_string(),
         )),
     }
+}
+
+pub(super) fn bounded_heatmap_page_ranges(
+    source_rows: usize,
+    source_cols: usize,
+    key: &HeatmapRenderKey,
+    viewport: HeatmapViewport,
+) -> Result<((usize, usize), (usize, usize)), AppError> {
+    let row_start = viewport.row_start.min(source_rows);
+    let col_start = viewport.col_start.min(source_cols);
+    let row_end = row_start.saturating_add(viewport.row_len).min(source_rows);
+    let col_end = col_start.saturating_add(viewport.col_len).min(source_cols);
+    let ((row_start, row_end), (col_start, col_end)) = match key.page_axis {
+        Some(HeatmapPageAxis::Rows) => {
+            let start = row_start.saturating_add(key.page_start).min(row_end);
+            let end = start.saturating_add(key.page_len).min(row_end);
+            ((start, end), (col_start, col_end))
+        }
+        Some(HeatmapPageAxis::Cols) => {
+            let start = col_start.saturating_add(key.page_start).min(col_end);
+            let end = start.saturating_add(key.page_len).min(col_end);
+            ((row_start, row_end), (start, end))
+        }
+        None => ((row_start, row_end), (col_start, col_end)),
+    };
+    let pixel_budget = usize::from(key.width.max(1))
+        * usize::from(key.height.max(1))
+        * usize::from(key.cell_width.max(1))
+        * usize::from(key.cell_height.max(1));
+    let source_cells = row_end
+        .saturating_sub(row_start)
+        .checked_mul(col_end.saturating_sub(col_start));
+    if source_cells.is_none_or(|cells| cells > pixel_budget) {
+        return Err(AppError::DrawingError(
+            "Heatmap source rectangle exceeds the rendered pixel budget; zoom in or use a narrower axis"
+                .to_string(),
+        ));
+    }
+    Ok(((row_start, row_end), (col_start, col_end)))
 }
 
 #[allow(clippy::too_many_arguments)]
