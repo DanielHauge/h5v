@@ -1,4 +1,9 @@
-use crate::configure;
+use std::{rc::Rc, sync::mpsc::channel};
+
+use crate::{
+    configure,
+    h5f::{H5FNode, Node},
+};
 
 use super::{
     AppState, Focus, HelpCommandSection, HelpCustomizationSection, HelpKeymapSection,
@@ -6,6 +11,140 @@ use super::{
 };
 
 impl AppState<'_> {
+    pub fn drain_content_previews(&mut self) {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let _ = self
+            .content_preview_tx
+            .send(super::ContentPreviewWork::Drain(done_tx));
+        let _ = done_rx.recv();
+    }
+
+    pub fn drain_matrix_viewports(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = self
+            .matrix_viewport_state
+            .tx_load
+            .send(super::MatrixViewportWork::Drain(tx));
+        let _ = rx.recv();
+    }
+    pub fn invalidate_selected_navigation_data(&mut self) {
+        self.navigation_generation = self.navigation_generation.wrapping_add(1);
+        self.pending_navigation_request = None;
+        self.content_preview_state.pending_key = None;
+        self.content_preview_state.error = None;
+        self.content_preview_state.cached.clear();
+    }
+
+    /// Queues the selected node's lazy metadata and attributes.  One worker keeps HDF5 access
+    /// ordered with reload; later selections make earlier replies irrelevant.
+    pub fn request_selected_navigation_data(&mut self) {
+        let Some(item) = self.treeview.get(self.tree_view_cursor) else {
+            return;
+        };
+        let mut node = item.node.borrow_mut();
+        if node.computed_attributes.is_some()
+            && self.pending_tree_selection_state.is_none()
+            && self.pending_tree_attribute_selection.is_none()
+            && !matches!(
+                node.node,
+                Node::Dataset(_, crate::h5f::DatasetMetaState::Pending(_))
+            )
+        {
+            return;
+        }
+        if (node.metadata_loading || node.attributes_loading)
+            && self.pending_navigation_request.is_some()
+        {
+            return;
+        }
+        let request_id = self.next_navigation_request_id;
+        self.next_navigation_request_id = self.next_navigation_request_id.wrapping_add(1);
+        node.metadata_loading = matches!(
+            node.node,
+            Node::Dataset(_, crate::h5f::DatasetMetaState::Pending(_))
+        );
+        node.attributes_loading = true;
+        node.metadata_error = None;
+        node.attributes_error = None;
+        let request = crate::ui::app::NavigationLoadRequest {
+            generation: self.navigation_generation,
+            request_id,
+            node: node.node.clone(),
+        };
+        drop(node);
+        self.pending_navigation_request = Some(request_id);
+        if self
+            .navigation_load_tx
+            .send(crate::ui::app::NavigationLoadWork::Load(request))
+            .is_err()
+        {
+            self.pending_navigation_request = None;
+            let mut node = item.node.borrow_mut();
+            node.metadata_loading = false;
+            node.attributes_loading = false;
+            node.attributes_error = Some("Navigation loading worker stopped".to_string());
+        }
+    }
+
+    /// Wait for the metadata worker before closing its HDF5 handles during reload/shutdown.
+    pub fn drain_navigation_loads(&mut self) {
+        let (done_tx, done_rx) = channel();
+        if self
+            .navigation_load_tx
+            .send(crate::ui::app::NavigationLoadWork::Drain(done_tx))
+            .is_ok()
+        {
+            let _ = done_rx.recv();
+        }
+        self.pending_navigation_request = None;
+    }
+
+    pub fn request_tree_children(&mut self, node: Rc<std::cell::RefCell<H5FNode>>) {
+        let mut node_ref = node.borrow_mut();
+        if node_ref.read || node_ref.loading {
+            node_ref.expanded = true;
+            return;
+        }
+        let Some(enumeration_node) = node_ref.enumeration_node() else {
+            return;
+        };
+        node_ref.expanded = true;
+        node_ref.loading = true;
+        node_ref.load_error = None;
+        let request_id = self.next_tree_load_request_id;
+        self.next_tree_load_request_id += 1;
+        drop(node_ref);
+        self.pending_tree_loads.push((request_id, node.clone()));
+        if self
+            .tree_load_tx
+            .send(crate::ui::app::TreeLoadWork::Load(
+                crate::ui::app::TreeLoadRequest {
+                    generation: self.tree_load_generation,
+                    request_id,
+                    node: enumeration_node,
+                },
+            ))
+            .is_err()
+        {
+            self.pending_tree_loads.retain(|(id, _)| *id != request_id);
+            node.borrow_mut()
+                .apply_enumeration_error("Tree loading worker stopped".to_string());
+        }
+    }
+
+    /// Wait until the single tree worker has finished every old HDF5 traversal.
+    pub fn drain_tree_loads(&mut self) {
+        let (done_tx, done_rx) = channel();
+        if self
+            .tree_load_tx
+            .send(crate::ui::app::TreeLoadWork::Drain(done_tx))
+            .is_ok()
+        {
+            let _ = done_rx.recv();
+        }
+        self.pending_tree_loads.clear();
+    }
+
     fn remember_main_focus(&mut self, last_focused: LastFocused) {
         self.focus = Focus::Tree(last_focused);
     }

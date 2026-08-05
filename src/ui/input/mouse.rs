@@ -421,7 +421,7 @@ fn handle_left_click(
                 let clicked_index = tree.row_offset.saturating_add(clicked_row);
                 if clicked_row < tree.visible_rows && clicked_index < state.treeview.len() {
                     let was_selected = state.tree_view_cursor == clicked_index;
-                    state.tree_view_cursor = clicked_index;
+                    state.select_tree_view_cursor(clicked_index);
                     if was_selected || toggle_if_selected {
                         let tree_item = &state.treeview[clicked_index];
                         if tree_item.load_more {
@@ -431,10 +431,10 @@ fn handle_left_click(
                         }
                         if tree_item.node.borrow().is_expandable() {
                             let node = tree_item.node.clone();
-                            let expand_result = node.borrow_mut().expand_toggle();
-                            if let Err(error) = expand_result {
-                                state.compute_tree_view();
-                                return Err(error.into());
+                            if node.borrow().expanded && node.borrow().load_error.is_none() {
+                                node.borrow_mut().collapse();
+                            } else {
+                                state.request_tree_children(node);
                             }
                             state.compute_tree_view();
                             return Ok(EventResult::Redraw);

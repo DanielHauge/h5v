@@ -11,16 +11,14 @@ use image::{DynamicImage, ImageBuffer, Rgb};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::{
-    data::{PreviewSelection, Previewable, SliceSelection},
+    data::{PreviewSelection, SliceSelection},
     error::AppError,
     h5f::{
-        format_dataset_value_for_edit, plot_projected, read_opaque_dataset_preview,
-        read_projected_scalar, read_scalar_string_dataset, read_single_value_dataset,
-        write_dataset_value_from_text, DatasetHandle, DatasetMeta, DatasetMetaState, H5FNode, Node,
+        format_dataset_value_for_edit, write_dataset_value_from_text, DatasetHandle, DatasetMeta,
+        DatasetMetaState, H5FNode, HasPath, Node,
     },
     ui::{
         edit::perform_edit,
-        matrix::compound_root_matrix_cell_text,
         mchart::ChartAxisScale,
         preview::chart::render_image_chart,
         preview::preview_text_for_compound_schema,
@@ -118,14 +116,8 @@ fn copy_image_to_clipboard(
 fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventResult> {
     let tree_item = state.treeview[state.tree_view_cursor].node.clone();
     let mut node = tree_item.borrow_mut();
-    if matches!(node.node, Node::Dataset(_, _)) {
-        node.ensure_dataset_meta()
-            .map_err(|error| EventResult::Toast(AppToast::Warning(error.to_string()), false))?;
-    }
-    let (dataset, meta) = match &node.node {
-        Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => {
-            (dataset.clone(), meta.clone())
-        }
+    let meta = match &node.node {
+        Node::Dataset(DatasetHandle::Loaded(_), DatasetMetaState::Loaded(meta)) => meta.clone(),
         _ => {
             return Err(EventResult::Toast(
                 AppToast::Warning("Only datasets can be copied from content view".to_string()),
@@ -169,31 +161,40 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
             .cols_currently_available
             .max(1)
             .min(field_count);
-        let row_index = state
-            .matrix_view_state
-            .row_offset
-            .min(row_count.saturating_sub(visible_rows))
-            + state
+        let key = crate::ui::state::MatrixViewportKey {
+            file_generation: state.content_generation,
+            metadata_revision: state.navigation_generation,
+            ds_path: node.node.path(),
+            mode: "compound-root".into(),
+            selected_row: row_dim,
+            selected_col: 0,
+            selected_indexes: node.selected_indexes.clone(),
+            row_offset: state
                 .matrix_view_state
-                .cursor_row
-                .min(visible_rows.saturating_sub(1));
-        let field_index = state
-            .matrix_view_state
-            .col_offset
-            .min(field_count.saturating_sub(visible_cols))
-            + state
+                .row_offset
+                .min(row_count.saturating_sub(visible_rows)),
+            col_offset: state
                 .matrix_view_state
-                .cursor_col
-                .min(visible_cols.saturating_sub(1));
-        return compound_root_matrix_cell_text(
-            &dataset,
-            &meta,
-            row_dim,
-            row_index,
-            field_index,
-            &node.selected_indexes,
-        )
-        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false));
+                .col_offset
+                .min(field_count.saturating_sub(visible_cols)),
+            rows: visible_rows,
+            cols: visible_cols,
+        };
+        return state
+            .matrix_viewport_state
+            .cached
+            .iter()
+            .find(|entry| entry.key == key)
+            .and_then(|entry| match &entry.data {
+                crate::ui::state::MatrixViewportData::Two(values) => values
+                    .get(
+                        state.matrix_view_state.cursor_row.min(visible_rows - 1) * visible_cols
+                            + state.matrix_view_state.cursor_col.min(visible_cols - 1),
+                    )
+                    .cloned(),
+                _ => None,
+            })
+            .ok_or_else(matrix_copy_loading);
     }
 
     if meta.matrixable.is_none() {
@@ -203,14 +204,11 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
         ));
     }
 
-    let shape = dataset.shape();
+    let shape = &meta.shape;
     let rank = shape.len();
     node.sync_selection_rank(rank);
-    let mut indices = node.selected_indexes.clone();
-    indices.resize(rank, 0);
-
-    let selection = if rank == 0 {
-        None
+    let (_row_offset, _col_offset, rows, cols) = if rank == 0 {
+        return Err(matrix_copy_loading());
     } else if rank == 1 {
         let visible_rows = state
             .matrix_view_state
@@ -221,12 +219,7 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
             .matrix_view_state
             .row_offset
             .min(shape[0].saturating_sub(visible_rows));
-        indices[0] = base_row
-            + state
-                .matrix_view_state
-                .cursor_row
-                .min(visible_rows.saturating_sub(1));
-        Some(exact_element_selection(&indices))
+        (base_row, 0, visible_rows, 1)
     } else {
         let row_dim = node.selected_row.min(rank.saturating_sub(1));
         let col_dim = node.selected_col.min(rank.saturating_sub(1));
@@ -248,21 +241,53 @@ fn selected_matrix_copy_text(state: &mut AppState<'_>) -> Result<String, EventRe
             .matrix_view_state
             .col_offset
             .min(shape[col_dim].saturating_sub(visible_cols));
-        indices[row_dim] = base_row
-            + state
-                .matrix_view_state
-                .cursor_row
-                .min(visible_rows.saturating_sub(1));
-        indices[col_dim] = base_col
-            + state
-                .matrix_view_state
-                .cursor_col
-                .min(visible_cols.saturating_sub(1));
-        Some(exact_element_selection(&indices))
+        (base_row, base_col, visible_rows, visible_cols)
     };
+    let key = crate::ui::state::MatrixViewportKey {
+        file_generation: state.content_generation,
+        metadata_revision: state.navigation_generation,
+        ds_path: node.node.path(),
+        mode: format!("{:?}:{}", meta.matrixable, meta.is_compound_leaf()),
+        selected_row: node.selected_row,
+        selected_col: node.selected_col,
+        selected_indexes: node.selected_indexes.clone(),
+        row_offset: state.matrix_view_state.row_offset,
+        col_offset: state.matrix_view_state.col_offset,
+        rows,
+        cols,
+    };
+    let index = if rank == 1 {
+        state.matrix_view_state.cursor_row.min(rows - 1)
+    } else {
+        state.matrix_view_state.cursor_row.min(rows - 1) * cols
+            + state.matrix_view_state.cursor_col.min(cols - 1)
+    };
+    state
+        .matrix_viewport_state
+        .cached
+        .iter()
+        .find(|entry| entry.key == key)
+        .and_then(|entry| match &entry.data {
+            crate::ui::state::MatrixViewportData::One(values)
+            | crate::ui::state::MatrixViewportData::Two(values)
+            | crate::ui::state::MatrixViewportData::OpaqueOne(values)
+            | crate::ui::state::MatrixViewportData::OpaqueTwo(values) => values.get(index).cloned(),
+            crate::ui::state::MatrixViewportData::EnumOne(values)
+            | crate::ui::state::MatrixViewportData::EnumTwo(values) => {
+                values.get(index).map(|value| match &meta.type_descriptor {
+                    TypeDescriptor::Enum(enum_type) => enum_value_to_string(enum_type, *value),
+                    _ => value.to_string(),
+                })
+            }
+        })
+        .ok_or_else(matrix_copy_loading)
+}
 
-    format_dataset_value_for_edit(&dataset, &meta, selection.as_ref())
-        .map_err(|error| EventResult::Toast(AppToast::Error(error.to_string()), false))
+fn matrix_copy_loading() -> EventResult {
+    EventResult::Toast(
+        AppToast::Warning("Matrix content is still loading".to_string()),
+        false,
+    )
 }
 
 fn selected_heatmap_copy_text(state: &mut AppState<'_>) -> Result<String, EventResult> {
@@ -290,87 +315,6 @@ fn chart_preview_selection(
     page_idx: i32,
 ) -> Option<PreviewSelection> {
     preview_selection_for_node(node, shape, page_idx)
-}
-
-fn preview_text_value(
-    node: &mut H5FNode,
-    dataset: &Dataset,
-    meta: &DatasetMeta,
-) -> Result<Option<String>, AppError> {
-    if meta.is_opaque() {
-        return Ok(Some(read_opaque_dataset_preview(dataset, meta)?));
-    }
-
-    if meta.image.is_some() {
-        return Ok(None);
-    }
-
-    if let Some(schema) = preview_text_for_compound_schema(meta) {
-        return Ok(Some(schema));
-    }
-
-    if meta.matrixable.is_none() {
-        return Ok(Some(read_scalar_string_dataset(dataset, &meta.encoding)?));
-    }
-
-    let Some(_) = chart_preview_selection(node, &dataset.shape(), 0) else {
-        return match meta.matrixable {
-            Some(MatrixRenderType::Float64) => {
-                if meta.is_compound_leaf() {
-                    Ok(Some(
-                        read_projected_scalar::<f64>(dataset, meta)?.to_string(),
-                    ))
-                } else {
-                    Ok(Some(read_single_value_dataset::<f64>(dataset)?.to_string()))
-                }
-            }
-            Some(MatrixRenderType::Uint64) => {
-                if meta.is_compound_leaf() {
-                    Ok(Some(
-                        read_projected_scalar::<u64>(dataset, meta)?.to_string(),
-                    ))
-                } else {
-                    Ok(Some(read_single_value_dataset::<u64>(dataset)?.to_string()))
-                }
-            }
-            Some(MatrixRenderType::Int64) => {
-                if meta.is_compound_leaf() {
-                    Ok(Some(
-                        read_projected_scalar::<i64>(dataset, meta)?.to_string(),
-                    ))
-                } else {
-                    Ok(Some(read_single_value_dataset::<i64>(dataset)?.to_string()))
-                }
-            }
-            Some(MatrixRenderType::Opaque) => {
-                Ok(Some(format_dataset_value_for_edit(dataset, meta, None)?))
-            }
-            Some(MatrixRenderType::Strings) => {
-                if meta.is_compound_leaf() {
-                    Ok(Some(read_projected_scalar::<String>(dataset, meta)?))
-                } else {
-                    Ok(Some(read_scalar_string_dataset(dataset, &meta.encoding)?))
-                }
-            }
-            Some(MatrixRenderType::Enum) => {
-                let TypeDescriptor::Enum(enum_type) = &meta.type_descriptor else {
-                    return Err(AppError::EditError(
-                        "Enum preview lost its enum type descriptor".to_string(),
-                    ));
-                };
-                let rendered = if meta.is_compound_leaf() {
-                    enum_value_to_string(enum_type, read_projected_scalar::<u64>(dataset, meta)?)
-                } else {
-                    enum_value_to_string(enum_type, read_single_value_dataset::<u64>(dataset)?)
-                };
-                Ok(Some(rendered))
-            }
-            Some(MatrixRenderType::ByteArray) => Ok(None),
-            _ => Ok(None),
-        };
-    };
-
-    Ok(None)
 }
 
 fn copy_chart_preview(
@@ -448,13 +392,8 @@ fn copy_chart_preview(
 fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppError> {
     let tree_item = state.treeview[state.tree_view_cursor].node.clone();
     let mut node = tree_item.borrow_mut();
-    if matches!(node.node, Node::Dataset(_, _)) {
-        node.ensure_dataset_meta()?;
-    }
-    let (dataset, meta) = match &node.node {
-        Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Loaded(meta)) => {
-            (dataset.clone(), meta.clone())
-        }
+    let meta = match &node.node {
+        Node::Dataset(DatasetHandle::Loaded(_), DatasetMetaState::Loaded(meta)) => meta.clone(),
         _ => {
             return Ok(EventResult::Toast(
                 AppToast::Warning("Only datasets can be copied from content view".to_string()),
@@ -462,7 +401,7 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
             ))
         }
     };
-    let ds_path = meta.virtual_path().unwrap_or(&dataset.name()).to_string();
+    let ds_path = node.node.path();
 
     if meta.image.is_some() {
         if let Some(message) = &state.img_state.error {
@@ -492,22 +431,42 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
         );
     }
 
-    if let Some(text) = preview_text_value(&mut node, &dataset, &meta)? {
+    if let Some(schema) = preview_text_for_compound_schema(&meta) {
+        return copy_text_to_clipboard(state, schema, "Copied preview value to clipboard");
+    }
+    let content_key = crate::ui::state::ContentPreviewKey {
+        file_generation: state.content_generation,
+        metadata_revision: state.navigation_generation,
+        ds_path: node.node.path(),
+        opaque: meta.is_opaque(),
+    };
+    if let Some(text) = state
+        .content_preview_state
+        .cached
+        .iter()
+        .find(|entry| entry.key == content_key)
+        .map(|entry| entry.text.clone())
+    {
         return copy_text_to_clipboard(state, text, "Copied preview value to clipboard");
     }
 
-    let shape = dataset.shape();
-    let Some(selection) = chart_preview_selection(&mut node, &shape, state.page_state.idx) else {
+    let Some(selection) = chart_preview_selection(&mut node, &meta.shape, state.page_state.idx)
+    else {
         return Ok(EventResult::Toast(
-            AppToast::Warning("Current preview cannot be copied".to_string()),
+            AppToast::Warning("Preview is still loading".to_string()),
             false,
         ));
     };
 
-    let data_preview = if meta.is_compound_leaf() {
-        plot_projected(&dataset, &meta, &selection)?
-    } else {
-        dataset.plot(&selection)?
+    let Some(data_preview) = (state.chart_preview_state.ds_loaded.as_deref()
+        == Some(ds_path.as_str())
+        && state.chart_preview_state.ds_selection.as_ref() == Some(&selection))
+    .then(|| state.chart_preview_state.current_data.clone())
+    .flatten() else {
+        return Ok(EventResult::Toast(
+            AppToast::Warning("Preview is still loading".to_string()),
+            false,
+        ));
     };
     copy_chart_preview(state, &ds_path, selection, data_preview)
 }

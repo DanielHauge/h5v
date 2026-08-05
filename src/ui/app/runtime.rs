@@ -1,7 +1,7 @@
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
-    sync::mpsc::RecvTimeoutError,
+    sync::mpsc::{Receiver, RecvTimeoutError},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -39,9 +39,109 @@ use super::{
     render::{draw_app_frame, render_error},
     update::spawn_update_check,
     AppEvent, ChartPreviewLoadedResult, HeatmapLoadedResult, ImageLoadedResult,
+    NavigationLoadResult, TreeLoadResult,
 };
 
 type Result<T> = std::result::Result<T, AppError>;
+
+fn tree_load_is_current(
+    current_generation: u64,
+    mut pending_request_ids: impl Iterator<Item = u64>,
+    generation: u64,
+    request_id: u64,
+) -> bool {
+    generation == current_generation && pending_request_ids.any(|id| id == request_id)
+}
+
+fn navigation_load_is_current(
+    current_generation: u64,
+    pending_request: Option<u64>,
+    generation: u64,
+    request_id: u64,
+) -> bool {
+    generation == current_generation && pending_request == Some(request_id)
+}
+
+fn startup_navigation_pending(
+    pending_tree_selection: bool,
+    pending_navigation_request: bool,
+) -> bool {
+    pending_tree_selection || pending_navigation_request
+}
+
+fn apply_navigation_load_result(
+    state: &mut AppState<'_>,
+    result: NavigationLoadResult,
+) -> Result<bool> {
+    let (generation, request_id) = match &result {
+        NavigationLoadResult::Metadata {
+            generation,
+            request_id,
+            ..
+        }
+        | NavigationLoadResult::Attributes {
+            generation,
+            request_id,
+            ..
+        }
+        | NavigationLoadResult::Failure {
+            generation,
+            request_id,
+            ..
+        } => (*generation, *request_id),
+    };
+    if !navigation_load_is_current(
+        state.navigation_generation,
+        state.pending_navigation_request,
+        generation,
+        request_id,
+    ) {
+        return Ok(false);
+    }
+    let Some(item) = state.treeview.get(state.tree_view_cursor) else {
+        return Ok(false);
+    };
+    let node_ref = item.node.clone();
+    let attributes_loaded = matches!(&result, NavigationLoadResult::Attributes { .. });
+    let mut node = node_ref.borrow_mut();
+    match result {
+        NavigationLoadResult::Metadata { node: loaded, .. } => {
+            node.node = loaded;
+            node.metadata_loading = false;
+            let rank = match &node.node {
+                crate::h5f::Node::Dataset(_, crate::h5f::DatasetMetaState::Loaded(meta)) => {
+                    meta.shape.len()
+                }
+                _ => 0,
+            };
+            node.sync_selection_rank(rank);
+            state.restore_pending_tree_selection_metadata(&mut node);
+        }
+        NavigationLoadResult::Attributes { attributes, .. } => {
+            node.computed_attributes = Some(attributes);
+            node.attributes_loading = false;
+            state.pending_navigation_request = None;
+        }
+        NavigationLoadResult::Failure {
+            metadata, message, ..
+        } => {
+            if metadata {
+                node.metadata_loading = false;
+                node.attributes_loading = false;
+                node.metadata_error = Some(message);
+            } else {
+                node.attributes_loading = false;
+                node.attributes_error = Some(message);
+            }
+            state.pending_navigation_request = None;
+        }
+    }
+    drop(node);
+    if attributes_loaded {
+        state.restore_pending_tree_attribute_selection()?;
+    }
+    Ok(true)
+}
 
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
@@ -80,7 +180,7 @@ pub(super) fn main_recover_loop(
     } = prepare_app(&filename, link, requested_open_mode, runtime_config)?;
     let mut new_version = new_version.map(str::to_owned);
 
-    if run_startup_commands(&mut state, startup_commands)? {
+    if run_startup_commands(&mut state, startup_commands, &rx_events)? {
         return Ok(());
     }
 
@@ -189,54 +289,16 @@ pub(super) fn main_recover_loop(
                 {
                     apply_app_toast(&mut state, AppToast::Error(error));
                 }
-                let selected_after = state.selected_tree_path();
-                if selected_before != selected_after {
-                    if let Some(path) = &selected_after {
-                        let path = path.clone();
-                        let generation = state.begin_preview_debounce(path);
-                        schedule_preview_debounce(tx_events.clone(), generation);
-                    } else {
-                        state.clear_preview_debounce();
-                    }
-                    if let Some(dataset_path) = selected_dataset_path(&state) {
-                        let opened_path = dataset_path.clone();
-                        let callback_result = configure::dispatch_lua_event(
-                            &mut state,
-                            "builtin.event.dataset_opened",
-                            |lua| {
-                                let event = lua.create_table()?;
-                                event.set("path", opened_path.clone())?;
-                                Ok(event)
-                            },
-                        )
-                        .unwrap_or_else(|error| {
-                            EventResult::Toast(AppToast::Warning(error.to_string()), false)
-                        });
-                        event_result = combine_event_results(event_result, callback_result);
-                    }
-                    let selected_kind_after = selected_item_kind(&state).map(str::to_string);
-                    let callback_result = dispatch_runtime_event(
+                event_result = combine_event_results(
+                    event_result,
+                    commit_selection_change(
                         &mut state,
-                        "builtin.event.selection_changed",
-                        |lua| {
-                            let event = lua.create_table()?;
-                            if let Some(path) = &selected_before {
-                                event.set("previous_path", path.clone())?;
-                            }
-                            if let Some(kind) = &selected_kind_before {
-                                event.set("previous_kind", kind.clone())?;
-                            }
-                            if let Some(path) = &selected_after {
-                                event.set("path", path.clone())?;
-                            }
-                            if let Some(kind) = &selected_kind_after {
-                                event.set("kind", kind.clone())?;
-                            }
-                            Ok(event)
-                        },
-                    );
-                    event_result = combine_event_results(event_result, callback_result);
-                }
+                        selected_before,
+                        selected_kind_before,
+                        &tx_events,
+                    ),
+                );
+                state.request_selected_navigation_data();
                 if focus_before != state.focus {
                     let previous_focus = focus_label(&focus_before);
                     let focus = focus_label(&state.focus);
@@ -556,6 +618,76 @@ pub(super) fn main_recover_loop(
                 }
                 redraw(terminal, &mut state, new_version.as_deref())?;
             }
+            AppEvent::ContentPreview(result) => {
+                match result {
+                    super::ContentPreviewLoadedResult::Success { key, text } => {
+                        if !crate::ui::preview::content::content_preview_is_current(
+                            state.content_preview_state.pending_key.as_ref(),
+                            &key,
+                        ) {
+                            continue;
+                        }
+                        state.content_preview_state.pending_key = None;
+                        state.content_preview_state.error = None;
+                        state
+                            .content_preview_state
+                            .cached
+                            .retain(|entry| entry.key != key);
+                        state
+                            .content_preview_state
+                            .cached
+                            .push_back(state::CachedContentPreview { key, text });
+                        while state.content_preview_state.cached.len()
+                            > state::CONTENT_CACHE_CAPACITY
+                        {
+                            state.content_preview_state.cached.pop_front();
+                        }
+                    }
+                    super::ContentPreviewLoadedResult::Failure { key, message } => {
+                        if !crate::ui::preview::content::content_preview_is_current(
+                            state.content_preview_state.pending_key.as_ref(),
+                            &key,
+                        ) {
+                            continue;
+                        }
+                        state.content_preview_state.pending_key = None;
+                        state.content_preview_state.error = Some((key, message));
+                    }
+                }
+                redraw(terminal, &mut state, new_version.as_deref())?;
+            }
+            AppEvent::MatrixViewport(result) => {
+                match result {
+                    super::MatrixViewportLoadedResult::Success { key, data } => {
+                        if state.matrix_viewport_state.pending_key.as_ref() != Some(&key) {
+                            continue;
+                        }
+                        state.matrix_viewport_state.pending_key = None;
+                        state.matrix_viewport_state.error = None;
+                        state
+                            .matrix_viewport_state
+                            .cached
+                            .retain(|entry| entry.key != key);
+                        state
+                            .matrix_viewport_state
+                            .cached
+                            .push_back(state::CachedMatrixViewport { key, data });
+                        while state.matrix_viewport_state.cached.len()
+                            > state::MATRIX_VIEWPORT_CACHE_CAPACITY
+                        {
+                            state.matrix_viewport_state.cached.pop_front();
+                        }
+                    }
+                    super::MatrixViewportLoadedResult::Failure { key, message } => {
+                        if state.matrix_viewport_state.pending_key.as_ref() != Some(&key) {
+                            continue;
+                        }
+                        state.matrix_viewport_state.pending_key = None;
+                        state.matrix_viewport_state.error = Some((key, message));
+                    }
+                }
+                redraw(terminal, &mut state, new_version.as_deref())?;
+            }
             AppEvent::PreviewChartLoad(image_loaded_result) => match image_loaded_result {
                 ChartPreviewLoadedResult::Success {
                     key,
@@ -720,6 +852,74 @@ pub(super) fn main_recover_loop(
                 state.multi_chart.apply_render_result(result);
                 redraw(terminal, &mut state, new_version.as_deref())?;
             }
+            AppEvent::TreeLoad(result) => {
+                let (generation, request_id) = match &result {
+                    TreeLoadResult::Success {
+                        generation,
+                        request_id,
+                        ..
+                    }
+                    | TreeLoadResult::Failure {
+                        generation,
+                        request_id,
+                        ..
+                    } => (*generation, *request_id),
+                };
+                if !tree_load_is_current(
+                    state.tree_load_generation,
+                    state.pending_tree_loads.iter().map(|(id, _)| *id),
+                    generation,
+                    request_id,
+                ) {
+                    continue;
+                }
+                let Some(index) = state
+                    .pending_tree_loads
+                    .iter()
+                    .position(|(id, _)| *id == request_id)
+                else {
+                    continue;
+                };
+                let (_, node) = state.pending_tree_loads.remove(index);
+                match result {
+                    TreeLoadResult::Success { children, .. } => {
+                        node.borrow_mut().apply_enumerated_children(children)
+                    }
+                    TreeLoadResult::Failure { message, .. } => {
+                        node.borrow_mut().apply_enumeration_error(message)
+                    }
+                }
+                let selected_before = state.selected_tree_path();
+                let selected_kind_before = selected_item_kind(&state).map(str::to_string);
+                if let Err(error) = state.resume_tree_requests() {
+                    apply_app_toast(&mut state, AppToast::Error(error.to_string()));
+                }
+                let selection_result = commit_selection_change(
+                    &mut state,
+                    selected_before,
+                    selected_kind_before,
+                    &tx_events,
+                );
+                if let EventResult::Toast(toast, _) = selection_result {
+                    apply_app_toast(&mut state, toast);
+                }
+                state.request_selected_navigation_data();
+                state.compute_tree_view();
+                redraw(terminal, &mut state, new_version.as_deref())?;
+            }
+            AppEvent::NavigationLoad(result) => {
+                let applied = match apply_navigation_load_result(&mut state, result) {
+                    Ok(applied) => applied,
+                    Err(error) => {
+                        apply_app_toast(&mut state, AppToast::Error(error.to_string()));
+                        true
+                    }
+                };
+                if !applied {
+                    continue;
+                }
+                redraw(terminal, &mut state, new_version.as_deref())?;
+            }
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
                     redraw(terminal, &mut state, new_version.as_deref())?;
@@ -733,6 +933,10 @@ pub(super) fn main_recover_loop(
             }
         }
     }
+    state.drain_tree_loads();
+    state.drain_navigation_loads();
+    state.drain_content_previews();
+    state.drain_matrix_viewports();
     if let Some(file) = state.file.take() {
         file.close()?;
     }
@@ -797,11 +1001,93 @@ fn draw_error_terminal_frame(terminal: &mut AppTerminal, error: &str) -> std::io
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{navigation_load_is_current, startup_navigation_pending, tree_load_is_current};
+
+    #[test]
+    fn delayed_tree_result_is_rejected_after_reload() {
+        assert!(!tree_load_is_current(2, [7].into_iter(), 1, 7));
+    }
+
+    #[test]
+    fn distinct_pending_tree_expansions_are_retained() {
+        assert!(tree_load_is_current(3, [11, 12].into_iter(), 3, 11));
+        assert!(tree_load_is_current(3, [11, 12].into_iter(), 3, 12));
+    }
+
+    #[test]
+    fn delayed_navigation_result_is_rejected_after_selection() {
+        assert!(!navigation_load_is_current(2, Some(8), 1, 8));
+        assert!(!navigation_load_is_current(2, Some(8), 2, 7));
+        assert!(navigation_load_is_current(2, Some(8), 2, 8));
+    }
+
+    #[test]
+    fn startup_commands_wait_for_navigation_metadata_and_attributes() {
+        assert!(startup_navigation_pending(false, true));
+        assert!(startup_navigation_pending(true, false));
+        assert!(!startup_navigation_pending(false, false));
+    }
+}
+
 fn combine_event_results(primary: EventResult, secondary: EventResult) -> EventResult {
     match secondary {
         EventResult::Continue => primary,
         other => other,
     }
+}
+
+fn commit_selection_change(
+    state: &mut AppState<'_>,
+    selected_before: Option<String>,
+    selected_kind_before: Option<String>,
+    tx_events: &std::sync::mpsc::Sender<AppEvent>,
+) -> EventResult {
+    let selected_after = state.selected_tree_path();
+    if selected_before == selected_after {
+        return EventResult::Continue;
+    }
+    state.navigation_generation = state.navigation_generation.wrapping_add(1);
+    state.pending_navigation_request = None;
+    if let Some(path) = &selected_after {
+        let generation = state.begin_preview_debounce(path.clone());
+        schedule_preview_debounce(tx_events.clone(), generation);
+    } else {
+        state.clear_preview_debounce();
+    }
+
+    let mut result = EventResult::Continue;
+    if let Some(dataset_path) = selected_dataset_path(state) {
+        let callback_result =
+            configure::dispatch_lua_event(state, "builtin.event.dataset_opened", |lua| {
+                let event = lua.create_table()?;
+                event.set("path", dataset_path)?;
+                Ok(event)
+            })
+            .unwrap_or_else(|error| {
+                EventResult::Toast(AppToast::Warning(error.to_string()), false)
+            });
+        result = combine_event_results(result, callback_result);
+    }
+    let selected_kind_after = selected_item_kind(state).map(str::to_string);
+    let callback_result = dispatch_runtime_event(state, "builtin.event.selection_changed", |lua| {
+        let event = lua.create_table()?;
+        if let Some(path) = selected_before {
+            event.set("previous_path", path)?;
+        }
+        if let Some(kind) = selected_kind_before {
+            event.set("previous_kind", kind)?;
+        }
+        if let Some(path) = selected_after {
+            event.set("path", path)?;
+        }
+        if let Some(kind) = selected_kind_after {
+            event.set("kind", kind)?;
+        }
+        Ok(event)
+    });
+    combine_event_results(result, callback_result)
 }
 
 fn dispatch_runtime_event(
@@ -890,6 +1176,7 @@ fn apply_startup_event_result(state: &mut AppState<'_>, event_result: EventResul
 fn run_startup_commands(
     state: &mut AppState<'_>,
     startup_commands: &[StartupCommand],
+    rx_events: &Receiver<AppEvent>,
 ) -> Result<bool> {
     for startup_command in startup_commands {
         let invocation = parse_command_text(&startup_command.command_text).map_err(|error| {
@@ -899,6 +1186,57 @@ fn run_startup_commands(
             AppError::InvalidCommand(format!("{}: {}", startup_command.origin, error))
         })?;
         state.command_state.record_successful_command(&invocation);
+        while startup_navigation_pending(
+            state.pending_tree_selection.is_some(),
+            state.pending_navigation_request.is_some(),
+        ) {
+            let event = rx_events.recv().map_err(|error| {
+                AppError::ChannelError(format!("Failed to receive tree load: {error}"))
+            })?;
+            let AppEvent::TreeLoad(result) = event else {
+                if let AppEvent::NavigationLoad(result) = event {
+                    apply_navigation_load_result(state, result).map_err(|error| {
+                        AppError::InvalidCommand(format!("{}: {}", startup_command.origin, error))
+                    })?;
+                }
+                continue;
+            };
+            let (generation, request_id) = match &result {
+                TreeLoadResult::Success {
+                    generation,
+                    request_id,
+                    ..
+                }
+                | TreeLoadResult::Failure {
+                    generation,
+                    request_id,
+                    ..
+                } => (*generation, *request_id),
+            };
+            let Some(index) = (generation == state.tree_load_generation)
+                .then(|| {
+                    state
+                        .pending_tree_loads
+                        .iter()
+                        .position(|(id, _)| *id == request_id)
+                })
+                .flatten()
+            else {
+                continue;
+            };
+            let (_, node) = state.pending_tree_loads.remove(index);
+            match result {
+                TreeLoadResult::Success { children, .. } => {
+                    node.borrow_mut().apply_enumerated_children(children)
+                }
+                TreeLoadResult::Failure { message, .. } => {
+                    node.borrow_mut().apply_enumeration_error(message)
+                }
+            }
+            state.resume_tree_requests().map_err(|error| {
+                AppError::InvalidCommand(format!("{}: {}", startup_command.origin, error))
+            })?;
+        }
         if apply_startup_event_result(state, event_result)? {
             return Ok(true);
         }

@@ -1,7 +1,11 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    sync::mpsc::{channel, Sender},
+    thread,
+};
 
 use hdf5_metno::{
-    types::{EnumMember, EnumType, IntSize},
+    types::{EnumMember, EnumType, IntSize, VarLenUnicode},
     H5Type, Hyperslab, Selection, SliceOrIndex,
 };
 use ndarray::{Array1, Array2};
@@ -20,8 +24,8 @@ use crate::{
     h5f::{
         read_opaque_values_1d, read_opaque_values_2d, read_projected_values_1d,
         read_projected_values_2d, read_selected_values_bytes, read_varlen_u8_matrix_table,
-        read_varlen_u8_matrix_values, DatasetMeta, EnumRenderOverrides, H5FNode, ProjectionDecode,
-        ResolvedOpenMode,
+        read_varlen_u8_matrix_values, DatasetMeta, EnumRenderOverrides, H5FNode, HasPath,
+        ProjectionDecode, ResolvedOpenMode,
     },
     ui::{render::sprint_typedescriptor, state::Focus},
 };
@@ -30,6 +34,261 @@ use super::{
     dims::{render_dim_selector, HasMatrixSelection, MatrixSelection},
     state::{AppState, MatrixCellHitbox, MatrixRowHitbox},
 };
+
+/// One bounded latest-request worker; matrices never touch HDF5 from redraw.
+pub(crate) fn handle_matrix_viewport_load(
+    tx_events: Sender<crate::ui::app::AppEvent>,
+) -> Sender<crate::ui::state::MatrixViewportWork> {
+    let (tx, rx) = channel();
+    thread::spawn(move || {
+        while let Ok(work) = rx.recv() {
+            let crate::ui::state::MatrixViewportWork::Load(mut request) = work else {
+                let crate::ui::state::MatrixViewportWork::Drain(done) = work else {
+                    unreachable!()
+                };
+                let _ = done.send(());
+                continue;
+            };
+            let mut pending_drains = Vec::new();
+            while let Ok(next) = rx.try_recv() {
+                match next {
+                    crate::ui::state::MatrixViewportWork::Load(next) => request = next,
+                    // A drain is acknowledged below, after the active read.
+                    crate::ui::state::MatrixViewportWork::Drain(done) => pending_drains.push(done),
+                }
+            }
+            let key = request.key.clone();
+            let result = load_matrix_viewport(request)
+                .map(|data| crate::ui::app::MatrixViewportLoadedResult::Success {
+                    key: key.clone(),
+                    data,
+                })
+                .unwrap_or_else(
+                    |error| crate::ui::app::MatrixViewportLoadedResult::Failure {
+                        key,
+                        message: error.to_string(),
+                    },
+                );
+            if tx_events
+                .send(crate::ui::app::AppEvent::MatrixViewport(result))
+                .is_err()
+            {
+                return;
+            }
+            for done in pending_drains {
+                let _ = done.send(());
+            }
+        }
+    });
+    tx
+}
+
+fn load_matrix_viewport(
+    request: crate::ui::state::MatrixViewportRequest,
+) -> Result<crate::ui::state::MatrixViewportData, AppError> {
+    use crate::ui::render::MatrixRenderType;
+    if request.meta.is_compound_container() {
+        let compound = request.meta.current_compound_type().ok_or_else(|| {
+            AppError::DrawingError("Compound matrix metadata is unavailable".into())
+        })?;
+        let (bytes, _) = read_selected_values_bytes(&request.dataset, request.selection)?;
+        let size = request.dataset.dtype()?.size();
+        if bytes.len() % size != 0 {
+            return Err(AppError::DrawingError(
+                "Compound matrix record size mismatch".into(),
+            ));
+        }
+        let start = request.key.col_offset.min(compound.fields.len());
+        let fields = compound.fields.iter().skip(start).take(request.key.cols);
+        let mut values = Vec::new();
+        for record in bytes.chunks_exact(size) {
+            for field in fields.clone() {
+                values.push(compound_root_matrix_field_text_from_record(record, field)?);
+            }
+        }
+        return Ok(crate::ui::state::MatrixViewportData::Two(values));
+    }
+    let projected = request.meta.is_compound_leaf();
+    macro_rules! read {
+        ($t:ty) => {{
+            if request.meta.shape.len() == 1 {
+                let values = if projected {
+                    read_projected_values_1d::<$t>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .to_vec()
+                } else {
+                    request
+                        .dataset
+                        .matrix_values::<$t>(request.selection)?
+                        .data
+                        .to_vec()
+                };
+                Ok(crate::ui::state::MatrixViewportData::One(
+                    values.into_iter().map(|v| v.to_string()).collect(),
+                ))
+            } else {
+                let values: Vec<$t> = if projected {
+                    read_projected_values_2d::<$t>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .into_iter()
+                    .collect()
+                } else {
+                    request
+                        .dataset
+                        .matrix_table::<$t>(request.selection)?
+                        .data
+                        .into_iter()
+                        .collect()
+                };
+                Ok(crate::ui::state::MatrixViewportData::Two(
+                    values.into_iter().map(|v| v.to_string()).collect(),
+                ))
+            }
+        }};
+    }
+    match request.meta.matrixable {
+        Some(MatrixRenderType::Float64) => read!(f64),
+        Some(MatrixRenderType::Uint64) => read!(u64),
+        Some(MatrixRenderType::Enum) => {
+            if request.meta.shape.len() == 1 {
+                let values = if projected {
+                    read_projected_values_1d::<u64>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .to_vec()
+                } else {
+                    request
+                        .dataset
+                        .matrix_values::<u64>(request.selection)?
+                        .data
+                        .to_vec()
+                };
+                Ok(crate::ui::state::MatrixViewportData::EnumOne(values))
+            } else {
+                let values = if projected {
+                    read_projected_values_2d::<u64>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .into_iter()
+                    .collect()
+                } else {
+                    request
+                        .dataset
+                        .matrix_table::<u64>(request.selection)?
+                        .data
+                        .into_iter()
+                        .collect()
+                };
+                Ok(crate::ui::state::MatrixViewportData::EnumTwo(values))
+            }
+        }
+        Some(MatrixRenderType::Int64) => read!(i64),
+        Some(MatrixRenderType::Strings) if projected => {
+            if request.meta.shape.len() == 1 {
+                Ok(matrix_viewport_string_data(
+                    read_projected_values_1d::<String>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .to_vec(),
+                    false,
+                    true,
+                ))
+            } else {
+                Ok(matrix_viewport_string_data(
+                    read_projected_values_2d::<String>(
+                        &request.dataset,
+                        &request.meta,
+                        request.selection,
+                    )?
+                    .into_iter()
+                    .collect(),
+                    false,
+                    false,
+                ))
+            }
+        }
+        Some(MatrixRenderType::Strings) => {
+            if request.meta.shape.len() == 1 {
+                Ok(crate::ui::state::MatrixViewportData::One(
+                    request
+                        .dataset
+                        .matrix_values::<VarLenUnicode>(request.selection)?
+                        .data
+                        .into_iter()
+                        .map(|v| v.to_string())
+                        .collect(),
+                ))
+            } else {
+                Ok(crate::ui::state::MatrixViewportData::Two(
+                    request
+                        .dataset
+                        .matrix_table::<VarLenUnicode>(request.selection)?
+                        .data
+                        .into_iter()
+                        .map(|v| v.to_string())
+                        .collect(),
+                ))
+            }
+        }
+        Some(MatrixRenderType::Opaque) => {
+            if request.meta.shape.len() == 1 {
+                Ok(matrix_viewport_string_data(
+                    read_opaque_values_1d(&request.dataset, request.selection)?.to_vec(),
+                    true,
+                    true,
+                ))
+            } else {
+                Ok(matrix_viewport_string_data(
+                    read_opaque_values_2d(&request.dataset, request.selection)?
+                        .into_iter()
+                        .collect(),
+                    true,
+                    false,
+                ))
+            }
+        }
+        Some(MatrixRenderType::ByteArray) => {
+            if request.meta.shape.len() == 1 {
+                Ok(crate::ui::state::MatrixViewportData::One(
+                    read_varlen_u8_matrix_values(&request.dataset, request.selection)?.to_vec(),
+                ))
+            } else {
+                Ok(crate::ui::state::MatrixViewportData::Two(
+                    read_varlen_u8_matrix_table(&request.dataset, request.selection)?
+                        .into_iter()
+                        .collect(),
+                ))
+            }
+        }
+        _ => Err(AppError::DrawingError("Unsupported matrix viewport".into())),
+    }
+}
+
+fn matrix_viewport_string_data(
+    values: Vec<String>,
+    opaque: bool,
+    one_dimensional: bool,
+) -> crate::ui::state::MatrixViewportData {
+    match (opaque, one_dimensional) {
+        (false, true) => crate::ui::state::MatrixViewportData::One(values),
+        (false, false) => crate::ui::state::MatrixViewportData::Two(values),
+        (true, true) => crate::ui::state::MatrixViewportData::OpaqueOne(values),
+        (true, false) => crate::ui::state::MatrixViewportData::OpaqueTwo(values),
+    }
+}
+
 pub fn render_not_yet_implemented(f: &mut Frame, area: &Rect, desc: &str) {
     let inner_area = area.inner(ratatui::layout::Margin {
         horizontal: 2,
@@ -130,6 +389,15 @@ fn has_visible_matrix_cells(shape_len: usize, selection: MatrixSelection) -> boo
     selection.rows > 0 && (shape_len <= 1 || selection.cols > 0)
 }
 
+fn should_load_matrix_viewport(
+    cached: bool,
+    pending: Option<&crate::ui::state::MatrixViewportKey>,
+    error: Option<&(crate::ui::state::MatrixViewportKey, String)>,
+    key: &crate::ui::state::MatrixViewportKey,
+) -> bool {
+    !cached && pending != Some(key) && error.is_none_or(|(error_key, _)| error_key != key)
+}
+
 impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     fn render_as_line(&self, value: &T) -> Line<'static> {
         let mut span = Span::styled(
@@ -154,6 +422,7 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
     }
 }
 
+#[allow(dead_code)]
 pub struct OpaqueHexRenderIntercept;
 
 impl RenderIntercept<String> for OpaqueHexRenderIntercept {
@@ -309,17 +578,8 @@ pub fn render_matrix<T: H5Type + Display>(
     state: &mut AppState,
     result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
-    refresh_dataset_for_swmr(ds, state)?;
-    render_matrix_with_reader(
-        f,
-        area,
-        attr,
-        node,
-        state,
-        |selection| Ok(ds.matrix_values::<T>(selection)?.data),
-        |selection| Ok(ds.matrix_table::<T>(selection)?.data),
-        result_render,
-    )
+    let _ = result_render;
+    render_cached_matrix(f, area, ds, attr, node, state)
 }
 
 pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
@@ -331,17 +591,8 @@ pub fn render_projected_matrix<T: Display + crate::h5f::ProjectionDecode>(
     state: &mut AppState,
     result_render: impl RenderIntercept<T>,
 ) -> Result<(), AppError> {
-    refresh_dataset_for_swmr(ds, state)?;
-    render_matrix_with_reader(
-        f,
-        area,
-        attr,
-        node,
-        state,
-        |selection| read_projected_values_1d::<T>(ds, attr, selection),
-        |selection| read_projected_values_2d::<T>(ds, attr, selection),
-        result_render,
-    )
+    let _ = result_render;
+    render_cached_matrix(f, area, ds, attr, node, state)
 }
 
 pub fn render_opaque_matrix(
@@ -352,17 +603,7 @@ pub fn render_opaque_matrix(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    refresh_dataset_for_swmr(ds, state)?;
-    render_matrix_with_reader(
-        f,
-        area,
-        attr,
-        node,
-        state,
-        |selection| read_opaque_values_1d(ds, selection),
-        |selection| read_opaque_values_2d(ds, selection),
-        OpaqueHexRenderIntercept,
-    )
+    render_cached_matrix(f, area, ds, attr, node, state)
 }
 
 pub fn render_varlen_u8_matrix(
@@ -373,17 +614,176 @@ pub fn render_varlen_u8_matrix(
     node: &mut H5FNode,
     state: &mut AppState,
 ) -> Result<(), AppError> {
-    refresh_dataset_for_swmr(ds, state)?;
-    render_matrix_with_reader(
-        f,
-        area,
-        attr,
-        node,
-        state,
-        |selection| read_varlen_u8_matrix_values(ds, selection),
-        |selection| read_varlen_u8_matrix_table(ds, selection),
-        DefaultMatrixResultRenderIntercept,
-    )
+    render_cached_matrix(f, area, ds, attr, node, state)
+}
+
+fn render_cached_matrix(
+    f: &mut Frame,
+    area: &Rect,
+    ds: &hdf5_metno::Dataset,
+    attr: &DatasetMeta,
+    node: &mut H5FNode,
+    state: &mut AppState,
+) -> Result<(), AppError> {
+    normalize_matrix_axes(node, &attr.shape);
+    let mut matrix_area = area.inner(ratatui::layout::Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    if attr.shape.len() > 1 {
+        matrix_area = Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)])
+            .split(matrix_area)[1]
+            .inner(ratatui::layout::Margin {
+                horizontal: 0,
+                vertical: 1,
+            });
+    }
+    let rows = attr
+        .shape
+        .get(node.selected_row)
+        .copied()
+        .unwrap_or_default();
+    let cols = attr.shape.get(node.selected_col).copied().unwrap_or(1);
+    let extent = visible_matrix_capacity(matrix_area, rows, cols);
+    let key = crate::ui::state::MatrixViewportKey {
+        file_generation: state.content_generation,
+        metadata_revision: state.navigation_generation,
+        ds_path: node.node.path(),
+        mode: format!("{:?}:{}", attr.matrixable, attr.is_compound_leaf()),
+        selected_row: node.selected_row,
+        selected_col: node.selected_col,
+        selected_indexes: node.selected_indexes.clone(),
+        row_offset: state.matrix_view_state.row_offset,
+        col_offset: state.matrix_view_state.col_offset,
+        rows: extent.rows,
+        cols: extent.cols,
+    };
+    let cached = state
+        .matrix_viewport_state
+        .cached
+        .iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| entry.data.clone());
+    if cached.is_none()
+        && state
+            .matrix_viewport_state
+            .error
+            .as_ref()
+            .is_some_and(|(error_key, _)| error_key == &key)
+    {
+        let message = state
+            .matrix_viewport_state
+            .error
+            .as_ref()
+            .unwrap()
+            .1
+            .clone();
+        crate::ui::std_comp_render::render_error(
+            f,
+            area,
+            format!("Error loading matrix: {message}"),
+        );
+        return Ok(());
+    }
+    if should_load_matrix_viewport(
+        cached.is_some(),
+        state.matrix_viewport_state.pending_key.as_ref(),
+        state.matrix_viewport_state.error.as_ref(),
+        &key,
+    ) {
+        let selection = state.get_matrix_selection(node, extent, &attr.shape);
+        state.matrix_viewport_state.pending_key = Some(key.clone());
+        state.matrix_viewport_state.error = None;
+        let _ =
+            state
+                .matrix_viewport_state
+                .tx_load
+                .send(crate::ui::state::MatrixViewportWork::Load(
+                    crate::ui::state::MatrixViewportRequest {
+                        key,
+                        dataset: ds.clone(),
+                        meta: attr.clone(),
+                        selection,
+                    },
+                ));
+    }
+    macro_rules! render_cached {
+        ($one:expr, $two:expr, $renderer:expr) => {{
+            let one = $one;
+            let two = $two;
+            render_matrix_with_reader(
+                f,
+                area,
+                attr,
+                node,
+                state,
+                move |_| Ok(one.clone()),
+                move |_| Ok(two.clone()),
+                $renderer,
+            )
+        }};
+    }
+    match cached {
+        Some(crate::ui::state::MatrixViewportData::EnumOne(values)) => {
+            let hdf5_metno::types::TypeDescriptor::Enum(enum_type) = &attr.type_descriptor else {
+                return Err(AppError::DrawingError(
+                    "Matrix enum metadata is unavailable".into(),
+                ));
+            };
+            render_cached!(
+                Array1::from(values),
+                Array2::default((0, 0)),
+                EnumRenderer::with_overrides(
+                    enum_type.clone(),
+                    attr.enum_render_overrides.as_ref()
+                )
+            )
+        }
+        Some(crate::ui::state::MatrixViewportData::EnumTwo(values)) => {
+            let hdf5_metno::types::TypeDescriptor::Enum(enum_type) = &attr.type_descriptor else {
+                return Err(AppError::DrawingError(
+                    "Matrix enum metadata is unavailable".into(),
+                ));
+            };
+            render_cached!(
+                Array1::default(0),
+                Array2::from_shape_vec((extent.rows, extent.cols), values)
+                    .unwrap_or_else(|_| Array2::default((0, 0))),
+                EnumRenderer::with_overrides(
+                    enum_type.clone(),
+                    attr.enum_render_overrides.as_ref()
+                )
+            )
+        }
+        Some(crate::ui::state::MatrixViewportData::OpaqueOne(values)) => {
+            render_cached!(
+                Array1::from(values),
+                Array2::default((0, 0)),
+                OpaqueHexRenderIntercept
+            )
+        }
+        Some(crate::ui::state::MatrixViewportData::OpaqueTwo(values)) => {
+            render_cached!(
+                Array1::default(0),
+                Array2::from_shape_vec((extent.rows, extent.cols), values)
+                    .unwrap_or_else(|_| Array2::default((0, 0))),
+                OpaqueHexRenderIntercept
+            )
+        }
+        data => render_cached!(
+            match data.clone() {
+                Some(crate::ui::state::MatrixViewportData::One(values)) => Array1::from(values),
+                _ => Array1::default(0),
+            },
+            match data {
+                Some(crate::ui::state::MatrixViewportData::Two(values)) =>
+                    Array2::from_shape_vec((extent.rows, extent.cols), values)
+                        .unwrap_or_else(|_| Array2::default((0, 0))),
+                _ => Array2::default((0, 0)),
+            },
+            DefaultMatrixResultRenderIntercept
+        ),
+    }
 }
 
 pub fn render_compound_root_matrix(
@@ -452,19 +852,70 @@ pub fn render_compound_root_matrix(
         .min(row_count.saturating_sub(max_rows));
     let col_start = compound_root_field_window(state, field_count, max_cols).start;
     let selection = compound_root_matrix_selection(node, attr, row_dim, row_start, max_rows);
-    let (bytes, _) = read_selected_values_bytes(ds, selection)?;
-    let record_size = ds.dtype()?.size();
-    let expected_bytes = max_rows.checked_mul(record_size).ok_or_else(|| {
-        AppError::DrawingError("Compound root matrix byte size overflowed usize".to_string())
-    })?;
-    if bytes.len() != expected_bytes {
-        return Err(AppError::DrawingError(format!(
-            "Compound root matrix byte size mismatch: expected {} bytes, got {}",
-            expected_bytes,
-            bytes.len()
-        )));
+    let key = crate::ui::state::MatrixViewportKey {
+        file_generation: state.content_generation,
+        metadata_revision: state.navigation_generation,
+        ds_path: node.node.path(),
+        mode: "compound-root".into(),
+        selected_row: row_dim,
+        selected_col: 0,
+        selected_indexes: node.selected_indexes.clone(),
+        row_offset: row_start,
+        col_offset: col_start,
+        rows: max_rows,
+        cols: max_cols,
+    };
+    let values = state
+        .matrix_viewport_state
+        .cached
+        .iter()
+        .find(|entry| entry.key == key)
+        .and_then(|entry| match &entry.data {
+            crate::ui::state::MatrixViewportData::Two(values) => Some(values.clone()),
+            _ => None,
+        });
+    if values.is_none()
+        && state
+            .matrix_viewport_state
+            .error
+            .as_ref()
+            .is_some_and(|(error_key, _)| error_key == &key)
+    {
+        let message = state
+            .matrix_viewport_state
+            .error
+            .as_ref()
+            .unwrap()
+            .1
+            .clone();
+        crate::ui::std_comp_render::render_error(
+            f,
+            area,
+            format!("Error loading matrix: {message}"),
+        );
+        return Ok(());
     }
-    let records = bytes.chunks_exact(record_size).collect::<Vec<_>>();
+    if should_load_matrix_viewport(
+        values.is_some(),
+        state.matrix_viewport_state.pending_key.as_ref(),
+        state.matrix_viewport_state.error.as_ref(),
+        &key,
+    ) {
+        state.matrix_viewport_state.pending_key = Some(key.clone());
+        state.matrix_viewport_state.error = None;
+        let _ =
+            state
+                .matrix_viewport_state
+                .tx_load
+                .send(crate::ui::state::MatrixViewportWork::Load(
+                    crate::ui::state::MatrixViewportRequest {
+                        key,
+                        dataset: ds.clone(),
+                        meta: attr.clone(),
+                        selection,
+                    },
+                ));
+    }
 
     let mut rows_area_constraints = Vec::with_capacity(max_rows + 1);
     (0..max_rows).for_each(|_| rows_area_constraints.push(Constraint::Length(1)));
@@ -506,7 +957,6 @@ pub fn render_compound_root_matrix(
         }
         f.render_widget(idx_line, idx_area);
 
-        let record = records[i];
         for j in 0..max_cols {
             let val_area = col_areas[j + 1];
             state.ui_layout.matrix_cells.push(MatrixCellHitbox {
@@ -514,7 +964,6 @@ pub fn render_compound_root_matrix(
                 row: i,
                 col: j,
             });
-            let field = &compound.fields[col_start + j];
             let val_bg_color = match (
                 (i + state.matrix_view_state.row_offset).is_multiple_of(2),
                 (j + state.matrix_view_state.col_offset).is_multiple_of(2),
@@ -531,7 +980,11 @@ pub fn render_compound_root_matrix(
             } else {
                 val_bg_color
             };
-            let value = compound_root_matrix_field_text_from_record(record, field)?;
+            let value = values
+                .as_ref()
+                .and_then(|values| values.get(i * max_cols + j))
+                .cloned()
+                .unwrap_or_else(|| "Loading…".to_string());
             render_centered_matrix_cell(
                 f,
                 val_area,
@@ -542,57 +995,6 @@ pub fn render_compound_root_matrix(
     }
 
     Ok(())
-}
-
-pub(crate) fn compound_root_matrix_cell_text(
-    dataset: &hdf5_metno::Dataset,
-    meta: &DatasetMeta,
-    row_dim: usize,
-    row_index: usize,
-    field_index: usize,
-    selected_indexes: &[usize],
-) -> Result<String, AppError> {
-    let Some((row_dim, row_count)) = compound_root_matrix_axis_for_row(meta, row_dim) else {
-        return Err(AppError::DrawingError(
-            "Compound root matrix copy requires at least one non-singleton record axis".to_string(),
-        ));
-    };
-    let compound = meta.current_compound_type().ok_or_else(|| {
-        AppError::DrawingError("Compound root matrix metadata is unavailable".to_string())
-    })?;
-    let field = compound.fields.get(field_index).ok_or_else(|| {
-        AppError::DrawingError(format!(
-            "Compound root field column {field_index} is out of bounds for {} fields",
-            compound.fields.len()
-        ))
-    })?;
-    if row_index >= row_count {
-        return Err(AppError::DrawingError(format!(
-            "Compound root row {row_index} is out of bounds for {row_count} rows"
-        )));
-    }
-
-    let mut slice = Vec::with_capacity(meta.shape.len());
-    for dim in 0..meta.shape.len() {
-        if dim == row_dim {
-            slice.push(SliceOrIndex::Index(row_index));
-        } else {
-            slice.push(SliceOrIndex::Index(
-                selected_indexes.get(dim).copied().unwrap_or_default(),
-            ));
-        }
-    }
-    let (bytes, _) =
-        read_selected_values_bytes(dataset, Selection::Hyperslab(Hyperslab::from(slice)))?;
-    let record_size = dataset.dtype()?.size();
-    if bytes.len() != record_size {
-        return Err(AppError::DrawingError(format!(
-            "Compound root cell read returned {} bytes, expected {}",
-            bytes.len(),
-            record_size
-        )));
-    }
-    compound_root_matrix_field_text_from_record(&bytes, field)
 }
 
 #[derive(Clone, Copy)]
@@ -1210,6 +1612,30 @@ mod tests {
     }
 
     #[test]
+    fn projected_string_viewport_data_uses_normal_text_variants() {
+        assert!(matches!(
+            matrix_viewport_string_data(vec!["text".into()], false, true),
+            crate::ui::state::MatrixViewportData::One(_)
+        ));
+        assert!(matches!(
+            matrix_viewport_string_data(vec!["text".into()], false, false),
+            crate::ui::state::MatrixViewportData::Two(_)
+        ));
+    }
+
+    #[test]
+    fn opaque_viewport_data_uses_opaque_variants() {
+        assert!(matches!(
+            matrix_viewport_string_data(vec!["0a".into()], true, true),
+            crate::ui::state::MatrixViewportData::OpaqueOne(_)
+        ));
+        assert!(matches!(
+            matrix_viewport_string_data(vec!["0a".into()], true, false),
+            crate::ui::state::MatrixViewportData::OpaqueTwo(_)
+        ));
+    }
+
+    #[test]
     fn visible_matrix_capacity_handles_large_dimensions_without_wrapping() {
         let selection = visible_matrix_capacity(
             Rect {
@@ -1286,6 +1712,45 @@ mod tests {
             selected_matrix_bg_color(&Focus::Attributes, true, fallback_bg, true),
             fallback_bg
         );
+    }
+
+    #[test]
+    fn matrix_viewport_key_isolates_rapid_offsets_and_datasets() {
+        let base = crate::ui::state::MatrixViewportKey {
+            file_generation: 1,
+            metadata_revision: 2,
+            ds_path: "/one".into(),
+            mode: "Float64:false".into(),
+            selected_row: 0,
+            selected_col: 1,
+            selected_indexes: vec![0, 0],
+            row_offset: 0,
+            col_offset: 0,
+            rows: 10,
+            cols: 4,
+        };
+        let next = crate::ui::state::MatrixViewportKey {
+            row_offset: 10,
+            ..base.clone()
+        };
+        let other = crate::ui::state::MatrixViewportKey {
+            ds_path: "/two".into(),
+            ..base.clone()
+        };
+        assert_ne!(base, next);
+        assert_ne!(base, other);
+        assert!(!should_load_matrix_viewport(
+            false,
+            None,
+            Some(&(base.clone(), "read failed".into())),
+            &base
+        ));
+        assert!(should_load_matrix_viewport(
+            false,
+            None,
+            Some(&(base.clone(), "read failed".into())),
+            &next
+        ));
     }
 
     #[test]

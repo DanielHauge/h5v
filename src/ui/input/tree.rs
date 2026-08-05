@@ -20,21 +20,25 @@ pub fn handle_normal_tree_event(
         Event::Key(key_event) => match key_event.kind {
             KeyEventKind::Press => match tree_action(&key_event, keymaps) {
                 Some(BoundAction::Action(TreeAction::MoveUp(step))) => {
-                    state.tree_view_cursor =
-                        max(state.tree_view_cursor as isize - step as isize, 0) as usize;
+                    state.select_tree_view_cursor(max(
+                        state.tree_view_cursor as isize - step as isize,
+                        0,
+                    ) as usize);
                     Ok(EventResult::Redraw)
                 }
                 Some(BoundAction::Action(TreeAction::MoveDown(step))) => {
-                    state.tree_view_cursor =
-                        min(state.tree_view_cursor + step, state.treeview.len() - 1);
+                    state.select_tree_view_cursor(min(
+                        state.tree_view_cursor + step,
+                        state.treeview.len() - 1,
+                    ));
                     Ok(EventResult::Redraw)
                 }
                 Some(BoundAction::Action(TreeAction::MoveTop)) => {
-                    state.tree_view_cursor = 0;
+                    state.select_tree_view_cursor(0);
                     Ok(EventResult::Redraw)
                 }
                 Some(BoundAction::Action(TreeAction::MoveBottom)) => {
-                    state.tree_view_cursor = state.treeview.len() - 1;
+                    state.select_tree_view_cursor(state.treeview.len() - 1);
                     Ok(EventResult::Redraw)
                 }
                 Some(BoundAction::Action(TreeAction::Collapse)) => {
@@ -42,19 +46,21 @@ pub fn handle_normal_tree_event(
                     if tree_item.load_more || tree_item.node.borrow().expanded {
                         let node = tree_item.node.clone();
                         node.borrow_mut().collapse();
-                        state.tree_view_cursor = state
+                        let cursor = state
                             .treeview
                             .iter()
                             .position(|item| !item.load_more && Rc::ptr_eq(&item.node, &node))
                             .unwrap_or(state.tree_view_cursor);
+                        state.select_tree_view_cursor(cursor);
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else if let Some(parent) = tree_item.parent.clone() {
-                        state.tree_view_cursor = state
+                        let cursor = state
                             .treeview
                             .iter()
                             .position(|item| !item.load_more && Rc::ptr_eq(&item.node, &parent))
                             .unwrap_or(state.tree_view_cursor);
+                        state.select_tree_view_cursor(cursor);
                         Ok(EventResult::Redraw)
                     } else {
                         Ok(EventResult::Continue)
@@ -73,12 +79,8 @@ pub fn handle_normal_tree_event(
                         return Ok(EventResult::Continue);
                     }
                     let node = tree_item.node.clone();
-                    if !node.borrow().expanded {
-                        let expand_result = node.borrow_mut().expand();
-                        if let Err(error) = expand_result {
-                            state.compute_tree_view();
-                            return Err(error.into());
-                        }
+                    if !node.borrow().expanded || node.borrow().load_error.is_some() {
+                        state.request_tree_children(node);
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)
                     } else {
@@ -89,7 +91,7 @@ pub fn handle_normal_tree_event(
                                 .as_ref()
                                 .is_some_and(|parent| Rc::ptr_eq(parent, &node))
                             {
-                                state.tree_view_cursor += 1;
+                                state.select_tree_view_cursor(state.tree_view_cursor + 1);
                                 return Ok(EventResult::Redraw);
                             }
                         }
@@ -107,10 +109,10 @@ pub fn handle_normal_tree_event(
                     let tree_item = &state.treeview[state.tree_view_cursor];
                     if tree_item.node.borrow().is_expandable() {
                         let node = tree_item.node.clone();
-                        let expand_result = node.borrow_mut().expand_toggle();
-                        if let Err(error) = expand_result {
-                            state.compute_tree_view();
-                            return Err(error.into());
+                        if node.borrow().expanded && node.borrow().load_error.is_none() {
+                            node.borrow_mut().collapse();
+                        } else {
+                            state.request_tree_children(node);
                         }
                         state.compute_tree_view();
                         Ok(EventResult::Redraw)

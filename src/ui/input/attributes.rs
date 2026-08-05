@@ -83,6 +83,7 @@ pub fn apply_attribute_edit_request(
         }
     }
     drop(selected_node);
+    state.invalidate_selected_navigation_data();
     state.acknowledge_file_write();
 
     eprintln!("Attribute '{}' updated successfully", request.attr_name);

@@ -79,46 +79,151 @@ impl AppState<'_> {
             .and_then(|item| item.node.try_borrow().ok().map(|node| node.node.path()))
     }
 
+    pub fn cancel_pending_tree_selection(&mut self) {
+        clear_pending_tree_selection(
+            &mut self.pending_tree_selection,
+            &mut self.pending_tree_selection_state,
+            &mut self.pending_tree_attribute_selection,
+        );
+    }
+
+    pub fn select_tree_view_cursor(&mut self, cursor: usize) {
+        apply_tree_view_selection(
+            cursor,
+            &mut self.tree_view_cursor,
+            &mut self.pending_tree_selection,
+            &mut self.pending_tree_selection_state,
+            &mut self.pending_tree_attribute_selection,
+        );
+    }
+
     pub fn select_tree_node_by_path(&mut self, path: &str) -> Result<()> {
         let normalized = Self::normalized_node_path(path);
+        self.cancel_pending_tree_selection();
         if normalized.is_empty() {
-            self.tree_view_cursor = 0;
+            self.select_tree_view_cursor(0);
             return Ok(());
         }
+        self.pending_tree_selection = Some(normalized.to_string());
+        self.resume_tree_requests()?;
+        Ok(())
+    }
 
-        let previous_cursor = self.tree_view_cursor;
+    fn drive_tree_path(&mut self, path: &str, expand_target: bool) -> Result<bool> {
         let mut current = self.root.clone();
-        for segment in normalized.split('/') {
-            let next_and_index = {
-                let mut node = current.borrow_mut();
-                node.ensure_expanded()?;
-                node.children.iter().enumerate().find_map(|(index, child)| {
-                    let name = child.borrow().name();
-                    (name == segment).then(|| (index, child.clone()))
-                })
+        for segment in Self::normalized_node_path(path).split('/') {
+            if !current.borrow().read {
+                if current.borrow().load_error.is_none() {
+                    self.request_tree_children(current);
+                    return Ok(false);
+                }
+                return Err(AppError::Hdf5(hdf5_metno::Error::Internal(
+                    current.borrow().load_error.clone().unwrap_or_default(),
+                )));
+            }
+            current.borrow_mut().expanded = true;
+            let next = {
+                let node = current.borrow();
+                node.children
+                    .iter()
+                    .position(|child| child.borrow().name() == segment)
+                    .map(|index| (index, node.children[index].clone()))
             };
-            let Some((index, next)) = next_and_index else {
-                self.compute_tree_view();
-                self.tree_view_cursor = self.treeview.len().saturating_sub(1).min(previous_cursor);
+            let Some((index, next)) = next else {
                 return Err(AppError::ChildNotFound(path.to_string()));
             };
             current.borrow_mut().view_loaded = (index + 50) as u32;
             current = next;
         }
-        if matches!(current.borrow().node, Node::Dataset(_, _)) {
-            current.borrow_mut().ensure_dataset_meta()?;
+        if expand_target && current.borrow().is_expandable() && !current.borrow().read {
+            if current.borrow().load_error.is_none() {
+                self.request_tree_children(current);
+                return Ok(false);
+            }
         }
-        self.compute_tree_view();
-        let Some((index, _)) = self
-            .treeview
-            .iter()
-            .enumerate()
-            .find(|(_, item)| Rc::ptr_eq(&item.node, &current))
-        else {
-            self.tree_view_cursor = self.treeview.len().saturating_sub(1).min(previous_cursor);
-            return Err(AppError::ChildNotFound(path.to_string()));
+        if expand_target {
+            current.borrow_mut().expanded = true;
+        }
+        Ok(true)
+    }
+
+    /// Advances reload/startup paths only after their parent load completed.
+    pub fn resume_tree_requests(&mut self) -> Result<()> {
+        while let Some(path) = self.pending_tree_expansions.first().cloned() {
+            if !self.drive_tree_path(&path, true)? {
+                return Ok(());
+            }
+            self.pending_tree_expansions.remove(0);
+        }
+        let Some(path) = self.pending_tree_selection.clone() else {
+            return Ok(());
         };
-        self.tree_view_cursor = index;
+        let complete = match self.drive_tree_path(&path, false) {
+            Ok(complete) => complete,
+            Err(error) => {
+                self.pending_tree_selection = None;
+                self.pending_tree_selection_state = None;
+                self.pending_tree_attribute_selection = None;
+                return Err(error);
+            }
+        };
+        if !complete {
+            return Ok(());
+        }
+        self.pending_tree_selection = None;
+        self.compute_tree_view();
+        if let Some((index, item)) =
+            self.treeview.iter().enumerate().find(|(_, item)| {
+                Self::normalized_node_path(&item.node.borrow().node.path()) == path
+            })
+        {
+            if !matches!(item.node.borrow().node, Node::Dataset(_, _)) {
+                self.pending_tree_selection_state = None;
+            }
+            self.tree_view_cursor = index;
+            self.request_selected_navigation_data();
+        } else {
+            self.pending_tree_selection_state = None;
+            self.pending_tree_attribute_selection = None;
+            return Err(AppError::ChildNotFound(path));
+        }
+        Ok(())
+    }
+
+    pub fn restore_pending_tree_selection_metadata(&mut self, node: &mut H5FNode) {
+        let Some(saved) = self.pending_tree_selection_state.take() else {
+            return;
+        };
+        let Node::Dataset(_, crate::h5f::DatasetMetaState::Loaded(meta)) = &node.node else {
+            return;
+        };
+        let shape = meta.shape.clone();
+        node.sync_selection_rank(shape.len());
+        for ((dst, src), len) in node
+            .selected_indexes
+            .iter_mut()
+            .zip(saved.selected_indexes)
+            .zip(shape.iter().copied())
+        {
+            *dst = src.min(len.saturating_sub(1));
+        }
+        node.selected_dim = saved.selected_dim.min(shape.len().saturating_sub(1));
+        node.selected_x = saved.selected_x.min(shape.len().saturating_sub(1));
+        node.selected_row = saved.selected_row.min(shape.len().saturating_sub(1));
+        node.selected_col = saved.selected_col.min(shape.len().saturating_sub(1));
+        node.line_offset = saved.line_offset;
+        node.col_offset = saved.col_offset.max(0);
+        node.attributes_view_cursor = saved.attributes_view_cursor;
+    }
+
+    pub fn restore_pending_tree_attribute_selection(&mut self) -> Result<()> {
+        let Some(attr_name) = self.pending_tree_attribute_selection.take() else {
+            return Ok(());
+        };
+        if reference_target_requires_attributes_focus(attr_name.as_deref()) {
+            self.focus = Focus::Attributes;
+            self.select_attribute_by_name(attr_name.as_deref().expect("attribute target exists"))?;
+        }
         Ok(())
     }
 
@@ -128,31 +233,40 @@ impl AppState<'_> {
             .get(self.tree_view_cursor)
             .ok_or_else(|| AppError::EditError("No selected tree item".to_string()))?;
         let mut node = tree_item.node.borrow_mut();
-        let attributes = node.read_attributes()?;
-        let Some(index) = attributes
-            .rendered_rows
-            .iter()
-            .position(|row| row.key.as_deref() == Some(attr_name))
-        else {
-            return Err(AppError::ChildNotFound(attr_name.to_string()));
-        };
-        node.attributes_view_cursor.attribute_index = index;
-        node.attributes_view_cursor.attribute_view_selection = AttributeViewSelection::Value;
-        Ok(())
+        select_cached_attribute_by_name(&mut node, attr_name)
     }
+}
 
+fn reference_target_requires_attributes_focus(attr_name: Option<&str>) -> bool {
+    attr_name.is_some()
+}
+
+fn select_cached_attribute_by_name(node: &mut H5FNode, attr_name: &str) -> Result<()> {
+    let attributes = node
+        .computed_attributes
+        .as_ref()
+        .ok_or_else(|| AppError::EditError("Attributes are still loading".to_string()))?;
+    let Some(index) = attributes
+        .rendered_rows
+        .iter()
+        .position(|row| row.key.as_deref() == Some(attr_name))
+    else {
+        return Err(AppError::ChildNotFound(attr_name.to_string()));
+    };
+    node.attributes_view_cursor.attribute_index = index;
+    node.attributes_view_cursor.attribute_view_selection = AttributeViewSelection::Value;
+    Ok(())
+}
+
+impl AppState<'_> {
     pub fn navigate_to_attribute_target(
         &mut self,
         path: &str,
         attr_name: Option<&str>,
     ) -> Result<()> {
         self.select_tree_node_by_path(path)?;
-        if let Some(attr_name) = attr_name {
-            self.focus = Focus::Attributes;
-            self.select_attribute_by_name(attr_name)?;
-        } else {
-            self.focus = Focus::Tree(LastFocused::Attributes);
-        }
+        self.pending_tree_attribute_selection = Some(attr_name.map(str::to_owned));
+        self.request_selected_navigation_data();
         Ok(())
     }
 
@@ -520,5 +634,81 @@ impl AppState<'_> {
             }
             _ => Ok(EventResult::Continue),
         }
+    }
+}
+
+fn clear_pending_tree_selection(
+    pending_selection: &mut Option<String>,
+    pending_state: &mut Option<TreeSelectionState>,
+    pending_attribute: &mut Option<Option<String>>,
+) {
+    *pending_selection = None;
+    *pending_state = None;
+    *pending_attribute = None;
+}
+
+fn apply_tree_view_selection(
+    cursor: usize,
+    tree_view_cursor: &mut usize,
+    pending_selection: &mut Option<String>,
+    pending_state: &mut Option<TreeSelectionState>,
+    pending_attribute: &mut Option<Option<String>>,
+) {
+    clear_pending_tree_selection(pending_selection, pending_state, pending_attribute);
+    *tree_view_cursor = cursor;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::text::Line;
+
+    #[test]
+    fn reselecting_current_row_cancels_pending_path_and_attribute_selection() {
+        let mut cursor = 3;
+        let mut path = Some("queued/dataset".to_string());
+        let mut state = Some(TreeSelectionState {
+            selected_dim: 0,
+            selected_x: 0,
+            selected_row: 0,
+            selected_col: 0,
+            line_offset: 0,
+            col_offset: 0,
+            selected_indexes: vec![],
+            attributes_view_cursor: Default::default(),
+        });
+        let mut attribute = Some(Some("units".to_string()));
+
+        apply_tree_view_selection(3, &mut cursor, &mut path, &mut state, &mut attribute);
+
+        assert_eq!(cursor, 3);
+        assert!(path.is_none());
+        assert!(state.is_none());
+        assert!(attribute.is_none());
+    }
+
+    #[test]
+    fn attribute_reference_focus_waits_for_cached_worker_rows() {
+        let mut node = H5FNode::new(Node::Broken("loading".to_string()));
+
+        assert!(select_cached_attribute_by_name(&mut node, "units").is_err());
+
+        node.computed_attributes = Some(crate::h5f::ComputedAttributes {
+            longest_name_length: 5,
+            attributes: vec![],
+            rendered_rows: vec![crate::h5f::RenderedAttributeRow::attribute(
+                "units",
+                (Line::from("units"), Line::from("m"), Line::from("str")),
+            )],
+        });
+        select_cached_attribute_by_name(&mut node, "units").expect("focus loaded attribute");
+
+        assert_eq!(node.attributes_view_cursor.attribute_index, 0);
+    }
+
+    #[test]
+    fn reference_without_attribute_target_preserves_tree_focus() {
+        assert!(!reference_target_requires_attributes_focus(None));
+        assert!(reference_target_requires_attributes_focus(Some("units")));
     }
 }

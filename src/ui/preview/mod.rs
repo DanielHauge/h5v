@@ -1,4 +1,5 @@
 pub mod chart;
+pub(crate) mod content;
 pub mod image;
 pub(crate) mod pipeline;
 
@@ -31,10 +32,7 @@ use super::{
 use crate::{
     configure,
     error::AppError,
-    h5f::{
-        read_opaque_dataset_preview, read_string_dataset_preview, DatasetHandle, DatasetMetaState,
-        Encoding, H5FNode, HasPath, Node, ResolvedOpenMode,
-    },
+    h5f::{DatasetHandle, DatasetMetaState, H5FNode, HasPath, Node, ResolvedOpenMode},
     ui::{
         perf,
         render::{sprint_type_schema, MatrixRenderType},
@@ -601,10 +599,7 @@ pub fn render_preview(
             return;
         }
         if attr.is_opaque() {
-            match read_opaque_dataset_preview(&dataset, &attr) {
-                Ok(text) => render_string(f, &area_inner, selected_node, text, None),
-                Err(e) => render_error(f, &area_inner, format!("Render opaque error: {}", e)),
-            }
+            render_direct_content_preview(f, &area_inner, selected_node, state, &dataset, &attr);
             return;
         }
         match &attr.image {
@@ -625,12 +620,14 @@ pub fn render_preview(
                         "Preview is only supported for vlen byte arrays when image attributes are present; use Matrix mode to inspect values",
                     );
                 } else if attr.matrixable.is_none() {
-                    match render_string_preview(f, &area_inner, selected_node) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            render_error(f, &area_inner, format!("Render string error: {}", e));
-                        }
-                    }
+                    render_direct_content_preview(
+                        f,
+                        &area_inner,
+                        selected_node,
+                        state,
+                        &dataset,
+                        &attr,
+                    );
                 } else {
                     match render_chart_preview(f, &area_inner, selected_node, state) {
                         Ok(()) => {}
@@ -644,57 +641,90 @@ pub fn render_preview(
     }
 }
 
+fn render_direct_content_preview(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    state: &mut AppState,
+    dataset: &hdf5_metno::Dataset,
+    meta: &crate::h5f::DatasetMeta,
+) {
+    let key = crate::ui::state::ContentPreviewKey {
+        file_generation: state.content_generation,
+        metadata_revision: state.navigation_generation,
+        ds_path: node.node.path(),
+        opaque: meta.is_opaque(),
+    };
+    if let Some(index) = state
+        .content_preview_state
+        .cached
+        .iter()
+        .position(|entry| entry.key == key)
+    {
+        let entry = state
+            .content_preview_state
+            .cached
+            .remove(index)
+            .expect("cached content index");
+        let text = entry.text.clone();
+        state.content_preview_state.cached.push_back(entry);
+        render_string(f, area, node, text, meta.hl.clone());
+        return;
+    }
+    if let Some((error_key, message)) = &state.content_preview_state.error {
+        if error_key == &key {
+            render_error(f, area, format!("Error: {message}"));
+            return;
+        }
+    }
+    if state.content_preview_state.pending_key.as_ref() != Some(&key) {
+        state.content_preview_state.pending_key = Some(key.clone());
+        state.content_preview_state.error = None;
+        let _ =
+            state
+                .content_preview_state
+                .tx_load
+                .send(crate::ui::state::ContentPreviewWork::Load(
+                    crate::ui::state::ContentPreviewRequest {
+                        key,
+                        dataset: dataset.clone(),
+                        meta: meta.clone(),
+                    },
+                ));
+    }
+    render_error(
+        f,
+        area,
+        if meta.is_opaque() {
+            "Loading opaque preview..."
+        } else {
+            "Loading string preview..."
+        },
+    );
+}
+
 pub fn render_string_preview(
     f: &mut Frame,
     area: &Rect,
     node: &mut H5FNode,
+    state: &mut AppState,
 ) -> Result<(), AppError> {
-    let selected_node = &node.node;
-    let (dataset, meta) = match selected_node {
-        Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => (ds, attr),
+    let (dataset, meta) = match &node.node {
+        Node::Dataset(DatasetHandle::Loaded(ds), DatasetMetaState::Loaded(attr)) => {
+            (ds.clone(), attr.clone())
+        }
         _ => {
             render_unsupported_rendering(
                 f,
                 area,
-                selected_node,
+                &node.node,
                 "Selected node is not a dataset, cannot render string preview",
             );
             return Ok(());
         }
     };
 
-    if meta.is_opaque() {
-        match read_opaque_dataset_preview(dataset, meta) {
-            Ok(text) => render_string(f, area, node, text, None),
-            Err(e) => render_error(f, area, format!("Error: {}", e)),
-        }
-        return Ok(());
-    }
-
-    match meta.encoding {
-        Encoding::LittleEndian => {
-            render_unsupported_rendering(
-                f,
-                area,
-                selected_node,
-                "LittleEndian not supported for string data",
-            );
-        }
-        Encoding::Unknown => {
-            render_unsupported_rendering(
-                f,
-                area,
-                selected_node,
-                "Unknown encoding not supported for string data",
-            );
-        }
-        Encoding::Ascii | Encoding::UTF8 | Encoding::UTF8Fixed | Encoding::AsciiFixed => {
-            match read_string_dataset_preview(dataset, &meta.encoding) {
-                Ok(x) => render_string(f, area, node, x, meta.hl.clone()),
-                Err(e) => render_error(f, area, format!("Error: {}", e)),
-            }
-        }
-    }
+    render_direct_content_preview(f, area, node, state, &dataset, &meta);
     Ok(())
 }
 

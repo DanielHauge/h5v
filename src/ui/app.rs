@@ -6,14 +6,14 @@ use crate::{
     compat::RuntimeConfig,
     data::DatasetPlotingData,
     error::AppError,
-    h5f::RequestedOpenMode,
+    h5f::{ComputedAttributes, Node, RequestedOpenMode},
     ui::{
         command::StartupCommand,
         mchart::{MultiChartExpressionRefreshResult, MultiChartLoadResult},
         preview::image::ImageResizeResult,
         state::{
-            self, AppToast, ChartPreviewKey, HeatmapLoadedPage, HeatmapRenderKey, ImageLoadKey,
-            PreviewExpressionResult,
+            self, AppToast, ChartPreviewKey, ContentPreviewKey, HeatmapLoadedPage,
+            HeatmapRenderKey, ImageLoadKey, PreviewExpressionResult,
         },
     },
 };
@@ -89,6 +89,8 @@ pub enum AppEvent {
     ImageResized(ImageResizeResult),
     ImageLoad(ImageLoadedResult),
     PreviewExpression(PreviewExpressionResult),
+    ContentPreview(ContentPreviewLoadedResult),
+    MatrixViewport(MatrixViewportLoadedResult),
     PreviewChartLoad(ChartPreviewLoadedResult),
     PreviewChartResized(ImageResizeResult),
     HeatmapLoad(HeatmapLoadedResult),
@@ -96,8 +98,86 @@ pub enum AppEvent {
     MultiChartExpressionRefresh(MultiChartExpressionRefreshResult),
     MultiChartRender(crate::ui::mchart::MultiChartRenderResult),
     PreviewDebounceExpired(u64),
+    TreeLoad(TreeLoadResult),
+    NavigationLoad(NavigationLoadResult),
     Toast(AppToast),
     FileChanged,
+}
+
+pub enum MatrixViewportLoadedResult {
+    Success {
+        key: state::MatrixViewportKey,
+        data: state::MatrixViewportData,
+    },
+    Failure {
+        key: state::MatrixViewportKey,
+        message: String,
+    },
+}
+
+pub enum ContentPreviewLoadedResult {
+    Success {
+        key: ContentPreviewKey,
+        text: String,
+    },
+    Failure {
+        key: ContentPreviewKey,
+        message: String,
+    },
+}
+
+pub struct NavigationLoadRequest {
+    pub generation: u64,
+    pub request_id: u64,
+    pub node: Node,
+}
+
+pub enum NavigationLoadWork {
+    Load(NavigationLoadRequest),
+    Drain(std::sync::mpsc::Sender<()>),
+}
+
+pub enum NavigationLoadResult {
+    Metadata {
+        generation: u64,
+        request_id: u64,
+        node: Node,
+    },
+    Attributes {
+        generation: u64,
+        request_id: u64,
+        attributes: ComputedAttributes,
+    },
+    Failure {
+        generation: u64,
+        request_id: u64,
+        metadata: bool,
+        message: String,
+    },
+}
+
+pub struct TreeLoadRequest {
+    pub generation: u64,
+    pub request_id: u64,
+    pub node: Node,
+}
+
+pub enum TreeLoadWork {
+    Load(TreeLoadRequest),
+    Drain(std::sync::mpsc::Sender<()>),
+}
+
+pub enum TreeLoadResult {
+    Success {
+        generation: u64,
+        request_id: u64,
+        children: Vec<Node>,
+    },
+    Failure {
+        generation: u64,
+        request_id: u64,
+        message: String,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]

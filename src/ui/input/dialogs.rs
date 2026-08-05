@@ -133,6 +133,7 @@ pub(super) fn handle_attribute_create_dialog(
                 let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
                 let created_type = selected_node.create_attribute(&name, attr_type, &value)?;
                 drop(selected_node);
+                state.invalidate_selected_navigation_data();
                 state.attribute_create_dialog = None;
                 state.mode = Mode::Normal;
                 state.acknowledge_file_write();
@@ -269,6 +270,7 @@ pub(super) fn handle_attribute_delete_dialog(
             let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
             selected_node.delete_attribute(&attr_name)?;
             drop(selected_node);
+            state.invalidate_selected_navigation_data();
             state.attribute_delete_dialog = None;
             state.mode = Mode::Normal;
             state.acknowledge_file_write();

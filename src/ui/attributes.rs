@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Scrollbar, ScrollbarState},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState},
     Frame,
 };
 
@@ -464,6 +464,40 @@ pub fn render_info_attributes(
         horizontal: 2,
         vertical: 1,
     });
+
+    if let Some(error) = node
+        .metadata_error
+        .as_ref()
+        .or(node.attributes_error.as_ref())
+    {
+        f.render_widget(
+            Paragraph::new(format!("Metadata unavailable: {error}")).style(Style::default().bg(bg)),
+            area_inner,
+        );
+        return Ok(());
+    }
+    if node.metadata_loading || node.attributes_loading {
+        f.render_widget(
+            Paragraph::new(if node.metadata_loading {
+                "Loading dataset metadata..."
+            } else {
+                "Loading attributes..."
+            })
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(bg)),
+            area_inner,
+        );
+        return Ok(());
+    }
+    if node.computed_attributes.is_none() {
+        f.render_widget(
+            Paragraph::new("Metadata not loaded")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(bg)),
+            area_inner,
+        );
+        return Ok(());
+    }
 
     let selected_row_index = node.normalize_attribute_selection()?.unwrap_or(0);
     let cursor = node.attributes_view_cursor.clone();

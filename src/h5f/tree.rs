@@ -9,7 +9,6 @@ use ratatui::style::Color;
 use tempfile::NamedTempFile;
 
 use crate::{
-    error::AppError,
     h5f::read_string_attr_values,
     ui::render::{
         encoding_from_dtype, is_image, is_type_matrixable, sprint_typedescriptor, MatrixRenderType,
@@ -156,6 +155,10 @@ impl H5FNode {
                 DatasetHandle::Pending { parent, name },
                 DatasetMetaState::Pending(identity),
             ) => Some((parent.clone(), name.clone(), identity.clone())),
+            Node::Dataset(DatasetHandle::Loaded(dataset), DatasetMetaState::Pending(identity)) => {
+                let parent = dataset.as_group()?;
+                Some((parent, dataset.name(), identity.clone()))
+            }
             Node::Dataset(_, DatasetMetaState::Loaded(_)) => None,
             _ => return Err(hdf5_metno::Error::Internal("Not a dataset".to_string())),
         };
@@ -224,6 +227,7 @@ impl H5FNode {
         self.node.name()
     }
 
+    #[cfg(test)]
     pub fn expand(&mut self) -> Result<(), hdf5_metno::Error> {
         self.read_children()?;
         if self.expanded {
@@ -235,6 +239,7 @@ impl H5FNode {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn ensure_expanded(&mut self) -> Result<(), hdf5_metno::Error> {
         self.read_children()?;
         if !self.expanded {
@@ -247,6 +252,7 @@ impl H5FNode {
         self.expanded = false;
     }
 
+    #[cfg(test)]
     pub fn expand_toggle(&mut self) -> Result<(), hdf5_metno::Error> {
         if self.expanded {
             self.collapse();
@@ -256,35 +262,7 @@ impl H5FNode {
         Ok(())
     }
 
-    pub fn expand_path(&mut self, relative_path: &str) -> Result<Option<usize>, AppError> {
-        self.ensure_expanded()?;
-        let child_mame = relative_path.split('/').next();
-
-        match child_mame {
-            Some(n) => {
-                for (i, child) in self.children.iter().enumerate() {
-                    let child_name = match child.try_borrow() {
-                        Ok(c) => c.name(),
-                        Err(_) => return Ok(Some(i)),
-                    };
-                    if child_name == n {
-                        let mut child_node = child.borrow_mut();
-                        self.view_loaded = (i + 50) as u32;
-                        if relative_path.len() > n.len() + 1 {
-                            return child_node.expand_path(&relative_path[n.len() + 1..]);
-                        }
-                        if matches!(child_node.node, Node::Dataset(_, _)) {
-                            child_node.ensure_dataset_meta()?;
-                        }
-                        return Ok(Some(i));
-                    }
-                }
-                Err(AppError::ChildNotFound(relative_path.to_string()))
-            }
-            None => Ok(None),
-        }
-    }
-
+    #[cfg(test)]
     fn read_children(&mut self) -> Result<(), hdf5_metno::Error> {
         let result = self.read_children_once();
         self.load_error = result.as_ref().err().map(ToString::to_string);
@@ -438,6 +416,41 @@ impl H5FNode {
         self.children = children;
         self.read = true;
         Ok(())
+    }
+}
+
+pub fn enumerate_group_children(node: &Node) -> Result<Vec<Node>, hdf5_metno::Error> {
+    let mut enumerated = H5FNode::new(node.clone());
+    enumerated.read_children_once()?;
+    Ok(enumerated
+        .children
+        .iter()
+        .map(|child| child.borrow().node.clone())
+        .collect())
+}
+
+impl H5FNode {
+    pub fn enumeration_node(&self) -> Option<Node> {
+        match &self.node {
+            Node::File(file) => Some(Node::File(file.clone())),
+            Node::Group(group, meta) => Some(Node::Group(group.clone(), meta.clone())),
+            _ => None,
+        }
+    }
+
+    pub fn apply_enumerated_children(&mut self, children: Vec<Node>) {
+        self.children = children
+            .into_iter()
+            .map(|node| Rc::new(RefCell::new(H5FNode::new(node))))
+            .collect();
+        self.read = true;
+        self.loading = false;
+        self.load_error = None;
+    }
+
+    pub fn apply_enumeration_error(&mut self, error: String) {
+        self.loading = false;
+        self.load_error = Some(error);
     }
 }
 
@@ -763,9 +776,6 @@ impl H5F {
 
         let root = Rc::new(RefCell::new(h5node));
 
-        root.borrow_mut().read_children()?;
-        root.borrow_mut().expand_toggle()?;
-
         Ok(Self {
             root,
             file,
@@ -860,6 +870,26 @@ mod tests {
     }
 
     #[test]
+    fn opening_does_not_enumerate_root_children() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        file.create_group("wide-root-member")
+            .expect("failed to create group");
+        file.close().expect("failed to close hdf5 file");
+
+        let opened = H5F::open(
+            temp.path().to_string_lossy().into_owned(),
+            false,
+            RequestedOpenMode::Read(ReadOpenMode::Standard),
+        )
+        .expect("failed to open hdf5 file");
+
+        assert!(!opened.root.borrow().read);
+        assert!(opened.root.borrow().children.is_empty());
+    }
+
+    #[test]
     fn expanding_a_group_does_not_read_nested_groups() {
         let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
@@ -885,6 +915,11 @@ mod tests {
             RequestedOpenMode::Read(ReadOpenMode::Standard),
         )
         .expect("failed to open hdf5 file");
+        opened
+            .root
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to enumerate root");
         let parent = opened.root.borrow().children[0].clone();
 
         parent
@@ -946,6 +981,11 @@ mod tests {
             RequestedOpenMode::Read(ReadOpenMode::Standard),
         )
         .expect("failed to open hdf5 file");
+        opened
+            .root
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to enumerate root");
         let group = opened.root.borrow().children[0].clone();
 
         group
@@ -1009,6 +1049,11 @@ mod tests {
             RequestedOpenMode::Read(ReadOpenMode::Standard),
         )
         .expect("failed to open hdf5 file");
+        opened
+            .root
+            .borrow_mut()
+            .ensure_expanded()
+            .expect("failed to enumerate root");
         let child = opened.root.borrow().children[0].clone();
         assert!(matches!(child.borrow().node, Node::Broken(ref name) if name == "broken-external"));
     }

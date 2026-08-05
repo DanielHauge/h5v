@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     fs,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{mpsc::Sender, Arc, RwLock},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -24,6 +24,7 @@ use crate::{
 };
 
 use super::{
+    app::{NavigationLoadWork, TreeLoadWork},
     command::{execute_command, CommandState},
     input::EventResult,
     preview::chart::MAX_PAGE_SIZE,
@@ -63,12 +64,16 @@ pub use help_state::{
     HelpTab, HelpViewState,
 };
 pub use preview::{
-    ChartPreviewKey, ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState,
-    ClipboardImageData, DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState,
-    ImgState, PageState, PageType, PreviewChartMode, PreviewChartRoi, PreviewChartViewport,
-    PreviewChartZoomMode, PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
+    CachedContentPreview, CachedMatrixViewport, ChartPreviewKey, ChartPreviewLoadRequest,
+    ChartPreviewSource, ChartPreviwState, ClipboardImageData, ContentPreviewKey,
+    ContentPreviewRequest, ContentPreviewState, ContentPreviewWork, DatasetImageLoadRequest,
+    ImageLoadKey, ImageWindowAxis, ImageWindowState, ImgState, MatrixViewportData,
+    MatrixViewportKey, MatrixViewportRequest, MatrixViewportState, MatrixViewportWork, PageState,
+    PageType, PreviewChartMode, PreviewChartRoi, PreviewChartViewport, PreviewChartZoomMode,
+    PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
     PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
-    CHART_PREVIEW_CACHE_CAPACITY, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+    CHART_PREVIEW_CACHE_CAPACITY, CONTENT_CACHE_CAPACITY, MATRIX_VIEWPORT_CACHE_CAPACITY,
+    PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,
@@ -80,6 +85,20 @@ pub use ui_layout::{
 pub struct AppState<'a> {
     pub readonly: bool,
     pub root: Rc<RefCell<H5FNode>>,
+    pub tree_load_tx: Sender<TreeLoadWork>,
+    pub navigation_load_tx: Sender<NavigationLoadWork>,
+    pub content_preview_tx: Sender<ContentPreviewWork>,
+    pub content_generation: u64,
+    pub navigation_generation: u64,
+    pub next_navigation_request_id: u64,
+    pub pending_navigation_request: Option<u64>,
+    pub tree_load_generation: u64,
+    pub next_tree_load_request_id: u64,
+    pub pending_tree_loads: Vec<(u64, Rc<RefCell<H5FNode>>)>,
+    pub pending_tree_expansions: Vec<String>,
+    pub pending_tree_selection: Option<String>,
+    pub pending_tree_selection_state: Option<TreeSelectionState>,
+    pub pending_tree_attribute_selection: Option<Option<String>>,
     pub treeview: Vec<TreeItem<'a>>,
     pub file: Option<File>,
     pub requested_open_mode: RequestedOpenMode,
@@ -122,12 +141,26 @@ pub struct AppState<'a> {
     pub heatmap_render: HeatmapRenderState,
     pub chart_preview_state: ChartPreviwState,
     pub preview_expression_state: PreviewExpressionState,
+    pub content_preview_state: ContentPreviewState,
+    pub matrix_viewport_state: MatrixViewportState,
     pub page_state: PageState,
     pub command_state: CommandState,
     pub attribute_create_dialog: Option<AttributeCreateDialogState>,
     pub attribute_delete_dialog: Option<AttributeDeleteDialogState>,
     pub fixed_string_overflow_dialog: Option<FixedStringOverflowDialogState>,
     pub ui_layout: UiLayoutState,
+}
+
+#[derive(Clone)]
+pub struct TreeSelectionState {
+    pub selected_dim: usize,
+    pub selected_x: usize,
+    pub selected_row: usize,
+    pub selected_col: usize,
+    pub line_offset: usize,
+    pub col_offset: isize,
+    pub selected_indexes: Vec<usize>,
+    pub attributes_view_cursor: AttributeCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

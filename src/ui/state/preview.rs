@@ -15,6 +15,94 @@ use crate::{
     ui::mchart::{ChartAxisScale, ChartItem},
 };
 
+pub const CONTENT_CACHE_CAPACITY: usize = 8;
+pub const MATRIX_VIEWPORT_CACHE_CAPACITY: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MatrixViewportKey {
+    pub file_generation: u64,
+    pub metadata_revision: u64,
+    pub ds_path: String,
+    pub mode: String,
+    pub selected_row: usize,
+    pub selected_col: usize,
+    pub selected_indexes: Vec<usize>,
+    pub row_offset: usize,
+    pub col_offset: usize,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatrixViewportData {
+    One(Vec<String>),
+    Two(Vec<String>),
+    EnumOne(Vec<u64>),
+    EnumTwo(Vec<u64>),
+    OpaqueOne(Vec<String>),
+    OpaqueTwo(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedMatrixViewport {
+    pub key: MatrixViewportKey,
+    pub data: MatrixViewportData,
+}
+
+pub struct MatrixViewportRequest {
+    pub key: MatrixViewportKey,
+    pub dataset: Dataset,
+    pub meta: DatasetMeta,
+    pub selection: hdf5_metno::Selection,
+}
+
+pub enum MatrixViewportWork {
+    Load(MatrixViewportRequest),
+    Drain(Sender<()>),
+}
+
+pub struct MatrixViewportState {
+    pub pending_key: Option<MatrixViewportKey>,
+    pub error: Option<(MatrixViewportKey, String)>,
+    pub cached: VecDeque<CachedMatrixViewport>,
+    pub tx_load: Sender<MatrixViewportWork>,
+}
+
+/// Identity for the small, directly rendered dataset previews.  Keep this
+/// separate from chart/image keys: those workers deliberately have different
+/// cache and invalidation rules.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContentPreviewKey {
+    pub file_generation: u64,
+    pub metadata_revision: u64,
+    pub ds_path: String,
+    pub opaque: bool,
+}
+
+pub struct ContentPreviewRequest {
+    pub key: ContentPreviewKey,
+    pub dataset: Dataset,
+    pub meta: DatasetMeta,
+}
+
+pub enum ContentPreviewWork {
+    Load(ContentPreviewRequest),
+    Drain(Sender<()>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedContentPreview {
+    pub key: ContentPreviewKey,
+    pub text: String,
+}
+
+pub struct ContentPreviewState {
+    pub pending_key: Option<ContentPreviewKey>,
+    pub error: Option<(ContentPreviewKey, String)>,
+    pub cached: VecDeque<CachedContentPreview>,
+    pub tx_load: Sender<ContentPreviewWork>,
+}
+
 mod cache;
 mod viewport;
 

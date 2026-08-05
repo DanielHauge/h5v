@@ -12,7 +12,7 @@ use ratatui::{
 use crate::{
     configure,
     error::AppError,
-    h5f::{DatasetHandle, DatasetMetaState, H5FNode, HasAttributes, HasPath, Node},
+    h5f::{DatasetHandle, DatasetMetaState, H5FNode, HasPath, Node},
     ui::{
         self,
         custom_content::render_custom_content_mode,
@@ -95,6 +95,10 @@ fn content_mode_title(handle: &crate::configure::registry::ContentModeHandle) ->
         .unwrap_or_else(|| handle.as_str().to_string())
 }
 
+fn metadata_error_message(node: &H5FNode) -> Option<&str> {
+    node.metadata_error.as_deref()
+}
+
 pub fn render_main_display(
     f: &mut Frame,
     area: &Rect,
@@ -102,11 +106,11 @@ pub fn render_main_display(
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
     let mut node = selected_node_no.borrow_mut();
-    if matches!(node.node, Node::Dataset(_, _)) {
-        node.ensure_dataset_meta()?;
-    }
     let prepared_attributes = if state.show_tree_view {
-        Some(prepare_metadata_layout(&mut node, area.width)?)
+        node.computed_attributes
+            .is_some()
+            .then(|| prepare_metadata_layout(&mut node, area.width))
+            .transpose()?
     } else {
         None
     };
@@ -130,6 +134,26 @@ pub fn render_main_display(
     state.ui_layout.matrix_rows.clear();
     state.ui_layout.matrix_cells.clear();
 
+    if let Some(error) = metadata_error_message(&node) {
+        f.render_widget(
+            Paragraph::new(format!("Dataset metadata unavailable: {error}"))
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg))),
+            content_area,
+        );
+        return Ok(());
+    }
+
+    if matches!(node.node, Node::Dataset(_, DatasetMetaState::Pending(_))) {
+        f.render_widget(
+            Paragraph::new("Loading dataset metadata...")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg))),
+            content_area,
+        );
+        return Ok(());
+    }
+
     let selected_path = node.node.path();
     let selected_kind = match &node.node {
         Node::File(_) => "file",
@@ -137,7 +161,17 @@ pub fn render_main_display(
         Node::Dataset(_, _) => "dataset",
         Node::Broken(_) => "broken",
     };
-    let attribute_names = node.node.attribute_names().unwrap_or_default();
+    let attribute_names: Vec<String> = node
+        .computed_attributes
+        .as_ref()
+        .map(|attributes| {
+            attributes
+                .attributes
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let available_handles = state.available_content_mode_handles_for_item(
         node.content_show_modes(),
         &selected_path,
@@ -437,4 +471,20 @@ pub fn render_main_display(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::h5f::{H5FNode, Node};
+
+    use super::metadata_error_message;
+
+    #[test]
+    fn metadata_worker_failure_is_not_a_loading_state() {
+        let mut node = H5FNode::new(Node::Broken("pending".to_string()));
+        node.metadata_loading = true;
+        node.metadata_error = Some("worker failed".to_string());
+
+        assert_eq!(metadata_error_message(&node), Some("worker failed"));
+    }
 }

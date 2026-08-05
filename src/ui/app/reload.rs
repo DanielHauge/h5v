@@ -3,15 +3,14 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     configure::registry::ContentModeHandle,
     error::AppError,
-    h5f::{self, DatasetMetaState, HasPath, Node},
-    ui::state::{self, AppState, AttributeCursor, Focus, MatrixViewState},
+    h5f::{self, HasPath, Node},
+    ui::state::{self, AppState, AttributeCursor, Focus, MatrixViewState, TreeSelectionState},
 };
 
 type Result<T> = std::result::Result<T, AppError>;
 
 #[derive(Clone)]
 struct SelectedNodeSnapshot {
-    path: String,
     selected_dim: usize,
     selected_x: usize,
     selected_row: usize,
@@ -24,7 +23,6 @@ struct SelectedNodeSnapshot {
 
 #[derive(Clone)]
 struct ReloadSnapshot {
-    root_selected: bool,
     selected_path: Option<String>,
     expanded_paths: Vec<String>,
     selected_node: Option<SelectedNodeSnapshot>,
@@ -38,10 +36,6 @@ struct ReloadSnapshot {
 
 fn normalized_node_path(path: &str) -> &str {
     path.trim_start_matches('/')
-}
-
-fn same_node_path(lhs: &str, rhs: &str) -> bool {
-    normalized_node_path(lhs) == normalized_node_path(rhs)
 }
 
 fn collect_expanded_paths(node: &Rc<RefCell<h5f::H5FNode>>, out: &mut Vec<String>) {
@@ -60,7 +54,6 @@ fn snapshot_selected_node(state: &AppState<'_>) -> Option<SelectedNodeSnapshot> 
     let tree_item = state.treeview.get(state.tree_view_cursor)?;
     let node = tree_item.node.borrow();
     Some(SelectedNodeSnapshot {
-        path: node.node.path(),
         selected_dim: node.selected_dim,
         selected_x: node.selected_x,
         selected_row: node.selected_row,
@@ -72,13 +65,28 @@ fn snapshot_selected_node(state: &AppState<'_>) -> Option<SelectedNodeSnapshot> 
     })
 }
 
+fn selection_state(snapshot: &ReloadSnapshot) -> Option<TreeSelectionState> {
+    snapshot
+        .selected_node
+        .as_ref()
+        .map(|node| TreeSelectionState {
+            selected_dim: node.selected_dim,
+            selected_x: node.selected_x,
+            selected_row: node.selected_row,
+            selected_col: node.selected_col,
+            line_offset: node.line_offset,
+            col_offset: node.col_offset,
+            selected_indexes: node.selected_indexes.clone(),
+            attributes_view_cursor: node.attributes_view_cursor.clone(),
+        })
+}
+
 fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
     let mut expanded_paths = Vec::new();
     collect_expanded_paths(&state.root, &mut expanded_paths);
     expanded_paths.sort_by_key(|path| normalized_node_path(path).matches('/').count());
 
     ReloadSnapshot {
-        root_selected: state.tree_view_cursor == 0,
         selected_path: state.selected_tree_path(),
         expanded_paths,
         selected_node: snapshot_selected_node(state),
@@ -91,94 +99,14 @@ fn snapshot_reload_state(state: &AppState<'_>) -> ReloadSnapshot {
     }
 }
 
-fn restore_tree_selection(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
-    if snapshot.root_selected {
-        state.tree_view_cursor = 0;
-        return;
-    }
-
-    let Some(selected_path) = snapshot.selected_path.as_deref() else {
-        state.tree_view_cursor = 0;
-        return;
-    };
-
-    if let Some((idx, _)) = state
-        .treeview
-        .iter()
-        .enumerate()
-        .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), selected_path))
-    {
-        state.tree_view_cursor = idx;
-        return;
-    }
-
-    let mut fallback = selected_path.to_string();
-    while let Some((prefix, _)) = normalized_node_path(&fallback).rsplit_once('/') {
-        if prefix.is_empty() {
-            break;
-        }
-        fallback = prefix.to_string();
-        if let Some((idx, _)) = state
-            .treeview
-            .iter()
-            .enumerate()
-            .find(|(_, item)| same_node_path(&item.node.borrow().node.path(), &fallback))
-        {
-            state.tree_view_cursor = idx;
-            return;
-        }
-    }
-
-    state.tree_view_cursor = 0;
-}
-
-fn restore_selected_node_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
-    let Some(selected_snapshot) = snapshot.selected_node.as_ref() else {
-        return;
-    };
-    let Some(tree_item) = state.treeview.get(state.tree_view_cursor) else {
-        return;
-    };
-    if !same_node_path(
-        &tree_item.node.borrow().node.path(),
-        &selected_snapshot.path,
-    ) {
-        return;
-    }
-
-    let mut node = tree_item.node.borrow_mut();
-    if matches!(node.node, Node::Dataset(_, _)) && node.ensure_dataset_meta().is_err() {
-        return;
-    }
-    let shape = match &node.node {
-        Node::Dataset(_, DatasetMetaState::Loaded(meta)) => meta.shape.clone(),
-        _ => Vec::new(),
-    };
-    let rank = shape.len();
-    node.sync_selection_rank(rank);
-    for ((dst, src), dim_len) in node
-        .selected_indexes
-        .iter_mut()
-        .zip(selected_snapshot.selected_indexes.iter().copied())
-        .zip(shape.iter().copied())
-    {
-        *dst = src.min(dim_len.saturating_sub(1));
-    }
-    node.selected_dim = node.selected_dim.min(rank.saturating_sub(1));
-    node.selected_x = selected_snapshot.selected_x.min(rank.saturating_sub(1));
-    node.selected_row = selected_snapshot.selected_row.min(rank.saturating_sub(1));
-    node.selected_col = if rank > 1 {
-        selected_snapshot.selected_col.min(rank.saturating_sub(1))
-    } else {
-        0
-    };
-    node.selected_dim = selected_snapshot.selected_dim.min(rank.saturating_sub(1));
-    node.line_offset = selected_snapshot.line_offset;
-    node.col_offset = selected_snapshot.col_offset.max(0);
-    node.attributes_view_cursor = selected_snapshot.attributes_view_cursor.clone();
-}
-
 fn clear_preview_state(state: &mut AppState<'_>, snapshot: &ReloadSnapshot) {
+    state.content_generation = state.content_generation.wrapping_add(1);
+    state.content_preview_state.pending_key = None;
+    state.content_preview_state.error = None;
+    state.content_preview_state.cached.clear();
+    state.matrix_viewport_state.pending_key = None;
+    state.matrix_viewport_state.error = None;
+    state.matrix_viewport_state.cached.clear();
     state.clear_preview_debounce();
     state.page_state = snapshot.page_state.clone();
     state.matrix_view_state = snapshot.matrix_view_state.clone();
@@ -230,6 +158,12 @@ fn placeholder_root(path: &str) -> Rc<RefCell<h5f::H5FNode>> {
 }
 
 pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Result<String> {
+    state.tree_load_generation = state.tree_load_generation.wrapping_add(1);
+    state.navigation_generation = state.navigation_generation.wrapping_add(1);
+    state.drain_tree_loads();
+    state.drain_navigation_loads();
+    state.drain_content_previews();
+    state.drain_matrix_viewports();
     let snapshot = snapshot_reload_state(state);
     let file_path = state.file_watch.path.clone();
     let linked = state.file_watch.linked;
@@ -278,19 +212,12 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
             state.focus = snapshot.focus.clone();
             state.show_tree_view = snapshot.show_tree_view;
             state.content_mode = snapshot.content_mode.clone();
-            for path in &snapshot.expanded_paths {
-                let relative = normalized_node_path(path);
-                if relative.is_empty() {
-                    continue;
-                }
-                let _ = state.root.borrow_mut().expand_path(relative);
-            }
-            state.compute_tree_view();
-            restore_tree_selection(state, &snapshot);
-            restore_selected_node_state(state, &snapshot);
-            state.compute_tree_view();
-            restore_tree_selection(state, &snapshot);
+            state.pending_tree_expansions = snapshot.expanded_paths.clone();
+            state.pending_tree_selection = snapshot.selected_path.clone();
+            state.pending_tree_selection_state = selection_state(&snapshot);
+            state.resume_tree_requests()?;
             state.sync_file_watch();
+            state.request_tree_children(state.root.clone());
             return Err(AppError::Hdf5(hdf5_metno::Error::from(format!(
                 "Failed to reopen HDF5 file '{}' in {} mode: {}",
                 file_path,
@@ -310,20 +237,12 @@ pub(super) fn reload_current_file(state: &mut AppState<'_>, write: bool) -> Resu
     state.show_tree_view = snapshot.show_tree_view;
     state.content_mode = snapshot.content_mode.clone();
 
-    for path in &snapshot.expanded_paths {
-        let relative = normalized_node_path(path);
-        if relative.is_empty() {
-            continue;
-        }
-        let _ = state.root.borrow_mut().expand_path(relative);
-    }
-
-    state.compute_tree_view();
-    restore_tree_selection(state, &snapshot);
-    restore_selected_node_state(state, &snapshot);
-    state.compute_tree_view();
-    restore_tree_selection(state, &snapshot);
+    state.pending_tree_expansions = snapshot.expanded_paths.clone();
+    state.pending_tree_selection = snapshot.selected_path.clone();
+    state.pending_tree_selection_state = selection_state(&snapshot);
+    state.resume_tree_requests()?;
     state.sync_file_watch();
+    state.request_tree_children(state.root.clone());
 
     let reloaded_path = state.file_watch.path.clone();
     let readonly = state.readonly;

@@ -16,6 +16,7 @@ use crate::{
     ui::command::CommandState,
     ui::{
         heatmap::handle_heatmap_load,
+        matrix::handle_matrix_viewport_load,
         mchart::{
             handle_mchart_expression_refresh, handle_mchart_load, handle_mchart_render,
             MultiChartState,
@@ -24,10 +25,11 @@ use crate::{
             handle_chartpreview_load, handle_chartpreview_resize, handle_image_load,
             handle_image_resize, handle_imagefs_load, handle_imagefsvlen_load,
         },
-        preview::pipeline::handle_preview_expression_eval,
+        preview::{content::handle_content_preview_load, pipeline::handle_preview_expression_eval},
         state::{
-            self, AppState, AppToast, ChartPreviwState, ContentShowMode, FileWatchState, Focus,
-            ImgState, LastFocused, MatrixViewState, Mode, PreviewExpressionState,
+            self, AppState, AppToast, ChartPreviwState, ContentPreviewState, ContentShowMode,
+            FileWatchState, Focus, ImgState, LastFocused, MatrixViewState, MatrixViewportState,
+            Mode, PreviewExpressionState,
         },
     },
 };
@@ -124,6 +126,9 @@ pub(super) fn prepare_app<'a>(
     let tx_load_mchart = handle_mchart_load(tx_events.clone());
     let tx_render_mchart = handle_mchart_render(tx_events.clone());
     let tx_expression_refresh = handle_mchart_expression_refresh(tx_events.clone());
+    let tx_tree_load = super::events::handle_tree_load(tx_events.clone());
+    let tx_navigation_load = super::events::handle_navigation_load(tx_events.clone());
+    let tx_content_preview = handle_content_preview_load(tx_events.clone());
 
     let img_state = ImgState {
         protocol: None,
@@ -174,6 +179,18 @@ pub(super) fn prepare_app<'a>(
         error: None,
         tx_load: tx_preview_expression,
     };
+    let content_preview_state = ContentPreviewState {
+        pending_key: None,
+        error: None,
+        cached: Default::default(),
+        tx_load: tx_content_preview.clone(),
+    };
+    let matrix_viewport_state = MatrixViewportState {
+        pending_key: None,
+        error: None,
+        cached: Default::default(),
+        tx_load: handle_matrix_viewport_load(tx_events.clone()),
+    };
 
     let matrix_view_state = MatrixViewState {
         col_offset: 0,
@@ -204,6 +221,20 @@ pub(super) fn prepare_app<'a>(
     let mut state = AppState {
         readonly: h5f.resolved_open_mode.readonly(),
         root: root_node,
+        tree_load_tx: tx_tree_load,
+        navigation_load_tx: tx_navigation_load,
+        content_preview_tx: tx_content_preview,
+        content_generation: 0,
+        navigation_generation: 0,
+        next_navigation_request_id: 0,
+        pending_navigation_request: None,
+        tree_load_generation: 0,
+        next_tree_load_request_id: 0,
+        pending_tree_loads: vec![],
+        pending_tree_expansions: vec![],
+        pending_tree_selection: None,
+        pending_tree_selection_state: None,
+        pending_tree_attribute_selection: None,
         editing: false,
         file: Some(h5f.file),
         requested_open_mode: h5f.requested_open_mode,
@@ -281,6 +312,8 @@ pub(super) fn prepare_app<'a>(
         },
         chart_preview_state,
         preview_expression_state,
+        content_preview_state,
+        matrix_viewport_state,
         ui_layout: state::UiLayoutState::default(),
     };
     let startup_health_warning = summarize_runtime_healthcheck(&run_runtime_healthcheck(
@@ -302,6 +335,8 @@ pub(super) fn prepare_app<'a>(
     }
     state.sync_heatmap_configuration();
     state.sync_file_watch();
+    state.compute_tree_view();
+    state.request_tree_children(state.root.clone());
     state.compute_tree_view();
     let opened_path = state.file_watch.path.clone();
     let readonly = state.readonly;

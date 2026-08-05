@@ -67,8 +67,10 @@ fn restored_tree_cursor(treeview: &[TreeItem<'_>], selection: &TreeSelection) ->
         })
 }
 
-fn group_load_marker(load_error: bool) -> Option<&'static str> {
-    if load_error {
+fn group_load_marker(loading: bool, load_error: bool) -> Option<&'static str> {
+    if loading {
+        Some("[loading]")
+    } else if load_error {
         Some("[! retry]")
     } else {
         None
@@ -83,8 +85,14 @@ impl AppState<'_> {
             symbols.tree.root_file_icon
         }));
         let filenode = self.root.borrow().full_path();
+        let root_loading = self.root.borrow().loading;
         let text = Line::styled(
-            format!("{} {}", file_icon, filenode),
+            format!(
+                "{} {}{}",
+                file_icon,
+                filenode,
+                if root_loading { " [loading]" } else { "" }
+            ),
             Style::default().fg(configure::themed_color(|colors| colors.tree.root_file)),
         );
         let root_tree_item = TreeItem {
@@ -262,7 +270,7 @@ fn compute_tree_view_rec<'a>(
             child.borrow().name(),
             Style::default().fg(name_color),
         ));
-        if let Some(marker) = group_load_marker(c.load_error.is_some()) {
+        if let Some(marker) = group_load_marker(c.loading, c.load_error.is_some()) {
             line_vec.push(Span::styled(
                 format!(" {marker}"),
                 Style::default().fg(configure::themed_color(|colors| colors.text.error)),
@@ -574,7 +582,8 @@ mod tests {
 
     #[test]
     fn failed_group_load_has_a_distinct_retry_marker() {
-        assert_eq!(group_load_marker(false), None);
-        assert_eq!(group_load_marker(true), Some("[! retry]"));
+        assert_eq!(group_load_marker(false, false), None);
+        assert_eq!(group_load_marker(true, false), Some("[loading]"));
+        assert_eq!(group_load_marker(false, true), Some("[! retry]"));
     }
 }

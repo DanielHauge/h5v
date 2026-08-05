@@ -285,7 +285,7 @@ pub fn render_chart_preview(
         return render_projected_chart_preview(f, area, node, state, ds, ds_meta);
     }
     if matches!(ds_meta.matrixable, Some(MatrixRenderType::Strings)) {
-        return render_string_preview(f, area, node);
+        return render_string_preview(f, area, node, state);
     }
 
     let shape = ds.shape();
@@ -336,7 +336,7 @@ pub fn render_chart_preview(
                     render_string(f, area, node, ds, None);
                 }
                 MatrixRenderType::Opaque => {
-                    render_string_preview(f, area, node)?;
+                    render_string_preview(f, area, node, state)?;
                     return Ok(());
                 }
                 MatrixRenderType::Compound => {
@@ -349,7 +349,7 @@ pub fn render_chart_preview(
                     return Ok(());
                 }
                 MatrixRenderType::Strings => {
-                    render_string_preview(f, area, node)?;
+                    render_string_preview(f, area, node, state)?;
                     return Ok(());
                 }
                 MatrixRenderType::ByteArray => {
@@ -600,7 +600,7 @@ fn render_projected_chart_preview(
                 );
             }
             Some(MatrixRenderType::Opaque) => {
-                render_string_preview(f, area, node)?;
+                render_string_preview(f, area, node, state)?;
             }
             Some(MatrixRenderType::Enum) => {
                 let hdf5_metno::types::TypeDescriptor::Enum(et) = &ds_meta.type_descriptor else {

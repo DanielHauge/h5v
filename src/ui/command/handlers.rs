@@ -519,6 +519,7 @@ pub(super) fn handle_attr(
             let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
             let created_type = selected_node.create_attribute(attr_name, attr_type, value)?;
             drop(selected_node);
+            state.invalidate_selected_navigation_data();
             state.acknowledge_file_write();
             Ok(EventResult::Toast(
                 AppToast::Info(format!(
@@ -533,6 +534,7 @@ pub(super) fn handle_attr(
             let mut selected_node = state.treeview[state.tree_view_cursor].node.borrow_mut();
             selected_node.delete_attribute(attr_name)?;
             drop(selected_node);
+            state.invalidate_selected_navigation_data();
             state.acknowledge_file_write();
             Ok(EventResult::Toast(
                 AppToast::Info(format!("Deleted attribute '{}'", attr_name)),

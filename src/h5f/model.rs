@@ -163,8 +163,13 @@ pub struct H5FNode {
     pub expanded: bool,
     pub node: Node,
     pub computed_attributes: Option<ComputedAttributes>,
+    pub metadata_loading: bool,
+    pub attributes_loading: bool,
+    pub metadata_error: Option<String>,
+    pub attributes_error: Option<String>,
     pub attributes_view_cursor: AttributeCursor,
     pub read: bool,
+    pub loading: bool,
     pub load_error: Option<String>,
     pub children: Vec<Rc<RefCell<H5FNode>>>,
     pub view_loaded: u32,
@@ -191,10 +196,15 @@ impl H5FNode {
             attributes_view_cursor: Default::default(),
             node: node_type,
             read: false,
+            loading: false,
             load_error: None,
             children: vec![],
             view_loaded: 50,
             computed_attributes: None,
+            metadata_loading: false,
+            attributes_loading: false,
+            metadata_error: None,
+            attributes_error: None,
             selected_dim: 0,
             selected_x: 0,
             selected_row: 0,
@@ -449,6 +459,15 @@ mod tests {
         let node = H5FNode::new(Node::File(file));
 
         assert_eq!(node.content_show_modes(), vec![ContentShowMode::Preview]);
+    }
+
+    #[test]
+    fn new_nodes_start_with_lazy_metadata_states() {
+        let node = H5FNode::new(Node::Broken("missing".to_string()));
+
+        assert!(!node.metadata_loading);
+        assert!(!node.attributes_loading);
+        assert!(node.computed_attributes.is_none());
     }
 
     #[test]

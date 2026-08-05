@@ -2,7 +2,7 @@ use std::{
     fs,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
+        mpsc::{channel, Sender},
         Arc, RwLock,
     },
     thread,
@@ -11,9 +11,107 @@ use std::{
 
 use ratatui::crossterm::event;
 
-use crate::error::log_error;
+use crate::{
+    error::log_error,
+    h5f::{enumerate_group_children, H5FNode},
+};
 
-use super::AppEvent;
+use super::{AppEvent, NavigationLoadResult, NavigationLoadWork, TreeLoadResult, TreeLoadWork};
+
+pub(super) fn handle_navigation_load(tx_events: Sender<AppEvent>) -> Sender<NavigationLoadWork> {
+    let (tx_worker, rx_worker) = channel::<NavigationLoadWork>();
+    thread::spawn(move || {
+        while let Ok(work) = rx_worker.recv() {
+            let NavigationLoadWork::Load(request) = work else {
+                let NavigationLoadWork::Drain(done) = work else {
+                    unreachable!()
+                };
+                let _ = done.send(());
+                continue;
+            };
+            let mut node = H5FNode::new(request.node);
+            if matches!(node.node, crate::h5f::Node::Dataset(_, _))
+                && node.ensure_dataset_meta().is_err()
+            {
+                let _ = tx_events.send(AppEvent::NavigationLoad(NavigationLoadResult::Failure {
+                    generation: request.generation,
+                    request_id: request.request_id,
+                    metadata: true,
+                    message: node
+                        .load_error
+                        .unwrap_or_else(|| "Failed to read dataset metadata".to_string()),
+                }));
+                continue;
+            }
+            if tx_events
+                .send(AppEvent::NavigationLoad(NavigationLoadResult::Metadata {
+                    generation: request.generation,
+                    request_id: request.request_id,
+                    node: node.node.clone(),
+                }))
+                .is_err()
+            {
+                return;
+            }
+            match node.read_attributes() {
+                Ok(_) => {
+                    let attributes = node
+                        .computed_attributes
+                        .take()
+                        .expect("attributes were cached");
+                    let _ = tx_events.send(AppEvent::NavigationLoad(
+                        NavigationLoadResult::Attributes {
+                            generation: request.generation,
+                            request_id: request.request_id,
+                            attributes,
+                        },
+                    ));
+                }
+                Err(error) => {
+                    let _ =
+                        tx_events.send(AppEvent::NavigationLoad(NavigationLoadResult::Failure {
+                            generation: request.generation,
+                            request_id: request.request_id,
+                            metadata: false,
+                            message: error.to_string(),
+                        }));
+                }
+            }
+        }
+    });
+    tx_worker
+}
+
+pub(super) fn handle_tree_load(tx_events: Sender<AppEvent>) -> Sender<TreeLoadWork> {
+    let (tx_worker, rx_worker) = channel::<TreeLoadWork>();
+    thread::spawn(move || {
+        while let Ok(work) = rx_worker.recv() {
+            let TreeLoadWork::Load(request) = work else {
+                let TreeLoadWork::Drain(done) = work else {
+                    unreachable!()
+                };
+                let _ = done.send(());
+                continue;
+            };
+            let result = match enumerate_group_children(&request.node) {
+                Ok(children) => TreeLoadResult::Success {
+                    generation: request.generation,
+                    request_id: request.request_id,
+                    children,
+                },
+                Err(error) => TreeLoadResult::Failure {
+                    generation: request.generation,
+                    request_id: request.request_id,
+                    message: error.to_string(),
+                },
+            };
+            if tx_events.send(AppEvent::TreeLoad(result)).is_err() {
+                return;
+            }
+        }
+    });
+    tx_worker
+}
 
 pub(super) fn schedule_preview_debounce(tx_events: Sender<AppEvent>, generation: u64) {
     thread::spawn(move || {

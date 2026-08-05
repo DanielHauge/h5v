@@ -406,10 +406,6 @@ impl ComputedAttributes {
         rendered_attributes
     }
 
-    pub fn row_count(&self) -> usize {
-        self.rendered_rows.len()
-    }
-
     pub fn row(&self, row_index: usize) -> Option<&RenderedAttributeRow> {
         self.rendered_rows.get(row_index)
     }
@@ -452,15 +448,6 @@ impl H5FNode {
         Ok(normalized_index)
     }
 
-    fn rendered_attribute_index(&mut self, attr_name: &str) -> Result<usize, AppError> {
-        let attributes = self.read_attributes()?;
-        attributes
-            .rendered_rows
-            .iter()
-            .position(|row| row.key.as_deref() == Some(attr_name))
-            .ok_or_else(|| AppError::EditError(format!("Attribute '{}' not found", attr_name)))
-    }
-
     pub fn create_attribute(
         &mut self,
         attr_name: &str,
@@ -470,7 +457,6 @@ impl H5FNode {
         let attr_name = validate_user_attribute_name(attr_name)?;
         let created_type = self.node.create_attr(&attr_name, attr_type, value)?;
         self.recompute_attributes()?;
-        self.attributes_view_cursor.attribute_index = self.rendered_attribute_index(&attr_name)?;
         self.attributes_view_cursor.attribute_view_selection = AttributeViewSelection::Value;
         Ok(created_type)
     }
@@ -478,18 +464,17 @@ impl H5FNode {
     pub fn delete_attribute(&mut self, attr_name: &str) -> Result<(), AppError> {
         let attr_name = validate_user_attribute_name(attr_name)?;
         let current_index = self.attributes_view_cursor.attribute_index;
-        let deleted_index = self.rendered_attribute_index(&attr_name)?;
+        let deleted_index = self.computed_attributes.as_ref().and_then(|attributes| {
+            attributes
+                .rendered_rows
+                .iter()
+                .position(|row| row.key.as_deref() == Some(attr_name.as_str()))
+        });
         self.node.delete_attr(&attr_name)?;
         self.recompute_attributes()?;
-        let len = self.read_attributes()?.row_count();
-        self.attributes_view_cursor.attribute_index = if len == 0 {
-            0
-        } else if deleted_index < current_index {
-            current_index.saturating_sub(1).min(len - 1)
-        } else {
-            current_index.min(len - 1)
-        };
-        self.normalize_attribute_selection()?;
+        if deleted_index.is_some_and(|index| index < current_index) {
+            self.attributes_view_cursor.attribute_index = current_index.saturating_sub(1);
+        }
         Ok(())
     }
 
@@ -542,7 +527,15 @@ impl H5FNode {
     }
 
     pub fn recompute_attributes(&mut self) -> Result<(), hdf5_metno::Error> {
-        self.computed_attributes = Some(ComputedAttributes::new(self)?);
+        self.computed_attributes = None;
+        if let Some(identity) = self.dataset_identity() {
+            if let Node::Dataset(_, meta) = &mut self.node {
+                *meta = DatasetMetaState::Pending(identity);
+            }
+        }
+        self.metadata_loading = false;
+        self.attributes_loading = false;
+        self.attributes_error = None;
         Ok(())
     }
 }
@@ -552,6 +545,7 @@ impl H5FNode {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{ComputedAttributes, RenderedAttributeRow};
+    use crate::h5f::{AttributeCreateType, H5FNode, Node};
     use ratatui::text::Line;
 
     fn line(text: &str) -> Line<'static> {
@@ -578,5 +572,38 @@ mod tests {
         assert_eq!(rows.normalize_row_index(0), Some(1));
         assert_eq!(rows.normalize_row_index(2), Some(3));
         assert_eq!(rows.normalize_row_index(3), Some(3));
+    }
+
+    #[test]
+    fn mutation_invalidation_drops_cached_attributes() {
+        let mut node = H5FNode::new(Node::Broken("missing".to_string()));
+        node.computed_attributes = Some(test_rows());
+        node.attributes_loading = true;
+
+        node.recompute_attributes().expect("invalidate attributes");
+
+        assert!(node.computed_attributes.is_none());
+        assert!(!node.attributes_loading);
+    }
+
+    #[test]
+    fn attribute_mutations_invalidate_without_reloading_rows() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("create hdf5 file");
+        let mut node = H5FNode::new(Node::File(file));
+
+        node.computed_attributes = Some(test_rows());
+        node.create_attribute("created", AttributeCreateType::I64, "1")
+            .expect("create attribute");
+        assert!(node.computed_attributes.is_none());
+
+        node.create_attribute("units", AttributeCreateType::String, "m")
+            .expect("create attribute");
+        node.computed_attributes = Some(test_rows());
+        node.attributes_view_cursor.attribute_index = 3;
+        node.delete_attribute("units").expect("delete attribute");
+        assert!(node.computed_attributes.is_none());
+        assert_eq!(node.attributes_view_cursor.attribute_index, 3);
     }
 }
