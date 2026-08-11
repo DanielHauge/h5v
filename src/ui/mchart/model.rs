@@ -8,6 +8,7 @@ pub enum ChartAxisScale {
     #[default]
     Linear,
     Logarithmic,
+    SymLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

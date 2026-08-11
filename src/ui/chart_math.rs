@@ -45,6 +45,11 @@ pub(crate) fn axis_label_area_size(values: &[f64], padding: u32) -> u32 {
         .unwrap_or(padding)
 }
 
+/// Space for horizontal tick labels, an axis title, and a small gap between them.
+pub(crate) fn axis_title_label_area_size(font_size: u32) -> u32 {
+    font_size.saturating_mul(2).saturating_add(8)
+}
+
 fn trim_number(value: &str) -> String {
     let (mantissa, exponent) = value.split_once('e').unwrap_or((value, ""));
     let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
@@ -145,6 +150,25 @@ pub(crate) fn normalized_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
     Some((min, max))
 }
 
+pub(crate) fn normalized_log_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
+    if !min.is_finite() || !max.is_finite() || min <= 0.0 || max < min {
+        return None;
+    }
+    if min == max {
+        return Some((min / 10.0, max * 10.0));
+    }
+    Some((min, max))
+}
+
+/// A continuous signed logarithm with a linear neighbourhood around zero.
+pub(crate) fn symlog(value: f64) -> f64 {
+    value.signum() * value.abs().ln_1p()
+}
+
+pub(crate) fn symlog_inverse(value: f64) -> f64 {
+    value.signum() * value.abs().exp_m1()
+}
+
 pub(crate) fn padded_axis_bounds(min: f64, max: f64) -> Option<(f64, f64)> {
     let (min, max) = normalized_axis_bounds(min, max)?;
     let pad = (max - min).abs().max(1.0) * 0.05;
@@ -226,15 +250,28 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::{
-        axis_label_area_size, clamp_axis_range, format_axis_number, normalized_axis_bounds,
-        padded_axis_bounds, point_in_rect, raster_chart_layout, zoom_axis_range,
-        RasterChartLayoutHints,
+        axis_label_area_size, axis_title_label_area_size, clamp_axis_range, format_axis_number,
+        normalized_axis_bounds, normalized_log_axis_bounds, padded_axis_bounds, point_in_rect,
+        raster_chart_layout, symlog, symlog_inverse, zoom_axis_range, RasterChartLayoutHints,
     };
 
     #[test]
     fn normalizes_degenerate_axis_bounds() {
         assert_eq!(normalized_axis_bounds(0.0, 0.0), Some((-1.0, 1.0)));
         assert_eq!(normalized_axis_bounds(10.0, 10.0), Some((9.5, 10.5)));
+    }
+
+    #[test]
+    fn normalizes_positive_log_degenerate_bounds_multiplicatively() {
+        assert_eq!(normalized_log_axis_bounds(10.0, 10.0), Some((1.0, 100.0)));
+        assert_eq!(normalized_log_axis_bounds(0.0, 1.0), None);
+    }
+
+    #[test]
+    fn symlog_round_trips_signed_values() {
+        for value in [-1_000.0, -1.0, 0.0, 1.0, 1_000.0] {
+            assert!((symlog_inverse(symlog(value)) - value).abs() < 1e-10);
+        }
     }
 
     #[test]
@@ -291,6 +328,11 @@ mod tests {
         assert!(layout.y_label_area_size <= 32);
         assert!(layout.x_label_area_size + layout.margin * 2 + 40 <= 64);
         assert!(layout.y_label_area_size + layout.margin * 2 + 48 <= 80);
+    }
+
+    #[test]
+    fn axis_title_area_separates_title_from_tick_labels() {
+        assert_eq!(axis_title_label_area_size(18), 44);
     }
 
     #[test]

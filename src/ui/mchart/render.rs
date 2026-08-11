@@ -149,19 +149,9 @@ impl MultiChartState {
         let compact = area.width < 30;
         let mut spans = Vec::new();
         let mut offset = 0u16;
-        for (x_axis, label, supported, selected) in [
-            (
-                true,
-                "X",
-                self.view_mode().supports_x_log_scale(),
-                self.x_axis_scale(),
-            ),
-            (
-                false,
-                "Y",
-                self.view_mode().supports_y_log_scale(),
-                self.y_axis_scale(),
-            ),
+        for (x_axis, label, selected) in [
+            (true, "X", self.effective_x_axis_scale()),
+            (false, "Y", self.effective_y_axis_scale()),
         ] {
             if !spans.is_empty() {
                 spans.push(Span::raw("  "));
@@ -172,17 +162,23 @@ impl MultiChartState {
                 Style::default().fg(configure::themed_color(|colors| colors.help.muted)),
             ));
             offset = offset.saturating_add(2);
-            for scale in [ChartAxisScale::Linear, ChartAxisScale::Logarithmic] {
+            for scale in [
+                ChartAxisScale::Linear,
+                ChartAxisScale::Logarithmic,
+                ChartAxisScale::SymLog,
+            ] {
                 let text = match (compact, scale) {
                     (true, ChartAxisScale::Linear) => " Lin ",
                     (true, ChartAxisScale::Logarithmic) => " Log ",
+                    (true, ChartAxisScale::SymLog) => " Sym ",
                     (false, ChartAxisScale::Linear) => " Linear ",
                     (false, ChartAxisScale::Logarithmic) => " Log ",
+                    (false, ChartAxisScale::SymLog) => " SymLog ",
                 };
                 let width = text.chars().count() as u16;
                 let style = if scale == selected {
                     mchart_mode_tab_style(true)
-                } else if supported || matches!(scale, ChartAxisScale::Linear) {
+                } else if self.axis_scale_is_available(x_axis, scale) {
                     mchart_mode_tab_style(false)
                 } else {
                     mchart_soft_muted(
@@ -190,7 +186,7 @@ impl MultiChartState {
                     )
                 };
                 spans.push(Span::styled(text, style));
-                if supported || matches!(scale, ChartAxisScale::Linear) {
+                if self.axis_scale_is_available(x_axis, scale) {
                     self.axis_scale_hitboxes.push(MultiChartAxisScaleHitbox {
                         area: Rect::new(area.x.saturating_add(offset), area.y, width, 1),
                         x_axis,

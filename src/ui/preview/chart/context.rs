@@ -12,8 +12,8 @@ use crate::{
     h5f::H5FNode,
     ui::{
         chart_math::{
-            axis_label_area_size, normalized_axis_bounds, raster_chart_layout, RasterChartLayout,
-            RasterChartLayoutHints,
+            axis_label_area_size, axis_title_label_area_size, normalized_axis_bounds,
+            raster_chart_layout, RasterChartLayout, RasterChartLayoutHints,
         },
         mchart::chart_plot_area_in_rect,
         mchart::ChartAxisScale,
@@ -42,7 +42,7 @@ pub(super) fn preview_chart_layout(
         height_px,
         RasterChartLayoutHints {
             preferred_margin: 10,
-            preferred_x_label_area_size: 30,
+            preferred_x_label_area_size: axis_title_label_area_size(18),
             preferred_y_label_area_size: y_label_area_size,
             preferred_x_label_font_size: 18,
             preferred_y_label_font_size: 18,
@@ -363,11 +363,23 @@ pub(super) fn render_preview_context_panel(
 ) {
     let mode = state.chart_preview_state.mode;
     let title = format!("View & selection [{} · t]", mode.label());
-    let control_width = "  X  Lin  Log ".chars().count() as u16;
+    let control_width = "  X  Lin  Log  Sym ".chars().count() as u16;
     let mut axes = Vec::new();
     for (x_axis, label, selected) in [
-        (true, "X", state.chart_preview_state.x_axis_scale),
-        (false, "Y", state.chart_preview_state.y_axis_scale),
+        (
+            true,
+            "X",
+            state
+                .chart_preview_state
+                .effective_axis_scale_for_renderer(true, state.image_protocol_enabled),
+        ),
+        (
+            false,
+            "Y",
+            state
+                .chart_preview_state
+                .effective_axis_scale_for_renderer(false, state.image_protocol_enabled),
+        ),
     ] {
         if super::preview_axis_scale_supported(state, x_axis)
             && area.width
@@ -378,17 +390,19 @@ pub(super) fn render_preview_context_panel(
             axes.push((x_axis, label, selected));
         }
     }
-    let control_style = |scale, selected| {
+    let control_style = |available, scale, selected| {
         if scale == selected {
             Style::default()
                 .fg(configure::themed_color(|colors| colors.accent.selection_fg))
                 .bg(configure::themed_color(|colors| colors.accent.selection_bg))
                 .bold()
-        } else {
+        } else if available {
             Style::default()
                 .fg(configure::themed_color(|colors| colors.help.description))
                 .bg(configure::themed_color(|colors| colors.surface.help_key_bg))
                 .bold()
+        } else {
+            Style::default().fg(configure::themed_color(|colors| colors.help.muted))
         }
     };
     let mut title_spans = Vec::new();
@@ -402,15 +416,49 @@ pub(super) fn render_preview_context_panel(
         ));
     }
     title_spans.push(Span::raw(title.clone()));
-    for (_, label, selected) in &axes {
+    for (x_axis, label, selected) in &axes {
         title_spans.push(Span::raw(format!("  {label} ")));
         title_spans.push(Span::styled(
             " Lin ",
-            control_style(ChartAxisScale::Linear, *selected),
+            control_style(
+                state
+                    .chart_preview_state
+                    .axis_scale_is_available_for_renderer(
+                        *x_axis,
+                        ChartAxisScale::Linear,
+                        state.image_protocol_enabled,
+                    ),
+                ChartAxisScale::Linear,
+                *selected,
+            ),
         ));
         title_spans.push(Span::styled(
             " Log ",
-            control_style(ChartAxisScale::Logarithmic, *selected),
+            control_style(
+                state
+                    .chart_preview_state
+                    .axis_scale_is_available_for_renderer(
+                        *x_axis,
+                        ChartAxisScale::Logarithmic,
+                        state.image_protocol_enabled,
+                    ),
+                ChartAxisScale::Logarithmic,
+                *selected,
+            ),
+        ));
+        title_spans.push(Span::styled(
+            " Sym ",
+            control_style(
+                state
+                    .chart_preview_state
+                    .axis_scale_is_available_for_renderer(
+                        *x_axis,
+                        ChartAxisScale::SymLog,
+                        state.image_protocol_enabled,
+                    ),
+                ChartAxisScale::SymLog,
+                *selected,
+            ),
         ));
     }
     let title_line = Line::from(title_spans);
@@ -433,19 +481,26 @@ pub(super) fn render_preview_context_panel(
         .saturating_add(title.chars().count() as u16);
     for (x_axis, _, _) in axes {
         control_x = control_x.saturating_add(4);
-        state.ui_layout.preview_axis_scales.extend([
-            PreviewAxisScaleHitbox {
-                area: Rect::new(control_x, area.y, 5, 1),
-                x_axis,
-                scale: ChartAxisScale::Linear,
-            },
-            PreviewAxisScaleHitbox {
-                area: Rect::new(control_x.saturating_add(5), area.y, 5, 1),
-                x_axis,
-                scale: ChartAxisScale::Logarithmic,
-            },
-        ]);
-        control_x = control_x.saturating_add(10);
+        for (offset, scale) in [
+            (0, ChartAxisScale::Linear),
+            (5, ChartAxisScale::Logarithmic),
+            (10, ChartAxisScale::SymLog),
+        ] {
+            if state
+                .chart_preview_state
+                .axis_scale_is_available_for_renderer(x_axis, scale, state.image_protocol_enabled)
+            {
+                state
+                    .ui_layout
+                    .preview_axis_scales
+                    .push(PreviewAxisScaleHitbox {
+                        area: Rect::new(control_x.saturating_add(offset), area.y, 5, 1),
+                        x_axis,
+                        scale,
+                    });
+            }
+        }
+        control_x = control_x.saturating_add(15);
     }
 
     let inner = area.inner(Margin {
@@ -521,7 +576,7 @@ pub(super) fn preview_roi_x_bounds(
     Some((start_x - (left_step / 2.0), end_x + (right_step / 2.0)))
 }
 
-pub(super) fn preview_visible_index_window(
+pub(crate) fn preview_visible_index_window(
     data_preview: &DatasetPlotingData,
     viewport: PreviewChartViewport,
     x_min: f64,

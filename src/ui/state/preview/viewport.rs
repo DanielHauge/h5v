@@ -3,7 +3,10 @@ use ratatui::layout::Rect;
 use crate::{
     data::{DatasetPlotingData, PreviewSelection},
     ui::chart_math::{clamp_axis_range, normalized_axis_bounds, point_in_rect, zoom_axis_range},
-    ui::preview::chart::{preview_effective_x_domain, preview_x_from_ratio, preview_x_ratio},
+    ui::preview::chart::{
+        preview_effective_x_domain, preview_visible_index_window, preview_x_from_ratio,
+        preview_x_ratio,
+    },
 };
 
 use super::{
@@ -13,6 +16,100 @@ use super::{
 use crate::ui::mchart::ChartAxisScale;
 
 impl ChartPreviwState {
+    pub fn axis_scale_is_available(&self, x_axis: bool, scale: ChartAxisScale) -> bool {
+        self.axis_scale_is_available_for_renderer(x_axis, scale, true)
+    }
+
+    pub fn axis_scale_is_available_for_renderer(
+        &self,
+        x_axis: bool,
+        scale: ChartAxisScale,
+        supports_symlog: bool,
+    ) -> bool {
+        if scale == ChartAxisScale::Linear {
+            return true;
+        }
+        let supported = if x_axis {
+            self.mode.supports_x_log_scale()
+        } else {
+            self.mode.supports_y_log_scale()
+        };
+        if !supported || (scale == ChartAxisScale::SymLog && !supports_symlog) {
+            return supported;
+        }
+        let Some(data) = self.current_data.as_ref() else {
+            return true;
+        };
+        if scale == ChartAxisScale::SymLog {
+            return true;
+        }
+        let viewport = self.effective_viewport().unwrap_or(PreviewChartViewport {
+            x_min: self.selection_x_min(),
+            x_max: f64::INFINITY,
+            y_min: f64::NEG_INFINITY,
+            y_max: f64::INFINITY,
+        });
+        let Some((start, end)) =
+            preview_visible_index_window(data, viewport, self.selection_x_min())
+        else {
+            return false;
+        };
+        let points = &data.data[start..=end];
+        match (self.mode, x_axis) {
+            (PreviewChartMode::Histogram, true) => {
+                points.iter().all(|(_, y)| y.is_finite() && *y > 0.0)
+            }
+            (PreviewChartMode::BoxPlot, false) => {
+                points.iter().all(|(_, y)| y.is_finite() && *y > 0.0)
+            }
+            (_, true) => points.iter().all(|(x, _)| {
+                let x = self.selection_x_min() + *x;
+                x.is_finite() && x > 0.0
+            }),
+            (_, false) => points.iter().all(|(_, y)| y.is_finite() && *y > 0.0),
+        }
+    }
+
+    pub fn effective_axis_scale(&self, x_axis: bool) -> ChartAxisScale {
+        self.effective_axis_scale_for_renderer(x_axis, true)
+    }
+
+    pub fn effective_axis_scale_for_renderer(
+        &self,
+        x_axis: bool,
+        supports_symlog: bool,
+    ) -> ChartAxisScale {
+        let scale = if x_axis {
+            self.x_axis_scale
+        } else {
+            self.y_axis_scale
+        };
+        self.axis_scale_is_available_for_renderer(x_axis, scale, supports_symlog)
+            .then_some(scale)
+            .unwrap_or(ChartAxisScale::Linear)
+    }
+
+    pub fn toggle_axis_scale(&mut self, x_axis: bool) -> bool {
+        let current = self.effective_axis_scale(x_axis);
+        let next = [
+            ChartAxisScale::Linear,
+            ChartAxisScale::Logarithmic,
+            ChartAxisScale::SymLog,
+        ]
+        .into_iter()
+        .cycle()
+        .skip_while(|scale| *scale != current)
+        .skip(1)
+        .find(|scale| self.axis_scale_is_available(x_axis, *scale))
+        .expect("linear scale is always available");
+        if x_axis {
+            self.set_x_axis_scale(next)
+        } else {
+            self.set_y_axis_scale(next)
+        }
+        true
+    }
+
     pub fn set_x_axis_scale(&mut self, scale: ChartAxisScale) {
         let next = if self.mode.supports_x_log_scale() {
             scale
@@ -618,9 +715,19 @@ fn preview_index_at_x(x: f64, x_min: f64, round: bool) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::preview::chart::{preview_x_from_ratio, preview_x_ratio};
+    use crate::{
+        data::DatasetPlotingData,
+        ui::{
+            mchart::ChartAxisScale,
+            preview::chart::{preview_x_from_ratio, preview_x_ratio},
+        },
+    };
 
-    use super::preview_index_at_x;
+    use super::{preview_index_at_x, ChartPreviwState, PreviewChartMode};
+
+    fn chart_state() -> ChartPreviwState {
+        super::super::tests::chart_state()
+    }
 
     #[test]
     fn log_x_left_click_selects_an_early_index() {
@@ -638,5 +745,19 @@ mod tests {
                 .abs()
                 < 1e-9
         );
+    }
+
+    #[test]
+    fn symlog_is_available_for_mixed_line_values() {
+        let mut state = chart_state();
+        state.mode = PreviewChartMode::Line;
+        state.set_current_data(Some(DatasetPlotingData {
+            data: vec![(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)],
+            length: 3,
+            min: -1.0,
+            max: 1.0,
+        }));
+        assert!(!state.axis_scale_is_available(true, ChartAxisScale::Logarithmic));
+        assert!(state.axis_scale_is_available(true, ChartAxisScale::SymLog));
     }
 }

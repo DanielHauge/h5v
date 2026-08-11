@@ -333,6 +333,7 @@ impl MultiChartState {
 
     pub fn cycle_view_mode(&mut self) -> MultiChartViewMode {
         self.view_mode = self.view_mode.next();
+        self.reset_unsupported_axis_scales();
         self.modified = true;
         self.view_mode
     }
@@ -346,13 +347,134 @@ impl MultiChartState {
     }
 
     pub fn set_x_axis_scale(&mut self, scale: ChartAxisScale) {
-        self.x_axis_scale = scale;
+        self.x_axis_scale = self.supported_axis_scale(true, scale);
         self.modified = true;
     }
 
     pub fn set_y_axis_scale(&mut self, scale: ChartAxisScale) {
-        self.y_axis_scale = scale;
+        self.y_axis_scale = self.supported_axis_scale(false, scale);
         self.modified = true;
+    }
+
+    pub fn toggle_x_axis_scale(&mut self) -> bool {
+        self.toggle_axis_scale(true)
+    }
+
+    pub fn toggle_y_axis_scale(&mut self) -> bool {
+        self.toggle_axis_scale(false)
+    }
+
+    pub(crate) fn effective_x_axis_scale(&self) -> ChartAxisScale {
+        self.effective_axis_scale_for_ui(true)
+    }
+
+    pub(crate) fn effective_y_axis_scale(&self) -> ChartAxisScale {
+        self.effective_axis_scale_for_ui(false)
+    }
+
+    pub(crate) fn axis_scale_is_available(&self, x_axis: bool, scale: ChartAxisScale) -> bool {
+        match scale {
+            ChartAxisScale::Linear => true,
+            ChartAxisScale::Logarithmic => {
+                self.axis_supports_log_scale(x_axis) && self.axis_values_are_positive(x_axis)
+            }
+            ChartAxisScale::SymLog => self.axis_supports_log_scale(x_axis),
+        }
+    }
+
+    fn effective_axis_scale_for_ui(&self, x_axis: bool) -> ChartAxisScale {
+        let scale = if x_axis {
+            self.x_axis_scale
+        } else {
+            self.y_axis_scale
+        };
+        self.axis_scale_is_available(x_axis, scale)
+            .then_some(scale)
+            .unwrap_or(ChartAxisScale::Linear)
+    }
+
+    fn supported_axis_scale(&self, x_axis: bool, scale: ChartAxisScale) -> ChartAxisScale {
+        (matches!(scale, ChartAxisScale::Linear) || self.axis_supports_log_scale(x_axis))
+            .then_some(scale)
+            .unwrap_or(ChartAxisScale::Linear)
+    }
+
+    fn axis_supports_log_scale(&self, x_axis: bool) -> bool {
+        if x_axis {
+            self.view_mode.supports_x_log_scale()
+        } else {
+            self.view_mode.supports_y_log_scale()
+        }
+    }
+
+    fn axis_values_are_positive(&self, x_axis: bool) -> bool {
+        if self.view_mode == MultiChartViewMode::ComparisonScatter {
+            let Some((left, right)) = self.comparison_scatter_pair() else {
+                return false;
+            };
+            let mut values = self
+                .windowed_visible_points(left)
+                .into_iter()
+                .chain(self.windowed_visible_points(right))
+                .map(|(_, y)| y);
+            return values
+                .clone()
+                .next()
+                .is_some_and(|first| first.is_finite() && first > 0.0)
+                && values.all(|value| value.is_finite() && value > 0.0);
+        }
+        let mut values = self
+            .items
+            .iter()
+            .filter(|item| item.visible)
+            .flat_map(|item| item.active_series().points.iter())
+            .filter(|(x, _)| {
+                self.viewport
+                    .is_none_or(|viewport| *x >= viewport.x_min && *x <= viewport.x_max)
+            })
+            .map(|(x, y)| match (self.view_mode, x_axis) {
+                (MultiChartViewMode::Histogram | MultiChartViewMode::BoxPlot, true) => *y,
+                (_, true) => *x,
+                _ => *y,
+            });
+        let Some(first) = values.next() else {
+            return false;
+        };
+        first.is_finite() && first > 0.0 && values.all(|value| value.is_finite() && value > 0.0)
+    }
+
+    fn toggle_axis_scale(&mut self, x_axis: bool) -> bool {
+        let current = if x_axis {
+            self.effective_x_axis_scale()
+        } else {
+            self.effective_y_axis_scale()
+        };
+        let next = [
+            ChartAxisScale::Linear,
+            ChartAxisScale::Logarithmic,
+            ChartAxisScale::SymLog,
+        ]
+        .into_iter()
+        .cycle()
+        .skip_while(|scale| *scale != current)
+        .skip(1)
+        .find(|scale| self.axis_scale_is_available(x_axis, *scale))
+        .expect("linear scale is always available");
+        if x_axis {
+            self.set_x_axis_scale(next);
+        } else {
+            self.set_y_axis_scale(next);
+        }
+        true
+    }
+
+    fn reset_unsupported_axis_scales(&mut self) {
+        if !self.axis_supports_log_scale(true) {
+            self.x_axis_scale = ChartAxisScale::Linear;
+        }
+        if !self.axis_supports_log_scale(false) {
+            self.y_axis_scale = ChartAxisScale::Linear;
+        }
     }
 
     pub(crate) fn refresh_expression_detail_series(

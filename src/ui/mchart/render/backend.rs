@@ -7,8 +7,8 @@ use crate::{
     configure,
     error::log_error,
     ui::chart_math::{
-        axis_label_area_size, format_axis_number, raster_chart_layout, RasterChartLayout,
-        RasterChartLayoutHints,
+        axis_label_area_size, axis_title_label_area_size, format_axis_number, raster_chart_layout,
+        symlog, symlog_inverse, RasterChartLayout, RasterChartLayoutHints,
     },
 };
 
@@ -23,7 +23,7 @@ fn line_chart_layout(width: u32, height: u32, y_label_area_size: u32) -> RasterC
         height,
         RasterChartLayoutHints {
             preferred_margin: 10,
-            preferred_x_label_area_size: 30,
+            preferred_x_label_area_size: axis_title_label_area_size(18),
             preferred_y_label_area_size: y_label_area_size,
             preferred_x_label_font_size: 18,
             preferred_y_label_font_size: 18,
@@ -35,6 +35,22 @@ fn line_chart_layout(width: u32, height: u32, y_label_area_size: u32) -> RasterC
 
 fn valid_log_range(min: f64, max: f64) -> bool {
     min.is_finite() && max.is_finite() && min > 0.0 && max > min
+}
+
+fn scale_value(scale: ChartAxisScale, value: f64) -> f64 {
+    match scale {
+        ChartAxisScale::Linear => value,
+        ChartAxisScale::Logarithmic => value.ln(),
+        ChartAxisScale::SymLog => symlog(value),
+    }
+}
+
+fn axis_label(scale: ChartAxisScale, value: f64) -> String {
+    format_axis_number(match scale {
+        ChartAxisScale::Linear => value,
+        ChartAxisScale::Logarithmic => value.exp(),
+        ChartAxisScale::SymLog => symlog_inverse(value),
+    })
 }
 
 fn render_line_chart_request(
@@ -67,7 +83,7 @@ fn render_line_chart_request(
             axis_label_area_size(&[prepared.y_min, prepared.y_max], 30),
         );
         macro_rules! draw_line_chart {
-            ($x:expr, $y:expr) => {{
+            ($x:expr, $y:expr, $points:expr, $x_scale:expr, $y_scale:expr) => {{
                 let mut chart = match plotters::prelude::ChartBuilder::on(&root)
                     .margin(layout.margin)
                     .x_label_area_size(layout.x_label_area_size)
@@ -87,8 +103,8 @@ fn render_line_chart_request(
                     .configure_mesh()
                     .x_desc("x values")
                     .y_desc("value")
-                    .x_label_formatter(&|value| format_axis_number(*value))
-                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_formatter(&|value| axis_label($x_scale, *value))
+                    .y_label_formatter(&|value| axis_label($y_scale, *value))
                     .y_label_style(
                         ("sans-serif", layout.y_label_font_size)
                             .into_font()
@@ -113,7 +129,7 @@ fn render_line_chart_request(
                     let color = RGBColor(r, g, b);
                     let stroke_width = if series.is_selected { 4 } else { 3 };
                     let line_series = plotters::prelude::LineSeries::new(
-                        series.points.iter().copied(),
+                        $points(&series),
                         ShapeStyle::from(&color).stroke_width(stroke_width),
                     );
                     let series_label = series.label.clone();
@@ -148,28 +164,61 @@ fn render_line_chart_request(
                 ranges
             }};
         }
-        match (
-            prepared.x_axis_scale == ChartAxisScale::Logarithmic
-                && valid_log_range(prepared.plot_x_min, prepared.plot_x_max),
-            prepared.y_axis_scale == ChartAxisScale::Logarithmic
-                && valid_log_range(prepared.y_min, prepared.y_max),
-        ) {
-            (false, false) => draw_line_chart!(
-                prepared.plot_x_min..prepared.plot_x_max,
-                prepared.y_min..prepared.y_max
-            ),
-            (true, false) => draw_line_chart!(
-                (prepared.plot_x_min..prepared.plot_x_max).log_scale(),
-                prepared.y_min..prepared.y_max
-            ),
-            (false, true) => draw_line_chart!(
-                prepared.plot_x_min..prepared.plot_x_max,
-                (prepared.y_min..prepared.y_max).log_scale()
-            ),
-            (true, true) => draw_line_chart!(
-                (prepared.plot_x_min..prepared.plot_x_max).log_scale(),
-                (prepared.y_min..prepared.y_max).log_scale()
-            ),
+        if prepared.x_axis_scale == ChartAxisScale::SymLog
+            || prepared.y_axis_scale == ChartAxisScale::SymLog
+        {
+            draw_line_chart!(
+                scale_value(prepared.x_axis_scale, prepared.plot_x_min)
+                    ..scale_value(prepared.x_axis_scale, prepared.plot_x_max),
+                scale_value(prepared.y_axis_scale, prepared.y_min)
+                    ..scale_value(prepared.y_axis_scale, prepared.y_max),
+                |series: &super::super::PreparedLineChartSeries| series
+                    .points
+                    .iter()
+                    .map(|(x, y)| (
+                        scale_value(prepared.x_axis_scale, *x),
+                        scale_value(prepared.y_axis_scale, *y)
+                    ))
+                    .collect::<Vec<_>>(),
+                prepared.x_axis_scale,
+                prepared.y_axis_scale
+            )
+        } else {
+            match (
+                prepared.x_axis_scale == ChartAxisScale::Logarithmic
+                    && valid_log_range(prepared.plot_x_min, prepared.plot_x_max),
+                prepared.y_axis_scale == ChartAxisScale::Logarithmic
+                    && valid_log_range(prepared.y_min, prepared.y_max),
+            ) {
+                (false, false) => draw_line_chart!(
+                    prepared.plot_x_min..prepared.plot_x_max,
+                    prepared.y_min..prepared.y_max,
+                    |series: &super::super::PreparedLineChartSeries| series.points.clone(),
+                    ChartAxisScale::Linear,
+                    ChartAxisScale::Linear
+                ),
+                (true, false) => draw_line_chart!(
+                    (prepared.plot_x_min..prepared.plot_x_max).log_scale(),
+                    prepared.y_min..prepared.y_max,
+                    |series: &super::super::PreparedLineChartSeries| series.points.clone(),
+                    ChartAxisScale::Linear,
+                    ChartAxisScale::Linear
+                ),
+                (false, true) => draw_line_chart!(
+                    prepared.plot_x_min..prepared.plot_x_max,
+                    (prepared.y_min..prepared.y_max).log_scale(),
+                    |series: &super::super::PreparedLineChartSeries| series.points.clone(),
+                    ChartAxisScale::Linear,
+                    ChartAxisScale::Linear
+                ),
+                (true, true) => draw_line_chart!(
+                    (prepared.plot_x_min..prepared.plot_x_max).log_scale(),
+                    (prepared.y_min..prepared.y_max).log_scale(),
+                    |series: &super::super::PreparedLineChartSeries| series.points.clone(),
+                    ChartAxisScale::Linear,
+                    ChartAxisScale::Linear
+                ),
+            }
         }
     };
 
@@ -213,6 +262,12 @@ fn render_histogram_request(
             request.height,
             axis_label_area_size(&[0.0, prepared.count_max], 30),
         );
+        let x_scale = prepared.x_axis_scale;
+        let x_label_scale = if x_scale == ChartAxisScale::Logarithmic {
+            ChartAxisScale::Linear
+        } else {
+            x_scale
+        };
         macro_rules! draw_histogram {
             ($x:expr) => {
                 plotters::prelude::ChartBuilder::on(&root)
@@ -239,7 +294,7 @@ fn render_histogram_request(
                     .configure_mesh()
                     .x_desc(format!("value ({} bins)", prepared.bin_count))
                     .y_desc("count")
-                    .x_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_formatter(&|value| axis_label(x_label_scale, *value))
                     .y_label_formatter(&|value| format_axis_number(*value))
                     .y_label_style(
                         ("sans-serif", layout.y_label_font_size)
@@ -266,7 +321,24 @@ fn render_histogram_request(
                     let stroke_width = if series.is_selected { 3 } else { 2 };
                     let drawn_series = match chart.draw_series(series.bins.iter().map(|bin| {
                         plotters::prelude::Rectangle::new(
-                            [(bin.start, 0.0), (bin.end, bin.count)],
+                            [
+                                (
+                                    if x_scale == ChartAxisScale::SymLog {
+                                        symlog(bin.start)
+                                    } else {
+                                        bin.start
+                                    },
+                                    0.0,
+                                ),
+                                (
+                                    if x_scale == ChartAxisScale::SymLog {
+                                        symlog(bin.end)
+                                    } else {
+                                        bin.end
+                                    },
+                                    bin.count,
+                                ),
+                            ],
                             color
                                 .mix(if series.is_selected { 0.45 } else { 0.28 })
                                 .filled(),
@@ -303,7 +375,11 @@ fn render_histogram_request(
                 ranges
             }};
         }
-        if prepared.x_axis_scale == ChartAxisScale::Logarithmic
+        if prepared.x_axis_scale == ChartAxisScale::SymLog {
+            finish_histogram!(draw_histogram!(
+                symlog(prepared.value_min)..symlog(prepared.value_max)
+            ))
+        } else if prepared.x_axis_scale == ChartAxisScale::Logarithmic
             && valid_log_range(prepared.value_min, prepared.value_max)
         {
             finish_histogram!(draw_histogram!(
@@ -349,12 +425,18 @@ fn render_box_plot_request(
             };
         }
         let x_max = prepared.series.len().max(1) as f64 + 0.5;
+        let y_scale = prepared.y_axis_scale;
+        let y_label_scale = if y_scale == ChartAxisScale::Logarithmic {
+            ChartAxisScale::Linear
+        } else {
+            y_scale
+        };
         let layout = raster_chart_layout(
             request.width,
             request.height,
             RasterChartLayoutHints {
                 preferred_margin: 12,
-                preferred_x_label_area_size: 60,
+                preferred_x_label_area_size: axis_title_label_area_size(16).max(60),
                 preferred_y_label_area_size: axis_label_area_size(
                     &[prepared.value_min, prepared.value_max],
                     30,
@@ -406,7 +488,7 @@ fn render_box_plot_request(
                             labels[index as usize].clone()
                         }
                     })
-                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .y_label_formatter(&|value| axis_label(y_label_scale, *value))
                     .y_label_style(
                         ("sans-serif", layout.y_label_font_size)
                             .into_font()
@@ -426,6 +508,13 @@ fn render_box_plot_request(
                 }
                 let y_span = (prepared.value_max - prepared.value_min).abs().max(1.0);
                 for series in &prepared.series {
+                    let transform = |value| {
+                        if y_scale == ChartAxisScale::SymLog {
+                            symlog(value)
+                        } else {
+                            value
+                        }
+                    };
                     let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
                         colors.chart.series[series.color_slot % colors.chart.series.len()]
                     }));
@@ -446,47 +535,53 @@ fn render_box_plot_request(
                     let median_style = ShapeStyle::from(&axis.mix(0.98)).stroke_width(median_width);
                     let spine_style = ShapeStyle::from(&axis.mix(0.28)).stroke_width(1);
                     let cap_style = ShapeStyle::from(&color.mix(0.72)).stroke_width(whisker_width);
-                    let box_height = (series.q3 - series.q1).abs();
+                    let box_height = (transform(series.q3) - transform(series.q1)).abs();
                     let corner_x = half_width * 0.24;
                     let corner_y = (box_height * 0.22).min(y_span * 0.018);
                     let use_chamfered_box = corner_y > f64::EPSILON && box_height > corner_y * 2.0;
 
                     let _ =
                         chart.draw_series(std::iter::once(plotters::element::PathElement::new(
-                            vec![(x, series.whisker_low), (x, series.q1)],
-                            whisker_style,
-                        )));
-                    let _ =
-                        chart.draw_series(std::iter::once(plotters::element::PathElement::new(
-                            vec![(x, series.q3), (x, series.whisker_high)],
+                            vec![
+                                (x, transform(series.whisker_low)),
+                                (x, transform(series.q1)),
+                            ],
                             whisker_style,
                         )));
                     let _ =
                         chart.draw_series(std::iter::once(plotters::element::PathElement::new(
                             vec![
-                                (x - half_width / 2.0, series.whisker_low),
-                                (x + half_width / 2.0, series.whisker_low),
+                                (x, transform(series.q3)),
+                                (x, transform(series.whisker_high)),
+                            ],
+                            whisker_style,
+                        )));
+                    let _ =
+                        chart.draw_series(std::iter::once(plotters::element::PathElement::new(
+                            vec![
+                                (x - half_width / 2.0, transform(series.whisker_low)),
+                                (x + half_width / 2.0, transform(series.whisker_low)),
                             ],
                             cap_style,
                         )));
                     let _ =
                         chart.draw_series(std::iter::once(plotters::element::PathElement::new(
                             vec![
-                                (x - half_width / 2.0, series.whisker_high),
-                                (x + half_width / 2.0, series.whisker_high),
+                                (x - half_width / 2.0, transform(series.whisker_high)),
+                                (x + half_width / 2.0, transform(series.whisker_high)),
                             ],
                             cap_style,
                         )));
                     if use_chamfered_box {
                         let box_points = vec![
-                            (x - half_width + corner_x, series.q1),
-                            (x + half_width - corner_x, series.q1),
-                            (x + half_width, series.q1 + corner_y),
-                            (x + half_width, series.q3 - corner_y),
-                            (x + half_width - corner_x, series.q3),
-                            (x - half_width + corner_x, series.q3),
-                            (x - half_width, series.q3 - corner_y),
-                            (x - half_width, series.q1 + corner_y),
+                            (x - half_width + corner_x, transform(series.q1)),
+                            (x + half_width - corner_x, transform(series.q1)),
+                            (x + half_width, transform(series.q1) + corner_y),
+                            (x + half_width, transform(series.q3) - corner_y),
+                            (x + half_width - corner_x, transform(series.q3)),
+                            (x - half_width + corner_x, transform(series.q3)),
+                            (x - half_width, transform(series.q3) - corner_y),
+                            (x - half_width, transform(series.q1) + corner_y),
                         ];
                         let _ = chart.draw_series(std::iter::once(
                             plotters::element::Polygon::new(box_points.clone(), box_fill),
@@ -499,38 +594,44 @@ fn render_box_plot_request(
                     } else {
                         let _ =
                             chart.draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                                [(x - half_width, series.q1), (x + half_width, series.q3)],
+                                [
+                                    (x - half_width, transform(series.q1)),
+                                    (x + half_width, transform(series.q3)),
+                                ],
                                 box_fill,
                             )));
                         let _ =
                             chart.draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                                [(x - half_width, series.q1), (x + half_width, series.q3)],
+                                [
+                                    (x - half_width, transform(series.q1)),
+                                    (x + half_width, transform(series.q3)),
+                                ],
                                 box_outline,
                             )));
                     }
                     let _ =
                         chart.draw_series(std::iter::once(plotters::element::PathElement::new(
-                            vec![(x, series.q1), (x, series.q3)],
+                            vec![(x, transform(series.q1)), (x, transform(series.q3))],
                             spine_style,
                         )));
                     let _ =
                         chart.draw_series(std::iter::once(plotters::element::PathElement::new(
                             vec![
-                                (x - half_width, series.median),
-                                (x + half_width, series.median),
+                                (x - half_width, transform(series.median)),
+                                (x + half_width, transform(series.median)),
                             ],
                             median_style,
                         )));
-                    let _ = chart.draw_series(series.outliers.iter().map(|value| {
+                    let _ = chart.draw_series(series.outliers.iter().map(|outlier| {
                         plotters::element::Circle::new(
-                            (x, *value),
+                            (x, transform(*outlier)),
                             outlier_radius,
                             plot_bg.filled(),
                         )
                     }));
-                    let _ = chart.draw_series(series.outliers.iter().map(|value| {
+                    let _ = chart.draw_series(series.outliers.iter().map(|outlier| {
                         plotters::element::Circle::new(
-                            (x, *value),
+                            (x, transform(*outlier)),
                             outlier_radius,
                             ShapeStyle::from(&color).stroke_width(2),
                         )
@@ -539,7 +640,11 @@ fn render_box_plot_request(
                 ranges
             }};
         }
-        if prepared.y_axis_scale == ChartAxisScale::Logarithmic
+        if prepared.y_axis_scale == ChartAxisScale::SymLog {
+            finish_box_plot!(draw_box_plot!(
+                symlog(prepared.value_min)..symlog(prepared.value_max)
+            ))
+        } else if prepared.y_axis_scale == ChartAxisScale::Logarithmic
             && valid_log_range(prepared.value_min, prepared.value_max)
         {
             finish_box_plot!(draw_box_plot!(
@@ -577,6 +682,14 @@ fn render_comparison_scatter_request(
         let plot_bg = RGBColor(bg_r, bg_g, bg_b);
         let grid = RGBColor(grid_r, grid_g, grid_b);
         let axis = RGBColor(axis_r, axis_g, axis_b);
+        let x_scale = prepared.x_axis_scale;
+        let y_scale = prepared.y_axis_scale;
+        let (x_label_scale, y_label_scale) =
+            if x_scale == ChartAxisScale::SymLog || y_scale == ChartAxisScale::SymLog {
+                (x_scale, y_scale)
+            } else {
+                (ChartAxisScale::Linear, ChartAxisScale::Linear)
+            };
         if let Err(error) = root.fill(&plot_bg) {
             log_error(&error);
             return MultiChartRenderResult::Failure {
@@ -589,7 +702,7 @@ fn render_comparison_scatter_request(
             request.height,
             RasterChartLayoutHints {
                 preferred_margin: 10,
-                preferred_x_label_area_size: 30,
+                preferred_x_label_area_size: axis_title_label_area_size(18),
                 preferred_y_label_area_size: axis_label_area_size(
                     &[prepared.y_min, prepared.y_max],
                     30,
@@ -626,8 +739,8 @@ fn render_comparison_scatter_request(
                     .configure_mesh()
                     .x_desc(prepared.x_label.clone())
                     .y_desc(prepared.y_label.clone())
-                    .x_label_formatter(&|value| format_axis_number(*value))
-                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_formatter(&|value| axis_label(x_label_scale, *value))
+                    .y_label_formatter(&|value| axis_label(y_label_scale, *value))
                     .y_label_style(
                         ("sans-serif", layout.y_label_font_size)
                             .into_font()
@@ -652,10 +765,23 @@ fn render_comparison_scatter_request(
                 }));
                 let color = RGBColor(r, g, b);
                 let _ = chart.draw_series(std::iter::once(plotters::element::PathElement::new(
-                    vec![(diagonal_min, diagonal_min), (diagonal_max, diagonal_max)],
+                    vec![
+                        (
+                            scale_value(x_scale, diagonal_min),
+                            scale_value(y_scale, diagonal_min),
+                        ),
+                        (
+                            scale_value(x_scale, diagonal_max),
+                            scale_value(y_scale, diagonal_max),
+                        ),
+                    ],
                     axis.mix(0.4).stroke_width(2),
                 )));
-                let points = prepared.points.clone();
+                let points = prepared
+                    .points
+                    .iter()
+                    .map(|(x, y)| (scale_value(x_scale, *x), scale_value(y_scale, *y)))
+                    .collect::<Vec<_>>();
                 let drawn_series =
                     match chart.draw_series(plotters::prelude::PointSeries::of_element(
                         points,
@@ -696,28 +822,39 @@ fn render_comparison_scatter_request(
                 ranges
             }};
         }
-        match (
-            prepared.x_axis_scale == ChartAxisScale::Logarithmic
-                && valid_log_range(prepared.x_min, prepared.x_max),
-            prepared.y_axis_scale == ChartAxisScale::Logarithmic
-                && valid_log_range(prepared.y_min, prepared.y_max),
-        ) {
-            (false, false) => finish_scatter!(draw_scatter!(
-                prepared.x_min..prepared.x_max,
-                prepared.y_min..prepared.y_max
-            )),
-            (true, false) => finish_scatter!(draw_scatter!(
-                (prepared.x_min..prepared.x_max).log_scale(),
-                prepared.y_min..prepared.y_max
-            )),
-            (false, true) => finish_scatter!(draw_scatter!(
-                prepared.x_min..prepared.x_max,
-                (prepared.y_min..prepared.y_max).log_scale()
-            )),
-            (true, true) => finish_scatter!(draw_scatter!(
-                (prepared.x_min..prepared.x_max).log_scale(),
-                (prepared.y_min..prepared.y_max).log_scale()
-            )),
+        if prepared.x_axis_scale == ChartAxisScale::SymLog
+            || prepared.y_axis_scale == ChartAxisScale::SymLog
+        {
+            finish_scatter!(draw_scatter!(
+                scale_value(prepared.x_axis_scale, prepared.x_min)
+                    ..scale_value(prepared.x_axis_scale, prepared.x_max),
+                scale_value(prepared.y_axis_scale, prepared.y_min)
+                    ..scale_value(prepared.y_axis_scale, prepared.y_max)
+            ))
+        } else {
+            match (
+                prepared.x_axis_scale == ChartAxisScale::Logarithmic
+                    && valid_log_range(prepared.x_min, prepared.x_max),
+                prepared.y_axis_scale == ChartAxisScale::Logarithmic
+                    && valid_log_range(prepared.y_min, prepared.y_max),
+            ) {
+                (false, false) => finish_scatter!(draw_scatter!(
+                    prepared.x_min..prepared.x_max,
+                    prepared.y_min..prepared.y_max
+                )),
+                (true, false) => finish_scatter!(draw_scatter!(
+                    (prepared.x_min..prepared.x_max).log_scale(),
+                    prepared.y_min..prepared.y_max
+                )),
+                (false, true) => finish_scatter!(draw_scatter!(
+                    prepared.x_min..prepared.x_max,
+                    (prepared.y_min..prepared.y_max).log_scale()
+                )),
+                (true, true) => finish_scatter!(draw_scatter!(
+                    (prepared.x_min..prepared.x_max).log_scale(),
+                    (prepared.y_min..prepared.y_max).log_scale()
+                )),
+            }
         }
     };
     MultiChartRenderResult::Success {
@@ -741,5 +878,19 @@ pub(crate) fn render_prepared_chart_request(
         PreparedChartData::ComparisonScatter(prepared) => {
             render_comparison_scatter_request(&request, prepared)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{axis_label, scale_value};
+    use crate::ui::mchart::ChartAxisScale;
+
+    #[test]
+    fn manual_log_transform_uses_natural_log_and_raw_labels() {
+        let raw = 100.0;
+        let transformed = scale_value(ChartAxisScale::Logarithmic, raw);
+        assert!((transformed - raw.ln()).abs() < f64::EPSILON);
+        assert_eq!(axis_label(ChartAxisScale::Logarithmic, transformed), "100");
     }
 }

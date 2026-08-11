@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{Event, KeyEventKind, KeyModifiers, MouseButton, 
 
 use crate::{
     error::AppError,
-    ui::mchart::{ChartAxisScale, ChartZoomMode},
+    ui::mchart::ChartZoomMode,
     ui::state::{AppState, AppToast, Mode},
 };
 
@@ -144,24 +144,16 @@ pub(crate) fn handle_mchart_event(
                         state.multi_chart.cycle_view_mode();
                         Ok(EventResult::Redraw)
                     }
-                    Some(BoundAction::Action(MultiChartAction::ToggleXAxisScale)) => {
-                        state.multi_chart.set_x_axis_scale(
-                            match state.multi_chart.x_axis_scale() {
-                                ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
-                                ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
-                            },
-                        );
-                        Ok(EventResult::Redraw)
-                    }
-                    Some(BoundAction::Action(MultiChartAction::ToggleYAxisScale)) => {
-                        state.multi_chart.set_y_axis_scale(
-                            match state.multi_chart.y_axis_scale() {
-                                ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
-                                ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
-                            },
-                        );
-                        Ok(EventResult::Redraw)
-                    }
+                    Some(BoundAction::Action(MultiChartAction::ToggleXAxisScale)) => Ok(state
+                        .multi_chart
+                        .toggle_x_axis_scale()
+                        .then_some(EventResult::Redraw)
+                        .unwrap_or(EventResult::Continue)),
+                    Some(BoundAction::Action(MultiChartAction::ToggleYAxisScale)) => Ok(state
+                        .multi_chart
+                        .toggle_y_axis_scale()
+                        .then_some(EventResult::Redraw)
+                        .unwrap_or(EventResult::Continue)),
                     Some(BoundAction::Action(MultiChartAction::ZoomIn)) => {
                         Ok(if state.multi_chart.zoom_in(10.0) {
                             EventResult::Redraw

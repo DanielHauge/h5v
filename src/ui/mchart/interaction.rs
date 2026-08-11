@@ -387,6 +387,7 @@ impl MultiChartState {
             return false;
         }
         self.view_mode = hitbox.mode;
+        self.reset_unsupported_axis_scales();
         self.modified = true;
         true
     }

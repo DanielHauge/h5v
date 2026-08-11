@@ -869,25 +869,13 @@ pub fn handle_normal_content_event(
                     (
                         Some(BoundAction::Action(ContentAction::ToggleXAxisScale)),
                         ContentShowMode::Preview,
-                    ) => {
-                        let scale = state.chart_preview_state.x_axis_scale;
-                        state.chart_preview_state.set_x_axis_scale(match scale {
-                            ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
-                            ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
-                        });
-                        Ok(redraw_if(state.chart_preview_state.x_axis_scale != scale))
-                    }
+                    ) => Ok(redraw_if(state.chart_preview_state.toggle_axis_scale(true))),
                     (
                         Some(BoundAction::Action(ContentAction::ToggleYAxisScale)),
                         ContentShowMode::Preview,
-                    ) => {
-                        let scale = state.chart_preview_state.y_axis_scale;
-                        state.chart_preview_state.set_y_axis_scale(match scale {
-                            ChartAxisScale::Linear => ChartAxisScale::Logarithmic,
-                            ChartAxisScale::Logarithmic => ChartAxisScale::Linear,
-                        });
-                        Ok(redraw_if(state.chart_preview_state.y_axis_scale != scale))
-                    }
+                    ) => Ok(redraw_if(
+                        state.chart_preview_state.toggle_axis_scale(false),
+                    )),
                     (Some(BoundAction::Action(ContentAction::Copy)), ContentShowMode::Matrix) => {
                         let text = match selected_matrix_copy_text(state) {
                             Ok(text) => text,

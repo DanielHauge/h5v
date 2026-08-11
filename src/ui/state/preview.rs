@@ -520,7 +520,7 @@ mod tests {
         }
     }
 
-    fn chart_state() -> ChartPreviwState {
+    pub(super) fn chart_state() -> ChartPreviwState {
         let (tx_resize_chartpreview, _) = channel();
         let (tx_load_chartpreview, _) = channel();
         ChartPreviwState {

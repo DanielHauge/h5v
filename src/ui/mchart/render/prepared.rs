@@ -1,6 +1,6 @@
 use crate::ui::{
-    chart_math::normalized_axis_bounds,
-    chart_stats::{box_plot_summary, histogram_summary},
+    chart_math::{normalized_axis_bounds, normalized_log_axis_bounds},
+    chart_stats::{box_plot_summary, histogram_bins, histogram_summary_with_scale},
 };
 
 use super::super::{
@@ -17,7 +17,7 @@ impl MultiChartState {
         supported: bool,
         valid: bool,
     ) -> ChartAxisScale {
-        if supported && valid {
+        if supported && (requested == ChartAxisScale::SymLog || valid) {
             requested
         } else {
             ChartAxisScale::Linear
@@ -35,7 +35,7 @@ impl MultiChartState {
             .map(|viewport| (viewport.x_min, viewport.x_max))
     }
 
-    fn windowed_visible_points(&self, item: &ChartItem) -> Vec<Point> {
+    pub(crate) fn windowed_visible_points(&self, item: &ChartItem) -> Vec<Point> {
         let points = item.active_series().points.iter().copied();
         match self.sample_window() {
             Some((x_min, x_max)) => sanitize_chart_points(
@@ -47,7 +47,7 @@ impl MultiChartState {
         }
     }
 
-    pub(super) fn comparison_scatter_pair(&self) -> Option<(&ChartItem, &ChartItem)> {
+    pub(crate) fn comparison_scatter_pair(&self) -> Option<(&ChartItem, &ChartItem)> {
         let visible_items = self
             .items
             .iter()
@@ -150,7 +150,15 @@ impl MultiChartState {
         let (plot_x_min, plot_x_max) = if let Some(viewport) = self.viewport {
             (viewport.x_min, viewport.x_max)
         } else {
-            normalized_axis_bounds(plot_x_min, plot_x_max)?
+            match self.x_axis_scale {
+                ChartAxisScale::Logarithmic => {
+                    normalized_log_axis_bounds(plot_x_min, plot_x_max)
+                        .or_else(|| normalized_axis_bounds(plot_x_min, plot_x_max))?
+                }
+                ChartAxisScale::Linear | ChartAxisScale::SymLog => {
+                    normalized_axis_bounds(plot_x_min, plot_x_max)?
+                }
+            }
         };
         let (y_min, y_max) = if let Some(viewport) = self.viewport {
             (viewport.y_min, viewport.y_max)
@@ -163,7 +171,13 @@ impl MultiChartState {
                     y_max = y_max.max(y);
                 }
             }
-            normalized_axis_bounds(y_min, y_max)?
+            match self.y_axis_scale {
+                ChartAxisScale::Logarithmic => normalized_log_axis_bounds(y_min, y_max)
+                    .or_else(|| normalized_axis_bounds(y_min, y_max))?,
+                ChartAxisScale::Linear | ChartAxisScale::SymLog => {
+                    normalized_axis_bounds(y_min, y_max)?
+                }
+            }
         };
 
         Some(PreparedLineChartData {
@@ -216,7 +230,7 @@ impl MultiChartState {
                 continue;
             }
             max_samples = max_samples.max(values.len());
-            let summary = histogram_summary(&values)?;
+            let summary = histogram_summary_with_scale(&values, ChartAxisScale::Linear)?;
             let (overall_min, overall_max) =
                 summary_bounds.unwrap_or((summary.value_min, summary.value_max));
             summary_bounds = Some((
@@ -229,7 +243,20 @@ impl MultiChartState {
             return None;
         }
 
-        let (value_min, value_max) = summary_bounds?;
+        let (raw_value_min, raw_value_max) = summary_bounds?;
+        let histogram_scale = self.effective_axis_scale(
+            self.x_axis_scale,
+            self.view_mode.supports_x_log_scale(),
+            raw_value_min > 0.0,
+        );
+        let (value_min, value_max) = match histogram_scale {
+            ChartAxisScale::Logarithmic => {
+                normalized_log_axis_bounds(raw_value_min, raw_value_max)?
+            }
+            ChartAxisScale::Linear | ChartAxisScale::SymLog => {
+                normalized_axis_bounds(raw_value_min, raw_value_max)?
+            }
+        };
         let bin_count = match max_samples {
             0 => return None,
             1..=4 => max_samples,
@@ -239,29 +266,15 @@ impl MultiChartState {
         let mut series = Vec::new();
 
         for (item, values) in series_values {
-            let mut counts = vec![0usize; bin_count];
-            let bin_width = (value_max - value_min) / bin_count as f64;
-            for value in values {
-                let normalized = ((value - value_min) / bin_width).floor();
-                let index = normalized
-                    .max(0.0)
-                    .min((bin_count.saturating_sub(1)) as f64) as usize;
-                counts[index] = counts[index].saturating_add(1);
-            }
-            count_max = count_max.max(counts.iter().copied().max().unwrap_or_default() as f64);
-            let bins = counts
+            let bins = histogram_bins(&values, value_min, value_max, bin_count, histogram_scale)?
                 .into_iter()
-                .enumerate()
-                .map(|(index, count)| PreparedHistogramBin {
-                    start: value_min + bin_width * index as f64,
-                    end: if index + 1 == bin_count {
-                        value_max
-                    } else {
-                        value_min + bin_width * (index + 1) as f64
-                    },
-                    count: count as f64,
+                .map(|bin| PreparedHistogramBin {
+                    start: bin.start,
+                    end: bin.end,
+                    count: bin.count,
                 })
                 .collect::<Vec<_>>();
+            count_max = count_max.max(bins.iter().map(|bin| bin.count).fold(0.0, f64::max));
             series.push(PreparedHistogramSeries {
                 label: self.item_display_label(item),
                 color_slot: item.color_slot,
@@ -297,6 +310,7 @@ impl MultiChartState {
         let selected_item_id = self.selected_item().map(|item| item.id);
         let mut series = Vec::new();
         let mut plot_bounds = None;
+        let mut mark_bounds = None;
 
         for (x_index, item) in visible_items.into_iter().enumerate() {
             let values: Vec<f64> = self
@@ -305,6 +319,10 @@ impl MultiChartState {
                 .map(|(_, y)| y)
                 .filter(|value| value.is_finite())
                 .collect();
+            let value_min = values.iter().copied().reduce(f64::min)?;
+            let value_max = values.iter().copied().reduce(f64::max)?;
+            let (overall_min, overall_max) = mark_bounds.unwrap_or((value_min, value_max));
+            mark_bounds = Some((overall_min.min(value_min), overall_max.max(value_max)));
             let summary = box_plot_summary(&values)?;
             let (overall_min, overall_max) =
                 plot_bounds.unwrap_or((summary.value_min, summary.value_max));
@@ -328,24 +346,31 @@ impl MultiChartState {
         if series.is_empty() {
             return None;
         }
-        let (value_min, value_max) = plot_bounds?;
+        let marks_are_positive = series.iter().all(|series| {
+            [
+                series.whisker_low,
+                series.q1,
+                series.median,
+                series.q3,
+                series.whisker_high,
+            ]
+            .into_iter()
+            .chain(series.outliers.iter().copied())
+            .all(|value| value.is_finite() && value > 0.0)
+        });
+        let y_axis_scale = self.effective_axis_scale(
+            self.y_axis_scale,
+            self.view_mode.supports_y_log_scale(),
+            marks_are_positive,
+        );
+        let (value_min, value_max) = match y_axis_scale {
+            ChartAxisScale::Logarithmic => {
+                normalized_log_axis_bounds(mark_bounds?.0, mark_bounds?.1)?
+            }
+            ChartAxisScale::Linear | ChartAxisScale::SymLog => plot_bounds?,
+        };
         Some(PreparedBoxPlotData {
-            y_axis_scale: self.effective_axis_scale(
-                self.y_axis_scale,
-                self.view_mode.supports_y_log_scale(),
-                series.iter().all(|series| {
-                    [
-                        series.whisker_low,
-                        series.q1,
-                        series.median,
-                        series.q3,
-                        series.whisker_high,
-                    ]
-                    .into_iter()
-                    .chain(series.outliers.iter().copied())
-                    .all(|value| value.is_finite() && value > 0.0)
-                }),
-            ),
+            y_axis_scale,
             value_min,
             value_max,
             series,

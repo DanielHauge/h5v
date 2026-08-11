@@ -571,6 +571,56 @@ fn box_plot_log_scale_uses_positive_marks_not_linear_padding() {
 }
 
 #[test]
+fn box_plot_log_scale_keeps_small_positive_constant_log_bounds() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(source("/group/a", selection), vec![(0.0, 0.1); 4]);
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+    state.set_y_axis_scale(ChartAxisScale::Logarithmic);
+
+    let PreparedChartData::BoxPlot(prepared) = state.prepared_chart_data().expect("box plot")
+    else {
+        panic!("expected box plot chart data");
+    };
+    assert_eq!(prepared.y_axis_scale, ChartAxisScale::Logarithmic);
+    assert_eq!((prepared.value_min, prepared.value_max), (0.01, 1.0));
+}
+
+#[test]
+fn comparison_scatter_log_availability_uses_plotted_values() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(1.0, 1.0), (2.0, 2.0)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection.clone()),
+        vec![(1.0, 3.0), (2.0, 4.0)],
+    );
+    state.add_chart_item(
+        source("/group/c", selection),
+        vec![(1.0, -1.0), (2.0, -2.0)],
+    );
+    state.idx = 0;
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+    state.cycle_view_mode();
+
+    assert!(state.axis_scale_is_available(true, ChartAxisScale::Logarithmic));
+    assert!(state.axis_scale_is_available(false, ChartAxisScale::Logarithmic));
+}
+
+#[test]
 fn line_log_scale_rejects_nonpositive_plotted_coordinate() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -633,6 +683,50 @@ fn histogram_mode_prepares_overlayed_bins_from_visible_window() {
             .sum::<usize>(),
         2
     );
+}
+
+#[test]
+fn histogram_log_scale_uses_linear_fallback_for_zero_or_mixed_values() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(0.0, -1.0), (1.0, 0.0), (2.0, 10.0)],
+    );
+    state.cycle_view_mode();
+    state.set_x_axis_scale(ChartAxisScale::Logarithmic);
+
+    let PreparedChartData::Histogram(prepared) = state.prepared_chart_data().expect("histogram")
+    else {
+        panic!("expected histogram chart data");
+    };
+    assert_eq!(prepared.x_axis_scale, ChartAxisScale::Linear);
+}
+
+#[test]
+fn symlog_line_scale_keeps_mixed_values_valid() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection),
+        vec![(-1.0, -10.0), (0.0, 0.0), (1.0, 10.0)],
+    );
+    state.set_x_axis_scale(ChartAxisScale::SymLog);
+    state.set_y_axis_scale(ChartAxisScale::SymLog);
+
+    let PreparedChartData::Line(prepared) = state.prepared_chart_data().expect("line chart") else {
+        panic!("expected line chart data");
+    };
+    assert_eq!(prepared.x_axis_scale, ChartAxisScale::SymLog);
+    assert_eq!(prepared.y_axis_scale, ChartAxisScale::SymLog);
 }
 
 #[test]

@@ -23,8 +23,8 @@ use crate::{
         DatasetMetaState, H5FNode, HasPath, Node,
     },
     ui::{
-        chart_math::format_axis_number,
-        chart_stats::{box_plot_summary, histogram_summary},
+        chart_math::{format_axis_number, normalized_log_axis_bounds, symlog, symlog_inverse},
+        chart_stats::{box_plot_summary, histogram_summary, histogram_summary_with_scale},
         matrix::{EnumRenderer, RenderIntercept},
         mchart::ChartAxisScale,
         page_scroll::PageDisplayInfo,
@@ -44,11 +44,12 @@ mod protocol;
 
 use context::{
     copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_roi_range,
-    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_index_window,
-    preview_visible_points, preview_x_axis_max, preview_x_min, render_preview_context_panel,
+    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_points,
+    preview_x_axis_max, preview_x_min, render_preview_context_panel,
 };
 pub(crate) use context::{
-    preview_chart_data_bounds, preview_effective_x_domain, preview_x_from_ratio, preview_x_ratio,
+    preview_chart_data_bounds, preview_effective_x_domain, preview_visible_index_window,
+    preview_x_from_ratio, preview_x_ratio,
 };
 use protocol::{clear_active_chart_preview, queue_chart_preview_load};
 
@@ -60,12 +61,6 @@ fn valid_log_range(min: f64, max: f64) -> bool {
     min.is_finite() && max.is_finite() && min > 0.0 && max > min
 }
 
-fn positive_marks(values: impl IntoIterator<Item = f64>) -> bool {
-    values
-        .into_iter()
-        .all(|value| value.is_finite() && value > 0.0)
-}
-
 fn clear_chart_preview_layout(state: &mut AppState<'_>) {
     state.chart_preview_state.set_chart_area(None);
     state.chart_preview_state.set_plot_area(None);
@@ -73,61 +68,33 @@ fn clear_chart_preview_layout(state: &mut AppState<'_>) {
 }
 
 fn preview_axis_scale_supported(state: &AppState<'_>, x_axis: bool) -> bool {
-    let mode_supported = if x_axis {
+    if x_axis {
         state.chart_preview_state.mode.supports_x_log_scale()
     } else {
         state.chart_preview_state.mode.supports_y_log_scale()
-    };
-    let Some(data) = state.chart_preview_state.current_data.as_ref() else {
-        return mode_supported;
-    };
-    let viewport = state.chart_preview_state.effective_viewport();
-    let values = preview_windowed_values(
-        data,
-        viewport.unwrap_or(PreviewChartViewport {
-            x_min: preview_x_min(&state.page_state),
-            x_max: f64::INFINITY,
-            y_min: 0.0,
-            y_max: 0.0,
-        }),
-        preview_x_min(&state.page_state),
-    );
-    mode_supported
-        && match (state.chart_preview_state.mode, x_axis) {
-            (PreviewChartMode::Histogram, true) => histogram_summary(&values)
-                .is_some_and(|summary| positive_marks([summary.value_min, summary.value_max])),
-            (PreviewChartMode::BoxPlot, false) => {
-                box_plot_summary(&values).is_some_and(|summary| {
-                    positive_marks(
-                        [
-                            summary.whisker_low,
-                            summary.q1,
-                            summary.median,
-                            summary.q3,
-                            summary.whisker_high,
-                        ]
-                        .into_iter()
-                        .chain(summary.outliers),
-                    )
-                })
-            }
-            (PreviewChartMode::Line | PreviewChartMode::Scatter, true) => {
-                preview_effective_x_domain(
-                    data,
-                    viewport.unwrap_or(PreviewChartViewport {
-                        x_min: preview_x_min(&state.page_state),
-                        x_max: f64::INFINITY,
-                        y_min: 0.0,
-                        y_max: 0.0,
-                    }),
-                    preview_x_min(&state.page_state),
-                    true,
-                )
-                .is_some()
-            }
-            (_, true) => false,
-            (_, false) => positive_marks(data.data.iter().map(|(_, y)| *y)),
-        }
+    }
+}
+
+fn scale_value(scale: ChartAxisScale, value: f64) -> f64 {
+    (scale == ChartAxisScale::SymLog)
+        .then(|| symlog(value))
+        .unwrap_or(value)
+}
+
+fn axis_label(scale: ChartAxisScale, value: f64) -> String {
+    format_axis_number(match scale {
+        ChartAxisScale::SymLog => symlog_inverse(value),
+        ChartAxisScale::Logarithmic => value.exp(),
+        ChartAxisScale::Linear => value,
+    })
+}
+
+fn transformed_scale_value(scale: ChartAxisScale, value: f64) -> f64 {
+    match scale {
+        ChartAxisScale::SymLog => symlog(value),
+        ChartAxisScale::Logarithmic => value.ln(),
+        ChartAxisScale::Linear => value,
+    }
 }
 
 fn sync_direct_chart_preview(
@@ -1089,7 +1056,14 @@ pub fn render_image_chart(
     });
     if matches!(mode, PreviewChartMode::Histogram) {
         let values = preview_windowed_values(&data_preview, viewport, x_min);
-        let Some(summary) = histogram_summary(&values) else {
+        let histogram_scale = if x_axis_scale == ChartAxisScale::Logarithmic
+            && !values.iter().all(|value| *value > 0.0)
+        {
+            ChartAxisScale::Linear
+        } else {
+            x_axis_scale
+        };
+        let Some(summary) = histogram_summary_with_scale(&values, histogram_scale) else {
             return Err(AppError::DrawingError(
                 "No finite values available for histogram preview".to_string(),
             ));
@@ -1110,7 +1084,7 @@ pub fn render_image_chart(
                     .configure_mesh()
                     .x_desc("value")
                     .y_desc("count")
-                    .x_label_formatter(&|value| format_axis_number(*value))
+                    .x_label_formatter(&|value| axis_label(histogram_scale, *value))
                     .y_label_formatter(&|value| format_axis_number(*value))
                     .x_label_style(
                         ("sans-serif", layout.x_label_font_size)
@@ -1132,7 +1106,10 @@ pub fn render_image_chart(
                 chart
                     .draw_series(summary.bins.iter().map(|bin| {
                         plotters::prelude::Rectangle::new(
-                            [(bin.start, 0.0), (bin.end, bin.count)],
+                            [
+                                (scale_value(histogram_scale, bin.start), 0.0),
+                                (scale_value(histogram_scale, bin.end), bin.count),
+                            ],
                             line.mix(0.45).filled(),
                         )
                     }))
@@ -1141,7 +1118,9 @@ pub fn render_image_chart(
                     })?;
             };
         }
-        if x_axis_scale == ChartAxisScale::Logarithmic
+        if histogram_scale == ChartAxisScale::SymLog {
+            draw_histogram!(symlog(summary.value_min)..symlog(summary.value_max));
+        } else if histogram_scale == ChartAxisScale::Logarithmic
             && valid_log_range(summary.value_min, summary.value_max)
         {
             draw_histogram!((summary.value_min..summary.value_max).log_scale());
@@ -1177,7 +1156,7 @@ pub fn render_image_chart(
                     .y_desc("value")
                     .x_labels(1)
                     .x_label_formatter(&|_| "series".to_string())
-                    .y_label_formatter(&|value| format_axis_number(*value))
+                    .y_label_formatter(&|value| axis_label(y_axis_scale, *value))
                     .x_label_style(
                         ("sans-serif", layout.x_label_font_size)
                             .into_font()
@@ -1195,11 +1174,12 @@ pub fn render_image_chart(
                     .map_err(|e| {
                         AppError::DrawingError(format!("Error drawing box-plot mesh: {}", e))
                     })?;
+                let value = |value| scale_value(y_axis_scale, value);
                 let x = 1.0;
                 let half_width = 0.2;
                 chart
                     .draw_series(std::iter::once(plotters::element::PathElement::new(
-                        vec![(x, summary.whisker_low), (x, summary.q1)],
+                        vec![(x, value(summary.whisker_low)), (x, value(summary.q1))],
                         ShapeStyle::from(&line).stroke_width(2),
                     )))
                     .map_err(|e| {
@@ -1207,7 +1187,7 @@ pub fn render_image_chart(
                     })?;
                 chart
                     .draw_series(std::iter::once(plotters::element::PathElement::new(
-                        vec![(x, summary.q3), (x, summary.whisker_high)],
+                        vec![(x, value(summary.q3)), (x, value(summary.whisker_high))],
                         ShapeStyle::from(&line).stroke_width(2),
                     )))
                     .map_err(|e| {
@@ -1215,7 +1195,10 @@ pub fn render_image_chart(
                     })?;
                 chart
                     .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                        [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                        [
+                            (x - half_width, value(summary.q1)),
+                            (x + half_width, value(summary.q3)),
+                        ],
                         line.mix(0.25).filled(),
                     )))
                     .map_err(|e| {
@@ -1223,7 +1206,10 @@ pub fn render_image_chart(
                     })?;
                 chart
                     .draw_series(std::iter::once(plotters::prelude::Rectangle::new(
-                        [(x - half_width, summary.q1), (x + half_width, summary.q3)],
+                        [
+                            (x - half_width, value(summary.q1)),
+                            (x + half_width, value(summary.q3)),
+                        ],
                         ShapeStyle::from(&line).stroke_width(2),
                     )))
                     .map_err(|e| {
@@ -1232,16 +1218,16 @@ pub fn render_image_chart(
                 chart
                     .draw_series(std::iter::once(plotters::element::PathElement::new(
                         vec![
-                            (x - half_width, summary.median),
-                            (x + half_width, summary.median),
+                            (x - half_width, value(summary.median)),
+                            (x + half_width, value(summary.median)),
                         ],
                         ShapeStyle::from(&selected).stroke_width(3),
                     )))
                     .map_err(|e| AppError::DrawingError(format!("Error drawing median: {}", e)))?;
                 chart
-                    .draw_series(summary.outliers.iter().map(|value| {
+                    .draw_series(summary.outliers.iter().map(|outlier| {
                         plotters::element::Circle::new(
-                            (x, *value),
+                            (x, value(*outlier)),
                             4,
                             ShapeStyle::from(&selected).filled(),
                         )
@@ -1251,10 +1237,18 @@ pub fn render_image_chart(
                     })?;
             };
         }
-        if y_axis_scale == ChartAxisScale::Logarithmic
-            && valid_log_range(summary.value_min, summary.value_max)
-        {
-            draw_box_plot!((summary.value_min..summary.value_max).log_scale());
+        if y_axis_scale == ChartAxisScale::SymLog {
+            draw_box_plot!(symlog(summary.value_min)..symlog(summary.value_max));
+        } else if y_axis_scale == ChartAxisScale::Logarithmic {
+            let (raw_min, raw_max) = summary.outliers.iter().copied().fold(
+                (summary.whisker_low, summary.whisker_high),
+                |(min, max), value| (min.min(value), max.max(value)),
+            );
+            if let Some((min, max)) = normalized_log_axis_bounds(raw_min, raw_max) {
+                draw_box_plot!((min..max).log_scale());
+            } else {
+                draw_box_plot!(summary.value_min..summary.value_max);
+            }
         } else {
             draw_box_plot!(summary.value_min..summary.value_max);
         }
@@ -1272,7 +1266,7 @@ pub fn render_image_chart(
         .flatten();
 
     macro_rules! draw_xy_chart {
-        ($x:expr, $y:expr, $log_x:expr) => {{
+        ($x:expr, $y:expr, $log_x:expr, $x_scale:expr, $y_scale:expr) => {{
             let mut chart = ChartBuilder::on(&root)
                 .margin(layout.margin)
                 .x_label_area_size(layout.x_label_area_size)
@@ -1282,8 +1276,8 @@ pub fn render_image_chart(
 
             chart
                 .configure_mesh()
-                .x_label_formatter(&|value| format_axis_number(*value))
-                .y_label_formatter(&|value| format_axis_number(*value))
+                .x_label_formatter(&|value| axis_label($x_scale, *value))
+                .y_label_formatter(&|value| axis_label($y_scale, *value))
                 .x_label_style(
                     ("sans-serif", layout.x_label_font_size)
                         .into_font()
@@ -1303,7 +1297,12 @@ pub fn render_image_chart(
             let data = data_preview
                 .data
                 .iter()
-                .map(|(x, y)| (x_min + *x, *y))
+                .map(|(x, y)| {
+                    (
+                        transformed_scale_value($x_scale, x_min + *x),
+                        transformed_scale_value($y_scale, *y),
+                    )
+                })
                 .collect::<Vec<_>>();
             if matches!(mode, PreviewChartMode::Line) {
                 let line_series = plotters::prelude::LineSeries::new(
@@ -1334,9 +1333,12 @@ pub fn render_image_chart(
             } else if let Some(points) = preview_visible_points(&data_preview, viewport, x_min) {
                 chart
                     .draw_series(points.into_iter().filter(|(x, _)| !$log_x || *x > 0.0).map(
-                        |point| {
+                        |(x, y)| {
                             plotters::prelude::Circle::new(
-                                point,
+                                (
+                                    transformed_scale_value($x_scale, x),
+                                    transformed_scale_value($y_scale, y),
+                                ),
                                 PREVIEW_POINT_MARKER_RADIUS,
                                 ShapeStyle::from(&line).filled(),
                             )
@@ -1356,7 +1358,22 @@ pub fn render_image_chart(
                                 chart
                                     .draw_series(std::iter::once(
                                         plotters::prelude::Rectangle::new(
-                                            [(x0, viewport.y_min), (x1, viewport.y_max)],
+                                            [
+                                                (
+                                                    transformed_scale_value($x_scale, x0),
+                                                    transformed_scale_value(
+                                                        $y_scale,
+                                                        viewport.y_min,
+                                                    ),
+                                                ),
+                                                (
+                                                    transformed_scale_value($x_scale, x1),
+                                                    transformed_scale_value(
+                                                        $y_scale,
+                                                        viewport.y_max,
+                                                    ),
+                                                ),
+                                            ],
                                             roi_fill.filled(),
                                         ),
                                     ))
@@ -1373,6 +1390,12 @@ pub fn render_image_chart(
                         .iter()
                         .copied()
                         .filter(|(x, _)| !$log_x || *x > 0.0)
+                        .map(|(x, y)| {
+                            (
+                                transformed_scale_value($x_scale, x),
+                                transformed_scale_value($y_scale, y),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     if roi.selection_count >= 2 && matches!(mode, PreviewChartMode::Line) {
                         chart
@@ -1403,31 +1426,51 @@ pub fn render_image_chart(
             }
         }};
     }
-    match (
-        x_log_bounds,
-        y_axis_scale == ChartAxisScale::Logarithmic
-            && valid_log_range(viewport.y_min, viewport.y_max),
-    ) {
-        (None, false) => draw_xy_chart!(
-            viewport.x_min..viewport.x_max,
-            viewport.y_min..viewport.y_max,
-            false
-        ),
-        (Some((x_min, x_max)), false) => draw_xy_chart!(
-            (x_min..x_max).log_scale(),
-            viewport.y_min..viewport.y_max,
-            true
-        ),
-        (None, true) => draw_xy_chart!(
-            viewport.x_min..viewport.x_max,
-            (viewport.y_min..viewport.y_max).log_scale(),
-            false
-        ),
-        (Some((x_min, x_max)), true) => draw_xy_chart!(
-            (x_min..x_max).log_scale(),
-            (viewport.y_min..viewport.y_max).log_scale(),
-            true
-        ),
+    if x_axis_scale == ChartAxisScale::SymLog || y_axis_scale == ChartAxisScale::SymLog {
+        draw_xy_chart!(
+            transformed_scale_value(x_axis_scale, viewport.x_min)
+                ..transformed_scale_value(x_axis_scale, viewport.x_max),
+            transformed_scale_value(y_axis_scale, viewport.y_min)
+                ..transformed_scale_value(y_axis_scale, viewport.y_max),
+            false,
+            x_axis_scale,
+            y_axis_scale
+        );
+    } else {
+        match (
+            x_log_bounds,
+            y_axis_scale == ChartAxisScale::Logarithmic
+                && valid_log_range(viewport.y_min, viewport.y_max),
+        ) {
+            (None, false) => draw_xy_chart!(
+                viewport.x_min..viewport.x_max,
+                viewport.y_min..viewport.y_max,
+                false,
+                ChartAxisScale::Linear,
+                ChartAxisScale::Linear
+            ),
+            (Some((x_min, x_max)), false) => draw_xy_chart!(
+                (x_min..x_max).log_scale(),
+                viewport.y_min..viewport.y_max,
+                true,
+                ChartAxisScale::Linear,
+                ChartAxisScale::Linear
+            ),
+            (None, true) => draw_xy_chart!(
+                viewport.x_min..viewport.x_max,
+                (viewport.y_min..viewport.y_max).log_scale(),
+                false,
+                ChartAxisScale::Linear,
+                ChartAxisScale::Linear
+            ),
+            (Some((x_min, x_max)), true) => draw_xy_chart!(
+                (x_min..x_max).log_scale(),
+                (viewport.y_min..viewport.y_max).log_scale(),
+                true,
+                ChartAxisScale::Linear,
+                ChartAxisScale::Linear
+            ),
+        }
     }
     root.present()
         .map_err(|e| AppError::DrawingError(format!("Error presenting chart: {}", e)))?;
