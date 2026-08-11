@@ -166,6 +166,8 @@ pub(crate) fn handle_chartpreview_load(
                 req.key.y_axis_scale,
                 req.key.viewport,
                 req.key.roi,
+                req.key.histogram_selection,
+                req.key.histogram_range,
             ) {
                 send_chart_failure(
                     &tx_events,

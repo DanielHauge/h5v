@@ -59,6 +59,8 @@ impl ChartPreviwState {
             y_axis_scale: self.y_axis_scale,
             viewport: self.rendered_viewport,
             roi: self.rendered_roi,
+            histogram_selection: self.histogram_selection,
+            histogram_range: self.histogram_range,
             width,
             height,
         };

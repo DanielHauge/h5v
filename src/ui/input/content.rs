@@ -19,7 +19,6 @@ use crate::{
     },
     ui::{
         edit::perform_edit,
-        mchart::ChartAxisScale,
         preview::chart::render_image_chart,
         preview::preview_text_for_compound_schema,
         render::MatrixRenderType,
@@ -333,6 +332,8 @@ fn copy_chart_preview(
                 y_axis_scale: state.chart_preview_state.y_axis_scale,
                 viewport: state.chart_preview_state.rendered_viewport,
                 roi: state.chart_preview_state.rendered_roi,
+                histogram_selection: state.chart_preview_state.histogram_selection,
+                histogram_range: state.chart_preview_state.histogram_range,
                 width: chart_area.width,
                 height: chart_area.height,
             })
@@ -375,6 +376,8 @@ fn copy_chart_preview(
         state.chart_preview_state.y_axis_scale,
         state.chart_preview_state.effective_viewport(),
         state.chart_preview_state.roi,
+        state.chart_preview_state.histogram_selection,
+        state.chart_preview_state.histogram_range,
     )?;
     let image = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, buffer).ok_or_else(|| {
         AppError::DrawingError("Failed to build chart preview image for clipboard".to_string())

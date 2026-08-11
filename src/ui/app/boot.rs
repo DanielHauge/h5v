@@ -168,6 +168,8 @@ pub(super) fn prepare_app<'a>(
         data_bounds: None,
         current_data: None,
         roi: None,
+        histogram_selection: None,
+        histogram_range: None,
         last_chart_area: None,
         last_plot_area: None,
         drag_state: None,

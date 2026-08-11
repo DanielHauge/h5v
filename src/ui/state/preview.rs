@@ -161,6 +161,8 @@ pub struct ChartPreviwState {
     pub data_bounds: Option<PreviewChartViewport>,
     pub current_data: Option<DatasetPlotingData>,
     pub roi: Option<PreviewChartRoi>,
+    pub histogram_selection: Option<PreviewHistogramSelection>,
+    pub histogram_range: Option<PreviewHistogramRange>,
     pub last_chart_area: Option<Rect>,
     pub last_plot_area: Option<Rect>,
     pub drag_state: Option<PreviewChartDragState>,
@@ -209,6 +211,8 @@ mod log_scale_tests {
             }),
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -290,6 +294,19 @@ pub struct PreviewChartRoi {
     pub end: usize,
     pub precise: bool,
     pub selection_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviewHistogramSelection {
+    pub start: usize,
+    pub end: usize,
+    pub selection_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreviewHistogramRange {
+    pub min: f64,
+    pub max: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,6 +406,8 @@ pub struct ChartPreviewKey {
     pub y_axis_scale: ChartAxisScale,
     pub viewport: Option<PreviewChartViewport>,
     pub roi: Option<PreviewChartRoi>,
+    pub histogram_selection: Option<PreviewHistogramSelection>,
+    pub histogram_range: Option<PreviewHistogramRange>,
     pub width: u16,
     pub height: u16,
 }
@@ -489,6 +508,8 @@ mod tests {
             y_axis_scale: ChartAxisScale::Linear,
             viewport: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             width: 10,
             height: 10,
         }
@@ -544,6 +565,8 @@ mod tests {
             data_bounds: None,
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -575,6 +598,8 @@ mod tests {
             data_bounds: None,
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -630,6 +655,8 @@ mod tests {
             data_bounds: None,
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -696,6 +723,8 @@ mod tests {
             data_bounds: None,
             current_data: Some(data_preview()),
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -747,6 +776,8 @@ mod tests {
             data_bounds: None,
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -869,6 +900,8 @@ mod tests {
             data_bounds: Some(bounds()),
             current_data: Some(data_preview()),
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
             last_plot_area: Some(Rect::new(0, 0, 10, 10)),
             drag_state: None,
@@ -916,6 +949,8 @@ mod tests {
             }),
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -961,6 +996,8 @@ mod tests {
                 precise: true,
                 selection_count: 1,
             }),
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -1006,6 +1043,8 @@ mod tests {
             }),
             current_data: None,
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
             last_plot_area: None,
             drag_state: None,
@@ -1058,6 +1097,8 @@ mod tests {
                 max: 99.0,
             }),
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(5, 3, 10, 10)),
             last_plot_area: Some(Rect::new(5, 3, 10, 10)),
             drag_state: None,
@@ -1112,6 +1153,8 @@ mod tests {
                 precise: false,
                 selection_count: 1,
             }),
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
             last_plot_area: Some(Rect::new(0, 0, 10, 10)),
             drag_state: None,
@@ -1162,6 +1205,8 @@ mod tests {
                 max: 99.0,
             }),
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(5, 3, 10, 10)),
             last_plot_area: Some(Rect::new(5, 3, 10, 10)),
             drag_state: None,
@@ -1216,6 +1261,8 @@ mod tests {
                 precise: true,
                 selection_count: 1,
             }),
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(5, 3, 10, 10)),
             last_plot_area: Some(Rect::new(5, 3, 10, 10)),
             drag_state: None,
@@ -1255,6 +1302,8 @@ mod tests {
                 precise: false,
                 selection_count: 2,
             }),
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -1297,6 +1346,8 @@ mod tests {
                 precise: false,
                 selection_count: 2,
             }),
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: None,
             last_plot_area: None,
             drag_state: None,
@@ -1336,6 +1387,8 @@ mod tests {
             data_bounds: Some(bounds()),
             current_data: Some(data_preview()),
             roi: None,
+            histogram_selection: None,
+            histogram_range: None,
             last_chart_area: Some(Rect::new(0, 0, 10, 10)),
             last_plot_area: Some(Rect::new(0, 0, 10, 10)),
             drag_state: None,
@@ -1344,6 +1397,40 @@ mod tests {
         assert!(!state.zoom_with_anchor(10.0, 0.5, 0.5, true, PreviewChartZoomMode::Uniform));
         assert!(!state.cycle_roi_at_position(1, 1));
         assert!(!state.start_drag_at_position(1, 1));
+    }
+
+    #[test]
+    fn histogram_clear_zoom_resets_selection_and_range() {
+        let mut state = chart_state();
+        state.mode = PreviewChartMode::Histogram;
+        state.histogram_selection = Some(PreviewHistogramSelection {
+            start: 1,
+            end: 3,
+            selection_count: 2,
+        });
+        state.histogram_range = Some(PreviewHistogramRange { min: 1.0, max: 3.0 });
+
+        assert!(state.clear_zoom());
+        assert!(state.histogram_selection.is_none());
+        assert!(state.histogram_range.is_none());
+        assert!(!state.clear_zoom());
+    }
+
+    #[test]
+    fn histogram_selection_invalidates_the_stale_render_key() {
+        let mut state = chart_state();
+        let key = ChartPreviewKey {
+            mode: PreviewChartMode::Histogram,
+            ..preview_key("histogram")
+        };
+        state.begin_loading(key);
+        state.set_histogram_selection(Some(PreviewHistogramSelection {
+            start: 1,
+            end: 1,
+            selection_count: 1,
+        }));
+
+        assert!(state.current_request_key().is_none());
     }
 
     #[test]

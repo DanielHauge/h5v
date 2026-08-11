@@ -170,6 +170,8 @@ impl ChartPreviwState {
         self.data_bounds = None;
         self.current_data = None;
         self.roi = None;
+        self.histogram_selection = None;
+        self.histogram_range = None;
         self.last_chart_area = None;
         self.last_plot_area = None;
         self.drag_state = None;
@@ -289,7 +291,33 @@ impl ChartPreviwState {
     }
 
     pub fn clear_zoom(&mut self) -> bool {
+        if self.mode == PreviewChartMode::Histogram {
+            let changed = self.histogram_selection.is_some() || self.histogram_range.is_some();
+            self.histogram_selection = None;
+            self.histogram_range = None;
+            if changed {
+                self.invalidate_render();
+            }
+            return changed;
+        }
         self.set_explicit_viewport(None)
+    }
+
+    pub(crate) fn set_histogram_selection(
+        &mut self,
+        selection: Option<super::PreviewHistogramSelection>,
+    ) {
+        if self.histogram_selection != selection {
+            self.histogram_selection = selection;
+            self.invalidate_render();
+        }
+    }
+
+    pub(crate) fn set_histogram_range(&mut self, range: super::PreviewHistogramRange) {
+        if self.histogram_range != Some(range) {
+            self.histogram_range = Some(range);
+            self.invalidate_render();
+        }
     }
 
     pub fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
@@ -533,7 +561,7 @@ impl ChartPreviwState {
             .is_some_and(|chart_area| point_in_rect(chart_area, column, row))
     }
 
-    fn selection_x_min(&self) -> f64 {
+    pub(crate) fn selection_x_min(&self) -> f64 {
         match self.ds_selection.as_ref().map(|selection| &selection.slice) {
             Some(crate::data::SliceSelection::FromTo(start, _)) => *start as f64,
             _ => 0.0,

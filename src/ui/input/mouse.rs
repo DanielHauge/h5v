@@ -81,7 +81,9 @@ pub(super) fn handle_normal_mouse_event(
             handle_left_click(state, mouse_event.column, mouse_event.row, false)
         }
         MouseEventKind::Down(MouseButton::Right) => {
-            if let EventResult::Redraw =
+            if crate::ui::preview::chart::zoom_histogram_selection(state) {
+                Ok(EventResult::Redraw)
+            } else if let EventResult::Redraw =
                 handle_preview_chart_right_mouse_down(state, mouse_event.column, mouse_event.row)?
             {
                 Ok(EventResult::Redraw)
@@ -346,6 +348,13 @@ fn handle_left_click(
     row: u16,
     toggle_if_selected: bool,
 ) -> Result<EventResult, AppError> {
+    if state.active_content_mode() == ContentShowMode::Preview
+        && crate::ui::preview::chart::select_histogram_bin_at(state, column, row)
+    {
+        state.focus = Focus::Content;
+        return Ok(EventResult::Redraw);
+    }
+
     if state.active_content_mode() == ContentShowMode::Preview
         && click_preview_axis_scale(state, column, row)
     {

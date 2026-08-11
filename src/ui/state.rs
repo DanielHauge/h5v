@@ -71,9 +71,9 @@ pub use preview::{
     MatrixViewportKey, MatrixViewportRequest, MatrixViewportState, MatrixViewportWork, PageState,
     PageType, PreviewChartMode, PreviewChartRoi, PreviewChartViewport, PreviewChartZoomMode,
     PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
-    PreviewExpressionState, RawImageLoadRequest, VarLenImageLoadRequest,
-    CHART_PREVIEW_CACHE_CAPACITY, CONTENT_CACHE_CAPACITY, MATRIX_VIEWPORT_CACHE_CAPACITY,
-    PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+    PreviewExpressionState, PreviewHistogramRange, PreviewHistogramSelection, RawImageLoadRequest,
+    VarLenImageLoadRequest, CHART_PREVIEW_CACHE_CAPACITY, CONTENT_CACHE_CAPACITY,
+    MATRIX_VIEWPORT_CACHE_CAPACITY, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,

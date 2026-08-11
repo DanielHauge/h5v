@@ -125,10 +125,8 @@ fn sync_direct_chart_preview(
         .set_current_data(Some(data_preview.clone()));
     state.chart_preview_state.set_chart_area(Some(chart_area));
     state.chart_preview_state.set_plot_area(
-        state
-            .chart_preview_state
-            .mode
-            .supports_roi()
+        (state.chart_preview_state.mode.supports_roi()
+            || state.chart_preview_state.mode == PreviewChartMode::Histogram)
             .then(|| preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max))
             .flatten(),
     );
@@ -138,6 +136,7 @@ fn preview_windowed_values(
     data_preview: &DatasetPlotingData,
     viewport: PreviewChartViewport,
     x_min: f64,
+    histogram_range: Option<crate::ui::state::PreviewHistogramRange>,
 ) -> Vec<f64> {
     let Some((start, end)) = preview_visible_index_window(data_preview, viewport, x_min) else {
         return Vec::new();
@@ -146,7 +145,132 @@ fn preview_windowed_values(
         .iter()
         .map(|(_, y)| *y)
         .filter(|value| value.is_finite())
+        .filter(|value| {
+            histogram_range.is_none_or(|range| *value >= range.min && *value <= range.max)
+        })
         .collect()
+}
+
+pub(crate) fn select_histogram_bin_at(state: &mut AppState<'_>, column: u16, row: u16) -> bool {
+    if state.chart_preview_state.mode != PreviewChartMode::Histogram {
+        return false;
+    }
+    let Some(plot_area) = state.chart_preview_state.last_plot_area else {
+        return false;
+    };
+    if column < plot_area.x
+        || column >= plot_area.x.saturating_add(plot_area.width)
+        || row < plot_area.y
+        || row >= plot_area.y.saturating_add(plot_area.height)
+    {
+        return false;
+    }
+    let Some(data) = state.chart_preview_state.current_data.as_ref() else {
+        return false;
+    };
+    let Some(viewport) = state.chart_preview_state.effective_viewport() else {
+        return false;
+    };
+    let x_min = state.chart_preview_state.selection_x_min();
+    let values = preview_windowed_values(
+        data,
+        viewport,
+        x_min,
+        state.chart_preview_state.histogram_range,
+    );
+    let scale = state
+        .chart_preview_state
+        .effective_axis_scale_for_renderer(true, state.image_protocol_enabled);
+    let Some(summary) = histogram_summary_with_scale(&values, scale) else {
+        return false;
+    };
+    let ratio = f64::from(column.saturating_sub(plot_area.x))
+        / f64::from(plot_area.width.saturating_sub(1).max(1));
+    let value = match scale {
+        ChartAxisScale::Linear => {
+            summary.value_min + (summary.value_max - summary.value_min) * ratio
+        }
+        ChartAxisScale::Logarithmic => (summary.value_min.ln()
+            + (summary.value_max.ln() - summary.value_min.ln()) * ratio)
+            .exp(),
+        ChartAxisScale::SymLog => symlog_inverse(
+            symlog(summary.value_min)
+                + (symlog(summary.value_max) - symlog(summary.value_min)) * ratio,
+        ),
+    };
+    let index = summary
+        .bins
+        .iter()
+        .position(|bin| value >= bin.start && value <= bin.end)
+        .unwrap_or(summary.bins.len().saturating_sub(1));
+    let selection = match state.chart_preview_state.histogram_selection {
+        None => Some(crate::ui::state::PreviewHistogramSelection {
+            start: index,
+            end: index,
+            selection_count: 1,
+        }),
+        Some(selection) if selection.selection_count < 2 => {
+            Some(crate::ui::state::PreviewHistogramSelection {
+                start: selection.start.min(index),
+                end: selection.end.max(index),
+                selection_count: 2,
+            })
+        }
+        Some(_) => Some(crate::ui::state::PreviewHistogramSelection {
+            start: index,
+            end: index,
+            selection_count: 1,
+        }),
+    };
+    state.chart_preview_state.set_histogram_selection(selection);
+    true
+}
+
+pub(crate) fn zoom_histogram_selection(state: &mut AppState<'_>) -> bool {
+    if state.chart_preview_state.mode != PreviewChartMode::Histogram {
+        return false;
+    }
+    let Some(selection) = state
+        .chart_preview_state
+        .histogram_selection
+        .filter(|selection| selection.selection_count == 2)
+    else {
+        return false;
+    };
+    let Some(data) = state.chart_preview_state.current_data.as_ref() else {
+        return false;
+    };
+    let Some(viewport) = state.chart_preview_state.effective_viewport() else {
+        return false;
+    };
+    let values = preview_windowed_values(
+        data,
+        viewport,
+        state.chart_preview_state.selection_x_min(),
+        state.chart_preview_state.histogram_range,
+    );
+    let scale = state
+        .chart_preview_state
+        .effective_axis_scale_for_renderer(true, state.image_protocol_enabled);
+    let Some(summary) = histogram_summary_with_scale(&values, scale) else {
+        return false;
+    };
+    let Some(start) = summary.bins.get(selection.start) else {
+        return false;
+    };
+    let Some(end) = summary.bins.get(selection.end) else {
+        return false;
+    };
+    let range = crate::ui::state::PreviewHistogramRange {
+        min: start.start,
+        max: end.end,
+    };
+    if state.chart_preview_state.histogram_range == Some(range) {
+        return false;
+    }
+    state.chart_preview_state.set_histogram_range(range);
+    state.chart_preview_state.set_histogram_selection(None);
+    true
 }
 
 fn render_preview_summary_widget(
@@ -197,13 +321,15 @@ pub fn render_precomputed_chart_preview(
         return Ok(());
     }
     state.chart_preview_state.set_chart_area(Some(chart_area));
-    state
-        .chart_preview_state
-        .set_plot_area(if state.chart_preview_state.mode.supports_roi() {
+    state.chart_preview_state.set_plot_area(
+        if state.chart_preview_state.mode.supports_roi()
+            || state.chart_preview_state.mode == PreviewChartMode::Histogram
+        {
             preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max)
         } else {
             None
-        });
+        },
+    );
 
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
@@ -213,6 +339,8 @@ pub fn render_precomputed_chart_preview(
         y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        histogram_selection: state.chart_preview_state.histogram_selection,
+        histogram_range: state.chart_preview_state.histogram_range,
         width: chart_area.width,
         height: chart_area.height,
     };
@@ -479,6 +607,8 @@ pub fn render_chart_preview(
         y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        histogram_selection: state.chart_preview_state.histogram_selection,
+        histogram_range: state.chart_preview_state.histogram_range,
         width: chart_area.width,
         height: chart_area.height,
     };
@@ -733,6 +863,8 @@ fn render_projected_chart_preview(
         y_axis_scale: state.chart_preview_state.y_axis_scale,
         viewport: state.chart_preview_state.viewport,
         roi: state.chart_preview_state.roi,
+        histogram_selection: state.chart_preview_state.histogram_selection,
+        histogram_range: state.chart_preview_state.histogram_range,
         width: chart_area.width,
         height: chart_area.height,
     };
@@ -754,9 +886,10 @@ fn render_projected_chart_preview(
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
         state.chart_preview_state.set_chart_area(Some(chart_area));
-        state
-            .chart_preview_state
-            .set_plot_area(if state.chart_preview_state.mode.supports_roi() {
+        state.chart_preview_state.set_plot_area(
+            if state.chart_preview_state.mode.supports_roi()
+                || state.chart_preview_state.mode == PreviewChartMode::Histogram
+            {
                 state
                     .chart_preview_state
                     .current_data
@@ -766,7 +899,8 @@ fn render_projected_chart_preview(
                     })
             } else {
                 None
-            });
+            },
+        );
         queue_chart_preview_load(
             f,
             chart_area,
@@ -817,7 +951,12 @@ fn render_chart_widget(
         mode,
         PreviewChartMode::Histogram | PreviewChartMode::BoxPlot
     ) {
-        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        let values = preview_windowed_values(
+            &data_preview,
+            viewport,
+            x_min,
+            state.chart_preview_state.histogram_range,
+        );
         match mode {
             PreviewChartMode::Histogram => {
                 let Some(summary) = histogram_summary(&values) else {
@@ -1043,6 +1182,8 @@ pub fn render_image_chart(
     y_axis_scale: ChartAxisScale,
     viewport: Option<PreviewChartViewport>,
     roi: Option<PreviewChartRoi>,
+    histogram_selection: Option<crate::ui::state::PreviewHistogramSelection>,
+    histogram_range: Option<crate::ui::state::PreviewHistogramRange>,
 ) -> Result<(), AppError> {
     let _image_render_timer = perf::metrics().preview.chart_image_render.start();
     let (bg_r, bg_g, bg_b) =
@@ -1073,7 +1214,7 @@ pub fn render_image_chart(
         y_max: data_preview.max,
     });
     if matches!(mode, PreviewChartMode::Histogram) {
-        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        let values = preview_windowed_values(&data_preview, viewport, x_min, histogram_range);
         let histogram_scale = if x_axis_scale == ChartAxisScale::Logarithmic
             && !values.iter().all(|value| *value > 0.0)
         {
@@ -1145,13 +1286,21 @@ pub fn render_image_chart(
                         AppError::DrawingError(format!("Error drawing histogram mesh: {}", e))
                     })?;
                 chart
-                    .draw_series(summary.bins.iter().map(|bin| {
+                    .draw_series(summary.bins.iter().enumerate().map(|(index, bin)| {
                         plotters::prelude::Rectangle::new(
                             [
                                 (scale_value(histogram_scale, bin.start), 0.0),
                                 (scale_value(histogram_scale, bin.end), bin.count),
                             ],
-                            line.mix(0.45).filled(),
+                            if let Some(selection) = histogram_selection {
+                                if index >= selection.start && index <= selection.end {
+                                    selected.mix(0.7).filled()
+                                } else {
+                                    line.mix(0.45).filled()
+                                }
+                            } else {
+                                line.mix(0.45).filled()
+                            },
                         )
                     }))
                     .map_err(|e| {
@@ -1207,7 +1356,7 @@ pub fn render_image_chart(
         return Ok(());
     }
     if matches!(mode, PreviewChartMode::BoxPlot) {
-        let values = preview_windowed_values(&data_preview, viewport, x_min);
+        let values = preview_windowed_values(&data_preview, viewport, x_min, None);
         let Some(summary) = box_plot_summary(&values) else {
             return Err(AppError::DrawingError(
                 "No finite values available for box-plot preview".to_string(),
@@ -1558,12 +1707,15 @@ pub fn render_image_chart(
 mod tests {
     use super::{
         preview_chart_plot_area, preview_effective_x_domain, preview_visible_points,
-        preview_x_axis_max, render_image_chart,
+        preview_windowed_values, preview_x_axis_max, render_image_chart,
     };
     use crate::data::DatasetPlotingData;
     use crate::ui::{
         mchart::ChartAxisScale,
-        state::{PreviewChartMode, PreviewChartViewport, PREVIEW_CHART_VISIBLE_POINT_LIMIT},
+        state::{
+            PreviewChartMode, PreviewChartViewport, PreviewHistogramRange,
+            PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+        },
     };
     use ratatui::layout::Rect;
 
@@ -1585,6 +1737,27 @@ mod tests {
             min: 1.0,
         };
         assert_eq!(preview_x_axis_max(&preview), 2.0);
+    }
+
+    #[test]
+    fn histogram_range_limits_windowed_values() {
+        let preview = sample_preview(5);
+        let viewport = PreviewChartViewport {
+            x_min: 0.0,
+            x_max: 4.0,
+            y_min: 0.0,
+            y_max: 4.0,
+        };
+
+        assert_eq!(
+            preview_windowed_values(
+                &preview,
+                viewport,
+                0.0,
+                Some(PreviewHistogramRange { min: 1.0, max: 3.0 }),
+            ),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 
     #[test]
@@ -1612,6 +1785,8 @@ mod tests {
             ChartAxisScale::Logarithmic,
             ChartAxisScale::Linear,
             Some(viewport),
+            None,
+            None,
             None,
         )
         .is_ok());
