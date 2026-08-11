@@ -133,7 +133,7 @@ const NORMAL_ACTION_CODES: &[ActionCode<NormalAction>] = &[
         symbol: "ChangeXPrev",
         code: "change-x-prev",
         action: NormalAction::ChangeX(-1),
-        default_keys: &["X"],
+        default_keys: &[],
     },
     ActionCode {
         symbol: "ChangeRowNext",

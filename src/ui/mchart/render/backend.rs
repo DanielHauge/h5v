@@ -1,6 +1,9 @@
 use plotters::{
-    prelude::{BitMapBackend, IntoDrawingArea, IntoLogRange},
-    style::{Color as _, IntoFont, RGBColor, ShapeStyle},
+    prelude::{BitMapBackend, IntoDrawingArea, IntoLogRange, Text},
+    style::{
+        text_anchor::{HPos, Pos, VPos},
+        Color as _, IntoFont, RGBColor, ShapeStyle,
+    },
 };
 
 use crate::{
@@ -51,6 +54,17 @@ fn axis_label(scale: ChartAxisScale, value: f64) -> String {
         ChartAxisScale::Logarithmic => value.exp(),
         ChartAxisScale::SymLog => symlog_inverse(value),
     })
+}
+
+fn histogram_tick_indices(boundary_count: usize, max_labels: usize) -> Vec<usize> {
+    if boundary_count <= max_labels {
+        return (0..boundary_count).collect();
+    }
+    let step = (boundary_count - 1).div_ceil(max_labels.saturating_sub(1));
+    (0..boundary_count)
+        .step_by(step)
+        .chain(std::iter::once(boundary_count - 1))
+        .collect()
 }
 
 fn render_line_chart_request(
@@ -290,11 +304,45 @@ fn render_histogram_request(
                     }
                 };
                 let ranges = chart.plotting_area().get_pixel_range();
+                let boundaries = prepared
+                    .series
+                    .first()
+                    .into_iter()
+                    .flat_map(|series| {
+                        series
+                            .bins
+                            .iter()
+                            .map(|bin| bin.start)
+                            .chain(series.bins.last().map(|bin| bin.end))
+                    })
+                    .collect::<Vec<_>>();
+                let tick_positions = histogram_tick_indices(
+                    boundaries.len(),
+                    (request.width / 110).clamp(2, 7) as usize,
+                )
+                .into_iter()
+                .map(|index| {
+                    let value = boundaries[index];
+                    let coordinate = if x_scale == ChartAxisScale::SymLog {
+                        symlog(value)
+                    } else {
+                        value
+                    };
+                    (
+                        chart.backend_coord(&(coordinate, 0.0)),
+                        axis_label(x_label_scale, coordinate),
+                    )
+                })
+                .collect::<Vec<_>>();
                 if let Err(error) = chart
                     .configure_mesh()
-                    .x_desc(format!("value ({} bins)", prepared.bin_count))
+                    .x_desc(format!(
+                        "visible distribution ({} bins)",
+                        prepared.bin_count
+                    ))
                     .y_desc("count")
-                    .x_label_formatter(&|value| axis_label(x_label_scale, *value))
+                    .disable_x_mesh()
+                    .x_labels(0)
                     .y_label_formatter(&|value| format_axis_number(*value))
                     .y_label_style(
                         ("sans-serif", layout.y_label_font_size)
@@ -313,12 +361,20 @@ fn render_histogram_request(
                 {
                     log_error(&error);
                 }
-                for series in prepared.series.iter().cloned() {
+                for series in prepared
+                    .series
+                    .iter()
+                    .filter(|series| !series.is_selected)
+                    .chain(prepared.series.iter().filter(|series| series.is_selected))
+                {
                     let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| {
                         colors.chart.series[series.color_slot % colors.chart.series.len()]
                     }));
                     let color = RGBColor(r, g, b);
-                    let stroke_width = if series.is_selected { 3 } else { 2 };
+                    let fill_opacity = if series.is_selected { 0.45 } else { 0.16 };
+                    let outline =
+                        ShapeStyle::from(&color.mix(if series.is_selected { 0.95 } else { 0.5 }))
+                            .stroke_width(if series.is_selected { 3 } else { 1 });
                     let drawn_series = match chart.draw_series(series.bins.iter().map(|bin| {
                         plotters::prelude::Rectangle::new(
                             [
@@ -339,9 +395,7 @@ fn render_histogram_request(
                                     bin.count,
                                 ),
                             ],
-                            color
-                                .mix(if series.is_selected { 0.45 } else { 0.28 })
-                                .filled(),
+                            color.mix(fill_opacity).filled(),
                         )
                     })) {
                         Ok(series_drawn) => series_drawn,
@@ -355,9 +409,34 @@ fn render_histogram_request(
                         .legend(move |(x, y)| {
                             plotters::prelude::Rectangle::new(
                                 [(x, y - 5), (x + 20, y + 5)],
-                                color.mix(0.45).stroke_width(stroke_width).filled(),
+                                color.mix(fill_opacity).filled(),
                             )
                         });
+                    if let Err(error) = chart.draw_series(series.bins.iter().map(|bin| {
+                        plotters::prelude::Rectangle::new(
+                            [
+                                (
+                                    if x_scale == ChartAxisScale::SymLog {
+                                        symlog(bin.start)
+                                    } else {
+                                        bin.start
+                                    },
+                                    0.0,
+                                ),
+                                (
+                                    if x_scale == ChartAxisScale::SymLog {
+                                        symlog(bin.end)
+                                    } else {
+                                        bin.end
+                                    },
+                                    bin.count,
+                                ),
+                            ],
+                            outline,
+                        )
+                    })) {
+                        log_error(&error);
+                    }
                 }
                 if let Err(error) = chart
                     .configure_series_labels()
@@ -371,6 +450,25 @@ fn render_histogram_request(
                     .draw()
                 {
                     log_error(&error);
+                }
+                drop(chart);
+                for ((x, y), label) in tick_positions {
+                    if let Err(error) = root.draw(&plotters::element::PathElement::new(
+                        vec![(x, y), (x, y + 5)],
+                        ShapeStyle::from(&axis).stroke_width(2),
+                    )) {
+                        log_error(&error);
+                    }
+                    if let Err(error) = root.draw(&Text::new(
+                        label,
+                        (x, y + 5),
+                        ("sans-serif", layout.x_label_font_size)
+                            .into_font()
+                            .color(&axis)
+                            .pos(Pos::new(HPos::Center, VPos::Top)),
+                    )) {
+                        log_error(&error);
+                    }
                 }
                 ranges
             }};

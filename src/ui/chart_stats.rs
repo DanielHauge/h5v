@@ -66,69 +66,10 @@ pub(crate) fn histogram_summary_with_scale(
         return None;
     }
 
-    let mut value_min = f64::INFINITY;
-    let mut value_max = f64::NEG_INFINITY;
-    for value in &values {
-        value_min = value_min.min(*value);
-        value_max = value_max.max(*value);
-    }
-    let (value_min, value_max) = match scale {
-        ChartAxisScale::Logarithmic => normalized_log_axis_bounds(value_min, value_max)?,
-        ChartAxisScale::Linear | ChartAxisScale::SymLog => {
-            normalized_axis_bounds(value_min, value_max)?
-        }
-    };
-    let bin_count = match values.len() {
-        0 => return None,
-        1..=4 => values.len(),
-        n => ((n as f64).sqrt().round() as usize).clamp(6, 64),
-    };
-    let (transformed_min, transformed_max) = if scale == ChartAxisScale::SymLog {
-        (symlog(value_min), symlog(value_max))
-    } else if scale == ChartAxisScale::Logarithmic {
-        (value_min.ln(), value_max.ln())
-    } else {
-        (value_min, value_max)
-    };
-    let bin_width = (transformed_max - transformed_min) / bin_count as f64;
-    let mut counts = vec![0usize; bin_count];
-    for value in values {
-        let transformed = if scale == ChartAxisScale::SymLog {
-            symlog(value)
-        } else if scale == ChartAxisScale::Logarithmic {
-            value.ln()
-        } else {
-            value
-        };
-        let normalized = ((transformed - transformed_min) / bin_width).floor();
-        let index = normalized
-            .max(0.0)
-            .min((bin_count.saturating_sub(1)) as f64) as usize;
-        counts[index] = counts[index].saturating_add(1);
-    }
-    let count_max = counts.iter().copied().max().unwrap_or_default() as f64;
-    let bins = counts
-        .into_iter()
-        .enumerate()
-        .map(|(index, count)| {
-            let raw = |value: f64| match scale {
-                ChartAxisScale::SymLog => symlog_inverse(value),
-                ChartAxisScale::Logarithmic => value.exp(),
-                ChartAxisScale::Linear => value,
-            };
-            let start = raw(transformed_min + bin_width * index as f64);
-            let end = if index + 1 == bin_count {
-                value_max
-            } else {
-                raw(transformed_min + bin_width * (index + 1) as f64)
-            };
-            HistogramBinSummary {
-                start,
-                end,
-                count: count as f64,
-            }
-        })
-        .collect();
+    let (value_min, value_max) = histogram_bounds(&values, scale)?;
+    let bin_count = histogram_bin_count(&values, scale)?;
+    let bins = histogram_bins(&values, value_min, value_max, bin_count, scale)?;
+    let count_max = bins.iter().map(|bin| bin.count).fold(0.0, f64::max);
     Some(HistogramSummary {
         value_min,
         value_max,
@@ -136,6 +77,64 @@ pub(crate) fn histogram_summary_with_scale(
         bin_count,
         bins,
     })
+}
+
+/// Returns data-derived bounds for histogram edges. Degenerate data is expanded once so bins have
+/// a usable width; non-degenerate endpoints are the actual finite data extrema.
+pub(crate) fn histogram_bounds(values: &[f64], scale: ChartAxisScale) -> Option<(f64, f64)> {
+    let value_min = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .reduce(f64::min)?;
+    let value_max = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .reduce(f64::max)?;
+    match scale {
+        ChartAxisScale::Logarithmic => normalized_log_axis_bounds(value_min, value_max),
+        ChartAxisScale::Linear | ChartAxisScale::SymLog => {
+            normalized_axis_bounds(value_min, value_max)
+        }
+    }
+}
+
+pub(crate) fn histogram_bin_count(values: &[f64], scale: ChartAxisScale) -> Option<usize> {
+    let mut transformed = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .map(|value| transform_histogram_value(value, scale))
+        .collect::<Option<Vec<_>>>()?;
+    let count = transformed.len();
+    if count == 0 {
+        return None;
+    }
+    if count <= 4 {
+        return Some(count);
+    }
+    transformed.sort_by(f64::total_cmp);
+    let span = transformed.last()? - transformed[0];
+    let iqr = quantile_sorted(&transformed, 0.75) - quantile_sorted(&transformed, 0.25);
+    let width = 2.0 * iqr / (count as f64).cbrt();
+    let fallback = (count as f64).sqrt().round() as usize;
+    let bins = if span.is_finite() && width.is_finite() && width > 0.0 {
+        (span / width).ceil() as usize
+    } else {
+        fallback
+    };
+    Some(bins.clamp(6, 64))
+}
+
+fn transform_histogram_value(value: f64, scale: ChartAxisScale) -> Option<f64> {
+    let transformed = match scale {
+        ChartAxisScale::Linear => value,
+        ChartAxisScale::SymLog => symlog(value),
+        ChartAxisScale::Logarithmic if value > 0.0 => value.ln(),
+        ChartAxisScale::Logarithmic => return None,
+    };
+    transformed.is_finite().then_some(transformed)
 }
 
 pub(crate) fn histogram_bins(
@@ -149,24 +148,18 @@ pub(crate) fn histogram_bins(
     {
         return None;
     }
-    let (transformed_min, transformed_max) = match scale {
-        ChartAxisScale::SymLog => (symlog(value_min), symlog(value_max)),
-        ChartAxisScale::Logarithmic if value_min > 0.0 => (value_min.ln(), value_max.ln()),
-        ChartAxisScale::Logarithmic => return None,
-        ChartAxisScale::Linear => (value_min, value_max),
-    };
+    let (transformed_min, transformed_max) = (
+        transform_histogram_value(value_min, scale)?,
+        transform_histogram_value(value_max, scale)?,
+    );
     let width = (transformed_max - transformed_min) / bin_count as f64;
+    if !width.is_finite() || width <= 0.0 {
+        return None;
+    }
     let mut counts = vec![0usize; bin_count];
     for &value in values.iter().filter(|value| value.is_finite()) {
-        let transformed = match scale {
-            ChartAxisScale::SymLog => symlog(value),
-            ChartAxisScale::Logarithmic => {
-                if value <= 0.0 {
-                    continue;
-                }
-                value.ln()
-            }
-            ChartAxisScale::Linear => value,
+        let Some(transformed) = transform_histogram_value(value, scale) else {
+            continue;
         };
         let index = ((transformed - transformed_min) / width)
             .floor()
@@ -242,7 +235,9 @@ pub(crate) fn box_plot_summary(values: &[f64]) -> Option<BoxPlotSummary> {
 
 #[cfg(test)]
 mod tests {
-    use super::{box_plot_summary, histogram_summary, histogram_summary_with_scale};
+    use super::{
+        box_plot_summary, histogram_bin_count, histogram_summary, histogram_summary_with_scale,
+    };
     use crate::ui::mchart::ChartAxisScale;
 
     #[test]
@@ -251,6 +246,30 @@ mod tests {
         assert_eq!(summary.bin_count, 4);
         assert_eq!(summary.bins.len(), 4);
         assert!(summary.count_max >= 1.0);
+    }
+
+    #[test]
+    fn histogram_edges_match_non_degenerate_data_extents() {
+        let summary = histogram_summary(&[2.0, 3.0, 8.0, f64::NAN]).expect("summary");
+        assert_eq!(summary.value_min, 2.0);
+        assert_eq!(summary.value_max, 8.0);
+        assert_eq!(summary.bins.first().expect("first bin").start, 2.0);
+        assert_eq!(summary.bins.last().expect("last bin").end, 8.0);
+    }
+
+    #[test]
+    fn histogram_uses_freedman_diaconis_bin_count_in_transformed_space() {
+        let values = (0..100)
+            .map(|value| 10.0_f64.powi(value))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            histogram_bin_count(&values, ChartAxisScale::Logarithmic),
+            Some(6)
+        );
+        assert_eq!(
+            histogram_bin_count(&values, ChartAxisScale::Linear),
+            Some(64)
+        );
     }
 
     #[test]

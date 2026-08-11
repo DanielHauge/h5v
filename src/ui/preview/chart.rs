@@ -1,8 +1,11 @@
 use hdf5_metno::types::TypeDescriptor;
 use plotters::{
     chart::ChartBuilder,
-    prelude::{BitMapBackend, IntoDrawingArea, IntoLogRange},
-    style::{Color as _, IntoFont, RGBColor, ShapeStyle},
+    prelude::{BitMapBackend, IntoDrawingArea, IntoLogRange, Text},
+    style::{
+        text_anchor::{HPos, Pos, VPos},
+        Color as _, IntoFont, RGBColor, ShapeStyle,
+    },
 };
 
 use ratatui::{
@@ -95,6 +98,17 @@ fn transformed_scale_value(scale: ChartAxisScale, value: f64) -> f64 {
         ChartAxisScale::Logarithmic => value.ln(),
         ChartAxisScale::Linear => value,
     }
+}
+
+fn histogram_tick_indices(boundary_count: usize, max_labels: usize) -> Vec<usize> {
+    if boundary_count <= max_labels {
+        return (0..boundary_count).collect();
+    }
+    let step = (boundary_count - 1).div_ceil(max_labels.saturating_sub(1));
+    (0..boundary_count)
+        .step_by(step)
+        .chain(std::iter::once(boundary_count - 1))
+        .collect()
 }
 
 fn sync_direct_chart_preview(
@@ -820,10 +834,14 @@ fn render_chart_widget(
                     chart_area,
                     "Histogram",
                     vec![
-                        Line::from(format!("visible values {}", values.len())),
                         Line::from(format!(
-                            "range {:.4}..{:.4}  bins {}",
-                            summary.value_min, summary.value_max, summary.bin_count
+                            "visible distribution: {} values, {} bins",
+                            values.len(),
+                            summary.bin_count
+                        )),
+                        Line::from(format!(
+                            "range {:.4}..{:.4}",
+                            summary.value_min, summary.value_max
                         )),
                         Line::from(format!("max bin count {:.0}", summary.count_max)),
                         Line::from("Image protocol renders the plotted histogram."),
@@ -1080,11 +1098,34 @@ pub fn render_image_chart(
                     .y_label_area_size(layout.y_label_area_size)
                     .build_cartesian_2d($x, 0.0..summary.count_max)
                     .map_err(|e| AppError::DrawingError(format!("Error building chart: {}", e)))?;
+                let boundaries = summary
+                    .bins
+                    .iter()
+                    .map(|bin| bin.start)
+                    .chain(summary.bins.last().map(|bin| bin.end))
+                    .collect::<Vec<_>>();
+                let tick_positions =
+                    histogram_tick_indices(boundaries.len(), (width / 110).clamp(2, 7) as usize)
+                        .into_iter()
+                        .map(|index| {
+                            (
+                                chart.backend_coord(&(
+                                    scale_value(histogram_scale, boundaries[index]),
+                                    0.0,
+                                )),
+                                axis_label(
+                                    histogram_scale,
+                                    transformed_scale_value(histogram_scale, boundaries[index]),
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>();
                 chart
                     .configure_mesh()
-                    .x_desc("value")
+                    .x_desc(format!("visible distribution ({} bins)", summary.bin_count))
                     .y_desc("count")
-                    .x_label_formatter(&|value| axis_label(histogram_scale, *value))
+                    .disable_x_mesh()
+                    .x_labels(0)
                     .y_label_formatter(&|value| format_axis_number(*value))
                     .x_label_style(
                         ("sans-serif", layout.x_label_font_size)
@@ -1116,6 +1157,40 @@ pub fn render_image_chart(
                     .map_err(|e| {
                         AppError::DrawingError(format!("Error drawing histogram bars: {}", e))
                     })?;
+                chart
+                    .draw_series(summary.bins.iter().map(|bin| {
+                        plotters::prelude::Rectangle::new(
+                            [
+                                (scale_value(histogram_scale, bin.start), 0.0),
+                                (scale_value(histogram_scale, bin.end), bin.count),
+                            ],
+                            ShapeStyle::from(&line.mix(0.9)).stroke_width(1),
+                        )
+                    }))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error outlining histogram bars: {}", e))
+                    })?;
+                drop(chart);
+                for ((x, y), label) in tick_positions {
+                    root.draw(&plotters::element::PathElement::new(
+                        vec![(x, y), (x, y + 5)],
+                        ShapeStyle::from(&axis).stroke_width(2),
+                    ))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing histogram tick mark: {}", e))
+                    })?;
+                    root.draw(&Text::new(
+                        label,
+                        (x, y + 5),
+                        ("sans-serif", layout.x_label_font_size)
+                            .into_font()
+                            .color(&axis)
+                            .pos(Pos::new(HPos::Center, VPos::Top)),
+                    ))
+                    .map_err(|e| {
+                        AppError::DrawingError(format!("Error drawing histogram ticks: {}", e))
+                    })?;
+                }
             };
         }
         if histogram_scale == ChartAxisScale::SymLog {

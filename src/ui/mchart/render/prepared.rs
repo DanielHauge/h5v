@@ -1,6 +1,6 @@
 use crate::ui::{
     chart_math::{normalized_axis_bounds, normalized_log_axis_bounds},
-    chart_stats::{box_plot_summary, histogram_bins, histogram_summary_with_scale},
+    chart_stats::{box_plot_summary, histogram_bin_count, histogram_bins, histogram_bounds},
 };
 
 use super::super::{
@@ -216,9 +216,7 @@ impl MultiChartState {
         }
 
         let selected_item_id = self.selected_item().map(|item| item.id);
-        let mut max_samples = 0usize;
         let mut series_values = Vec::new();
-        let mut summary_bounds = None;
 
         for item in visible_items {
             let values = self
@@ -229,38 +227,28 @@ impl MultiChartState {
             if values.is_empty() {
                 continue;
             }
-            max_samples = max_samples.max(values.len());
-            let summary = histogram_summary_with_scale(&values, ChartAxisScale::Linear)?;
-            let (overall_min, overall_max) =
-                summary_bounds.unwrap_or((summary.value_min, summary.value_max));
-            summary_bounds = Some((
-                overall_min.min(summary.value_min),
-                overall_max.max(summary.value_max),
-            ));
             series_values.push((item, values));
         }
         if series_values.is_empty() {
             return None;
         }
 
-        let (raw_value_min, raw_value_max) = summary_bounds?;
+        let all_values = series_values
+            .iter()
+            .flat_map(|(_, values)| values.iter().copied())
+            .collect::<Vec<_>>();
+        let (raw_value_min, _) = histogram_bounds(&all_values, ChartAxisScale::Linear)?;
         let histogram_scale = self.effective_axis_scale(
             self.x_axis_scale,
             self.view_mode.supports_x_log_scale(),
             raw_value_min > 0.0,
         );
-        let (value_min, value_max) = match histogram_scale {
-            ChartAxisScale::Logarithmic => {
-                normalized_log_axis_bounds(raw_value_min, raw_value_max)?
-            }
-            ChartAxisScale::Linear | ChartAxisScale::SymLog => {
-                normalized_axis_bounds(raw_value_min, raw_value_max)?
-            }
-        };
-        let bin_count = match max_samples {
-            0 => return None,
-            1..=4 => max_samples,
-            n => ((n as f64).sqrt().round() as usize).clamp(6, 64),
+        let (value_min, value_max) = histogram_bounds(&all_values, histogram_scale)?;
+        let max_samples = series_values.iter().map(|(_, values)| values.len()).max()?;
+        let bin_count = if max_samples <= 4 {
+            max_samples
+        } else {
+            histogram_bin_count(&all_values, histogram_scale)?
         };
         let mut count_max = 0.0_f64;
         let mut series = Vec::new();

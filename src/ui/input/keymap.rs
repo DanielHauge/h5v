@@ -578,8 +578,15 @@ mod tests {
     }
 
     #[test]
-    fn shift_x_and_y_toggle_axis_scales() {
+    fn preview_shift_x_toggles_x_axis_scale_without_normal_x_conflict() {
         let keymaps = EffectiveKeymaps::default();
+        assert_eq!(
+            normal_action(
+                &KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+                &keymaps
+            ),
+            None
+        );
         assert_eq!(
             content_action(
                 &KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
