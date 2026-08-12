@@ -35,9 +35,19 @@ pub(crate) fn handle_content_preview_load(
             }
             let key = request.key.clone();
             let result = if key.opaque {
-                read_opaque_dataset_preview(&request.dataset, &request.meta)
+                read_opaque_dataset_preview(
+                    &request.dataset,
+                    &request.meta,
+                    key.value_start,
+                    key.value_count,
+                )
             } else {
-                read_string_dataset_preview(&request.dataset, &request.meta.encoding)
+                read_string_dataset_preview(
+                    &request.dataset,
+                    &request.meta.encoding,
+                    key.value_start,
+                    key.value_count,
+                )
             };
             let event = match result {
                 Ok(text) => ContentPreviewLoadedResult::Success { key, text },
@@ -74,6 +84,8 @@ mod tests {
             metadata_revision: 1,
             ds_path: "/d".into(),
             opaque: false,
+            value_start: 0,
+            value_count: 0,
         }
     }
     #[test]

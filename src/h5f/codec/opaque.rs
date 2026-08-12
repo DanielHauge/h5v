@@ -1,4 +1,4 @@
-use hdf5_metno::{Dataset, Selection};
+use hdf5_metno::{Dataset, Hyperslab, Selection, SliceOrIndex};
 use ndarray::{Array1, Array2};
 
 use crate::error::AppError;
@@ -19,7 +19,7 @@ pub fn format_opaque_bytes_for_edit(bytes: &[u8]) -> String {
         .join(" ")
 }
 
-fn hexdump_opaque_bytes(bytes: &[u8]) -> String {
+fn hexdump_opaque_bytes_at(bytes: &[u8], byte_offset: usize) -> String {
     if bytes.is_empty() {
         return "<empty>".to_string();
     }
@@ -28,18 +28,33 @@ fn hexdump_opaque_bytes(bytes: &[u8]) -> String {
         .chunks(16)
         .enumerate()
         .map(|(line_idx, chunk)| {
-            format!(
-                "{:04x}: {}",
-                line_idx * 16,
-                chunk
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
+            let hex = chunk
+                .chunks(2)
+                .map(|pair| match pair {
+                    [first, second] => format!("{first:02x}{second:02x}"),
+                    [first] => format!("{first:02x}  "),
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let ascii: String = chunk
+                .iter()
+                .map(|&byte| {
+                    if (0x20..=0x7e).contains(&byte) {
+                        byte as char
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            format!("{:08x}: {hex:<39}  |{ascii}|", byte_offset + line_idx * 16)
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn hexdump_opaque_bytes(bytes: &[u8]) -> String {
+    hexdump_opaque_bytes_at(bytes, 0)
 }
 
 pub(crate) fn parse_opaque_bytes_from_text(
@@ -137,6 +152,8 @@ pub fn read_opaque_values_2d(
 pub fn read_opaque_dataset_preview(
     dataset: &Dataset,
     meta: &DatasetMeta,
+    byte_start: usize,
+    byte_count: usize,
 ) -> Result<String, AppError> {
     let item_size = meta.data_bytesize;
     let reason = meta
@@ -168,37 +185,159 @@ pub fn read_opaque_dataset_preview(
         ));
     }
 
-    let preview_limit = 64usize;
-    let selection = bounded_preview_selection(&dataset.shape(), preview_limit);
-    let (bytes, _) = read_selected_values_bytes(dataset, selection)?;
-
     if dataset.size() <= 1 {
         return Ok(format!(
-            "{}\n{}\n\n{}",
+            "{}\n{}\nshape {:?}\n\n{}",
             meta.data_type,
             reason,
-            hexdump_opaque_bytes(&bytes)
+            dataset.shape(),
+            hexdump_opaque_bytes(&read_dataset_raw_bytes(dataset)?)
         ));
     }
 
-    let mut out = format!(
-        "{}\n{}\nshape {:?}\n\n",
-        meta.data_type,
-        reason,
-        dataset.shape()
-    );
-    for (idx, chunk) in bytes
-        .chunks_exact(item_size)
-        .take(preview_limit)
-        .enumerate()
-    {
-        out.push_str(&format!(
-            "[{idx}] {}\n",
-            format_opaque_bytes_for_edit(chunk)
-        ));
-    }
-    if dataset.size() > preview_limit {
-        out.push_str("...\n");
+    let preview_limit = 64usize;
+    let shape = dataset.shape();
+    let total = dataset.size();
+    let paged = shape.len() == 1 && total > preview_limit;
+    let (bytes, offset, truncated) = if paged {
+        let total_bytes = total.saturating_mul(item_size);
+        let start = byte_start.min(total_bytes.saturating_sub(1));
+        let end = start.saturating_add(byte_count).min(total_bytes);
+        let first_value = start / item_size;
+        let last_value = end.saturating_add(item_size - 1) / item_size;
+        let selection = Selection::Hyperslab(Hyperslab::from(vec![SliceOrIndex::SliceTo {
+            start: first_value,
+            step: 1,
+            end: last_value,
+            block: 1,
+        }]));
+        let (selected, _) = read_selected_values_bytes(dataset, selection)?;
+        let selected_start = first_value * item_size;
+        let from = start - selected_start;
+        let to = from + (end - start);
+        (selected[from..to].to_vec(), start, end < total_bytes)
+    } else {
+        let selection = bounded_preview_selection(&shape, preview_limit);
+        let (bytes, _) = read_selected_values_bytes(dataset, selection)?;
+        (bytes, 0, total > preview_limit)
+    };
+
+    let mut out = format!("{}\n{}\nshape {:?}\n\n", meta.data_type, reason, shape);
+    out.push_str(&hexdump_opaque_bytes_at(&bytes, offset));
+    if truncated {
+        out.push_str("\n...");
     }
     Ok(out.trim_end().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use hdf5_metno::{
+        types::{IntSize, TypeDescriptor},
+        File,
+    };
+
+    use super::{hexdump_opaque_bytes, hexdump_opaque_bytes_at, read_opaque_dataset_preview};
+    use crate::{
+        h5f::meta::{DatasetMeta, Encoding},
+        ui::render::MatrixRenderType,
+    };
+
+    fn opaque_meta(item_size: usize) -> DatasetMeta {
+        DatasetMeta {
+            link_name: None,
+            display_name: "opaque".to_string(),
+            shape: Vec::new(),
+            data_type: format!("opaque[{item_size} bytes]"),
+            unsupported_reason: Some("Datatype fallback".to_string()),
+            type_descriptor: TypeDescriptor::Unsigned(IntSize::U1),
+            data_bytesize: item_size,
+            storage_required: 0,
+            total_bytes: 0,
+            total_elems: 1,
+            chunk_shape: None,
+            hl: None,
+            matrixable: Some(MatrixRenderType::Opaque),
+            encoding: Encoding::Unknown,
+            image: None,
+            enum_render_overrides: None,
+            is_link: false,
+            filename: String::new(),
+            compound_projection: None,
+        }
+    }
+
+    #[test]
+    fn hexdump_uses_paired_hex_and_ascii_gutter() {
+        assert_eq!(
+            hexdump_opaque_bytes(b"param\0\xff"),
+            "00000000: 7061 7261 6d00 ff                        |param..|"
+        );
+    }
+
+    #[test]
+    fn hexdump_aligns_partial_final_row_and_offsets() {
+        let bytes: Vec<u8> = (0..17).collect();
+        assert_eq!(
+            hexdump_opaque_bytes(&bytes),
+            "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  |................|\n\
+00000010: 10                                       |.|"
+        );
+    }
+
+    #[test]
+    fn hexdump_uses_absolute_page_offset() {
+        assert_eq!(
+            hexdump_opaque_bytes_at(&[0xde, 0xad], 0x120),
+            "00000120: dead                                     |..|"
+        );
+    }
+
+    #[test]
+    fn oversized_scalar_opaque_preview_returns_cap_without_reading() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let dataset = file
+            .new_dataset::<u8>()
+            .create("opaque")
+            .expect("create scalar dataset");
+        dataset.write_scalar(&42_u8).expect("write scalar value");
+
+        assert_eq!(
+            read_opaque_dataset_preview(&dataset, &opaque_meta(25), 0, 0).expect("preview opaque"),
+            "opaque[25 bytes]\nDatatype fallback\n\n<opaque values are 25 bytes each; preview cap is 24 bytes>"
+        );
+    }
+
+    #[test]
+    fn oversized_one_element_opaque_preview_returns_cap_without_reading() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[42_u8])
+            .create("opaque")
+            .expect("create one-element dataset");
+
+        assert_eq!(
+            read_opaque_dataset_preview(&dataset, &opaque_meta(25), 0, 0).expect("preview opaque"),
+            "opaque[25 bytes]\nDatatype fallback\n\n<opaque values are 25 bytes each; preview cap is 24 bytes>"
+        );
+    }
+
+    #[test]
+    fn safe_scalar_opaque_preview_keeps_xxd_format() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let dataset = file
+            .new_dataset::<u8>()
+            .create("opaque")
+            .expect("create scalar dataset");
+        dataset.write_scalar(&42_u8).expect("write scalar value");
+
+        assert_eq!(
+            read_opaque_dataset_preview(&dataset, &opaque_meta(1), 0, 0).expect("preview opaque"),
+            "opaque[1 bytes]\nDatatype fallback\n\n00000000: 2a                                       |*|"
+        );
+    }
 }

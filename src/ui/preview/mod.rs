@@ -612,7 +612,16 @@ pub fn render_preview(
                 }
             }
             None => {
-                if matches!(attr.matrixable, Some(MatrixRenderType::ByteArray)) {
+                if matches!(attr.matrixable, Some(MatrixRenderType::Strings)) {
+                    render_direct_content_preview(
+                        f,
+                        &area_inner,
+                        selected_node,
+                        state,
+                        &dataset,
+                        &attr,
+                    );
+                } else if matches!(attr.matrixable, Some(MatrixRenderType::ByteArray)) {
                     render_unsupported_rendering(
                         f,
                         &area_inner,
@@ -649,11 +658,27 @@ fn render_direct_content_preview(
     dataset: &hdf5_metno::Dataset,
     meta: &crate::h5f::DatasetMeta,
 ) {
+    let (value_start, value_count) = crate::ui::state::direct_content_preview_page(
+        &meta.shape,
+        meta.data_bytesize,
+        meta.is_opaque(),
+        node.line_offset,
+    );
+    let paged = value_count > 0;
+    if paged {
+        node.line_offset = if meta.is_opaque() {
+            value_start / 16
+        } else {
+            value_start
+        };
+    }
     let key = crate::ui::state::ContentPreviewKey {
         file_generation: state.content_generation,
         metadata_revision: state.navigation_generation,
         ds_path: node.node.path(),
         opaque: meta.is_opaque(),
+        value_start,
+        value_count,
     };
     if let Some(index) = state
         .content_preview_state
@@ -668,7 +693,13 @@ fn render_direct_content_preview(
             .expect("cached content index");
         let text = entry.text.clone();
         state.content_preview_state.cached.push_back(entry);
-        render_string(f, area, node, text, meta.hl.clone());
+        if paged && !meta.is_opaque() {
+            render_paged_content_preview(f, area, text, key.value_start, node.col_offset);
+        } else if meta.is_opaque() && paged {
+            render_direct_opaque_page(f, area, text, node.col_offset);
+        } else {
+            render_string(f, area, node, text, meta.hl.clone());
+        }
         return;
     }
     if let Some((error_key, message)) = &state.content_preview_state.error {
@@ -700,6 +731,68 @@ fn render_direct_content_preview(
         } else {
             "Loading string preview..."
         },
+    );
+}
+
+fn render_direct_opaque_page(f: &mut Frame, area: &Rect, text: String, col_offset: isize) {
+    let text = text
+        .lines()
+        .take(area.height as usize)
+        .map(|line| truncate_left(line, col_offset.max(0) as usize))
+        .collect::<Vec<_>>()
+        .join("\n");
+    f.render_widget(
+        Paragraph::new(text)
+            .style(Style::default().fg(configure::themed_color(|colors| colors.text.primary)))
+            .wrap(Wrap { trim: false }),
+        *area,
+    );
+}
+
+fn render_paged_content_preview(
+    f: &mut Frame,
+    area: &Rect,
+    text: String,
+    value_start: usize,
+    col_offset: isize,
+) {
+    let lines = text
+        .lines()
+        .take(area.height as usize)
+        .map(|line| truncate_left(line, col_offset.max(0) as usize))
+        .collect::<Vec<_>>();
+    let visible = lines.len().max(1);
+    let width = (value_start + visible).to_string().len() as u16;
+    let (number_area, text_area) = {
+        let chunks =
+            ratatui::layout::Layout::horizontal([Constraint::Length(width), Constraint::Min(0)])
+                .spacing(1)
+                .split(*area);
+        (chunks[0], chunks[1])
+    };
+    let numbers = lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if line == "..." {
+                String::new()
+            } else {
+                (value_start + index + 1).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    f.render_widget(
+        Paragraph::new(numbers)
+            .style(Style::default().fg(configure::themed_color(|colors| colors.text.line_num)))
+            .alignment(Alignment::Right),
+        number_area,
+    );
+    f.render_widget(
+        Paragraph::new(lines.join("\n"))
+            .style(Style::default().fg(configure::themed_color(|colors| colors.text.primary)))
+            .wrap(Wrap { trim: false }),
+        text_area,
     );
 }
 

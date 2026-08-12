@@ -64,16 +64,17 @@ pub use help_state::{
     HelpTab, HelpViewState,
 };
 pub use preview::{
-    CachedContentPreview, CachedMatrixViewport, ChartPreviewKey, ChartPreviewLoadRequest,
-    ChartPreviewSource, ChartPreviwState, ClipboardImageData, ContentPreviewKey,
-    ContentPreviewRequest, ContentPreviewState, ContentPreviewWork, DatasetImageLoadRequest,
-    ImageLoadKey, ImageWindowAxis, ImageWindowState, ImgState, MatrixViewportData,
-    MatrixViewportKey, MatrixViewportRequest, MatrixViewportState, MatrixViewportWork, PageState,
-    PageType, PreviewChartMode, PreviewChartRoi, PreviewChartViewport, PreviewChartZoomMode,
-    PreviewExpressionKey, PreviewExpressionRequest, PreviewExpressionResult,
-    PreviewExpressionState, PreviewHistogramRange, PreviewHistogramSelection, RawImageLoadRequest,
-    VarLenImageLoadRequest, CHART_PREVIEW_CACHE_CAPACITY, CONTENT_CACHE_CAPACITY,
-    MATRIX_VIEWPORT_CACHE_CAPACITY, PREVIEW_CHART_VISIBLE_POINT_LIMIT,
+    direct_content_preview_page, CachedContentPreview, CachedMatrixViewport, ChartPreviewKey,
+    ChartPreviewLoadRequest, ChartPreviewSource, ChartPreviwState, ClipboardImageData,
+    ContentPreviewKey, ContentPreviewRequest, ContentPreviewState, ContentPreviewWork,
+    DatasetImageLoadRequest, ImageLoadKey, ImageWindowAxis, ImageWindowState, ImgState,
+    MatrixViewportData, MatrixViewportKey, MatrixViewportRequest, MatrixViewportState,
+    MatrixViewportWork, PageState, PageType, PreviewChartMode, PreviewChartRoi,
+    PreviewChartViewport, PreviewChartZoomMode, PreviewExpressionKey, PreviewExpressionRequest,
+    PreviewExpressionResult, PreviewExpressionState, PreviewHistogramRange,
+    PreviewHistogramSelection, RawImageLoadRequest, VarLenImageLoadRequest,
+    CHART_PREVIEW_CACHE_CAPACITY, CONTENT_CACHE_CAPACITY, MATRIX_VIEWPORT_CACHE_CAPACITY,
+    PREVIEW_CHART_VISIBLE_POINT_LIMIT,
 };
 pub use ui_layout::{
     AttributesHitbox, ContentTabHitbox, HeatmapSettingHitbox, HelpScrollbarHitbox,

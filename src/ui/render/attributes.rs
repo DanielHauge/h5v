@@ -261,6 +261,18 @@ fn limited_attribute_value(
     attr: &Attribute,
     type_desc: Option<&TypeDescriptor>,
 ) -> Result<Option<Line<'static>>, Error> {
+    if matches!(
+        type_desc,
+        Some(
+            TypeDescriptor::FixedAscii(_)
+                | TypeDescriptor::FixedUnicode(_)
+                | TypeDescriptor::VarLenAscii
+                | TypeDescriptor::VarLenUnicode
+        )
+    ) {
+        return Ok(None);
+    }
+
     if type_desc.is_some_and(type_contains_varlen) {
         return Ok(Some(Line::from("<variable-length value not loaded>")));
     }

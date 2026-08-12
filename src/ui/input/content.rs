@@ -437,11 +437,19 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
     if let Some(schema) = preview_text_for_compound_schema(&meta) {
         return copy_text_to_clipboard(state, schema, "Copied preview value to clipboard");
     }
+    let (value_start, value_count) = crate::ui::state::direct_content_preview_page(
+        &meta.shape,
+        meta.data_bytesize,
+        meta.is_opaque(),
+        node.line_offset,
+    );
     let content_key = crate::ui::state::ContentPreviewKey {
         file_generation: state.content_generation,
         metadata_revision: state.navigation_generation,
         ds_path: node.node.path(),
         opaque: meta.is_opaque(),
+        value_start,
+        value_count,
     };
     if let Some(text) = state
         .content_preview_state
@@ -472,6 +480,28 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
         ));
     };
     copy_chart_preview(state, &ds_path, selection, data_preview)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui::state::direct_content_preview_page;
+
+    #[test]
+    fn direct_content_preview_page_matches_paged_string_rendering() {
+        assert_eq!(direct_content_preview_page(&[100], 8, false, 50), (50, 128));
+        assert_eq!(
+            direct_content_preview_page(&[100], 8, false, 500),
+            (99, 128)
+        );
+    }
+
+    #[test]
+    fn direct_content_preview_page_uses_absolute_opaque_byte_rows() {
+        assert_eq!(
+            direct_content_preview_page(&[100], 8, true, 50),
+            (784, 1024)
+        );
+    }
 }
 
 fn selected_content_edit_request(

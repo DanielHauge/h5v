@@ -17,6 +17,36 @@ use crate::{
 
 pub const CONTENT_CACHE_CAPACITY: usize = 8;
 pub const MATRIX_VIEWPORT_CACHE_CAPACITY: usize = 8;
+pub const OPAQUE_PREVIEW_PAGE_BYTES: usize = 64 * 16;
+const OPAQUE_PREVIEW_ELEMENT_LIMIT: usize = 64;
+
+/// Returns `(start, count)`: strings use element units; opaque pages use bytes.
+pub fn direct_content_preview_page(
+    shape: &[usize],
+    data_bytesize: usize,
+    opaque: bool,
+    line_offset: usize,
+) -> (usize, usize) {
+    const STRING_PAGE_SIZE: usize = 128;
+    let preview_limit = (64 * 1024 / data_bytesize.max(1)).min(64);
+    if opaque {
+        if shape.len() == 1 && data_bytesize <= 24 && shape[0] > OPAQUE_PREVIEW_ELEMENT_LIMIT {
+            let rows = shape[0].saturating_mul(data_bytesize).saturating_sub(1) / 16 + 1;
+            return (
+                line_offset.min(rows.saturating_sub(1)).saturating_mul(16),
+                OPAQUE_PREVIEW_PAGE_BYTES,
+            );
+        }
+        return (0, 0);
+    }
+    if shape.len() == 1 && data_bytesize <= 32 * 1024 && shape[0] > preview_limit {
+        return (
+            line_offset.min(shape[0].saturating_sub(1)),
+            STRING_PAGE_SIZE,
+        );
+    }
+    (0, 0)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MatrixViewportKey {
@@ -77,6 +107,10 @@ pub struct ContentPreviewKey {
     pub metadata_revision: u64,
     pub ds_path: String,
     pub opaque: bool,
+    /// Strings use a zero-based value index; opaque pages use an absolute byte offset.
+    pub value_start: usize,
+    /// Strings use a value count; opaque pages use a byte count.
+    pub value_count: usize,
 }
 
 pub struct ContentPreviewRequest {

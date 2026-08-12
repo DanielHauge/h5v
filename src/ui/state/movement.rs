@@ -252,7 +252,15 @@ impl AppState<'_> {
                         "seek <x> <y> is only available in matrix or heatmap mode".to_string(),
                     ));
                 }
-                self.set(primary)
+                if matches!(self.page_state.paged, PageType::Unpaged)
+                    && self.active_image_window_mut().is_none()
+                {
+                    let current_node = &self.treeview[self.tree_view_cursor];
+                    current_node.node.borrow_mut().line_offset = primary.saturating_sub(1);
+                    Ok(EventResult::Redraw)
+                } else {
+                    self.set(primary)
+                }
             }
             ContentShowMode::Matrix => {
                 if let Some(row) = secondary {

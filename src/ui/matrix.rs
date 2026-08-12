@@ -5,7 +5,10 @@ use std::{
 };
 
 use hdf5_metno::{
-    types::{EnumMember, EnumType, IntSize, VarLenUnicode},
+    types::{
+        EnumMember, EnumType, FixedAscii, FixedUnicode, IntSize, TypeDescriptor, VarLenAscii,
+        VarLenUnicode,
+    },
     H5Type, Hyperslab, Selection, SliceOrIndex,
 };
 use ndarray::{Array1, Array2};
@@ -152,6 +155,31 @@ fn load_matrix_viewport(
             }
         }};
     }
+    macro_rules! read_direct {
+        ($t:ty) => {{
+            if request.meta.shape.len() == 1 {
+                Ok(crate::ui::state::MatrixViewportData::One(
+                    request
+                        .dataset
+                        .matrix_values::<$t>(request.selection)?
+                        .data
+                        .into_iter()
+                        .map(|value| value.to_string())
+                        .collect(),
+                ))
+            } else {
+                Ok(crate::ui::state::MatrixViewportData::Two(
+                    request
+                        .dataset
+                        .matrix_table::<$t>(request.selection)?
+                        .data
+                        .into_iter()
+                        .map(|value| value.to_string())
+                        .collect(),
+                ))
+            }
+        }};
+    }
     match request.meta.matrixable {
         Some(MatrixRenderType::Float64) => read!(f64),
         Some(MatrixRenderType::Uint64) => read!(u64),
@@ -219,29 +247,15 @@ fn load_matrix_viewport(
                 ))
             }
         }
-        Some(MatrixRenderType::Strings) => {
-            if request.meta.shape.len() == 1 {
-                Ok(crate::ui::state::MatrixViewportData::One(
-                    request
-                        .dataset
-                        .matrix_values::<VarLenUnicode>(request.selection)?
-                        .data
-                        .into_iter()
-                        .map(|v| v.to_string())
-                        .collect(),
-                ))
-            } else {
-                Ok(crate::ui::state::MatrixViewportData::Two(
-                    request
-                        .dataset
-                        .matrix_table::<VarLenUnicode>(request.selection)?
-                        .data
-                        .into_iter()
-                        .map(|v| v.to_string())
-                        .collect(),
-                ))
-            }
-        }
+        Some(MatrixRenderType::Strings) => match request.meta.type_descriptor {
+            TypeDescriptor::VarLenAscii => read_direct!(VarLenAscii),
+            TypeDescriptor::VarLenUnicode => read_direct!(VarLenUnicode),
+            TypeDescriptor::FixedAscii(_) => read_direct!(FixedAscii<32768>),
+            TypeDescriptor::FixedUnicode(_) => read_direct!(FixedUnicode<32768>),
+            _ => Err(AppError::DrawingError(
+                "String matrix metadata is unavailable".into(),
+            )),
+        },
         Some(MatrixRenderType::Opaque) => {
             if request.meta.shape.len() == 1 {
                 Ok(matrix_viewport_string_data(

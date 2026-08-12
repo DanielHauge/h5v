@@ -600,6 +600,8 @@ pub fn read_scalar_string_dataset(
 pub fn read_string_dataset_preview(
     dataset: &Dataset,
     encoding: &Encoding,
+    value_start: usize,
+    value_count: usize,
 ) -> Result<String, AppError> {
     fn format_values(
         shape: &[usize],
@@ -619,13 +621,6 @@ pub fn read_string_dataset_preview(
 
     let shape = dataset.shape();
     let count = shape.iter().copied().fold(1usize, usize::saturating_mul);
-
-    if matches!(encoding, Encoding::Ascii | Encoding::UTF8) {
-        return Ok(format!(
-            "shape {:?}\n\n<variable-length string values are not previewed>",
-            shape
-        ));
-    }
 
     if count == 0 {
         return Ok(format!("shape {:?}\n\n<empty>", shape));
@@ -653,6 +648,57 @@ pub fn read_string_dataset_preview(
         return read_scalar_string_dataset(dataset, encoding);
     }
 
+    let paged = shape.len() == 1 && count > limit;
+    if paged {
+        let start = value_start.min(count);
+        let end = start.saturating_add(value_count.min(limit)).min(count);
+        let selection = Selection::Hyperslab(Hyperslab::from(vec![SliceOrIndex::SliceTo {
+            start,
+            step: 1,
+            end,
+            block: 1,
+        }]));
+        let format_page = |values: Vec<String>| {
+            let mut out = values
+                .into_iter()
+                .enumerate()
+                .map(|(idx, value)| format!("[{}] {value}", start + idx))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if end < count {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str("...");
+            }
+            out
+        };
+        return match encoding {
+            Encoding::UTF8Fixed => dataset
+                .read_slice::<FixedUnicode<32768>, _, IxDyn>(selection)
+                .map(|values| format_page(values.iter().map(ToString::to_string).collect()))
+                .map_err(AppError::from),
+            Encoding::AsciiFixed => dataset
+                .read_slice::<FixedAscii<32768>, _, IxDyn>(selection)
+                .map(|values| format_page(values.iter().map(ToString::to_string).collect()))
+                .map_err(AppError::from),
+            Encoding::Ascii => dataset
+                .read_slice::<VarLenAscii, _, IxDyn>(selection)
+                .map(|values| format_page(values.iter().map(ToString::to_string).collect()))
+                .map_err(AppError::from),
+            Encoding::UTF8 => dataset
+                .read_slice::<VarLenUnicode, _, IxDyn>(selection)
+                .map(|values| format_page(values.iter().map(ToString::to_string).collect()))
+                .map_err(AppError::from),
+            Encoding::LittleEndian => Err(AppError::EditError(
+                "LittleEndian not supported for string data".to_string(),
+            )),
+            Encoding::Unknown => Err(AppError::EditError(
+                "Unknown encoding not supported for string data".to_string(),
+            )),
+        };
+    }
+
     let selection = bounded_preview_selection(&shape, limit);
     let truncated = count > limit;
     match encoding {
@@ -674,7 +720,24 @@ pub fn read_string_dataset_preview(
                 .map(|value| value.to_string()),
             truncated,
         )),
-        Encoding::Ascii | Encoding::UTF8 => unreachable!("variable-length strings return above"),
+        Encoding::Ascii => Ok(format_values(
+            &shape,
+            dataset
+                .read_slice::<VarLenAscii, _, IxDyn>(selection.clone())
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+            truncated,
+        )),
+        Encoding::UTF8 => Ok(format_values(
+            &shape,
+            dataset
+                .read_slice::<VarLenUnicode, _, IxDyn>(selection)
+                .map_err(AppError::from)?
+                .iter()
+                .map(|value| value.to_string()),
+            truncated,
+        )),
         Encoding::LittleEndian => Err(AppError::EditError(
             "LittleEndian not supported for string data".to_string(),
         )),
@@ -745,7 +808,7 @@ mod tests {
     use std::str::FromStr;
 
     use hdf5_metno::{
-        types::{IntSize, TypeDescriptor, VarLenUnicode},
+        types::{FixedAscii, IntSize, TypeDescriptor, VarLenUnicode},
         File,
     };
     use ndarray::{Array2, IxDyn};
@@ -866,8 +929,47 @@ mod tests {
             .create("strings")
             .expect("create string dataset");
 
-        let preview = read_string_dataset_preview(&dataset, &Encoding::UTF8)
-            .expect("decline variable-length string preview");
-        assert!(preview.contains("not previewed"));
+        let preview = read_string_dataset_preview(&dataset, &Encoding::UTF8, 0, 64)
+            .expect("preview variable-length strings");
+        assert!(preview.contains("[0] value-0"));
+        assert!(preview.contains("[63] value-63"));
+        assert!(preview.ends_with("..."));
+    }
+
+    #[test]
+    fn string_preview_pages_rank_one_values_without_headers() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let values = (0..130)
+            .map(|idx| VarLenUnicode::from_str(&format!("value-{idx}")))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("create string values");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("strings")
+            .expect("create string dataset");
+
+        let preview = read_string_dataset_preview(&dataset, &Encoding::UTF8, 64, 3)
+            .expect("page string values");
+        assert_eq!(preview, "[64] value-64\n[65] value-65\n[66] value-66\n...");
+    }
+
+    #[test]
+    fn fixed_string_page_is_capped_to_preview_limit() {
+        let temp = tempfile::NamedTempFile::new().expect("create temporary HDF5 file");
+        let file = File::create(temp.path()).expect("create HDF5 file");
+        let values = vec![FixedAscii::<1024>::from_ascii("value").expect("create value"); 65];
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("strings")
+            .expect("create string dataset");
+
+        let preview = read_string_dataset_preview(&dataset, &Encoding::AsciiFixed, 0, 128)
+            .expect("page fixed strings");
+        assert!(preview.contains("[63] value"));
+        assert!(!preview.contains("[64] value"));
+        assert!(preview.ends_with("..."));
     }
 }

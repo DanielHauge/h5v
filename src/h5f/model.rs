@@ -320,9 +320,8 @@ impl H5FNode {
             {
                 if dataset_meta.shape.iter().any(|x| *x > 1) {
                     result.push(ContentShowMode::Matrix);
-                } else {
-                    result.push(ContentShowMode::Preview);
                 }
+                result.push(ContentShowMode::Preview);
             }
             Node::Dataset(_, DatasetMetaState::Loaded(dataset_meta))
                 if dataset_meta.is_compound_container() =>
@@ -358,9 +357,8 @@ impl H5FNode {
                         MatrixRenderType::Opaque => {
                             if dataset_meta.shape.iter().any(|x| *x > 1) {
                                 result.push(ContentShowMode::Matrix);
-                            } else {
-                                result.push(ContentShowMode::Preview);
                             }
+                            result.push(ContentShowMode::Preview);
                         }
                         MatrixRenderType::Uint64 => {
                             if dataset_meta.shape.iter().any(|x| *x > 1) {
@@ -383,9 +381,8 @@ impl H5FNode {
                         MatrixRenderType::Strings => {
                             if dataset_meta.shape.iter().any(|x| *x > 1) {
                                 result.push(ContentShowMode::Matrix);
-                            } else {
-                                result.push(ContentShowMode::Preview);
                             }
+                            result.push(ContentShowMode::Preview);
                         }
                         MatrixRenderType::Enum => {
                             if dataset_meta.shape.iter().any(|x| *x > 1) {
@@ -518,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_value_string_datasets_are_matrix_only() {
+    fn multi_value_string_datasets_support_preview_and_matrix() {
         let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
@@ -552,7 +549,10 @@ mod tests {
             }),
         ));
 
-        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+        assert_eq!(
+            node.content_show_modes(),
+            vec![ContentShowMode::Matrix, ContentShowMode::Preview]
+        );
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_value_opaque_datasets_are_matrix_only() {
+    fn multi_value_opaque_datasets_support_preview_and_matrix() {
         let _guard = crate::test_support::hdf5_test_guard();
         let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
         let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
@@ -692,7 +692,10 @@ mod tests {
             }),
         ));
 
-        assert_eq!(node.content_show_modes(), vec![ContentShowMode::Matrix]);
+        assert_eq!(
+            node.content_show_modes(),
+            vec![ContentShowMode::Matrix, ContentShowMode::Preview]
+        );
     }
 
     #[test]

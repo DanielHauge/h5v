@@ -104,7 +104,8 @@ pub fn highlighted_lines(string: &str, hl: &str) -> Option<Vec<Line<'static>>> {
     let string = if hl == "json" {
         serde_json::from_str::<serde_json::Value>(string)
             .ok()
-            .and_then(|value| serde_json::to_string_pretty(&value).ok())?
+            .and_then(|value| serde_json::to_string_pretty(&value).ok())
+            .unwrap_or_else(|| string.to_string())
     } else {
         string.to_string()
     };
@@ -137,19 +138,10 @@ pub fn render_hl_string<T: ToString>(
     let mut h = HighlightLines::new(syntax, &THEME_SET.themes[highlight_theme_name()]);
     let string = string.to_string();
     let string = if hl == "json" {
-        match serde_json::from_str::<serde_json::Value>(&string) {
-            Ok(v) => match serde_json::to_string_pretty(&v) {
-                Ok(pretty) => pretty,
-                Err(e) => {
-                    return render_error(
-                        f,
-                        area,
-                        format!("Error pretty-printing JSON: {e}\n{string}"),
-                    )
-                }
-            },
-            Err(e) => return render_error(f, area, format!("Error parsing JSON: {e}\n{string}")),
-        }
+        serde_json::from_str::<serde_json::Value>(&string)
+            .ok()
+            .and_then(|value| serde_json::to_string_pretty(&value).ok())
+            .unwrap_or(string)
     } else {
         string
     };
@@ -309,4 +301,21 @@ pub fn render_unsupported_rendering(f: &mut Frame, area: &Rect, selected_node: &
             vertical: 1,
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::highlighted_lines;
+
+    #[test]
+    fn invalid_json_highlights_as_raw_text() {
+        let lines = highlighted_lines("{not json}", "json").expect("json syntax is available");
+
+        let rendered: String = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(rendered, "{not json}");
+    }
 }
