@@ -5,6 +5,7 @@ use hdf5_metno::{
     types::{TypeDescriptor, VarLenUnicode},
     Dataset, File, Group, LinkType, LocationType, OpenMode,
 };
+use hdf5_metno_sys::h5t::{H5T_class_t::H5T_COMPOUND, H5Tget_class};
 use ratatui::style::Color;
 use tempfile::NamedTempFile;
 
@@ -434,6 +435,7 @@ impl H5FNode {
         match &self.node {
             Node::File(file) => Some(Node::File(file.clone())),
             Node::Group(group, meta) => Some(Node::Group(group.clone(), meta.clone())),
+            Node::Dataset(_, _) if self.is_compound_container() => Some(self.node.clone()),
             _ => None,
         }
     }
@@ -482,11 +484,17 @@ fn build_dataset_node(wrapped_ds: DSType) -> Result<Option<Node>, hdf5_metno::Er
     let (Some(parent), Some(name)) = (parent, name) else {
         return Ok(None);
     };
+    let is_compound_container = parent
+        .dataset(&name)
+        .ok()
+        .and_then(|dataset| dataset.dtype().ok())
+        .is_some_and(|dtype| unsafe { H5Tget_class(dtype.id()) == H5T_COMPOUND });
     let identity = DatasetIdentity {
         display_name,
         is_link,
         link_name,
         path: format!("{}/{}", parent.name().trim_end_matches('/'), name),
+        is_compound_container,
     };
     Ok(Some(Node::Dataset(
         DatasetHandle::Pending { parent, name },
@@ -792,15 +800,17 @@ impl H5F {
 mod tests {
     use std::str::FromStr;
 
-    use hdf5_metno::types::{EnumMember, EnumType, IntSize, TypeDescriptor, VarLenUnicode};
+    use hdf5_metno::types::{
+        CompoundField, CompoundType, EnumMember, EnumType, IntSize, TypeDescriptor, VarLenUnicode,
+    };
     use ratatui::style::Color;
 
     use super::{
-        build_dataset_meta, build_dataset_node, enum_render_attr_names, highlight_hint_from_name,
-        parse_enum_color, resolve_enum_render_overrides, resolve_highlight_hint, DSType,
-        ReadOpenMode, RequestedOpenMode, ResolvedOpenMode, H5F,
+        build_dataset_meta, build_dataset_node, enum_render_attr_names, enumerate_group_children,
+        highlight_hint_from_name, parse_enum_color, resolve_enum_render_overrides,
+        resolve_highlight_hint, DSType, ReadOpenMode, RequestedOpenMode, ResolvedOpenMode, H5F,
     };
-    use crate::h5f::{DatasetMetaState, H5FNode, Node};
+    use crate::h5f::{DatasetMetaState, H5FNode, HasName, Node};
     use crate::ui::render::MatrixRenderType;
 
     fn sample_enum() -> EnumType {
@@ -1256,6 +1266,7 @@ mod tests {
             child.borrow().node,
             Node::Dataset(_, DatasetMetaState::Pending(_))
         ));
+        assert!(!child.borrow().is_expandable());
 
         child
             .borrow_mut()
@@ -1270,5 +1281,57 @@ mod tests {
             .borrow_mut()
             .ensure_dataset_meta()
             .expect("use cached metadata");
+    }
+
+    #[test]
+    fn pending_compound_datasets_have_their_tree_icon_and_expander() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let compound = TypeDescriptor::Compound(CompoundType {
+            fields: vec![CompoundField::new(
+                "value",
+                TypeDescriptor::Unsigned(IntSize::U1),
+                0,
+                0,
+            )],
+            size: 1,
+        });
+        file.new_dataset_builder()
+            .empty_as(&compound)
+            .shape([1])
+            .create("records")
+            .expect("failed to create compound dataset");
+        file.new_dataset_builder()
+            .with_data(&[1_u8])
+            .create("values")
+            .expect("failed to create ordinary dataset");
+
+        let children = enumerate_group_children(&Node::File(file)).expect("enumerate root");
+        let compound = H5FNode::new(
+            children
+                .iter()
+                .find(|node| node.name() == "records")
+                .expect("compound dataset")
+                .clone(),
+        );
+        let ordinary = H5FNode::new(
+            children
+                .iter()
+                .find(|node| node.name() == "values")
+                .expect("ordinary dataset")
+                .clone(),
+        );
+
+        assert!(matches!(
+            compound.node,
+            Node::Dataset(_, DatasetMetaState::Pending(_))
+        ));
+        assert!(compound.is_expandable());
+        assert_eq!(
+            compound.icon(),
+            crate::configure::configured_symbol(|symbols| symbols.tree.compound_container_icon)
+        );
+        assert!(!ordinary.is_expandable());
     }
 }

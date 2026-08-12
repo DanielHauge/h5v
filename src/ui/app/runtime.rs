@@ -908,6 +908,7 @@ pub(super) fn main_recover_loop(
                 redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::NavigationLoad(result) => {
+                let metadata_loaded = matches!(result, NavigationLoadResult::Metadata { .. });
                 let applied = match apply_navigation_load_result(&mut state, result) {
                     Ok(applied) => applied,
                     Err(error) => {
@@ -917,6 +918,9 @@ pub(super) fn main_recover_loop(
                 };
                 if !applied {
                     continue;
+                }
+                if metadata_loaded {
+                    state.compute_tree_view();
                 }
                 redraw(terminal, &mut state, new_version.as_deref())?;
             }

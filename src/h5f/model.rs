@@ -26,6 +26,7 @@ pub struct DatasetIdentity {
     pub is_link: bool,
     pub link_name: Option<String>,
     pub path: String,
+    pub is_compound_container: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -249,6 +250,7 @@ impl H5FNode {
                 is_link: meta.is_link,
                 link_name: meta.link_name.clone(),
                 path: meta.virtual_path().unwrap_or(&meta.filename).to_string(),
+                is_compound_container: meta.is_compound_container(),
             }),
             _ => None,
         }
@@ -416,7 +418,13 @@ impl H5FNode {
     }
 
     pub fn is_compound_container(&self) -> bool {
-        matches!(&self.node, Node::Dataset(_, DatasetMetaState::Loaded(meta)) if meta.is_compound_container())
+        matches!(
+            &self.node,
+            Node::Dataset(_, DatasetMetaState::Pending(identity)) if identity.is_compound_container
+        ) || matches!(
+            &self.node,
+            Node::Dataset(_, DatasetMetaState::Loaded(meta)) if meta.is_compound_container()
+        )
     }
 
     pub fn is_compound_leaf(&self) -> bool {
@@ -424,10 +432,7 @@ impl H5FNode {
     }
 
     pub fn is_expandable(&self) -> bool {
-        matches!(self.node, Node::File(_,))
-            || self.is_group()
-            || matches!(self.node, Node::Dataset(_, DatasetMetaState::Pending(_)))
-            || self.is_compound_container()
+        matches!(self.node, Node::File(_,)) || self.is_group() || self.is_compound_container()
     }
 }
 
@@ -598,6 +603,8 @@ mod tests {
             node.content_show_modes(),
             vec![ContentShowMode::Preview, ContentShowMode::Matrix]
         );
+        assert!(node.is_expandable());
+        assert!(matches!(node.enumeration_node(), Some(Node::Dataset(_, _))));
     }
 
     #[test]
@@ -812,5 +819,6 @@ mod tests {
             node.content_show_modes(),
             vec![ContentShowMode::Matrix, ContentShowMode::Preview]
         );
+        assert!(!node.is_expandable());
     }
 }
