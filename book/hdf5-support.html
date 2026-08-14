@@ -1,0 +1,244 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js oranda-dark">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>HDF5 feature support - h5v documentation</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="oranda-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "oranda-dark" : "oranda-dark";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('orandamdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('orandamdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('orandamdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('oranda-dark')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="quick-start.html"><strong aria-hidden="true">3.</strong> Quick start</a></li><li class="chapter-item expanded "><a href="navigation.html"><strong aria-hidden="true">4.</strong> Navigation and layout</a></li><li class="chapter-item expanded "><a href="controls.html"><strong aria-hidden="true">5.</strong> Controls reference</a></li><li class="chapter-item expanded "><a href="hdf5-support.html" class="active"><strong aria-hidden="true">6.</strong> HDF5 feature support</a></li><li class="chapter-item expanded "><a href="previews.html"><strong aria-hidden="true">7.</strong> Preview types</a></li><li class="chapter-item expanded "><a href="matrix.html"><strong aria-hidden="true">8.</strong> Matrix views</a></li><li class="chapter-item expanded "><a href="heatmap.html"><strong aria-hidden="true">9.</strong> Heatmap</a></li><li class="chapter-item expanded "><a href="images.html"><strong aria-hidden="true">10.</strong> Images</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="image-conventions.html"><strong aria-hidden="true">10.1.</strong> Image conventions</a></li></ol></li><li class="chapter-item expanded "><a href="compound-datasets.html"><strong aria-hidden="true">11.</strong> Compound datasets</a></li><li class="chapter-item expanded "><a href="commands.html"><strong aria-hidden="true">12.</strong> Commands</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="command-reference.html"><strong aria-hidden="true">12.1.</strong> Command help in app</a></li><li class="chapter-item expanded "><a href="startup-scripting.html"><strong aria-hidden="true">12.2.</strong> Startup scripting</a></li></ol></li><li class="chapter-item expanded "><a href="configuration.html"><strong aria-hidden="true">13.</strong> Configuration and theming</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="configuration-reference.html"><strong aria-hidden="true">13.1.</strong> Configuration reference</a></li><li class="chapter-item expanded "><a href="plugins.html"><strong aria-hidden="true">13.2.</strong> Plugins</a></li></ol></li><li class="chapter-item expanded "><a href="multichart.html"><strong aria-hidden="true">14.</strong> Multichart</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="multichart-expressions.html"><strong aria-hidden="true">14.1.</strong> Multichart expressions</a></li></ol></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">15.</strong> Troubleshooting and limits</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="oranda-dark">Hacker</button></li>
+
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">h5v documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/danielhauge/h5v/edit/main/docs/src/hdf5-support.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="hdf5-feature-support"><a class="header" href="#hdf5-feature-support">HDF5 feature support</a></h1>
+<p>h5v can browse groups, datasets, links, broken links, and synthetic nodes created for projected compound fields.</p>
+<h2 id="matrixable-and-previewable-data-types"><a class="header" href="#matrixable-and-previewable-data-types">Matrixable and previewable data types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type family</th><th>Preview</th><th>Matrix</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Signed integers</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Unsigned integers</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Floating point</td><td>Yes</td><td>Yes</td><td>Rendered as numeric data</td></tr>
+<tr><td>Boolean</td><td>Yes</td><td>Yes</td><td>Routed through unsigned rendering</td></tr>
+<tr><td>Enum</td><td>Yes</td><td>Yes</td><td>Uses colored symbols and labels, with optional dataset-defined overrides</td></tr>
+<tr><td>Fixed strings</td><td>Text</td><td>Yes</td><td>Fixed strings are read with a 32768-byte limit</td></tr>
+<tr><td>Variable strings</td><td>Text</td><td>Yes</td><td>Good for inline string inspection</td></tr>
+<tr><td>Compound</td><td>Schema or projected preview</td><td>Projected fields and compound roots</td><td>Root compound matrix mode uses one selected dataset dimension for rows and direct fields for columns</td></tr>
+<tr><td>Fixed arrays</td><td>Limited</td><td>No</td><td>Standalone fixed arrays are not matrixable through the main renderer</td></tr>
+<tr><td>Variable arrays</td><td>Limited</td><td>No</td><td>Not matrixable through the main matrix renderer</td></tr>
+<tr><td>References</td><td>Limited</td><td>No</td><td>Attribute navigation follows object and dataset-region references; no dedicated matrix renderer</td></tr>
+</tbody></table>
+</div>
+<p>Matrix mode is only available when a dataset is matrixable and its shape has at least one dimension larger than <code>1</code>. Single-value datasets stay in scalar preview mode.</p>
+<h2 id="strings-and-highlighting"><a class="header" href="#strings-and-highlighting">Strings and highlighting</a></h2>
+<p>String datasets can carry a <code>HIGHLIGHT</code> attribute with an extension hint such as <code>json</code>, <code>py</code>, or <code>yml</code>. If it is absent, h5v falls back to the dataset name extension.</p>
+<h2 id="enum-styling-overrides"><a class="header" href="#enum-styling-overrides">Enum styling overrides</a></h2>
+<p>Enum datasets can override the default symbol and color cycle with:</p>
+<ul>
+<li><code>SYMBOLS</code>: a 1D string attribute, aligned with ascending numeric enum value order</li>
+<li><code>COLORS</code>: a 1D string attribute, aligned with ascending numeric enum value order</li>
+</ul>
+<p>Color values accept named colors and <code>#RRGGBB</code>. See <a href="./configuration-reference.html">Configuration reference</a>.</p>
+<h2 id="group-preview-expressions"><a class="header" href="#group-preview-expressions">Group preview expressions</a></h2>
+<p>Groups can opt into preview rendering with a variable-length string attribute named <code>H5V_PREVIEW_EXPR</code>. The value uses the same expression syntax as multichart.</p>
+<h2 id="image-metadata-handling"><a class="header" href="#image-metadata-handling">Image metadata handling</a></h2>
+<p>Datasets that follow the HDF5 image convention are rendered inline as images. See <a href="./images.html">Images</a> and <a href="./image-conventions.html">Image conventions</a>.</p>
+<h2 id="properties-vs-attributes"><a class="header" href="#properties-vs-attributes">Properties vs attributes</a></h2>
+<p><code>type</code>, <code>size</code>, <code>shape</code>, <code>chunk</code>, <code>link</code>, and <code>path</code> are properties shown in the Properties section. They are not HDF5 attributes.</p>
+<p>Those built-in properties include:</p>
+<ul>
+<li><code>type</code></li>
+<li><code>size</code></li>
+<li><code>shape</code></li>
+<li><code>chunk</code></li>
+<li><code>link</code></li>
+<li><code>path</code></li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="controls.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="previews.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="controls.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="previews.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

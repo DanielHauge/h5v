@@ -1,0 +1,299 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js oranda-dark">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Configuration and theming - h5v documentation</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="oranda-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "oranda-dark" : "oranda-dark";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('orandamdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('orandamdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('orandamdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('oranda-dark')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="quick-start.html"><strong aria-hidden="true">3.</strong> Quick start</a></li><li class="chapter-item expanded "><a href="navigation.html"><strong aria-hidden="true">4.</strong> Navigation and layout</a></li><li class="chapter-item expanded "><a href="controls.html"><strong aria-hidden="true">5.</strong> Controls reference</a></li><li class="chapter-item expanded "><a href="hdf5-support.html"><strong aria-hidden="true">6.</strong> HDF5 feature support</a></li><li class="chapter-item expanded "><a href="previews.html"><strong aria-hidden="true">7.</strong> Preview types</a></li><li class="chapter-item expanded "><a href="matrix.html"><strong aria-hidden="true">8.</strong> Matrix views</a></li><li class="chapter-item expanded "><a href="heatmap.html"><strong aria-hidden="true">9.</strong> Heatmap</a></li><li class="chapter-item expanded "><a href="images.html"><strong aria-hidden="true">10.</strong> Images</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="image-conventions.html"><strong aria-hidden="true">10.1.</strong> Image conventions</a></li></ol></li><li class="chapter-item expanded "><a href="compound-datasets.html"><strong aria-hidden="true">11.</strong> Compound datasets</a></li><li class="chapter-item expanded "><a href="commands.html"><strong aria-hidden="true">12.</strong> Commands</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="command-reference.html"><strong aria-hidden="true">12.1.</strong> Command help in app</a></li><li class="chapter-item expanded "><a href="startup-scripting.html"><strong aria-hidden="true">12.2.</strong> Startup scripting</a></li></ol></li><li class="chapter-item expanded "><a href="configuration.html" class="active"><strong aria-hidden="true">13.</strong> Configuration and theming</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="configuration-reference.html"><strong aria-hidden="true">13.1.</strong> Configuration reference</a></li><li class="chapter-item expanded "><a href="plugins.html"><strong aria-hidden="true">13.2.</strong> Plugins</a></li></ol></li><li class="chapter-item expanded "><a href="multichart.html"><strong aria-hidden="true">14.</strong> Multichart</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="multichart-expressions.html"><strong aria-hidden="true">14.1.</strong> Multichart expressions</a></li></ol></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">15.</strong> Troubleshooting and limits</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="oranda-dark">Hacker</button></li>
+
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">h5v documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/danielhauge/h5v/edit/main/docs/src/configuration.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<p><code>h5v</code> loads one Lua file: <code>init.lua</code>.</p>
+<h2 id="file-location"><a class="header" href="#file-location">File location</a></h2>
+<ul>
+<li>Linux: <code>~/.config/h5v/init.lua</code></li>
+<li>macOS: <code>~/Library/Application Support/h5v/init.lua</code></li>
+<li>Windows: <code>%AppData%\\h5v\\init.lua</code></li>
+</ul>
+<p>Commands:</p>
+<pre><code class="language-text">:configure
+:configure reset
+h5v --config /path/to/init.lua file.h5
+</code></pre>
+<p>LuaLS support files live next to the config under <code>.h5v-luals/</code>.</p>
+<h2 id="start-with-this-shape"><a class="header" href="#start-with-this-shape">Start with this shape</a></h2>
+<pre><code class="language-lua">h5v.theme = "dark"
+h5v.symbol_theme = "rich"
+h5v.compatibility = false
+h5v.content_mode_order = { "preview", "matrix" }
+
+h5v.heatmap.default_colormap = "inferno"
+h5v.layout.tree.focused = "28%"
+
+h5v.colors.accent.selection_bg = "#005f87"
+h5v.symbols.title.help = " Help "
+
+h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+h",
+  target = h5v.actions.ShowHelp,
+  description = "Show help",
+})
+</code></pre>
+<h2 id="main-pieces"><a class="header" href="#main-pieces">Main pieces</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Lua entry</th><th>Use it for</th></tr></thead><tbody>
+<tr><td><code>h5v.theme</code>, <code>h5v.symbol_theme</code></td><td>shipped themes</td></tr>
+<tr><td><code>h5v.colors.*</code>, <code>h5v.symbols.*</code></td><td>targeted overrides</td></tr>
+<tr><td><code>h5v.content_mode_order</code></td><td>preferred preview/matrix/heatmap order</td></tr>
+<tr><td><code>h5v.compatibility</code></td><td>compatibility mode default</td></tr>
+<tr><td><code>h5v.layout.*</code></td><td>tree / attributes / content sizing</td></tr>
+<tr><td><code>h5v.heatmap.*</code></td><td>heatmap defaults and custom ranges</td></tr>
+<tr><td><code>h5v.multichart.*</code></td><td>multichart sampling defaults</td></tr>
+<tr><td><code>h5v.keys.*</code></td><td>keybindings</td></tr>
+<tr><td><code>h5v.commands.register(...)</code></td><td>custom commands</td></tr>
+<tr><td><code>h5v.events.on(...)</code></td><td>autocommands</td></tr>
+<tr><td><code>h5v.mchart.functions.register(...)</code></td><td>custom multichart functions</td></tr>
+<tr><td><code>h5v.plugins.use(...)</code></td><td>plugins</td></tr>
+<tr><td><code>h5v.logs.*</code></td><td>log from Lua</td></tr>
+</tbody></table>
+</div>
+<h2 id="use-constants-not-magic-strings"><a class="header" href="#use-constants-not-magic-strings">Use constants, not magic strings</a></h2>
+<p>Prefer the generated constants and action ids:</p>
+<pre><code class="language-lua">h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.global,
+  key = "ctrl+l",
+  target = h5v.actions.ReloadFile,
+})
+</code></pre>
+<p>Use the in-app help for the current command list, action names, keymaps, multichart functions, and health details.</p>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="keybinding"><a class="header" href="#keybinding">Keybinding</a></h3>
+<pre><code class="language-lua">h5v.keys.bind({
+  mode = h5v.ids.keymap_modes.heatmap,
+  key = "ctrl+alt+r",
+  command = "heatmap range use \"Clip 1-99%\"",
+  description = "Use clipped range",
+})
+</code></pre>
+<h3 id="custom-command"><a class="header" href="#custom-command">Custom command</a></h3>
+<pre><code class="language-lua">h5v.commands.register({
+  id = "analysis.refresh",
+  title = "Refresh analysis",
+  summary = "Refresh plugin output",
+  run = function(ctx)
+    ctx.toast.info("refreshing")
+    ctx.command("logs")
+  end,
+})
+</code></pre>
+<h3 id="event-hook"><a class="header" href="#event-hook">Event hook</a></h3>
+<pre><code class="language-lua">h5v.events.on(h5v.ids.events.file_opened, function(ctx, event)
+  ctx.log.info("file opened: " .. event.path)
+})
+</code></pre>
+<h3 id="plugin-from-config"><a class="header" href="#plugin-from-config">Plugin from config</a></h3>
+<pre><code class="language-lua">h5v.plugins.use("~/dev/h5v-demo-plugin")
+h5v.plugins.use("owner/example-plugin")
+h5v.plugins.use("owner/example-plugin@main")
+h5v.plugins.use("owner/example-plugin", { auto_pull = false })
+</code></pre>
+<h2 id="health-and-logs"><a class="header" href="#health-and-logs">Health and logs</a></h2>
+<ul>
+<li>Bad config loads show up in the header and in <code>Help -&gt; Health</code>.</li>
+<li>Plugin problems show up on the plugin health page when the plugin has a valid manifest.</li>
+<li><code>:logs</code> opens the log panel.</li>
+</ul>
+<p>For plugin authoring, see <a href="./plugins.html">Plugins</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="startup-scripting.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="configuration-reference.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="startup-scripting.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="configuration-reference.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

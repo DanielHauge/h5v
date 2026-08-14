@@ -1,0 +1,240 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js oranda-dark">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Compound datasets - h5v documentation</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="oranda-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "oranda-dark" : "oranda-dark";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('orandamdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('orandamdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('orandamdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('oranda-dark')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="quick-start.html"><strong aria-hidden="true">3.</strong> Quick start</a></li><li class="chapter-item expanded "><a href="navigation.html"><strong aria-hidden="true">4.</strong> Navigation and layout</a></li><li class="chapter-item expanded "><a href="controls.html"><strong aria-hidden="true">5.</strong> Controls reference</a></li><li class="chapter-item expanded "><a href="hdf5-support.html"><strong aria-hidden="true">6.</strong> HDF5 feature support</a></li><li class="chapter-item expanded "><a href="previews.html"><strong aria-hidden="true">7.</strong> Preview types</a></li><li class="chapter-item expanded "><a href="matrix.html"><strong aria-hidden="true">8.</strong> Matrix views</a></li><li class="chapter-item expanded "><a href="heatmap.html"><strong aria-hidden="true">9.</strong> Heatmap</a></li><li class="chapter-item expanded "><a href="images.html"><strong aria-hidden="true">10.</strong> Images</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="image-conventions.html"><strong aria-hidden="true">10.1.</strong> Image conventions</a></li></ol></li><li class="chapter-item expanded "><a href="compound-datasets.html" class="active"><strong aria-hidden="true">11.</strong> Compound datasets</a></li><li class="chapter-item expanded "><a href="commands.html"><strong aria-hidden="true">12.</strong> Commands</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="command-reference.html"><strong aria-hidden="true">12.1.</strong> Command help in app</a></li><li class="chapter-item expanded "><a href="startup-scripting.html"><strong aria-hidden="true">12.2.</strong> Startup scripting</a></li></ol></li><li class="chapter-item expanded "><a href="configuration.html"><strong aria-hidden="true">13.</strong> Configuration and theming</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="configuration-reference.html"><strong aria-hidden="true">13.1.</strong> Configuration reference</a></li><li class="chapter-item expanded "><a href="plugins.html"><strong aria-hidden="true">13.2.</strong> Plugins</a></li></ol></li><li class="chapter-item expanded "><a href="multichart.html"><strong aria-hidden="true">14.</strong> Multichart</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="multichart-expressions.html"><strong aria-hidden="true">14.1.</strong> Multichart expressions</a></li></ol></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">15.</strong> Troubleshooting and limits</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="oranda-dark">Hacker</button></li>
+
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">h5v documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/danielhauge/h5v/edit/main/docs/src/compound-datasets.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="compound-datasets"><a class="header" href="#compound-datasets">Compound datasets</a></h1>
+<h2 id="synthetic-child-nodes"><a class="header" href="#synthetic-child-nodes">Synthetic child nodes</a></h2>
+<p>The bundled example file includes <code>/compound/records</code> and <code>/compound/nested_records</code> so you can test both simple and nested compound browsing immediately.</p>
+<p>Compound datasets are not treated as opaque blobs. h5v creates synthetic tree nodes for their fields so you can navigate the compound structure directly from the main tree.</p>
+<h2 id="root-level-schema-preview"><a class="header" href="#root-level-schema-preview">Root-level schema preview</a></h2>
+<p>When the focused node is the root of a compound dataset, the preview pane shows a recursive schema view rather than an empty content area. The schema includes:</p>
+<ul>
+<li>field names</li>
+<li>field types</li>
+<li>byte offsets</li>
+<li>nested compounds and compound arrays</li>
+</ul>
+<p>For compound datasets with at least one non-singleton record axis, Matrix mode is also available as a first-pass table view:</p>
+<ul>
+<li>one row per compound record along the selected record dimension</li>
+<li>one column per direct field</li>
+<li>horizontal scrolling moves through fields when there are more fields than the viewport can show</li>
+<li>additional dataset dimensions stay fixed to the currently selected indices</li>
+<li>nested compounds and array-valued fields rendered inline as summarized cell text</li>
+<li>read-only for now; editing still happens through projected leaves</li>
+</ul>
+<h2 id="recursion-handling"><a class="header" href="#recursion-handling">Recursion handling</a></h2>
+<p>Schema rendering has a hard recursion limit of <code>32</code> nested levels and explicitly omits recursive loops once they are detected. That keeps pathological or self-referential layouts from hanging the preview.</p>
+<h2 id="projected-field-workflows"><a class="header" href="#projected-field-workflows">Projected field workflows</a></h2>
+<p>Once you drill down to a concrete leaf field, that projected field behaves like an ordinary dataset slice:</p>
+<ul>
+<li>numeric fields can preview as charts</li>
+<li>matrixable fields can render in matrix mode</li>
+<li>scalar string fields render as text</li>
+<li>multi-value string arrays stay matrix-only</li>
+</ul>
+<p>The bundled example is a good regression harness here:</p>
+<ul>
+<li><code>/compound/records/label</code> shows projected string handling</li>
+<li><code>/compound/nested_records/window</code> shows a projected fixed array that can be edited from matrix mode</li>
+</ul>
+<p>Projected enum leaves use the same enum renderer as normal enum datasets. They can inherit dataset-wide <code>SYMBOLS</code> and <code>COLORS</code> overrides, and they also check field-scoped variants first by prefixing the projected field path in uppercase with underscores. For example, a projected field like <code>status/evaluation</code> looks for <code>STATUS_EVALUATION_SYMBOLS</code> and <code>STATUS_EVALUATION_COLORS</code> before falling back to plain <code>SYMBOLS</code> and <code>COLORS</code>.</p>
+<p>This makes compound-heavy files much easier to inspect without exporting fields into standalone datasets first.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="image-conventions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="commands.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="image-conventions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="commands.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
