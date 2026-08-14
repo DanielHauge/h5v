@@ -1,3 +1,4 @@
+use super::super::{MultiChartViewMode, PreparedChartData};
 use super::*;
 use crate::ui::{
     chrome::{rounded_panel, truncate_to_width},
@@ -302,6 +303,57 @@ impl MultiChartState {
         let block = rounded_panel("Statistics");
         let inner = block.inner(area);
         f.render_widget(block, area);
+
+        if self.view_mode() == MultiChartViewMode::Histogram {
+            if let Some(PreparedChartData::Histogram(data)) = self.prepared_chart_data() {
+                let Some(first) = data.series.first().and_then(|series| series.bins.first()) else {
+                    return;
+                };
+                let construction = match data.x_axis_scale {
+                    ChartAxisScale::Linear => format!(
+                        "{} bins · first {:.4} · width {:.4}",
+                        data.bin_count,
+                        first.start,
+                        first.end - first.start
+                    ),
+                    ChartAxisScale::Logarithmic => format!(
+                        "{} bins · first {:.4} · log-spaced",
+                        data.bin_count, first.start
+                    ),
+                    ChartAxisScale::SymLog => format!(
+                        "{} bins · first {:.4} · symlog-spaced",
+                        data.bin_count, first.start
+                    ),
+                };
+                let mut lines = vec![Line::from(construction)];
+                if let Some(selection) = self.histogram_selection {
+                    let end = selection.end.min(data.bin_count.saturating_sub(1));
+                    let start = selection.start.min(end);
+                    let aggregate = data
+                        .series
+                        .iter()
+                        .flat_map(|series| &series.bins[start..=end])
+                        .map(|bin| bin.count)
+                        .sum::<f64>();
+                    let bins = &data.series[0].bins;
+                    lines.push(Line::from(format!(
+                        "bins {}–{} · {:.4}..{:.4}",
+                        start + 1,
+                        end + 1,
+                        bins[start].start,
+                        bins[end].end
+                    )));
+                    lines.push(Line::from(format!("aggregate count {:.0}", aggregate)));
+                }
+                f.render_widget(
+                    Paragraph::new(lines)
+                        .style(mchart_body_style())
+                        .wrap(Wrap { trim: true }),
+                    inner,
+                );
+                return;
+            }
+        }
 
         let Some(item) = self.selected_item() else {
             return;

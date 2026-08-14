@@ -361,13 +361,15 @@ fn describe_content_target(target: &BoundAction<ContentAction>) -> String {
                 "Toggle the preview Y axis between linear and logarithmic".to_string()
             }
             ContentAction::HeatmapZoomIn => {
-                "Zoom in the active heatmap or preview chart".to_string()
+                "Zoom in; histogram history back (z/-, PageUp; wheel down over plot)".to_string()
             }
             ContentAction::HeatmapZoomOut => {
-                "Zoom out the active heatmap or preview chart".to_string()
+                "Zoom out; histogram history forward (Z/+/=, PageDown; wheel up over plot)"
+                    .to_string()
             }
             ContentAction::HeatmapResetView => {
-                "Reset the heatmap or preview-chart viewport".to_string()
+                "Reset the heatmap or preview-chart viewport; clear histogram clipping history"
+                    .to_string()
             }
             ContentAction::HeatmapClearSelection => "Clear the heatmap selection".to_string(),
             ContentAction::HeatmapPan(direction) => {

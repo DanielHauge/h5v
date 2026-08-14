@@ -578,6 +578,36 @@ mod tests {
     }
 
     #[test]
+    fn content_zoom_keys_match_defaults() {
+        let keymaps = EffectiveKeymaps::default();
+        for key in ['z', '-'] {
+            assert_eq!(
+                content_action(
+                    &KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE),
+                    &keymaps
+                ),
+                Some(BoundAction::Action(ContentAction::HeatmapZoomIn))
+            );
+        }
+        for key in ['Z', '+', '='] {
+            assert_eq!(
+                content_action(
+                    &KeyEvent::new(
+                        KeyCode::Char(key),
+                        if key == 'Z' {
+                            KeyModifiers::SHIFT
+                        } else {
+                            KeyModifiers::NONE
+                        },
+                    ),
+                    &keymaps,
+                ),
+                Some(BoundAction::Action(ContentAction::HeatmapZoomOut))
+            );
+        }
+    }
+
+    #[test]
     fn preview_shift_x_toggles_x_axis_scale_without_normal_x_conflict() {
         let keymaps = EffectiveKeymaps::default();
         assert_eq!(

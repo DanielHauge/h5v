@@ -12,6 +12,145 @@ fn viewport_eq(left: ChartViewport, right: ChartViewport) -> bool {
 }
 
 impl MultiChartState {
+    fn histogram_history_move(&mut self, forward: bool) -> bool {
+        if self.view_mode != MultiChartViewMode::Histogram {
+            return false;
+        }
+        let next = if forward {
+            self.histogram_history_index.checked_add(1)
+        } else {
+            self.histogram_history_index.checked_sub(1)
+        };
+        let Some(next) = next.filter(|index| *index < self.histogram_history.len()) else {
+            return false;
+        };
+        self.histogram_history_index = next;
+        self.histogram_range = self.histogram_history[next];
+        self.histogram_selection = None;
+        self.modified = true;
+        true
+    }
+
+    fn histogram_reset(&mut self) -> bool {
+        if self.view_mode != MultiChartViewMode::Histogram
+            || (self.histogram_range.is_none()
+                && self.histogram_selection.is_none()
+                && self.histogram_history.len() == 1)
+        {
+            return false;
+        }
+        self.histogram_selection = None;
+        self.histogram_range = None;
+        self.histogram_history = vec![None];
+        self.histogram_history_index = 0;
+        self.modified = true;
+        true
+    }
+
+    pub fn histogram_select_at(&mut self, column: u16, row: u16) -> bool {
+        if self.view_mode != MultiChartViewMode::Histogram {
+            return false;
+        }
+        let Some(area) = self.last_chart_area else {
+            return false;
+        };
+        if !point_in_rect(area, column, row) {
+            return false;
+        }
+        let Some(PreparedChartData::Histogram(data)) = self.prepared_chart_data() else {
+            return false;
+        };
+        let ratio = f64::from(column.saturating_sub(area.x))
+            / f64::from(area.width.saturating_sub(1).max(1));
+        let value = match data.x_axis_scale {
+            ChartAxisScale::Linear => data.value_min + (data.value_max - data.value_min) * ratio,
+            ChartAxisScale::Logarithmic => {
+                (data.value_min.ln() + (data.value_max.ln() - data.value_min.ln()) * ratio).exp()
+            }
+            ChartAxisScale::SymLog => crate::ui::chart_math::symlog_inverse(
+                crate::ui::chart_math::symlog(data.value_min)
+                    + (crate::ui::chart_math::symlog(data.value_max)
+                        - crate::ui::chart_math::symlog(data.value_min))
+                        * ratio,
+            ),
+        };
+        let Some(bins) = data.series.first().map(|series| &series.bins) else {
+            return false;
+        };
+        let index = bins
+            .iter()
+            .position(|bin| value >= bin.start && value <= bin.end)
+            .unwrap_or(bins.len().saturating_sub(1));
+        self.histogram_selection = Some(match self.histogram_selection {
+            Some(selection) if selection.selection_count < 2 => HistogramSelection {
+                start: selection.start.min(index),
+                end: selection.end.max(index),
+                selection_count: 2,
+            },
+            _ => HistogramSelection {
+                start: index,
+                end: index,
+                selection_count: 1,
+            },
+        });
+        self.modified = true;
+        true
+    }
+
+    pub fn histogram_clip_selection(&mut self) -> bool {
+        let Some(selection) = self
+            .histogram_selection
+            .filter(|selection| selection.selection_count == 2)
+        else {
+            return false;
+        };
+        let Some(PreparedChartData::Histogram(data)) = self.prepared_chart_data() else {
+            return false;
+        };
+        let Some(bins) = data.series.first().map(|series| &series.bins) else {
+            return false;
+        };
+        let (Some(start), Some(end)) = (bins.get(selection.start), bins.get(selection.end)) else {
+            return false;
+        };
+        let range = HistogramRange {
+            min: start.start,
+            max: end.end,
+        };
+        if self.histogram_range == Some(range) {
+            return false;
+        }
+        self.histogram_history
+            .truncate(self.histogram_history_index + 1);
+        self.histogram_history.push(Some(range));
+        self.histogram_history_index += 1;
+        self.histogram_range = Some(range);
+        self.histogram_selection = None;
+        self.modified = true;
+        true
+    }
+
+    pub fn histogram_history_back(&mut self) -> bool {
+        self.histogram_history_move(false)
+    }
+    pub fn histogram_history_forward(&mut self) -> bool {
+        self.histogram_history_move(true)
+    }
+    pub fn histogram_history_back_at_position(&mut self, column: u16, row: u16) -> bool {
+        self.view_mode == MultiChartViewMode::Histogram
+            && self
+                .last_chart_area
+                .is_some_and(|area| point_in_rect(area, column, row))
+            && self.histogram_history_back()
+    }
+    pub fn histogram_history_forward_at_position(&mut self, column: u16, row: u16) -> bool {
+        self.view_mode == MultiChartViewMode::Histogram
+            && self
+                .last_chart_area
+                .is_some_and(|area| point_in_rect(area, column, row))
+            && self.histogram_history_forward()
+    }
+
     fn supports_zoom(&self) -> bool {
         matches!(self.view_mode(), MultiChartViewMode::Line)
     }
@@ -168,10 +307,16 @@ impl MultiChartState {
     }
 
     pub fn zoom_in(&mut self, percent: f64) -> bool {
+        if self.view_mode == MultiChartViewMode::Histogram {
+            return self.histogram_history_back();
+        }
         self.zoom_with_anchor(percent, 0.5, 0.5, true, ChartZoomMode::Uniform)
     }
 
     pub fn zoom_out(&mut self, percent: f64) -> bool {
+        if self.view_mode == MultiChartViewMode::Histogram {
+            return self.histogram_history_forward();
+        }
         self.zoom_with_anchor(percent, 0.5, 0.5, false, ChartZoomMode::Uniform)
     }
 
@@ -192,6 +337,9 @@ impl MultiChartState {
     }
 
     pub fn clear_zoom(&mut self) -> bool {
+        if self.view_mode == MultiChartViewMode::Histogram {
+            return self.histogram_reset();
+        }
         self.set_explicit_viewport(None)
     }
 
@@ -248,6 +396,9 @@ impl MultiChartState {
     }
 
     pub fn start_drag_at_position(&mut self, column: u16, row: u16) -> bool {
+        if self.view_mode == MultiChartViewMode::Histogram {
+            return false;
+        }
         let Some(chart_area) = self.last_chart_area else {
             return false;
         };
@@ -312,6 +463,9 @@ impl MultiChartState {
     }
 
     pub(super) fn pan_by(&mut self, dx_percent: f64, dy_percent: f64) -> bool {
+        if self.view_mode == MultiChartViewMode::Histogram {
+            return false;
+        }
         let Some(bounds) = self.visible_data_bounds() else {
             return false;
         };

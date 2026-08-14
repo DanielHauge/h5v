@@ -708,6 +708,57 @@ fn histogram_log_scale_uses_linear_fallback_for_zero_or_mixed_values() {
 }
 
 #[test]
+fn histogram_selection_clips_all_overlays_and_tracks_history() {
+    let mut state = make_state();
+    let selection = PreviewSelection {
+        index: vec![0],
+        x: 0,
+        slice: SliceSelection::All,
+    };
+    state.add_chart_item(
+        source("/group/a", selection.clone()),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)],
+    );
+    state.add_chart_item(
+        source("/group/b", selection),
+        vec![(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)],
+    );
+    state.cycle_view_mode();
+    state.last_chart_area = Some(Rect::new(0, 0, 101, 20));
+    assert!(state.histogram_select_at(0, 10));
+    assert!(state.histogram_select_at(60, 10));
+    assert_eq!(state.histogram_selection.expect("range").selection_count, 2);
+    let PreparedChartData::Histogram(selected) = state.prepared_chart_data().expect("histogram")
+    else {
+        panic!("histogram");
+    };
+    assert_eq!(
+        selected
+            .series
+            .iter()
+            .flat_map(|series| &series.bins)
+            .filter(|bin| bin.is_selected)
+            .map(|bin| bin.count)
+            .sum::<f64>(),
+        6.0
+    );
+    assert!(state.histogram_clip_selection());
+    let PreparedChartData::Histogram(data) = state.prepared_chart_data().expect("histogram") else {
+        panic!("histogram");
+    };
+    assert_eq!(
+        data.series
+            .iter()
+            .map(|series| series.bins.iter().map(|bin| bin.count).sum::<f64>())
+            .sum::<f64>(),
+        6.0
+    );
+    assert!(state.histogram_history_back());
+    assert!(state.histogram_history_forward());
+    assert!(state.clear_zoom());
+}
+
+#[test]
 fn symlog_line_scale_keeps_mixed_values_valid() {
     let mut state = make_state();
     let selection = PreviewSelection {
@@ -882,11 +933,13 @@ fn histogram_render_request_succeeds() {
                         start: 0.0,
                         end: 2.0,
                         count: 3.0,
+                        is_selected: true,
                     },
                     PreparedHistogramBin {
                         start: 2.0,
                         end: 4.0,
                         count: 1.0,
+                        is_selected: false,
                     },
                 ],
                 is_selected: true,

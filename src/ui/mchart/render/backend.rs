@@ -395,7 +395,9 @@ fn render_histogram_request(
                                     bin.count,
                                 ),
                             ],
-                            color.mix(fill_opacity).filled(),
+                            color
+                                .mix(if bin.is_selected { 0.78 } else { fill_opacity })
+                                .filled(),
                         )
                     })) {
                         Ok(series_drawn) => series_drawn,
@@ -432,7 +434,11 @@ fn render_histogram_request(
                                     bin.count,
                                 ),
                             ],
-                            outline,
+                            if bin.is_selected {
+                                ShapeStyle::from(&color).stroke_width(4)
+                            } else {
+                                outline
+                            },
                         )
                     })) {
                         log_error(&error);

@@ -63,6 +63,14 @@ Use `h5v.multichart = { ... }` in Lua to tune large-series behavior.
 - box plot summarizes visible-value quartiles, whiskers, and outliers
 - comparison scatter aligns the selected series with the next visible series
 
+### Histogram interaction
+
+- click a bin to select it; click a second bin for an inclusive shared range; a third click starts over
+- selected bins show their aggregate count across all visible overlays in Statistics, along with bin construction
+- right-click clips every visible overlay to the selected shared value range and clears the selection
+- `z`, `-`, or `PageUp` goes back; `Z`, `+`, `=`, or `PageDown` goes forward; `0` resets the clip history
+- wheel over the histogram plot follows the same direction: down back, up forward; line zoom, pan, and right-drag are disabled
+
 ## Zoom and pan
 
 - `+`, `=`, or `Shift+Up` to zoom in

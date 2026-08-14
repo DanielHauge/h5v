@@ -400,13 +400,13 @@ const CONTENT_ACTION_CODES: &[ActionCode<ContentAction>] = &[
         symbol: "HeatmapZoomIn",
         code: "heatmap-zoom-in",
         action: ContentAction::HeatmapZoomIn,
-        default_keys: &["z"],
+        default_keys: &["z", "-"],
     },
     ActionCode {
         symbol: "HeatmapZoomOut",
         code: "heatmap-zoom-out",
         action: ContentAction::HeatmapZoomOut,
-        default_keys: &["Z"],
+        default_keys: &["Z", "+", "="],
     },
     ActionCode {
         symbol: "HeatmapResetView",

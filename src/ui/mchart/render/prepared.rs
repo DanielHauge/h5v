@@ -223,6 +223,10 @@ impl MultiChartState {
                 .windowed_visible_points(item)
                 .into_iter()
                 .map(|(_, y)| y)
+                .filter(|value| {
+                    self.histogram_range
+                        .is_none_or(|range| *value >= range.min && *value <= range.max)
+                })
                 .collect::<Vec<_>>();
             if values.is_empty() {
                 continue;
@@ -256,10 +260,14 @@ impl MultiChartState {
         for (item, values) in series_values {
             let bins = histogram_bins(&values, value_min, value_max, bin_count, histogram_scale)?
                 .into_iter()
-                .map(|bin| PreparedHistogramBin {
+                .enumerate()
+                .map(|(index, bin)| PreparedHistogramBin {
                     start: bin.start,
                     end: bin.end,
                     count: bin.count,
+                    is_selected: self.histogram_selection.is_some_and(|selection| {
+                        index >= selection.start && index <= selection.end
+                    }),
                 })
                 .collect::<Vec<_>>();
             count_max = count_max.max(bins.iter().map(|bin| bin.count).fold(0.0, f64::max));

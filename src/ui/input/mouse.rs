@@ -543,6 +543,14 @@ fn handle_preview_chart_scroll(
     if state.active_content_mode() != ContentShowMode::Preview {
         return Ok(EventResult::Continue);
     }
+    if state.chart_preview_state.histogram_history_at_position(
+        column,
+        row,
+        histogram_wheel_history_back(zoom_in),
+    ) {
+        state.focus = Focus::Content;
+        return Ok(EventResult::Redraw);
+    }
     let zoom_mode = preview_chart_zoom_mode(modifiers);
     let changed = if zoom_in {
         state
@@ -558,6 +566,21 @@ fn handle_preview_chart_scroll(
         Ok(EventResult::Redraw)
     } else {
         Ok(EventResult::Continue)
+    }
+}
+
+fn histogram_wheel_history_back(scroll_up: bool) -> bool {
+    !scroll_up
+}
+
+#[cfg(test)]
+mod tests {
+    use super::histogram_wheel_history_back;
+
+    #[test]
+    fn histogram_wheel_directions_are_reversed_from_zoom() {
+        assert!(!histogram_wheel_history_back(true));
+        assert!(histogram_wheel_history_back(false));
     }
 }
 

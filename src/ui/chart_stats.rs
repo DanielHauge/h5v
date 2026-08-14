@@ -281,6 +281,12 @@ mod tests {
     }
 
     #[test]
+    fn histogram_bin_counts_sum_to_finite_input_count() {
+        let summary = histogram_summary(&[1.0, 2.0, f64::NAN, 4.0]).expect("summary");
+        assert_eq!(summary.bins.iter().map(|bin| bin.count).sum::<f64>(), 3.0);
+    }
+
+    #[test]
     fn symlog_histogram_keeps_zero_and_signed_values() {
         let summary = histogram_summary_with_scale(&[-100.0, 0.0, 100.0], ChartAxisScale::SymLog)
             .expect("summary");

@@ -120,6 +120,25 @@ pub(crate) fn handle_mchart_event(
                     };
                 }
 
+                if state.multi_chart.view_mode() == crate::ui::mchart::MultiChartViewMode::Histogram
+                {
+                    use ratatui::crossterm::event::KeyCode;
+                    let changed = match key_event.code {
+                        KeyCode::PageUp | KeyCode::Char('z') | KeyCode::Char('-') => {
+                            state.multi_chart.histogram_history_back()
+                        }
+                        KeyCode::PageDown
+                        | KeyCode::Char('Z')
+                        | KeyCode::Char('+')
+                        | KeyCode::Char('=') => state.multi_chart.histogram_history_forward(),
+                        KeyCode::Char('0') => state.multi_chart.clear_zoom(),
+                        _ => false,
+                    };
+                    if changed {
+                        return Ok(EventResult::Redraw);
+                    }
+                }
+
                 let keymaps = crate::configure::current_keymaps();
                 match multichart_action(&key_event, &keymaps) {
                     Some(BoundAction::Action(MultiChartAction::EnterCommand)) => {
@@ -298,6 +317,12 @@ pub(crate) fn handle_mchart_event(
                 }
                 if state
                     .multi_chart
+                    .histogram_select_at(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
+                if state
+                    .multi_chart
                     .click_view_mode_hitbox(mouse_event.column, mouse_event.row)
                 {
                     return Ok(EventResult::Redraw);
@@ -322,6 +347,9 @@ pub(crate) fn handle_mchart_event(
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
+                if state.multi_chart.histogram_clip_selection() {
+                    return Ok(EventResult::Redraw);
+                }
                 state
                     .multi_chart
                     .start_drag_at_position(mouse_event.column, mouse_event.row);
@@ -349,6 +377,12 @@ pub(crate) fn handle_mchart_event(
                 }
             }
             MouseEventKind::ScrollUp => {
+                if state
+                    .multi_chart
+                    .histogram_history_forward_at_position(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
                 let zoom_mode = mouse_zoom_mode(mouse_event.modifiers);
                 if state.multi_chart.zoom_in_at_position(
                     mouse_event.column,
@@ -362,6 +396,12 @@ pub(crate) fn handle_mchart_event(
                 }
             }
             MouseEventKind::ScrollDown => {
+                if state
+                    .multi_chart
+                    .histogram_history_back_at_position(mouse_event.column, mouse_event.row)
+                {
+                    return Ok(EventResult::Redraw);
+                }
                 let zoom_mode = mouse_zoom_mode(mouse_event.modifiers);
                 if state.multi_chart.zoom_out_at_position(
                     mouse_event.column,

@@ -12,9 +12,10 @@ use crate::{
     h5f::H5FNode,
     ui::{
         chart_math::{
-            axis_label_area_size, axis_title_label_area_size, normalized_axis_bounds,
-            raster_chart_layout, RasterChartLayout, RasterChartLayoutHints,
+            axis_label_area_size, axis_title_label_area_size, format_axis_number,
+            normalized_axis_bounds, raster_chart_layout, RasterChartLayout, RasterChartLayoutHints,
         },
+        chart_stats::histogram_summary_with_scale,
         mchart::chart_plot_area_in_rect,
         mchart::ChartAxisScale,
         page_scroll::{compact_count, PageDisplayInfo},
@@ -211,6 +212,9 @@ fn preview_stats_lines(
 }
 
 pub(super) fn preview_stats_info(state: &AppState<'_>) -> Option<Vec<Line<'static>>> {
+    if state.chart_preview_state.mode == crate::ui::state::PreviewChartMode::Histogram {
+        return histogram_info_lines(state);
+    }
     let data = state.chart_preview_state.current_data.as_ref()?;
     if data.data.is_empty() {
         return None;
@@ -240,6 +244,103 @@ pub(super) fn preview_stats_info(state: &AppState<'_>) -> Option<Vec<Line<'stati
     };
     let (start, end) = preview_visible_index_window(data, viewport, x_min)?;
     preview_stats_lines("View", &data.data[start..=end], false)
+}
+
+pub(super) fn preview_context_height(
+    mode: crate::ui::state::PreviewChartMode,
+    stats_lines: Option<&[Line<'static>]>,
+) -> u16 {
+    if mode == crate::ui::state::PreviewChartMode::Histogram {
+        return stats_lines
+            .map_or(2, |lines| lines.len().clamp(1, 2) as u16)
+            .saturating_add(2);
+    }
+    5
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::text::Line;
+
+    use super::preview_context_height;
+    use crate::ui::state::PreviewChartMode;
+
+    #[test]
+    fn histogram_context_height_tracks_its_one_or_two_stats_rows() {
+        assert_eq!(
+            preview_context_height(PreviewChartMode::Histogram, Some(&[Line::from("bins")])),
+            3
+        );
+        assert_eq!(
+            preview_context_height(
+                PreviewChartMode::Histogram,
+                Some(&[Line::from("bins"), Line::from("selection")]),
+            ),
+            4
+        );
+        assert_eq!(preview_context_height(PreviewChartMode::Line, None), 5);
+    }
+}
+
+fn histogram_info_lines(state: &AppState<'_>) -> Option<Vec<Line<'static>>> {
+    let data = state.chart_preview_state.current_data.as_ref()?;
+    let viewport = state.chart_preview_state.effective_viewport()?;
+    let x_min = state.chart_preview_state.selection_x_min();
+    let (start, end) = preview_visible_index_window(data, viewport, x_min)?;
+    let range = state.chart_preview_state.histogram_range;
+    let values = data.data[start..=end]
+        .iter()
+        .map(|(_, value)| *value)
+        .filter(|value| {
+            value.is_finite()
+                && range.is_none_or(|range| *value >= range.min && *value <= range.max)
+        })
+        .collect::<Vec<_>>();
+    let scale = state
+        .chart_preview_state
+        .effective_axis_scale_for_renderer(true, state.image_protocol_enabled);
+    let summary = histogram_summary_with_scale(&values, scale)?;
+    let first = summary.bins.first()?;
+    let width = first.end - first.start;
+    let construction = if scale == ChartAxisScale::Linear {
+        format!(
+            "{} bins · first {} · width {}",
+            summary.bin_count,
+            format_axis_number(first.start),
+            format_axis_number(width)
+        )
+    } else {
+        let scale_name = match scale {
+            ChartAxisScale::Logarithmic => "log",
+            ChartAxisScale::SymLog => "symlog",
+            ChartAxisScale::Linear => unreachable!(),
+        };
+        format!(
+            "{} bins · first {} · {}-spaced",
+            summary.bin_count,
+            format_axis_number(first.start),
+            scale_name
+        )
+    };
+    let Some(selection) = state.chart_preview_state.histogram_selection else {
+        return Some(vec![Line::from(construction)]);
+    };
+    let selected = &summary.bins[selection.start.min(summary.bins.len().saturating_sub(1))
+        ..=selection.end.min(summary.bins.len().saturating_sub(1))];
+    let min = selected.first()?.start;
+    let max = selected.last()?.end;
+    let count = selected.iter().map(|bin| bin.count).sum::<f64>();
+    Some(vec![
+        Line::from(construction),
+        Line::from(format!(
+            "bins {}–{} · {}..{} · count {:.0}",
+            selection.start + 1,
+            selection.end + 1,
+            format_axis_number(min),
+            format_axis_number(max),
+            count
+        )),
+    ])
 }
 
 fn preview_selection_lines(node: &mut H5FNode, shape: &[usize]) -> Vec<Line<'static>> {

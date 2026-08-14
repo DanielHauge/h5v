@@ -57,10 +57,11 @@ pub(crate) use render::chart_plot_area_in_rect;
 pub(crate) use types::ChartZoomMode;
 pub use types::{CapturedMultiChartItem, MultiChartRenderRequest, MultiChartRenderResult};
 use types::{
-    ChartDragState, ChartItemStatus, ChartViewport, MultiChartAxisScaleHitbox,
-    MultiChartEditorHitbox, MultiChartItemHitbox, MultiChartViewModeHitbox, PreparedBoxPlotData,
-    PreparedBoxPlotSeries, PreparedChartData, PreparedComparisonScatterData, PreparedHistogramBin,
-    PreparedHistogramData, PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
+    ChartDragState, ChartItemStatus, ChartViewport, HistogramRange, HistogramSelection,
+    MultiChartAxisScaleHitbox, MultiChartEditorHitbox, MultiChartItemHitbox,
+    MultiChartViewModeHitbox, PreparedBoxPlotData, PreparedBoxPlotSeries, PreparedChartData,
+    PreparedComparisonScatterData, PreparedHistogramBin, PreparedHistogramData,
+    PreparedHistogramSeries, PreparedLineChartData, PreparedLineChartSeries,
 };
 
 #[derive(Debug, Clone)]
@@ -171,6 +172,10 @@ pub struct MultiChartState {
     pub(super) axis_scale_hitboxes: Vec<MultiChartAxisScaleHitbox>,
     expression_revision: u64,
     pending_expression_refresh_revision: Option<u64>,
+    histogram_selection: Option<HistogramSelection>,
+    histogram_range: Option<HistogramRange>,
+    histogram_history: Vec<Option<HistogramRange>>,
+    histogram_history_index: usize,
 }
 
 impl MultiChartState {
@@ -211,6 +216,10 @@ impl MultiChartState {
             axis_scale_hitboxes: Vec::new(),
             expression_revision: 0,
             pending_expression_refresh_revision: None,
+            histogram_selection: None,
+            histogram_range: None,
+            histogram_history: vec![None],
+            histogram_history_index: 0,
         }
     }
 

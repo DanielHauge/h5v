@@ -172,6 +172,8 @@ impl ChartPreviwState {
         self.roi = None;
         self.histogram_selection = None;
         self.histogram_range = None;
+        self.histogram_history = vec![None];
+        self.histogram_history_index = 0;
         self.last_chart_area = None;
         self.last_plot_area = None;
         self.drag_state = None;
@@ -292,9 +294,13 @@ impl ChartPreviwState {
 
     pub fn clear_zoom(&mut self) -> bool {
         if self.mode == PreviewChartMode::Histogram {
-            let changed = self.histogram_selection.is_some() || self.histogram_range.is_some();
+            let changed = self.histogram_selection.is_some()
+                || self.histogram_range.is_some()
+                || self.histogram_history.len() > 1;
             self.histogram_selection = None;
             self.histogram_range = None;
+            self.histogram_history = vec![None];
+            self.histogram_history_index = 0;
             if changed {
                 self.invalidate_render();
             }
@@ -316,7 +322,54 @@ impl ChartPreviwState {
     pub(crate) fn set_histogram_range(&mut self, range: super::PreviewHistogramRange) {
         if self.histogram_range != Some(range) {
             self.histogram_range = Some(range);
+            self.histogram_history
+                .truncate(self.histogram_history_index + 1);
+            self.histogram_history.push(Some(range));
+            self.histogram_history_index = self.histogram_history.len() - 1;
             self.invalidate_render();
+        }
+    }
+
+    pub(crate) fn histogram_history_back(&mut self) -> bool {
+        if self.mode != PreviewChartMode::Histogram || self.histogram_history_index == 0 {
+            return false;
+        }
+        self.histogram_history_index -= 1;
+        self.histogram_range = self.histogram_history[self.histogram_history_index];
+        self.histogram_selection = None;
+        self.invalidate_render();
+        true
+    }
+
+    pub(crate) fn histogram_history_forward(&mut self) -> bool {
+        if self.mode != PreviewChartMode::Histogram
+            || self.histogram_history_index + 1 >= self.histogram_history.len()
+        {
+            return false;
+        }
+        self.histogram_history_index += 1;
+        self.histogram_range = self.histogram_history[self.histogram_history_index];
+        self.histogram_selection = None;
+        self.invalidate_render();
+        true
+    }
+
+    pub(crate) fn histogram_history_at_position(
+        &mut self,
+        column: u16,
+        row: u16,
+        back: bool,
+    ) -> bool {
+        if !self
+            .last_plot_area
+            .is_some_and(|area| point_in_rect(area, column, row))
+        {
+            return false;
+        }
+        if back {
+            self.histogram_history_back()
+        } else {
+            self.histogram_history_forward()
         }
     }
 
@@ -752,6 +805,7 @@ mod tests {
     };
 
     use super::{preview_index_at_x, ChartPreviwState, PreviewChartMode};
+    use crate::ui::state::PreviewHistogramRange;
 
     fn chart_state() -> ChartPreviwState {
         super::super::tests::chart_state()
@@ -787,5 +841,51 @@ mod tests {
         }));
         assert!(!state.axis_scale_is_available(true, ChartAxisScale::Logarithmic));
         assert!(state.axis_scale_is_available(true, ChartAxisScale::SymLog));
+    }
+
+    #[test]
+    fn histogram_history_drops_forward_states_after_a_new_clip() {
+        let mut state = chart_state();
+        state.mode = PreviewChartMode::Histogram;
+        let first = PreviewHistogramRange { min: 1.0, max: 2.0 };
+        let replacement = PreviewHistogramRange { min: 3.0, max: 4.0 };
+        state.set_histogram_range(first);
+        assert!(state.histogram_history_back());
+        state.set_histogram_range(replacement);
+        assert_eq!(state.histogram_range, Some(replacement));
+        assert!(!state.histogram_history_forward());
+        assert!(state.histogram_history_back());
+        assert_eq!(state.histogram_range, None);
+    }
+
+    #[test]
+    fn histogram_wheel_history_requires_the_plot_and_maps_reversed_directions() {
+        let mut state = chart_state();
+        state.mode = PreviewChartMode::Histogram;
+        state.last_plot_area = Some(ratatui::layout::Rect::new(5, 3, 10, 10));
+        let first = PreviewHistogramRange { min: 1.0, max: 2.0 };
+        let second = PreviewHistogramRange { min: 3.0, max: 4.0 };
+        state.set_histogram_range(first);
+        state.set_histogram_range(second);
+
+        assert!(!state.histogram_history_at_position(4, 3, true));
+        assert_eq!(state.histogram_range, Some(second));
+        assert!(state.histogram_history_at_position(5, 3, true));
+        assert_eq!(state.histogram_range, Some(first));
+        assert!(state.histogram_history_at_position(5, 3, false));
+        assert_eq!(state.histogram_range, Some(second));
+    }
+
+    #[test]
+    fn histogram_reset_clears_history_even_from_the_unclipped_state() {
+        let mut state = chart_state();
+        state.mode = PreviewChartMode::Histogram;
+        state.set_histogram_range(PreviewHistogramRange { min: 1.0, max: 2.0 });
+        assert!(state.histogram_history_back());
+
+        assert!(state.clear_zoom());
+        assert_eq!(state.histogram_range, None);
+        assert_eq!(state.histogram_history, vec![None]);
+        assert!(!state.histogram_history_forward());
     }
 }

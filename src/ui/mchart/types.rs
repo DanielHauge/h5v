@@ -77,6 +77,20 @@ pub(super) struct PreparedHistogramBin {
     pub(super) start: f64,
     pub(super) end: f64,
     pub(super) count: f64,
+    pub(super) is_selected: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HistogramSelection {
+    pub(super) start: usize,
+    pub(super) end: usize,
+    pub(super) selection_count: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct HistogramRange {
+    pub(super) min: f64,
+    pub(super) max: f64,
 }
 
 #[derive(Debug, Clone)]

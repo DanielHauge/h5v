@@ -170,6 +170,8 @@ pub(super) fn prepare_app<'a>(
         roi: None,
         histogram_selection: None,
         histogram_range: None,
+        histogram_history: vec![None],
+        histogram_history_index: 0,
         last_chart_area: None,
         last_plot_area: None,
         drag_state: None,

@@ -74,6 +74,14 @@ fn redraw_if(changed: bool) -> EventResult {
     }
 }
 
+fn histogram_history_direction(key: KeyCode) -> Option<bool> {
+    match key {
+        KeyCode::PageUp => Some(true),
+        KeyCode::PageDown => Some(false),
+        _ => None,
+    }
+}
+
 fn copy_image_to_clipboard(
     state: &mut AppState<'_>,
     width: usize,
@@ -484,7 +492,11 @@ fn copy_preview_content(state: &mut AppState<'_>) -> Result<EventResult, AppErro
 
 #[cfg(test)]
 mod tests {
+    use ratatui::crossterm::event::KeyCode;
+
     use crate::ui::state::direct_content_preview_page;
+
+    use super::histogram_history_direction;
 
     #[test]
     fn direct_content_preview_page_matches_paged_string_rendering() {
@@ -501,6 +513,13 @@ mod tests {
             direct_content_preview_page(&[100], 8, true, 50),
             (784, 1024)
         );
+    }
+
+    #[test]
+    fn histogram_page_keys_map_to_history_directions() {
+        assert_eq!(histogram_history_direction(KeyCode::PageUp), Some(true));
+        assert_eq!(histogram_history_direction(KeyCode::PageDown), Some(false));
+        assert_eq!(histogram_history_direction(KeyCode::Home), None);
     }
 }
 
@@ -744,6 +763,19 @@ pub fn handle_normal_content_event(
                 {
                     return Ok(redraw_if(state.chart_preview_state.clear_roi_or_zoom()));
                 }
+                if matches!(content_mode, ContentShowMode::Preview)
+                    && state.chart_preview_state.mode
+                        == crate::ui::state::PreviewChartMode::Histogram
+                {
+                    if let Some(back) = histogram_history_direction(key_event.code) {
+                        if back {
+                            state.chart_preview_state.histogram_history_back();
+                        } else {
+                            state.chart_preview_state.histogram_history_forward();
+                        }
+                        return Ok(EventResult::Redraw);
+                    }
+                }
                 let action = if matches!(content_mode, ContentShowMode::Heatmap) {
                     heatmap_action(&key_event, keymaps)
                         .or_else(|| content_action(&key_event, keymaps))
@@ -930,13 +962,21 @@ pub fn handle_normal_content_event(
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapZoomIn)),
                         ContentShowMode::Preview,
-                    ) => Ok(redraw_if(state.chart_preview_state.zoom_with_anchor(
-                        10.0,
-                        0.5,
-                        0.5,
-                        true,
-                        crate::ui::state::PreviewChartZoomMode::Uniform,
-                    ))),
+                    ) => Ok(redraw_if(
+                        if state.chart_preview_state.mode
+                            == crate::ui::state::PreviewChartMode::Histogram
+                        {
+                            state.chart_preview_state.histogram_history_back()
+                        } else {
+                            state.chart_preview_state.zoom_with_anchor(
+                                10.0,
+                                0.5,
+                                0.5,
+                                true,
+                                crate::ui::state::PreviewChartZoomMode::Uniform,
+                            )
+                        },
+                    )),
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapZoomOut)),
                         ContentShowMode::Heatmap,
@@ -944,13 +984,21 @@ pub fn handle_normal_content_event(
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapZoomOut)),
                         ContentShowMode::Preview,
-                    ) => Ok(redraw_if(state.chart_preview_state.zoom_with_anchor(
-                        10.0,
-                        0.5,
-                        0.5,
-                        false,
-                        crate::ui::state::PreviewChartZoomMode::Uniform,
-                    ))),
+                    ) => Ok(redraw_if(
+                        if state.chart_preview_state.mode
+                            == crate::ui::state::PreviewChartMode::Histogram
+                        {
+                            state.chart_preview_state.histogram_history_forward()
+                        } else {
+                            state.chart_preview_state.zoom_with_anchor(
+                                10.0,
+                                0.5,
+                                0.5,
+                                false,
+                                crate::ui::state::PreviewChartZoomMode::Uniform,
+                            )
+                        },
+                    )),
                     (
                         Some(BoundAction::Action(ContentAction::HeatmapResetView)),
                         ContentShowMode::Heatmap,

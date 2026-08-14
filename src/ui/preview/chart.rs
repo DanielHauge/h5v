@@ -46,9 +46,9 @@ mod context;
 mod protocol;
 
 use context::{
-    copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_roi_range,
-    preview_roi_x_bounds, preview_stats_info, preview_view_info, preview_visible_points,
-    preview_x_axis_max, preview_x_min, render_preview_context_panel,
+    copy_page_display_info, preview_chart_layout, preview_chart_plot_area, preview_context_height,
+    preview_roi_range, preview_roi_x_bounds, preview_stats_info, preview_view_info,
+    preview_visible_points, preview_x_axis_max, preview_x_min, render_preview_context_panel,
 };
 pub(crate) use context::{
     preview_chart_data_bounds, preview_effective_x_domain, preview_visible_index_window,
@@ -105,10 +105,12 @@ fn histogram_tick_indices(boundary_count: usize, max_labels: usize) -> Vec<usize
         return (0..boundary_count).collect();
     }
     let step = (boundary_count - 1).div_ceil(max_labels.saturating_sub(1));
-    (0..boundary_count)
+    let mut indices = (0..boundary_count)
         .step_by(step)
         .chain(std::iter::once(boundary_count - 1))
-        .collect()
+        .collect::<Vec<_>>();
+    indices.dedup();
+    indices
 }
 
 fn sync_direct_chart_preview(
@@ -124,12 +126,13 @@ fn sync_direct_chart_preview(
         .chart_preview_state
         .set_current_data(Some(data_preview.clone()));
     state.chart_preview_state.set_chart_area(Some(chart_area));
-    state.chart_preview_state.set_plot_area(
-        (state.chart_preview_state.mode.supports_roi()
-            || state.chart_preview_state.mode == PreviewChartMode::Histogram)
-            .then(|| preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max))
-            .flatten(),
-    );
+    state
+        .chart_preview_state
+        .set_plot_area(preview_chart_interaction_plot_area(
+            state,
+            chart_area,
+            data_preview,
+        ));
 }
 
 fn preview_windowed_values(
@@ -149,6 +152,33 @@ fn preview_windowed_values(
             histogram_range.is_none_or(|range| *value >= range.min && *value <= range.max)
         })
         .collect()
+}
+
+fn preview_chart_interaction_plot_area(
+    state: &AppState<'_>,
+    chart_area: Rect,
+    data: &DatasetPlotingData,
+) -> Option<Rect> {
+    if state.chart_preview_state.mode == PreviewChartMode::Histogram {
+        let values = preview_windowed_values(
+            data,
+            state.chart_preview_state.effective_viewport()?,
+            state.chart_preview_state.selection_x_min(),
+            state.chart_preview_state.histogram_range,
+        );
+        let scale = state
+            .chart_preview_state
+            .effective_axis_scale_for_renderer(true, state.image_protocol_enabled);
+        return histogram_summary_with_scale(&values, scale).and_then(|summary| {
+            preview_chart_plot_area(chart_area, state.image_cell_size, summary.count_max)
+        });
+    }
+    state
+        .chart_preview_state
+        .mode
+        .supports_roi()
+        .then(|| preview_chart_plot_area(chart_area, state.image_cell_size, data.max))
+        .flatten()
 }
 
 pub(crate) fn select_histogram_bin_at(state: &mut AppState<'_>, column: u16, row: u16) -> bool {
@@ -321,15 +351,13 @@ pub fn render_precomputed_chart_preview(
         return Ok(());
     }
     state.chart_preview_state.set_chart_area(Some(chart_area));
-    state.chart_preview_state.set_plot_area(
-        if state.chart_preview_state.mode.supports_roi()
-            || state.chart_preview_state.mode == PreviewChartMode::Histogram
-        {
-            preview_chart_plot_area(chart_area, state.image_cell_size, data_preview.max)
-        } else {
-            None
-        },
-    );
+    state
+        .chart_preview_state
+        .set_plot_area(preview_chart_interaction_plot_area(
+            state,
+            chart_area,
+            &data_preview,
+        ));
 
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
@@ -559,8 +587,14 @@ pub fn render_chart_preview(
     let selector_info = preview_view_info(state, shape[node.selected_x])
         .or_else(|| page_info.as_ref().map(copy_page_display_info));
     let stats_info = preview_stats_info(state);
-    let areas_split =
-        Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
+    let areas_split = Layout::vertical(vec![
+        Constraint::Length(preview_context_height(
+            state.chart_preview_state.mode,
+            stats_info.as_deref(),
+        )),
+        Constraint::Min(1),
+    ])
+    .split(*area);
     let chart_area = areas_split[1].inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -631,9 +665,7 @@ pub fn render_chart_preview(
                 .chart_preview_state
                 .current_data
                 .as_ref()
-                .and_then(|data| {
-                    preview_chart_plot_area(chart_area, state.image_cell_size, data.max)
-                }),
+                .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data)),
         );
         queue_chart_preview_load(
             f,
@@ -817,8 +849,14 @@ fn render_projected_chart_preview(
     let selector_info = preview_view_info(state, shape[node.selected_x])
         .or_else(|| page_info.as_ref().map(copy_page_display_info));
     let stats_info = preview_stats_info(state);
-    let areas_split =
-        Layout::vertical(vec![Constraint::Length(4), Constraint::Min(1)]).split(*area);
+    let areas_split = Layout::vertical(vec![
+        Constraint::Length(preview_context_height(
+            state.chart_preview_state.mode,
+            stats_info.as_deref(),
+        )),
+        Constraint::Min(1),
+    ])
+    .split(*area);
     let chart_area = areas_split[1].inner(ratatui::layout::Margin {
         horizontal: 0,
         vertical: 1,
@@ -887,19 +925,11 @@ fn render_projected_chart_preview(
     } else {
         state.chart_preview_state.set_chart_area(Some(chart_area));
         state.chart_preview_state.set_plot_area(
-            if state.chart_preview_state.mode.supports_roi()
-                || state.chart_preview_state.mode == PreviewChartMode::Histogram
-            {
-                state
-                    .chart_preview_state
-                    .current_data
-                    .as_ref()
-                    .and_then(|data| {
-                        preview_chart_plot_area(chart_area, state.image_cell_size, data.max)
-                    })
-            } else {
-                None
-            },
+            state
+                .chart_preview_state
+                .current_data
+                .as_ref()
+                .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data)),
         );
         queue_chart_preview_load(
             f,
