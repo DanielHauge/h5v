@@ -106,7 +106,12 @@ pub fn render_main_display(
     state: &mut AppState,
 ) -> std::result::Result<(), AppError> {
     let mut node = selected_node_no.borrow_mut();
-    let prepared_attributes = if state.show_tree_view {
+    let show_metadata = state.show_tree_view
+        && !matches!(
+            ContentShowMode::parse_handle(state.active_content_mode_handle().as_str()),
+            Some(ContentShowMode::Heatmap)
+        );
+    let prepared_attributes = if show_metadata {
         node.computed_attributes
             .is_some()
             .then(|| prepare_metadata_layout(&mut node, area.width))
@@ -115,7 +120,7 @@ pub fn render_main_display(
         None
     };
 
-    let content_area = if state.show_tree_view {
+    let content_area = if show_metadata {
         let (attr_area, content_area) =
             split_main_display(*area, &state.focus, prepared_attributes.as_ref());
         render_info_attributes(
@@ -134,17 +139,21 @@ pub fn render_main_display(
     state.ui_layout.matrix_rows.clear();
     state.ui_layout.matrix_cells.clear();
 
-    if let Some(error) = metadata_error_message(&node) {
-        f.render_widget(
-            Paragraph::new(format!("Dataset metadata unavailable: {error}"))
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(configure::themed_color(|colors| colors.surface.bg))),
-            content_area,
-        );
-        return Ok(());
+    if show_metadata {
+        if let Some(error) = metadata_error_message(&node) {
+            f.render_widget(
+                Paragraph::new(format!("Dataset metadata unavailable: {error}"))
+                    .alignment(Alignment::Center)
+                    .style(
+                        Style::default().bg(configure::themed_color(|colors| colors.surface.bg)),
+                    ),
+                content_area,
+            );
+            return Ok(());
+        }
     }
 
-    if matches!(node.node, Node::Dataset(_, DatasetMetaState::Pending(_))) {
+    if show_metadata && matches!(node.node, Node::Dataset(_, DatasetMetaState::Pending(_))) {
         f.render_widget(
             Paragraph::new("Loading dataset metadata...")
                 .alignment(Alignment::Center)

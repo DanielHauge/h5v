@@ -151,9 +151,7 @@ fn render_heatmap_with_dataset(
 
     let base_viewport = heatmap_base_viewport(state, source_rows, source_cols);
     let layout = HeatmapLayout::new(area_inner);
-    let show_profile_panel = state.heatmap_render.selected_line.is_some()
-        || state.heatmap_render.current_line_profile.is_some();
-    let (heatmap_body, profile_area) = split_heatmap_body(layout.body, show_profile_panel);
+    let (heatmap_body, profile_area) = split_heatmap_body(layout.body);
     let heatmap_body_inner = panels::heatmap_frame_inner(&heatmap_body);
     if !one_axis_heatmap_paging_supported(base_viewport, heatmap_body_inner, state.image_cell_size)
     {
@@ -212,9 +210,7 @@ fn render_heatmap_with_dataset(
         header_page_window,
     )?;
     panels::render_heatmap_region_panel(f, &layout.region, attr, node, state);
-    if let Some(profile_area) = profile_area {
-        panels::render_heatmap_profile_slot(f, &profile_area, state)?;
-    }
+    panels::render_heatmap_profile_slot(f, &profile_area, state)?;
     Ok(())
 }
 
@@ -303,14 +299,11 @@ impl HeatmapLayout {
     }
 }
 
-fn split_heatmap_body(area: Rect, show_profile: bool) -> (Rect, Option<Rect>) {
-    if !show_profile || area.height < 12 {
-        return (area, None);
-    }
-    let profile_height = 7u16.min(area.height.saturating_sub(5));
+fn split_heatmap_body(area: Rect) -> (Rect, Rect) {
+    let profile_height = 7u16.min(area.height.saturating_sub(4));
     let split =
         Layout::vertical([Constraint::Min(4), Constraint::Length(profile_height)]).split(area);
-    (split[0], Some(split[1]))
+    (split[0], split[1])
 }
 
 fn queue_heatmap_load(
