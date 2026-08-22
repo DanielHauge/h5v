@@ -1,3 +1,5 @@
+use image::Rgba;
+use ratatui::crossterm::terminal;
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
@@ -33,16 +35,119 @@ use crate::{
 use super::{
     boot::prepare_app,
     config::open_configuration_and_reload,
-    events::{handle_file_watch_events, handle_term_events, schedule_preview_debounce},
+    events::{
+        handle_file_watch_events, handle_term_events, schedule_preview_debounce,
+        schedule_resize_debounce,
+    },
     lifecycle::AppTerminal,
+    picker_with_cell_size,
     reload::reload_current_file,
     render::{draw_app_frame, render_error},
+    terminal_cell_size,
     update::spawn_update_check,
     AppEvent, ChartPreviewLoadedResult, HeatmapLoadedResult, ImageLoadedResult,
     NavigationLoadResult, TreeLoadResult,
 };
 
 type Result<T> = std::result::Result<T, AppError>;
+
+#[cfg(test)]
+mod cell_metric_tests {
+    use ratatui::crossterm::terminal::WindowSize;
+
+    use super::{resize_debounce_is_current, terminal_cell_size};
+
+    #[test]
+    fn cell_size_uses_pixel_and_cell_dimensions() {
+        assert_eq!(
+            terminal_cell_size(WindowSize {
+                columns: 120,
+                rows: 40,
+                width: 1_080,
+                height: 800,
+            }),
+            Some((9, 20))
+        );
+        assert_eq!(
+            terminal_cell_size(WindowSize {
+                columns: 0,
+                rows: 40,
+                width: 1_080,
+                height: 800,
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn only_the_latest_resize_debounce_is_current() {
+        assert!(!resize_debounce_is_current(2, 1));
+        assert!(resize_debounce_is_current(2, 2));
+    }
+}
+
+fn refresh_image_cell_metrics(
+    state: &mut AppState<'_>,
+    tx_events: &std::sync::mpsc::Sender<AppEvent>,
+) -> bool {
+    let Some(cell_size) = terminal::window_size().ok().and_then(terminal_cell_size) else {
+        return false;
+    };
+    if state.image_cell_size == cell_size {
+        return false;
+    }
+
+    let (r, g, b) = configure::rgb_channels(configure::themed_color(|colors| colors.surface.bg));
+    let picker = picker_with_cell_size(
+        state.multi_chart.picker.clone(),
+        Some(cell_size),
+        Rgba([r, g, b, 255]),
+    );
+
+    state.image_cell_size = cell_size;
+    state.multi_chart.set_picker(picker.clone());
+    state.img_state.protocol = None;
+    state.img_state.clipboard_image = None;
+    state.img_state.current_key = None;
+    state.img_state.window = None;
+    state.img_state.cached_images.clear();
+    state.img_state.pending_keys.clear();
+    state.chart_preview_state.invalidate_render();
+    state.heatmap_render.cached_pages.clear();
+    state.heatmap_render.current_key = None;
+
+    let tx_resize_img = crate::ui::preview::image::handle_image_resize(tx_events.clone());
+    state.img_state.tx_resize_img = tx_resize_img.clone();
+    state.img_state.tx_load_imgfs = crate::ui::preview::image::handle_imagefs_load(
+        tx_events.clone(),
+        tx_resize_img.clone(),
+        picker.clone(),
+    );
+    state.img_state.tx_load_imgfsvlen = crate::ui::preview::image::handle_imagefsvlen_load(
+        tx_events.clone(),
+        tx_resize_img.clone(),
+        picker.clone(),
+    );
+    state.img_state.tx_load_img = crate::ui::preview::image::handle_image_load(
+        tx_events.clone(),
+        tx_resize_img,
+        picker.clone(),
+    );
+    let tx_resize_chartpreview =
+        crate::ui::preview::image::handle_chartpreview_resize(tx_events.clone());
+    state.chart_preview_state.tx_resize_chartpreview = tx_resize_chartpreview.clone();
+    state.chart_preview_state.tx_load_chartpreview =
+        crate::ui::preview::image::handle_chartpreview_load(
+            tx_events.clone(),
+            tx_resize_chartpreview,
+            picker,
+        );
+    true
+}
+
+fn resize_debounce_is_current(active_generation: u64, generation: u64) -> bool {
+    active_generation == generation
+}
 
 fn tree_load_is_current(
     current_generation: u64,
@@ -203,6 +308,7 @@ pub(super) fn main_recover_loop(
         state.file_watch.path.clone(),
         worker_running,
     );
+    let mut resize_debounce_generation: u64 = 0;
 
     loop {
         let event = match state
@@ -255,6 +361,10 @@ pub(super) fn main_recover_loop(
                 redraw(terminal, &mut state, new_version.as_deref())?;
             }
             AppEvent::TermEvent(event) => {
+                if matches!(event, ratatui::crossterm::event::Event::Resize(_, _)) {
+                    resize_debounce_generation = resize_debounce_generation.wrapping_add(1);
+                    schedule_resize_debounce(tx_events.clone(), resize_debounce_generation);
+                }
                 let selected_before = state.selected_tree_path();
                 let selected_kind_before = selected_item_kind(&state).map(str::to_string);
                 let content_mode_before = state.active_content_mode_handle();
@@ -926,6 +1036,13 @@ pub(super) fn main_recover_loop(
             }
             AppEvent::PreviewDebounceExpired(generation) => {
                 if state.resolve_preview_debounce(generation) {
+                    redraw(terminal, &mut state, new_version.as_deref())?;
+                }
+            }
+            AppEvent::ResizeDebounceExpired(generation) => {
+                if resize_debounce_is_current(resize_debounce_generation, generation)
+                    && refresh_image_cell_metrics(&mut state, &tx_events)
+                {
                     redraw(terminal, &mut state, new_version.as_deref())?;
                 }
             }

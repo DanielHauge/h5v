@@ -5,6 +5,7 @@ use std::sync::{
 use std::time::Instant;
 
 use image::Rgba;
+use ratatui::crossterm::terminal;
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::{
@@ -105,7 +106,13 @@ pub(super) fn prepare_app<'a>(
     };
     let (bg_r, bg_g, bg_b) =
         configure::rgb_channels(configure::themed_color(|colors| colors.surface.bg));
-    picker.set_background_color(Some(Rgba([bg_r, bg_g, bg_b, 255])));
+    picker = super::picker_with_cell_size(
+        picker,
+        terminal::window_size()
+            .ok()
+            .and_then(super::terminal_cell_size),
+        Rgba([bg_r, bg_g, bg_b, 255]),
+    );
     let picker_font_size = picker.font_size();
     let image_cell_size = (picker_font_size.width, picker_font_size.height);
     let tx_resize = tx_events.clone();

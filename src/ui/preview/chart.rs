@@ -125,14 +125,9 @@ fn sync_direct_chart_preview(
     state
         .chart_preview_state
         .set_current_data(Some(data_preview.clone()));
-    state.chart_preview_state.set_chart_area(Some(chart_area));
-    state
-        .chart_preview_state
-        .set_plot_area(preview_chart_interaction_plot_area(
-            state,
-            chart_area,
-            data_preview,
-        ));
+    let plot_area = preview_chart_interaction_plot_area(state, chart_area, data_preview);
+    state.chart_preview_state.set_chart_area(plot_area);
+    state.chart_preview_state.set_plot_area(plot_area);
 }
 
 fn preview_windowed_values(
@@ -350,14 +345,9 @@ pub fn render_precomputed_chart_preview(
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
         return Ok(());
     }
-    state.chart_preview_state.set_chart_area(Some(chart_area));
-    state
-        .chart_preview_state
-        .set_plot_area(preview_chart_interaction_plot_area(
-            state,
-            chart_area,
-            &data_preview,
-        ));
+    let plot_area = preview_chart_interaction_plot_area(state, chart_area, &data_preview);
+    state.chart_preview_state.set_chart_area(plot_area);
+    state.chart_preview_state.set_plot_area(plot_area);
 
     let current_key = ChartPreviewKey {
         ds_path: node.node.path(),
@@ -659,14 +649,13 @@ pub fn render_chart_preview(
         perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
-        state.chart_preview_state.set_chart_area(Some(chart_area));
-        state.chart_preview_state.set_plot_area(
-            state
-                .chart_preview_state
-                .current_data
-                .as_ref()
-                .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data)),
-        );
+        let plot_area = state
+            .chart_preview_state
+            .current_data
+            .as_ref()
+            .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data));
+        state.chart_preview_state.set_chart_area(plot_area);
+        state.chart_preview_state.set_plot_area(plot_area);
         queue_chart_preview_load(
             f,
             chart_area,
@@ -923,14 +912,13 @@ fn render_projected_chart_preview(
         perf::metrics().preview.direct_widget_renders.increment();
         render_chart_widget(f, &chart_area, state, data_preview, x_min);
     } else {
-        state.chart_preview_state.set_chart_area(Some(chart_area));
-        state.chart_preview_state.set_plot_area(
-            state
-                .chart_preview_state
-                .current_data
-                .as_ref()
-                .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data)),
-        );
+        let plot_area = state
+            .chart_preview_state
+            .current_data
+            .as_ref()
+            .and_then(|data| preview_chart_interaction_plot_area(state, chart_area, data));
+        state.chart_preview_state.set_chart_area(plot_area);
+        state.chart_preview_state.set_plot_area(plot_area);
         queue_chart_preview_load(
             f,
             chart_area,

@@ -452,17 +452,21 @@ impl MultiChartState {
         }
 
         let font_size = self.picker.font_size();
-        let cell_w = font_size.width;
-        let cell_h = font_size.height;
+        let cell_w = font_size.width.max(1);
+        let cell_h = font_size.height.max(1);
         let new_height = chart_area.height as u32 * cell_h as u32;
         let new_width = chart_area.width as u32 * cell_w as u32;
+        let panel_changed = self.last_chart_panel_area != Some(chart_area);
         self.last_chart_panel_area = Some(chart_area);
-        if new_height != self.height || new_width != self.width {
+        if panel_changed || new_height != self.height || new_width != self.width {
             self.height = new_height;
             self.width = new_width;
             self.modified = true;
             self.stateful_protocol = None;
             self.pending_render_generation = None;
+            // Do not map input through a plot rectangle from an image rendered at
+            // different cell metrics or a different outer rectangle.
+            self.last_chart_area = None;
         }
 
         if self.modified {
@@ -975,10 +979,10 @@ pub(crate) fn chart_plot_area_in_rect(
     if outer_area.width == 0 || outer_area.height == 0 || width_px == 0 || height_px == 0 {
         return None;
     }
-    let x_start = plot_x_range.start.max(0) as u32;
-    let x_end = plot_x_range.end.max(plot_x_range.start).max(0) as u32;
-    let y_start = plot_y_range.start.max(0) as u32;
-    let y_end = plot_y_range.end.max(plot_y_range.start).max(0) as u32;
+    let x_start = (plot_x_range.start.max(0) as u32).min(width_px);
+    let x_end = (plot_x_range.end.max(plot_x_range.start).max(0) as u32).min(width_px);
+    let y_start = (plot_y_range.start.max(0) as u32).min(height_px);
+    let y_end = (plot_y_range.end.max(plot_y_range.start).max(0) as u32).min(height_px);
     if x_end <= x_start || y_end <= y_start {
         return None;
     }

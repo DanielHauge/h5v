@@ -1,6 +1,9 @@
 use std::time::SystemTime;
 
+use image::Rgba;
 use ratatui::crossterm::event;
+use ratatui::crossterm::terminal;
+use ratatui_image::{picker::Picker, FontSize};
 
 use crate::{
     compat::RuntimeConfig,
@@ -44,6 +47,69 @@ mod update;
 pub(crate) use self::startup_progress::render_startup_progress;
 
 type Result<T> = std::result::Result<T, AppError>;
+
+pub(super) fn terminal_cell_size(window: terminal::WindowSize) -> Option<(u16, u16)> {
+    let width = window.width.checked_div(window.columns)?;
+    let height = window.height.checked_div(window.rows)?;
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+pub(super) fn picker_with_cell_size(
+    mut picker: Picker,
+    cell_size: Option<(u16, u16)>,
+    background: Rgba<u8>,
+) -> Picker {
+    if let Some((width, height)) = cell_size {
+        let current = picker.font_size();
+        if (current.width, current.height) != (width, height) {
+            let protocol = picker.protocol_type();
+            #[allow(deprecated)]
+            let mut replacement = Picker::from_fontsize(FontSize::new(width, height));
+            replacement.set_protocol_type(protocol);
+            picker = replacement;
+        }
+    }
+    picker.set_background_color(Some(background));
+    picker
+}
+
+#[cfg(test)]
+mod picker_tests {
+    use image::Rgba;
+    use ratatui::crossterm::terminal::WindowSize;
+    use ratatui_image::{picker::ProtocolType, FontSize};
+
+    use super::{picker_with_cell_size, terminal_cell_size, Picker};
+
+    #[test]
+    fn live_cell_size_overrides_cached_picker_metrics() {
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize(FontSize::new(8, 16));
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let picker = picker_with_cell_size(picker, Some((9, 18)), Rgba([1, 2, 3, 255]));
+        let font_size = picker.font_size();
+        assert_eq!((font_size.width, font_size.height), (9, 18));
+        assert_eq!(picker.protocol_type(), ProtocolType::Kitty);
+    }
+
+    #[test]
+    fn unavailable_window_pixels_keep_picker_metrics() {
+        #[allow(deprecated)]
+        let picker = Picker::from_fontsize(FontSize::new(8, 16));
+        let picker = picker_with_cell_size(
+            picker,
+            terminal_cell_size(WindowSize {
+                columns: 120,
+                rows: 40,
+                width: 0,
+                height: 0,
+            }),
+            Rgba([1, 2, 3, 255]),
+        );
+        let font_size = picker.font_size();
+        assert_eq!((font_size.width, font_size.height), (8, 16));
+    }
+}
 
 pub fn init(
     filename: String,
@@ -101,6 +167,7 @@ pub enum AppEvent {
     MultiChartExpressionRefresh(MultiChartExpressionRefreshResult),
     MultiChartRender(crate::ui::mchart::MultiChartRenderResult),
     PreviewDebounceExpired(u64),
+    ResizeDebounceExpired(u64),
     TreeLoad(TreeLoadResult),
     NavigationLoad(NavigationLoadResult),
     Toast(AppToast),

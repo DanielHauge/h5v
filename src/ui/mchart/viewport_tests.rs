@@ -268,6 +268,13 @@ fn chart_plot_area_conversion_respects_padding() {
 }
 
 #[test]
+fn chart_plot_area_conversion_clips_to_outer_chart_rect() {
+    let plot_area =
+        chart_plot_area_in_rect(Rect::new(10, 5, 20, 8), 200, 80, -20..220, -10..90).unwrap();
+    assert_eq!(plot_area, Rect::new(10, 5, 20, 8));
+}
+
+#[test]
 fn zoom_at_position_ignores_chart_padding() {
     let mut state = make_state();
     let selection = PreviewSelection {

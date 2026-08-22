@@ -179,6 +179,20 @@ pub struct MultiChartState {
 }
 
 impl MultiChartState {
+    pub(crate) fn set_picker(&mut self, picker: Picker) {
+        let current = self.picker.font_size();
+        let next = picker.font_size();
+        if (current.width, current.height) == (next.width, next.height) {
+            return;
+        }
+        self.picker = picker;
+        self.modified = true;
+        self.stateful_protocol = None;
+        self.pending_render_generation = None;
+        self.last_chart_area = None;
+        self.last_chart_panel_area = None;
+    }
+
     pub fn new(
         picker: Picker,
         tx_load: Sender<MultiChartLoadRequest>,
@@ -256,6 +270,8 @@ impl MultiChartState {
         };
         self.pending_render_generation = Some(generation);
         self.render_error = None;
+        // Axis labels can change the plot bounds; wait for the matching renderer result.
+        self.last_chart_area = None;
         self.modified = false;
         if self.tx_render.send(request).is_err() {
             self.pending_render_generation = None;

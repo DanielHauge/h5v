@@ -134,7 +134,7 @@ impl ChartPreviwState {
         }
     }
 
-    fn invalidate_render(&mut self) {
+    pub(crate) fn invalidate_render(&mut self) {
         self.protocol = None;
         self.clipboard_image = None;
         self.error = None;

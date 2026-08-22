@@ -120,6 +120,13 @@ pub(super) fn schedule_preview_debounce(tx_events: Sender<AppEvent>, generation:
     });
 }
 
+pub(super) fn schedule_resize_debounce(tx_events: Sender<AppEvent>, generation: u64) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(150));
+        let _ = tx_events.send(AppEvent::ResizeDebounceExpired(generation));
+    });
+}
+
 pub(super) fn handle_file_watch_events(
     tx_events: Sender<AppEvent>,
     path: String,
@@ -155,7 +162,7 @@ pub(super) fn handle_term_events(
 ) {
     thread::spawn(move || {
         while running.load(Ordering::Relaxed) {
-            if event::poll(std::time::Duration::from_millis(16)).is_ok() {
+            if matches!(event::poll(Duration::from_millis(16)), Ok(true)) {
                 if !running.load(Ordering::Relaxed) {
                     return;
                 }

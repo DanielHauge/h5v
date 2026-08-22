@@ -6,8 +6,8 @@ use ratatui_image::ResizeEncodeRender;
 pub(crate) fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
 
-    thread::spawn(move || loop {
-        if let Ok(mut request) = rx_worker.recv() {
+    thread::spawn(move || {
+        while let Ok(mut request) = rx_worker.recv() {
             let _resize_timer = perf::metrics().preview.chart_resize.start();
             while let Ok(queued) = rx_worker.try_recv() {
                 request = queued;
@@ -36,8 +36,8 @@ pub(crate) fn handle_image_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeR
 pub(crate) fn handle_chartpreview_resize(tx_events: Sender<AppEvent>) -> Sender<ResizeRequest> {
     let (tx_worker, rx_worker) = channel::<ResizeRequest>();
 
-    thread::spawn(move || loop {
-        if let Ok(mut request) = rx_worker.recv() {
+    thread::spawn(move || {
+        while let Ok(mut request) = rx_worker.recv() {
             while let Ok(queued) = rx_worker.try_recv() {
                 request = queued;
             }
@@ -73,8 +73,8 @@ pub(crate) fn handle_chartpreview_load(
     let x = font_size.width;
     let y = font_size.height;
 
-    thread::spawn(move || loop {
-        if let Ok(mut req) = rx_load.recv() {
+    thread::spawn(move || {
+        while let Ok(mut req) = rx_load.recv() {
             let _worker_timer = perf::metrics().preview.chart_worker_total.start();
             let mut drained_requests = 0_u64;
             while let Ok(queued) = rx_load.try_recv() {
@@ -223,8 +223,8 @@ pub(crate) fn handle_imagefs_load(
 ) -> Sender<RawImageLoadRequest> {
     let (tx_load, rx_load) = channel::<RawImageLoadRequest>();
 
-    thread::spawn(move || loop {
-        if let Ok(mut req) = rx_load.recv() {
+    thread::spawn(move || {
+        while let Ok(mut req) = rx_load.recv() {
             // We drain to the latest
             while let Ok(queued) = rx_load.try_recv() {
                 req = queued;
@@ -253,8 +253,8 @@ pub(crate) fn handle_imagefsvlen_load(
 ) -> Sender<VarLenImageLoadRequest> {
     let (tx_load, rx_load) = channel::<VarLenImageLoadRequest>();
 
-    thread::spawn(move || loop {
-        if let Ok(mut req) = rx_load.recv() {
+    thread::spawn(move || {
+        while let Ok(mut req) = rx_load.recv() {
             // We drain to the latest
             while let Ok(queued) = rx_load.try_recv() {
                 req = queued;
@@ -354,8 +354,8 @@ pub(crate) fn handle_image_load(
     picker: Picker,
 ) -> Sender<DatasetImageLoadRequest> {
     let (tx_load, rx_load) = channel::<DatasetImageLoadRequest>();
-    thread::spawn(move || loop {
-        if let Ok(mut req) = rx_load.recv() {
+    thread::spawn(move || {
+        while let Ok(mut req) = rx_load.recv() {
             while let Ok(queued) = rx_load.try_recv() {
                 // We drain to the latest
                 req = queued;

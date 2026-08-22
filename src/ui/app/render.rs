@@ -18,7 +18,7 @@ use crate::{
         logs::render_logs,
         main_display::render_main_display,
         state::{self, AppState, AppToast, Focus, LastFocused, Mode},
-        tree_view::{render_tree, TreeItem},
+        tree_view::render_tree,
     },
     GIT_VERSION,
 };
@@ -86,7 +86,7 @@ pub(super) fn draw_app_frame(
 
     let main_display_area = match show_tree_view {
         true => {
-            let areas = make_panels_rect(content_area, &state.mode, &state.focus, &state.treeview);
+            let areas = make_panels_rect(content_area, &state.mode);
             let (tree_area, main_display_area) = (areas[0], areas[1]);
             render_tree(frame, tree_area, state);
             main_display_area
@@ -157,12 +157,7 @@ pub(super) fn render_error(frame: &mut Frame<'_>, error: &str) {
     frame.render_widget(error_paragraph, frame.area());
 }
 
-fn make_panels_rect(
-    area: Rect,
-    mode: &Mode,
-    focus: &Focus,
-    treeview: &[TreeItem<'_>],
-) -> Rc<[Rect]> {
+fn make_panels_rect(area: Rect, mode: &Mode) -> Rc<[Rect]> {
     if let Mode::Search = mode {
         Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -170,20 +165,11 @@ fn make_panels_rect(
             .split(area)
     } else {
         let layout = configure::current_auto_layout_settings();
-        let tree_focus = match focus {
-            Focus::Tree(_) => PanelFocus::Focused,
-            Focus::Attributes | Focus::Content => PanelFocus::Unfocused,
-        };
-        let focused_tree_constraint =
-            tree_constraint(&layout.tree.focused, preferred_tree_panel_width(treeview));
-        let tree_constraint = match tree_focus {
-            PanelFocus::Focused => focused_tree_constraint,
-            PanelFocus::Unfocused => layout.tree.unfocused.as_constraint(),
-        };
+        let tree_constraint = layout.tree.unfocused.as_constraint();
         if area.width < 100 {
             let chunks = Layout::default()
                 .direction(ratatui::layout::Direction::Vertical)
-                .constraints([tree_constraint, Constraint::Fill(1)])
+                .constraints([Constraint::Percentage(40), Constraint::Fill(1)])
                 .split(area);
             return chunks;
         }
@@ -195,31 +181,51 @@ fn make_panels_rect(
     }
 }
 
-fn preferred_tree_panel_width(treeview: &[TreeItem<'_>]) -> Option<u16> {
-    let widest_line = treeview.iter().map(|item| item.line.width() as u16).max()?;
-    Some(widest_line.saturating_add(4).max(12))
-}
-
-fn tree_constraint(size: &configure::LayoutSize, preferred_width: Option<u16>) -> Constraint {
-    match (size, preferred_width) {
-        (configure::LayoutSize::Max(cap), Some(preferred)) => {
-            Constraint::Length(preferred.min(*cap).max(12))
-        }
-        (configure::LayoutSize::Min(floor), Some(preferred)) => {
-            Constraint::Length(preferred.max(*floor))
-        }
-        _ => size.as_constraint(),
-    }
-}
-
-#[derive(Clone, Copy)]
-enum PanelFocus {
-    Focused,
-    Unfocused,
-}
-
 fn use_stacked_tree_layout(area: Rect, mode: &Mode, show_tree_view: bool) -> bool {
     show_tree_view && !matches!(mode, Mode::Search) && area.width < 100
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        configure::{
+            reset_config, set_auto_layout_settings, AutoLayoutSettings, LayoutSize,
+            PanelLayoutSizes, ThemeName,
+        },
+        ui::state::Mode,
+    };
+
+    use super::make_panels_rect;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn tree_width_uses_the_default_unfocused_size_regardless_of_focus_setting() {
+        let _guard = crate::test_support::serial_test_guard();
+        reset_config(ThemeName::Dark);
+        let default_panels = make_panels_rect(Rect::new(0, 0, 120, 40), &Mode::Normal);
+        assert_eq!(default_panels[0].width, 19);
+
+        set_auto_layout_settings(&AutoLayoutSettings {
+            tree: PanelLayoutSizes::new(LayoutSize::max(60), LayoutSize::percent(16)),
+            attributes: PanelLayoutSizes::new(LayoutSize::max(12), LayoutSize::cells(5)),
+            content: PanelLayoutSizes::new(LayoutSize::fill(), LayoutSize::fill()),
+        });
+
+        let panels = make_panels_rect(Rect::new(0, 0, 120, 40), &Mode::Normal);
+        assert_eq!(panels[0].width, default_panels[0].width);
+
+        reset_config(ThemeName::Dark);
+    }
+
+    #[test]
+    fn narrow_layout_uses_a_height_not_the_tree_width_constraint() {
+        let _guard = crate::test_support::serial_test_guard();
+        reset_config(ThemeName::Dark);
+        let panels = make_panels_rect(Rect::new(0, 0, 80, 50), &Mode::Normal);
+
+        assert_eq!(panels[0].height, 20);
+        assert_eq!(panels[1].height, 30);
+    }
 }
 
 fn render_header(
