@@ -20,8 +20,8 @@ use crate::{
 
 use self::{
     lifecycle::{
-        classify_recover_loop_error, init_terminal, resolve_alternate_screen, restore_terminal,
-        RecoverLoopAction,
+        classify_recover_loop_error, init_terminal, install_panic_terminal_restore_hook,
+        resolve_alternate_screen, restore_terminal, RecoverLoopAction,
     },
     runtime::main_recover_loop,
     update::cached_available_update,
@@ -53,6 +53,7 @@ pub fn init(
     startup_commands: &[StartupCommand],
 ) -> Result<()> {
     let use_alternate_screen = resolve_alternate_screen(runtime_config);
+    let panic_hook = install_panic_terminal_restore_hook(use_alternate_screen);
     let mut terminal = init_terminal(use_alternate_screen)?;
 
     let new_ver = cached_available_update(SystemTime::now());
@@ -79,7 +80,9 @@ pub fn init(
         }
     }
 
-    restore_terminal(use_alternate_screen, last_message)
+    let result = restore_terminal(use_alternate_screen, last_message);
+    drop(panic_hook);
+    result
 }
 
 #[allow(clippy::large_enum_variant)]
