@@ -166,6 +166,106 @@ fn heatmap_normalization_label(value: HeatmapNormalization) -> &'static str {
     value.label()
 }
 
+fn heatmap_value_summary_span(
+    region: &crate::ui::state::HeatmapRegionSelection,
+    is_boolean: bool,
+) -> Span<'static> {
+    if is_boolean
+        && region.width == 1
+        && region.height == 1
+        && (region.mean == 0.0 || region.mean == 1.0)
+    {
+        Span::styled(
+            format!(
+                "value={}",
+                crate::ui::render::boolean_text(region.mean as u64).unwrap_or_default()
+            ),
+            crate::ui::render::boolean_style(),
+        )
+    } else {
+        Span::styled(
+            region.value_summary(),
+            Style::default().fg(configure::themed_color(|colors| colors.help.description)),
+        )
+    }
+}
+
+#[cfg(test)]
+mod boolean_tests {
+    use super::heatmap_value_summary_span;
+    use crate::ui::{state::HeatmapRegionSelection, test_support::assert_text_color};
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        widgets::{Paragraph, Widget},
+    };
+
+    #[test]
+    fn boolean_heatmap_detail_only_labels_single_values_as_boolean() {
+        let _serial = crate::test_support::serial_test_guard();
+        let area = Rect::new(0, 0, 50, 1);
+        for (value, text) in [(0.0, "false"), (1.0, "true")] {
+            let region = HeatmapRegionSelection {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+                min: value,
+                max: value,
+                mean: value,
+                stddev: 0.0,
+            };
+            let mut buffer = Buffer::empty(area);
+            Paragraph::new(ratatui::text::Line::from(heatmap_value_summary_span(
+                &region, true,
+            )))
+            .render(area, &mut buffer);
+            assert_text_color(
+                &buffer,
+                area,
+                text,
+                crate::configure::themed_color(|colors| colors.text.bool_value),
+            );
+            assert_eq!(
+                heatmap_value_summary_span(&region, false).content,
+                format!("value={value:.6}")
+            );
+            let strip = HeatmapRegionSelection {
+                width: 2,
+                ..region.clone()
+            };
+            assert_eq!(
+                heatmap_value_summary_span(&strip, true).content,
+                format!("value={value:.6}")
+            );
+            let region = HeatmapRegionSelection {
+                width: 2,
+                height: 2,
+                mean: 0.5,
+                ..region
+            };
+            assert_eq!(
+                heatmap_value_summary_span(&region, true).content,
+                "mean=0.500000 stddev=0.000000"
+            );
+        }
+        let unexpected = HeatmapRegionSelection {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            min: 2.0,
+            max: 2.0,
+            mean: 2.0,
+            stddev: 0.0,
+        };
+        assert_eq!(
+            heatmap_value_summary_span(&unexpected, true).content,
+            "value=2.000000"
+        );
+    }
+}
+
 pub(super) fn render_heatmap_region_panel(
     f: &mut Frame,
     area: &Rect,
@@ -191,10 +291,7 @@ pub(super) fn render_heatmap_region_panel(
                 ),
                 Style::default().fg(configure::themed_color(|colors| colors.text.primary)),
             ),
-            Span::styled(
-                viewport.value_summary(),
-                Style::default().fg(configure::themed_color(|colors| colors.help.description)),
-            ),
+            heatmap_value_summary_span(viewport, attr.is_boolean),
         ]),
         Line::from(match state.heatmap_region.as_ref() {
             Some(region) if state.heatmap_render.selected_cells.is_some() => vec![
@@ -211,10 +308,7 @@ pub(super) fn render_heatmap_region_panel(
                     ),
                     Style::default().fg(configure::themed_color(|colors| colors.text.type_desc)),
                 ),
-                Span::styled(
-                    region.value_summary(),
-                    Style::default().fg(configure::themed_color(|colors| colors.help.description)),
-                ),
+                heatmap_value_summary_span(region, attr.is_boolean),
             ],
             _ => vec![
                 Span::styled(

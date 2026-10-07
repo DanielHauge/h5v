@@ -741,6 +741,7 @@ mod tests {
             data_type: "f64".to_string(),
             unsupported_reason: None,
             type_descriptor: TypeDescriptor::Float(super::FloatSize::U8),
+            is_boolean: false,
             data_bytesize: size_of::<f64>(),
             storage_required: 0,
             total_bytes: 0,

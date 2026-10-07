@@ -251,6 +251,7 @@ mod tests {
             data_type: format!("opaque[{item_size} bytes]"),
             unsupported_reason: Some("Datatype fallback".to_string()),
             type_descriptor: TypeDescriptor::Unsigned(IntSize::U1),
+            is_boolean: false,
             data_bytesize: item_size,
             storage_required: 0,
             total_bytes: 0,

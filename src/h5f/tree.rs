@@ -2,7 +2,7 @@ use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
 use hdf5_metno::{
     plist::file_access::FileCloseDegree,
-    types::{TypeDescriptor, VarLenUnicode},
+    types::{IntSize, TypeDescriptor, VarLenUnicode},
     Dataset, File, Group, LinkType, LocationType, OpenMode,
 };
 use hdf5_metno_sys::h5t::{H5T_class_t::H5T_COMPOUND, H5Tget_class};
@@ -602,6 +602,14 @@ fn build_dataset_meta(
         .and_then(|projection| projection.current_compound_type())
         .is_some();
     let is_unsupported = unsupported_reason.is_some();
+    let is_boolean = matches!(type_descriptor, TypeDescriptor::Boolean)
+        || (compound_projection.is_none()
+            && matches!(type_descriptor, TypeDescriptor::Unsigned(IntSize::U1))
+            && dataset
+                .attr("H5V_INFERRED_TYPE")
+                .ok()
+                .and_then(|attr| attr.read_scalar::<VarLenUnicode>().ok())
+                .is_some_and(|value| value.as_str() == "bool"));
     let total_bytes = data_bytesize * total_elems;
     let storage_required = dataset.storage_size();
     let chunk_shape = dataset.chunk();
@@ -637,6 +645,7 @@ fn build_dataset_meta(
             .unwrap_or_else(|| sprint_typedescriptor(&type_descriptor)),
         unsupported_reason,
         type_descriptor: type_descriptor.clone(),
+        is_boolean,
         display_name,
         data_bytesize,
         total_bytes,
@@ -1185,6 +1194,185 @@ mod tests {
                 Some(Color::Rgb(255, 0, 0))
             ]
         );
+    }
+
+    #[test]
+    fn boolean_metadata_recognizes_native_datasets() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let dataset = file
+            .new_dataset_builder()
+            .with_data(&[false, true])
+            .create("values")
+            .expect("failed to create native bool dataset");
+        file.new_dataset::<bool>()
+            .create("scalar")
+            .expect("failed to create scalar bool dataset")
+            .write_scalar(&true)
+            .expect("failed to write scalar bool");
+
+        let mut root = H5FNode::new(Node::File(file));
+        root.ensure_expanded().expect("expand root");
+        assert_eq!(root.children.len(), 2);
+        for child in &root.children {
+            let mut child = child.borrow_mut();
+            let meta = child
+                .ensure_dataset_meta()
+                .expect("materialize bool dataset");
+            assert!(meta.is_boolean);
+            assert_eq!(meta.type_descriptor, TypeDescriptor::Boolean);
+            assert_eq!(meta.matrixable, Some(MatrixRenderType::Uint64));
+        }
+        assert_eq!(
+            dataset.read_raw::<bool>().expect("read bools"),
+            [false, true]
+        );
+    }
+
+    #[test]
+    fn boolean_metadata_requires_explicit_bool_marker_for_u8() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+
+        for (name, marker, expected_boolean) in [
+            ("marked", Some("bool"), true),
+            ("unmarked", None, false),
+            ("wrong_marker", Some("u8"), false),
+            ("uppercase_marker", Some("BOOL"), false),
+        ] {
+            let dataset = file
+                .new_dataset_builder()
+                .with_data(&[0_u8, 1_u8])
+                .create(name)
+                .expect("failed to create u8 dataset");
+            if let Some(marker) = marker {
+                dataset
+                    .new_attr_builder()
+                    .empty::<VarLenUnicode>()
+                    .create("H5V_INFERRED_TYPE")
+                    .expect("failed to create importer marker")
+                    .write_scalar(&VarLenUnicode::from_str(marker).expect("encode marker"))
+                    .expect("failed to write importer marker");
+            }
+            let node = build_dataset_node(DSType::Hard(
+                file.as_group().expect("open root group"),
+                name.to_string(),
+            ))
+            .expect("build dataset node")
+            .expect("dataset node");
+            let mut node = H5FNode::new(node);
+            let meta = node.ensure_dataset_meta().expect("materialize u8 dataset");
+
+            assert_eq!(meta.is_boolean, expected_boolean, "{name}");
+            assert_eq!(meta.type_descriptor, TypeDescriptor::Unsigned(IntSize::U1));
+            assert_eq!(meta.matrixable, Some(MatrixRenderType::Uint64));
+            assert_eq!(dataset.read_raw::<u8>().expect("read u8 values"), [0, 1]);
+        }
+    }
+
+    #[test]
+    fn boolean_metadata_ignores_bool_marker_for_non_u8() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+
+        for (name, descriptor) in [
+            ("wide", TypeDescriptor::Unsigned(IntSize::U2)),
+            ("signed", TypeDescriptor::Integer(IntSize::U1)),
+            (
+                "float",
+                TypeDescriptor::Float(hdf5_metno::types::FloatSize::U8),
+            ),
+        ] {
+            let dataset = file
+                .new_dataset_builder()
+                .empty_as(&descriptor)
+                .shape([2])
+                .create(name)
+                .expect("failed to create numeric dataset");
+            dataset
+                .new_attr_builder()
+                .empty::<VarLenUnicode>()
+                .create("H5V_INFERRED_TYPE")
+                .expect("failed to create importer marker")
+                .write_scalar(&VarLenUnicode::from_str("bool").expect("encode marker"))
+                .expect("failed to write importer marker");
+            let node = build_dataset_node(DSType::Hard(
+                file.as_group().expect("open root group"),
+                name.to_string(),
+            ))
+            .expect("build dataset node")
+            .expect("dataset node");
+            let mut node = H5FNode::new(node);
+            let meta = node
+                .ensure_dataset_meta()
+                .expect("materialize numeric dataset");
+
+            assert!(!meta.is_boolean, "{name}");
+            assert_eq!(meta.type_descriptor, descriptor);
+        }
+    }
+
+    #[test]
+    fn boolean_metadata_compound_projections_use_native_field_types() {
+        let _guard = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("failed to create hdf5 file");
+        let compound = TypeDescriptor::Compound(CompoundType {
+            fields: vec![
+                CompoundField::new("flag", TypeDescriptor::Boolean, 0, 0),
+                CompoundField::new("value", TypeDescriptor::Unsigned(IntSize::U1), 1, 1),
+            ],
+            size: 2,
+        });
+        let dataset = file
+            .new_dataset_builder()
+            .empty_as(&compound)
+            .shape([2])
+            .create("records")
+            .expect("failed to create compound dataset");
+        dataset
+            .new_attr_builder()
+            .empty::<VarLenUnicode>()
+            .create("H5V_INFERRED_TYPE")
+            .expect("failed to create importer marker")
+            .write_scalar(&VarLenUnicode::from_str("bool").expect("encode marker"))
+            .expect("failed to write importer marker");
+        let node = build_dataset_node(DSType::Hard(
+            file.as_group().expect("open root group"),
+            "records".to_string(),
+        ))
+        .expect("build compound dataset node")
+        .expect("compound dataset node");
+        let mut node = H5FNode::new(node);
+        assert!(
+            !node
+                .ensure_dataset_meta()
+                .expect("materialize compound")
+                .is_boolean
+        );
+        node.ensure_expanded().expect("expand compound fields");
+        assert_eq!(node.children.len(), 2);
+
+        for child in &node.children {
+            let mut child = child.borrow_mut();
+            let meta = child
+                .ensure_dataset_meta()
+                .expect("materialize projected field");
+            let is_flag = meta.display_name == "flag";
+            assert_eq!(meta.is_boolean, is_flag, "{}", meta.display_name);
+            assert_eq!(
+                meta.type_descriptor,
+                if is_flag {
+                    TypeDescriptor::Boolean
+                } else {
+                    TypeDescriptor::Unsigned(IntSize::U1)
+                }
+            );
+            assert_eq!(meta.matrixable, Some(MatrixRenderType::Uint64));
+        }
     }
 
     #[test]

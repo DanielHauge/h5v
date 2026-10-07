@@ -30,7 +30,10 @@ use crate::{
         read_varlen_u8_matrix_values, DatasetMeta, EnumRenderOverrides, H5FNode, HasPath,
         ProjectionDecode, ResolvedOpenMode,
     },
-    ui::{render::sprint_typedescriptor, state::Focus},
+    ui::{
+        render::{boolean_style, boolean_text, sprint_typedescriptor},
+        state::Focus,
+    },
 };
 
 use super::{
@@ -113,7 +116,10 @@ fn load_matrix_viewport(
     }
     let projected = request.meta.is_compound_leaf();
     macro_rules! read {
-        ($t:ty) => {{
+        ($t:ty) => {
+            read!($t, |value: $t| value.to_string())
+        };
+        ($t:ty, $format:expr) => {{
             if request.meta.shape.len() == 1 {
                 let values = if projected {
                     read_projected_values_1d::<$t>(
@@ -130,7 +136,7 @@ fn load_matrix_viewport(
                         .to_vec()
                 };
                 Ok(crate::ui::state::MatrixViewportData::One(
-                    values.into_iter().map(|v| v.to_string()).collect(),
+                    values.into_iter().map($format).collect(),
                 ))
             } else {
                 let values: Vec<$t> = if projected {
@@ -150,7 +156,7 @@ fn load_matrix_viewport(
                         .collect()
                 };
                 Ok(crate::ui::state::MatrixViewportData::Two(
-                    values.into_iter().map(|v| v.to_string()).collect(),
+                    values.into_iter().map($format).collect(),
                 ))
             }
         }};
@@ -182,7 +188,18 @@ fn load_matrix_viewport(
     }
     match request.meta.matrixable {
         Some(MatrixRenderType::Float64) => read!(f64),
-        Some(MatrixRenderType::Uint64) => read!(u64),
+        Some(MatrixRenderType::Uint64) => read!(u64, |value: u64| {
+            if let Some(text) = request
+                .meta
+                .is_boolean
+                .then(|| boolean_text(value))
+                .flatten()
+            {
+                text.to_string()
+            } else {
+                value.to_string()
+            }
+        }),
         Some(MatrixRenderType::Enum) => {
             if request.meta.shape.len() == 1 {
                 let values = if projected {
@@ -433,6 +450,24 @@ impl<T: Display> RenderIntercept<T> for DefaultMatrixResultRenderIntercept {
             span = span.bold();
         }
         span
+    }
+}
+
+struct MatrixValueRenderIntercept {
+    is_boolean: bool,
+}
+
+impl RenderIntercept<String> for MatrixValueRenderIntercept {
+    fn render_as_line(&self, value: &String) -> Line<'static> {
+        Line::from(self.render_as_span(value))
+    }
+
+    fn render_as_span(&self, value: &String) -> Span<'static> {
+        if self.is_boolean && matches!(value.as_str(), "true" | "false") {
+            Span::styled(value.clone(), boolean_style())
+        } else {
+            DefaultMatrixResultRenderIntercept.render_as_span(value)
+        }
     }
 }
 
@@ -795,7 +830,9 @@ fn render_cached_matrix(
                         .unwrap_or_else(|_| Array2::default((0, 0))),
                 _ => Array2::default((0, 0)),
             },
-            DefaultMatrixResultRenderIntercept
+            MatrixValueRenderIntercept {
+                is_boolean: attr.is_boolean,
+            }
         ),
     }
 }
@@ -1002,7 +1039,13 @@ pub fn render_compound_root_matrix(
             render_centered_matrix_cell(
                 f,
                 val_area,
-                DefaultMatrixResultRenderIntercept.render_as_line(&value),
+                MatrixValueRenderIntercept {
+                    is_boolean: matches!(
+                        compound.fields[col_start + j].ty,
+                        TypeDescriptor::Boolean
+                    ),
+                }
+                .render_as_line(&value),
                 val_bg_color,
             );
         }
@@ -1521,10 +1564,271 @@ fn render_matrix_with_reader<T: Display>(
 mod tests {
     use super::*;
     use crate::ui::state::{Focus, LastFocused};
+    use crate::ui::test_support::{
+        assert_text_color, dataset_node, mark_imported_boolean, projected_flag_node,
+        renderer_state, BooleanRecord,
+    };
     use hdf5_metno::types::{
         CompoundField, CompoundType, EnumMember, EnumType, IntSize, TypeDescriptor,
     };
     use ratatui::style::Color;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn render_loaded_viewport(
+        node: &mut H5FNode,
+        width: u16,
+        height: u16,
+        row_offset: usize,
+    ) -> (ratatui::buffer::Buffer, AppState<'static>) {
+        let (tx, rx) = channel();
+        let mut state = renderer_state();
+        state.matrix_viewport_state.tx_load = tx;
+        state.matrix_view_state.row_offset = row_offset;
+        let meta = node.ensure_dataset_meta().expect("matrix metadata").clone();
+        let crate::h5f::Node::Dataset(crate::h5f::DatasetHandle::Loaded(ds), _) = &node.node else {
+            panic!("expected dataset");
+        };
+        let ds = ds.clone();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
+        let mut draw = |f: &mut Frame, state: &mut AppState| {
+            let area = f.area();
+            if meta.is_compound_container() {
+                render_compound_root_matrix(f, &area, &ds, &meta, node, state)
+                    .expect("compound matrix");
+            } else if meta.is_compound_leaf() {
+                render_projected_matrix::<u64>(
+                    f,
+                    &area,
+                    &ds,
+                    &meta,
+                    node,
+                    state,
+                    DefaultMatrixResultRenderIntercept,
+                )
+                .expect("projected matrix");
+            } else {
+                render_matrix::<u64>(
+                    f,
+                    &area,
+                    &ds,
+                    &meta,
+                    node,
+                    state,
+                    DefaultMatrixResultRenderIntercept,
+                )
+                .expect("matrix");
+            }
+        };
+        terminal
+            .draw(|f| draw(f, &mut state))
+            .expect("queue viewport");
+        let crate::ui::state::MatrixViewportWork::Load(request) =
+            rx.try_recv().expect("viewport request")
+        else {
+            panic!("expected load");
+        };
+        let key = request.key.clone();
+        let data = load_matrix_viewport(request).expect("load viewport");
+        state
+            .matrix_viewport_state
+            .cached
+            .push_back(crate::ui::state::CachedMatrixViewport { key, data });
+        state.matrix_viewport_state.pending_key = None;
+        state.ui_layout.matrix_cells.clear();
+        terminal
+            .draw(|f| draw(f, &mut state))
+            .expect("render cached viewport");
+        assert!(rx.try_recv().is_err(), "cached viewport should not reload");
+        (terminal.backend().buffer().clone(), state)
+    }
+
+    #[test]
+    fn boolean_matrix_viewports_render_text_and_color_without_relabeling_numbers() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let native = file
+            .new_dataset_builder()
+            .with_data(&[true, false, true, false])
+            .create("native")
+            .expect("native bools");
+        let imported = file
+            .new_dataset_builder()
+            .with_data(&[1_u8, 0, 1, 2])
+            .create("imported")
+            .expect("imported bools");
+        mark_imported_boolean(&imported);
+        let numeric = file
+            .new_dataset_builder()
+            .with_data(&[1_u8, 0, 1, 2])
+            .create("numeric")
+            .expect("numbers");
+        let records = [true, false, true, false].map(|flag| BooleanRecord {
+            flag,
+            count: u8::from(flag),
+        });
+        let compound = file
+            .new_dataset_builder()
+            .with_data(&records)
+            .create("compound")
+            .expect("compound bool vector");
+        let bool_color = configure::themed_color(|colors| colors.text.bool_value);
+        let number_color = configure::themed_color(|colors| colors.text.primary);
+        for (mut node, expected) in [
+            (
+                dataset_node(&native),
+                vec![
+                    ("false", bool_color),
+                    ("true", bool_color),
+                    ("false", bool_color),
+                ],
+            ),
+            (
+                dataset_node(&imported),
+                vec![
+                    ("false", bool_color),
+                    ("true", bool_color),
+                    ("2", number_color),
+                ],
+            ),
+            (
+                dataset_node(&numeric),
+                vec![
+                    ("0", number_color),
+                    ("1", number_color),
+                    ("2", number_color),
+                ],
+            ),
+            (
+                projected_flag_node(&compound),
+                vec![
+                    ("false", bool_color),
+                    ("true", bool_color),
+                    ("false", bool_color),
+                ],
+            ),
+        ] {
+            let (buffer, state) = render_loaded_viewport(&mut node, 64, 5, 1);
+            assert_eq!(state.ui_layout.matrix_cells.len(), 3);
+            for (cell, (text, color)) in state.ui_layout.matrix_cells.iter().zip(expected) {
+                assert_text_color(&buffer, cell.area, text, color);
+            }
+            let selected = state.ui_layout.matrix_cells[0].area;
+            assert_eq!(
+                buffer[(selected.x, selected.y)].bg,
+                configure::themed_color(|colors| colors.surface.highlight_bg)
+            );
+        }
+    }
+
+    #[test]
+    fn boolean_two_dimensional_and_projected_viewports_keep_boolean_styling() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let native_values = Array2::from_shape_vec(
+            (4, 2),
+            vec![true, false, false, true, true, false, false, true],
+        )
+        .expect("bool table");
+        let native = file
+            .new_dataset_builder()
+            .with_data(native_values.view())
+            .create("native")
+            .expect("native bool table");
+        let imported_values = native_values.mapv(u8::from);
+        let imported = file
+            .new_dataset_builder()
+            .with_data(imported_values.view())
+            .create("imported")
+            .expect("imported bool table");
+        mark_imported_boolean(&imported);
+        let records = native_values.mapv(|flag| BooleanRecord {
+            flag,
+            count: u8::from(flag),
+        });
+        let compound = file
+            .new_dataset_builder()
+            .with_data(records.view())
+            .create("compound")
+            .expect("compound bool table");
+        for mut node in [
+            dataset_node(&native),
+            dataset_node(&imported),
+            projected_flag_node(&compound),
+        ] {
+            let (buffer, state) = render_loaded_viewport(&mut node, 80, 10, 1);
+            let expected = ["false", "true", "true", "false"];
+            assert_eq!(state.ui_layout.matrix_cells.len(), expected.len());
+            for (cell, text) in state.ui_layout.matrix_cells.iter().zip(expected) {
+                assert_text_color(
+                    &buffer,
+                    cell.area,
+                    text,
+                    configure::themed_color(|colors| colors.text.bool_value),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compound_root_boolean_columns_are_colored_but_numeric_columns_are_not() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let ds = file
+            .new_dataset_builder()
+            .with_data(&[
+                BooleanRecord {
+                    flag: false,
+                    count: 0,
+                },
+                BooleanRecord {
+                    flag: true,
+                    count: 1,
+                },
+            ])
+            .create("records")
+            .expect("compound dataset");
+        let (buffer, state) = render_loaded_viewport(&mut dataset_node(&ds), 80, 6, 0);
+        let bool_color = configure::themed_color(|colors| colors.text.bool_value);
+        let number_color = configure::themed_color(|colors| colors.text.primary);
+        for (cell, (text, color)) in state.ui_layout.matrix_cells.iter().zip([
+            ("false", bool_color),
+            ("0", number_color),
+            ("true", bool_color),
+            ("1", number_color),
+        ]) {
+            assert_text_color(&buffer, cell.area, text, color);
+        }
+        assert_eq!(state.ui_layout.matrix_cells.len(), 4);
+    }
+
+    #[test]
+    fn boolean_words_in_string_matrix_cells_keep_normal_text_color() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let values = ["true", "false"].map(|text| text.parse::<VarLenUnicode>().expect("string"));
+        let ds = file
+            .new_dataset_builder()
+            .with_data(&values)
+            .create("words")
+            .expect("string dataset");
+        let (buffer, state) = render_loaded_viewport(&mut dataset_node(&ds), 64, 4, 0);
+        for (cell, text) in state.ui_layout.matrix_cells.iter().zip(["true", "false"]) {
+            assert_text_color(
+                &buffer,
+                cell.area,
+                text,
+                configure::themed_color(|colors| colors.text.primary),
+            );
+        }
+    }
 
     fn sample_enum() -> EnumType {
         EnumType {

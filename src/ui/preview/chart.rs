@@ -38,7 +38,9 @@ use crate::{
             AppState, ChartPreviewKey, ChartPreviewSource, Focus, Mode, PageType, PreviewChartMode,
             PreviewChartRoi, PreviewChartViewport,
         },
-        std_comp_render::{render_error, render_string, render_unsupported_rendering},
+        std_comp_render::{
+            render_error, render_string, render_unsigned_scalar, render_unsupported_rendering,
+        },
     },
 };
 
@@ -449,7 +451,7 @@ pub fn render_chart_preview(
                             return Ok(());
                         }
                     };
-                    render_string(f, area, node, ds, None);
+                    render_unsigned_scalar(f, area, node, ds, ds_meta.is_boolean);
                 }
                 MatrixRenderType::Int64 => {
                     let ds = read_single_value_dataset::<i64>(&ds);
@@ -576,7 +578,7 @@ pub fn render_chart_preview(
 
     let selector_info = preview_view_info(state, shape[node.selected_x])
         .or_else(|| page_info.as_ref().map(copy_page_display_info));
-    let stats_info = preview_stats_info(state);
+    let stats_info = preview_stats_info(state, ds_meta.is_boolean);
     let areas_split = Layout::vertical(vec![
         Constraint::Length(preview_context_height(
             state.chart_preview_state.mode,
@@ -714,12 +716,12 @@ fn render_projected_chart_preview(
                 );
             }
             Some(MatrixRenderType::Uint64) => {
-                render_string(
+                render_unsigned_scalar(
                     f,
                     area,
                     node,
                     read_projected_scalar::<u64>(&ds, &ds_meta)?,
-                    None,
+                    ds_meta.is_boolean,
                 );
             }
             Some(MatrixRenderType::Int64) => {
@@ -837,7 +839,7 @@ fn render_projected_chart_preview(
 
     let selector_info = preview_view_info(state, shape[node.selected_x])
         .or_else(|| page_info.as_ref().map(copy_page_display_info));
-    let stats_info = preview_stats_info(state);
+    let stats_info = preview_stats_info(state, ds_meta.is_boolean);
     let areas_split = Layout::vertical(vec![
         Constraint::Length(preview_context_height(
             state.chart_preview_state.mode,
@@ -1728,6 +1730,10 @@ mod tests {
         preview_windowed_values, preview_x_axis_max, render_image_chart,
     };
     use crate::data::DatasetPlotingData;
+    use crate::ui::test_support::{
+        assert_text_color, dataset_node, mark_imported_boolean, projected_flag_node,
+        renderer_state, BooleanRecord,
+    };
     use crate::ui::{
         mchart::ChartAxisScale,
         state::{
@@ -1736,6 +1742,204 @@ mod tests {
         },
     };
     use ratatui::layout::Rect;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn assert_scalar_preview(
+        mut node: crate::h5f::H5FNode,
+        text: &str,
+        color: ratatui::style::Color,
+    ) {
+        let mut state = renderer_state();
+        let mut terminal = Terminal::new(TestBackend::new(40, 4)).expect("test terminal");
+        // Scalar preview keeps the existing line-number gutter and clamps paging.
+        node.line_offset = 10;
+        terminal
+            .draw(|f| {
+                super::render_chart_preview(f, &f.area(), &mut node, &mut state)
+                    .expect("scalar preview");
+            })
+            .expect("draw scalar");
+        assert_eq!(node.line_offset, 0);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "1");
+        assert_text_color(
+            terminal.backend().buffer(),
+            Rect::new(2, 0, 38, 1),
+            text,
+            color,
+        );
+    }
+
+    #[test]
+    fn boolean_scalar_and_single_element_previews_use_boolean_text_and_color() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let bool_color = crate::configure::themed_color(|colors| colors.text.bool_value);
+        let number_color = crate::configure::themed_color(|colors| colors.text.primary);
+        for (shape_index, shape) in [vec![], vec![1], vec![1, 1]].into_iter().enumerate() {
+            for (value, text) in [(false, "false"), (true, "true")] {
+                let name = format!("native_{shape_index}_{value}");
+                let native = file
+                    .new_dataset::<bool>()
+                    .shape(shape.clone())
+                    .create(name.as_str())
+                    .expect("native bool scalar");
+                native.write_raw(&[value]).expect("write native bool");
+                assert_scalar_preview(dataset_node(&native), text, bool_color);
+                let name = format!("imported_{shape_index}_{value}");
+                let imported = file
+                    .new_dataset::<u8>()
+                    .shape(shape.clone())
+                    .create(name.as_str())
+                    .expect("imported bool scalar");
+                imported
+                    .write_raw(&[u8::from(value)])
+                    .expect("write imported bool");
+                mark_imported_boolean(&imported);
+                assert_scalar_preview(dataset_node(&imported), text, bool_color);
+                let name = format!("numeric_{shape_index}_{value}");
+                let numeric = file
+                    .new_dataset::<u8>()
+                    .shape(shape.clone())
+                    .create(name.as_str())
+                    .expect("numeric scalar");
+                numeric.write_raw(&[u8::from(value)]).expect("write number");
+                assert_scalar_preview(
+                    dataset_node(&numeric),
+                    if value { "1" } else { "0" },
+                    number_color,
+                );
+            }
+        }
+        let invalid = file
+            .new_dataset::<u8>()
+            .shape(())
+            .create("unexpected")
+            .expect("imported scalar");
+        invalid.write_scalar(&2_u8).expect("write unexpected byte");
+        mark_imported_boolean(&invalid);
+        assert_scalar_preview(dataset_node(&invalid), "2", number_color);
+    }
+
+    #[test]
+    fn projected_boolean_scalar_previews_use_boolean_text_and_color() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        for (shape_index, shape) in [vec![], vec![1]].into_iter().enumerate() {
+            for flag in [false, true] {
+                let name = format!("projected_{shape_index}_{flag}");
+                let ds = file
+                    .new_dataset::<BooleanRecord>()
+                    .shape(shape.clone())
+                    .create(name.as_str())
+                    .expect("compound scalar");
+                ds.write_raw(&[BooleanRecord {
+                    flag,
+                    count: u8::from(flag),
+                }])
+                .expect("write compound scalar");
+                assert_scalar_preview(
+                    projected_flag_node(&ds),
+                    if flag { "true" } else { "false" },
+                    crate::configure::themed_color(|colors| colors.text.bool_value),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn boolean_chart_point_details_do_not_change_numeric_plot_data() {
+        let _serial = crate::test_support::serial_test_guard();
+        let _hdf5 = crate::test_support::hdf5_test_guard();
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        let file = hdf5_metno::File::create(temp.path()).expect("hdf5 file");
+        let native = file
+            .new_dataset_builder()
+            .with_data(&[false, true])
+            .create("native")
+            .expect("native bools");
+        let imported = file
+            .new_dataset_builder()
+            .with_data(&[0_u8, 1])
+            .create("imported")
+            .expect("imported bools");
+        mark_imported_boolean(&imported);
+        let numeric = file
+            .new_dataset_builder()
+            .with_data(&[0_u8, 1])
+            .create("numeric")
+            .expect("numbers");
+        let compound = file
+            .new_dataset_builder()
+            .with_data(&[
+                BooleanRecord {
+                    flag: false,
+                    count: 0,
+                },
+                BooleanRecord {
+                    flag: true,
+                    count: 1,
+                },
+            ])
+            .create("compound")
+            .expect("compound bools");
+        for (mut node, is_boolean) in [
+            (dataset_node(&native), true),
+            (dataset_node(&imported), true),
+            (dataset_node(&numeric), false),
+            (projected_flag_node(&compound), true),
+        ] {
+            let mut state = renderer_state();
+            let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("test terminal");
+            terminal
+                .draw(|f| {
+                    super::render_chart_preview(f, &f.area(), &mut node, &mut state)
+                        .expect("chart preview")
+                })
+                .expect("draw chart");
+            let data = state
+                .chart_preview_state
+                .current_data
+                .as_ref()
+                .expect("plot data");
+            assert_eq!(data.data, vec![(0.0, 0.0), (1.0, 1.0)]);
+            assert_eq!((data.min, data.max), (0.0, 1.0));
+            for (index, value, bool_text) in [(0, 0.0, "false"), (1, 1.0, "true")] {
+                state.chart_preview_state.roi = Some(crate::ui::state::PreviewChartRoi {
+                    start: index,
+                    end: index,
+                    precise: true,
+                    selection_count: 1,
+                });
+                terminal
+                    .draw(|f| {
+                        super::render_chart_preview(f, &f.area(), &mut node, &mut state)
+                            .expect("selected point")
+                    })
+                    .expect("draw point detail");
+                let (text, color) = if is_boolean {
+                    (
+                        bool_text.to_string(),
+                        crate::configure::themed_color(|colors| colors.text.bool_value),
+                    )
+                } else {
+                    (
+                        format!("{value:.4}"),
+                        crate::configure::themed_color(|colors| colors.text.primary),
+                    )
+                };
+                assert_text_color(
+                    terminal.backend().buffer(),
+                    Rect::new(0, 0, 80, 5),
+                    &text,
+                    color,
+                );
+            }
+        }
+    }
 
     fn sample_preview(len: usize) -> DatasetPlotingData {
         DatasetPlotingData {

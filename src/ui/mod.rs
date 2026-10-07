@@ -21,5 +21,7 @@ pub mod preview;
 pub mod render;
 pub mod state;
 pub mod std_comp_render;
+#[cfg(test)]
+mod test_support;
 pub mod toast;
 pub mod tree_view;

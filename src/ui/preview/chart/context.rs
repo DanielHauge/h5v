@@ -152,6 +152,7 @@ fn preview_stats_lines(
     label: &str,
     slice: &[(f64, f64)],
     precise_value: bool,
+    is_boolean: bool,
 ) -> Option<Vec<Line<'static>>> {
     if slice.is_empty() {
         return None;
@@ -168,15 +169,20 @@ fn preview_stats_lines(
     let end_x = slice.last()?.0;
     if precise_value {
         let value = slice[0].1;
+        let value_span = if is_boolean && (value == 0.0 || value == 1.0) {
+            Span::styled(
+                crate::ui::render::boolean_text(value as u64).unwrap_or_default(),
+                crate::ui::render::boolean_style(),
+            )
+        } else {
+            Span::styled(format!("{value:.4}"), value_style)
+        };
         return Some(vec![
             Line::from(vec![
                 Span::styled(format!("{label} "), label_style),
                 Span::styled(format!("x {:.1}", start_x), value_style),
             ]),
-            Line::from(vec![
-                Span::styled("value ", label_style),
-                Span::styled(format!("{value:.4}"), value_style),
-            ]),
+            Line::from(vec![Span::styled("value ", label_style), value_span]),
         ]);
     }
     let count = slice.len();
@@ -211,7 +217,10 @@ fn preview_stats_lines(
     ])
 }
 
-pub(super) fn preview_stats_info(state: &AppState<'_>) -> Option<Vec<Line<'static>>> {
+pub(super) fn preview_stats_info(
+    state: &AppState<'_>,
+    is_boolean: bool,
+) -> Option<Vec<Line<'static>>> {
     if state.chart_preview_state.mode == crate::ui::state::PreviewChartMode::Histogram {
         return histogram_info_lines(state);
     }
@@ -229,6 +238,7 @@ pub(super) fn preview_stats_info(state: &AppState<'_>) -> Option<Vec<Line<'stati
                 "ROI",
                 &data.data[roi.start..=end],
                 roi.selection_count == 1 && roi.precise,
+                is_boolean,
             );
         }
     }
@@ -243,7 +253,7 @@ pub(super) fn preview_stats_info(state: &AppState<'_>) -> Option<Vec<Line<'stati
         _ => 0.0,
     };
     let (start, end) = preview_visible_index_window(data, viewport, x_min)?;
-    preview_stats_lines("View", &data.data[start..=end], false)
+    preview_stats_lines("View", &data.data[start..=end], false, is_boolean)
 }
 
 pub(super) fn preview_context_height(
@@ -264,6 +274,45 @@ mod tests {
 
     use super::preview_context_height;
     use crate::ui::state::PreviewChartMode;
+
+    #[test]
+    fn boolean_precise_chart_values_are_colored_but_statistics_stay_numeric() {
+        use crate::ui::test_support::assert_text_color;
+        use ratatui::{
+            buffer::Buffer,
+            layout::Rect,
+            widgets::{Paragraph, Widget},
+        };
+        let _serial = crate::test_support::serial_test_guard();
+        for (value, text) in [(0.0, "false"), (1.0, "true")] {
+            let lines = super::preview_stats_lines("ROI", &[(0.0, value)], true, true)
+                .expect("point detail");
+            let area = Rect::new(0, 0, 50, 2);
+            let mut buffer = Buffer::empty(area);
+            Paragraph::new(lines).render(area, &mut buffer);
+            assert_text_color(
+                &buffer,
+                area,
+                text,
+                crate::configure::themed_color(|colors| colors.text.bool_value),
+            );
+            let numeric = super::preview_stats_lines("ROI", &[(0.0, value)], true, false)
+                .expect("numeric detail");
+            Paragraph::new(numeric).render(area, &mut buffer);
+            assert_text_color(
+                &buffer,
+                area,
+                &format!("{value:.4}"),
+                crate::configure::themed_color(|colors| colors.text.primary),
+            );
+        }
+        let unexpected = super::preview_stats_lines("ROI", &[(0.0, 2.0)], true, true)
+            .expect("unexpected imported byte");
+        assert_eq!(unexpected[1].to_string(), "value 2.0000");
+        let stats = super::preview_stats_lines("ROI", &[(0.0, 0.0), (1.0, 1.0)], false, true)
+            .expect("statistics");
+        assert_eq!(stats[1].to_string(), "mean 0.5000  min/max 0.0000/1.0000");
+    }
 
     #[test]
     fn histogram_context_height_tracks_its_one_or_two_stats_rows() {

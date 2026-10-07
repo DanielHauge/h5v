@@ -26,7 +26,24 @@ pub fn render_string<T: ToString>(
 ) {
     match hl {
         Some(hl) => render_hl_string(f, area, node, string, hl),
-        None => render_raw_string(f, area, node, string),
+        None => render_raw_string(f, area, node, string, primary_text_style()),
+    }
+}
+
+pub(crate) fn render_unsigned_scalar(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    value: u64,
+    is_boolean: bool,
+) {
+    if let Some(text) = is_boolean
+        .then(|| super::render::boolean_text(value))
+        .flatten()
+    {
+        render_raw_string(f, area, node, text, super::render::boolean_style());
+    } else {
+        render_raw_string(f, area, node, value, primary_text_style());
     }
 }
 
@@ -133,7 +150,7 @@ pub fn render_hl_string<T: ToString>(
 ) {
     let syntax = match SYNTAX_SET.find_syntax_by_extension(&hl) {
         Some(s) => s,
-        None => return render_raw_string(f, area, node, string),
+        None => return render_raw_string(f, area, node, string, primary_text_style()),
     };
     let mut h = HighlightLines::new(syntax, &THEME_SET.themes[highlight_theme_name()]);
     let string = string.to_string();
@@ -210,7 +227,13 @@ fn render_linenums(f: &mut Frame, area: &Rect, line_offset: usize, visible_lines
     );
 }
 
-fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode, string: T) {
+fn render_raw_string<T: ToString>(
+    f: &mut Frame,
+    area: &Rect,
+    node: &mut H5FNode,
+    string: T,
+    style: Style,
+) {
     let string = string.to_string();
     let lines = split_display_lines(&string);
     let line_offset = clamp_line_offset(node, lines.len().max(1), area.height as usize);
@@ -235,7 +258,7 @@ fn render_raw_string<T: ToString>(f: &mut Frame, area: &Rect, node: &mut H5FNode
 
     f.render_widget(
         Paragraph::new(string)
-            .style(primary_text_style())
+            .style(style)
             .wrap(Wrap { trim: false }),
         text_area,
     );
